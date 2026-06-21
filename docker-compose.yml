@@ -1,0 +1,98 @@
+# Local dev stack for LHA. Everything self-hosted; bring it up with:
+#   docker compose up -d
+# Then point the app at it via .env (see .env.example).
+#
+# Every port is bound to 127.0.0.1: none of these services has authentication suitable for a
+# network (anyone who can reach Temporal can start workflows or signal human-gate decisions).
+# Credentials default to dev values but can be overridden from .env; the Langfuse secrets have
+# no default and must be set in .env before `docker compose up`.
+#
+# Services:
+#   temporal      - durable execution server (the spine)        :7233
+#   temporal-ui   - web UI for inspecting workflows             :8080
+#   appdb         - Postgres + pgvector (app state + memory)    :5432
+#   langfuse      - LLM observability (traces, cost, evals)     :3000
+
+services:
+  temporal-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.27
+    depends_on:
+      temporal-db:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: temporal
+      POSTGRES_SEEDS: temporal-db
+    ports:
+      - "127.0.0.1:7233:7233"
+
+  temporal-ui:
+    image: temporalio/ui:2.34.0
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:8080
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  appdb:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: lha
+      POSTGRES_PASSWORD: ${LHA_APPDB_PASSWORD:-lha}
+      POSTGRES_DB: lha
+    volumes:
+      - appdb-data:/var/lib/postgresql/data
+      # Applied once, on first start of an empty volume. `lha db migrate` applies them otherwise.
+      - ./db/migrations:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lha"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse-db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+
+  langfuse:
+    image: langfuse/langfuse:2
+    depends_on:
+      - langfuse-db
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: ${LANGFUSE_NEXTAUTH_SECRET:?set LANGFUSE_NEXTAUTH_SECRET in .env}
+      SALT: ${LANGFUSE_SALT:?set LANGFUSE_SALT in .env}
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  temporal-db-data:
+  appdb-data:
+  langfuse-db-data:
