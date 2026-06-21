@@ -58,7 +58,7 @@ the work**. This is a deliberate, evidence-based choice (see [docs/architecture.
   DAG +      sole writer  (read-only    (fresh ctx, single
   ownership  (SDK loop)   fan-out)      adversarial) write to main
   ─────────── GROUND TRUTH: git + checklist ───────────
-  ─────────── VERIFIER: pytest + ruff + mypy + build (the only merge gate) ───────────
+  ─────────── VERIFIER: pytest + ruff + ty + build (the only merge gate) ───────────
 ```
 
 ## Runs at $0 — and never faked

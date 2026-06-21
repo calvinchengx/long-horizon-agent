@@ -30,7 +30,12 @@ claude = ["claude-agent-sdk>=0.1"]
 lha = "lha.cli.main:app"
 
 [dependency-groups]
-dev = ["ruff>=0.5", "mypy>=1.10", "pytest>=8.2", "pytest-asyncio>=0.23"]
+dev = [
+    "ruff>=0.5",
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "ty>=0.0.83",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -55,31 +60,33 @@ ignore = ["E501", "UP042"]
 # typer requires typer.Option(...) as the default value of CLI parameters (B008).
 "src/lha/cli/main.py" = ["B008"]
 
-[tool.mypy]
-python_version = "3.12"
-strict = true
-files = ["src"]
-plugins = ["pydantic.mypy"]
+[tool.ty.environment]
+python-version = "3.12"
 
-# Optional/paid backends are imported only when their extra is installed; don't fail type-check
-# for missing stubs when they're absent.
-[[tool.mypy.overrides]]
-module = [
-    "psycopg.*",
-    "psycopg_pool.*",
-    "pgvector.*",
-    "e2b.*",
-    "e2b_code_interpreter.*",
-    "docker.*",
-    "voyageai.*",
-    "cohere.*",
-    "sentence_transformers.*",
-    "dspy.*",
-    "langfuse.*",
-    "opentelemetry.*",
-    "claude_agent_sdk.*",
+[tool.ty.src]
+include = ["src"]
+
+# Optional/paid backends are imported only when their extra is installed; don't fail the type
+# check when they're absent.
+[tool.ty.analysis]
+allowed-unresolved-imports = [
+    "psycopg.**",
+    "psycopg_pool.**",
+    "pgvector.**",
+    "e2b.**",
+    "e2b_code_interpreter.**",
+    "docker.**",
+    "voyageai.**",
+    "cohere.**",
+    "sentence_transformers.**",
+    "dspy.**",
+    "langfuse.**",
+    "opentelemetry.**",
+    "claude_agent_sdk.**",
 ]
-ignore_missing_imports = true
+
+[tool.ty.terminal]
+error-on-warning = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

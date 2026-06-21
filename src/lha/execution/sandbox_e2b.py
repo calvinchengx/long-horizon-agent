@@ -11,6 +11,7 @@ boundary for symlinks and network.
 from __future__ import annotations
 
 import shlex
+from typing import Any
 
 from lha.contracts.sandbox import ExecResult, Sandbox, SandboxSession, Snapshot
 from lha.execution.paths import contained_posix
@@ -26,8 +27,9 @@ def _clip(text: str) -> str:
 
 
 class E2BSandboxSession(SandboxSession):
-    def __init__(self, sandbox: object, workdir: str = _WORKDIR) -> None:
-        self._sbx = sandbox
+    def __init__(self, sandbox: Any, workdir: str = _WORKDIR) -> None:
+        # The optional ``e2b`` SDK is untyped here (the extra may be absent), hence ``Any``.
+        self._sbx: Any = sandbox
         self.workdir = workdir
 
     async def exec(
@@ -42,9 +44,7 @@ class E2BSandboxSession(SandboxSession):
         command = " ".join(shlex.quote(token) for token in argv)
         workdir = contained_posix(self.workdir, cwd) if cwd else self.workdir
         envs = {"HOME": self.workdir, "LANG": "C.UTF-8", **(env or {})}
-        result = await self._sbx.commands.run(  # type: ignore[attr-defined]
-            command, cwd=workdir, timeout=timeout, envs=envs
-        )
+        result = await self._sbx.commands.run(command, cwd=workdir, timeout=timeout, envs=envs)
         return ExecResult(
             exit_code=int(getattr(result, "exit_code", 0) or 0),
             stdout=_clip(str(getattr(result, "stdout", "") or "")),
@@ -52,14 +52,14 @@ class E2BSandboxSession(SandboxSession):
         )
 
     async def write_file(self, relpath: str, content: str) -> None:
-        await self._sbx.files.write(contained_posix(self.workdir, relpath), content)  # type: ignore[attr-defined]
+        await self._sbx.files.write(contained_posix(self.workdir, relpath), content)
 
     async def read_file(self, relpath: str) -> str:
-        data = await self._sbx.files.read(contained_posix(self.workdir, relpath))  # type: ignore[attr-defined]
+        data = await self._sbx.files.read(contained_posix(self.workdir, relpath))
         return str(data)
 
     async def close(self) -> None:
-        await self._sbx.kill()  # type: ignore[attr-defined]
+        await self._sbx.kill()
 
 
 class E2BSandbox(Sandbox):
@@ -79,5 +79,5 @@ class E2BSandbox(Sandbox):
 
     async def snapshot(self, session: SandboxSession) -> Snapshot:
         assert isinstance(session, E2BSandboxSession)
-        snapshot_id = await session._sbx.pause()  # type: ignore[attr-defined]
+        snapshot_id = await session._sbx.pause()
         return Snapshot(snapshot_id=str(snapshot_id), kind="e2b")

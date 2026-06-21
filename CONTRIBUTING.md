@@ -15,7 +15,7 @@ uv run lha --help
 ```bash
 uv run ruff check .         # lint
 uv run ruff format --check . # formatting
-uv run mypy                  # strict type-check (src/)
+uv run ty check              # type-check (src/)
 uv run pytest -q             # tests
 ```
 
@@ -23,7 +23,7 @@ CI (`.github/workflows/ci.yml`) runs exactly these on every push/PR.
 
 ## Conventions
 
-- **Typed, strict.** All of `src/` passes `mypy --strict`. Public functions are fully annotated.
+- **Typed.** All of `src/` passes `ty check` (warnings are errors). Public functions are fully annotated.
 - **Contracts first.** Cross-plane interfaces live in `src/lha/contracts/` as `Protocol`s. Depend
   on the Protocol, not a concrete implementation, so backends stay swappable.
 - **Honesty policy.** Anything presented as a real agent run uses genuine model output or a

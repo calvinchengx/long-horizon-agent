@@ -76,13 +76,13 @@ class DeterministicVerifier:
 
 DEFAULT_PYTHON_CHECK_COMMANDS: tuple[tuple[str, ...], ...] = (
     ("uv", "run", "ruff", "check", "."),
-    ("uv", "run", "mypy"),
+    ("uv", "run", "ty", "check"),
     ("uv", "run", "pytest", "-q"),
 )
 
 
 def default_python_checks() -> list[Check]:
-    """The standard deterministic gate for a uv-managed Python repo: ruff, mypy, pytest.
+    """The standard deterministic gate for a uv-managed Python repo: ruff, ty, pytest.
 
     This is the sensible default for run paths that were not given explicit checks.
     """

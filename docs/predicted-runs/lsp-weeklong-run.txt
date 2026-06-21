@@ -196,7 +196,7 @@ $ uv run lha mission-start --title pylsp-mini --workdir .lha/workspaces/pylsp-mi
     7 passed in 0.13s
 2026-06-11T09:10:21.770Z INFO  verify.ok cycle=c201 checks=[pytest]   ← FIRST GREEN (cycle 201, ~2.5 days in)
 2026-06-11T09:10:30.880Z INFO  tool.exec name=run_command cmd="uv run ruff check pylsp_mini/jsonrpc.py" → exit=0 "All checks passed!"
-2026-06-11T09:10:36.220Z INFO  tool.exec name=run_command cmd="uv run mypy pylsp_mini/jsonrpc.py" → exit=0 "Success: no issues found in 1 source file"
+2026-06-11T09:10:36.220Z INFO  tool.exec name=run_command cmd="uv run ty check pylsp_mini/jsonrpc.py" → exit=0 "All checks passed!"
 2026-06-11T09:11:02.140Z INFO  git.commit head=a1f2e3d msg="lha: transport framing (isolated, byte-tested)" files=3 ins=70
 2026-06-11T09:11:02.300Z INFO  skill.confirm name=lsp-framing precond=[python,stdio] proven_by=tests/test_framing.py
 2026-06-11T09:30:10.660Z DEBUG lead.thinking ▸ "framing solid → server loop is trivial + SYNCHRONOUS: read_message→dispatch on method→write_message. no async. initialize returns capabilities; shutdown→null then exit."
@@ -252,7 +252,7 @@ $ uv run lha mission-start --title pylsp-mini --workdir .lha/workspaces/pylsp-mi
 2026-06-15T08:00:00.040Z INFO  wake active=14 (final gate)
 2026-06-15T08:43:02.220Z INFO  tool.exec name=run_command cmd="make check" → exit=0 dur=44.1s
     uv run ruff check .            All checks passed!
-    uv run mypy                    Success: no issues found in 14 source files
+    uv run ty check                All checks passed!
     uv run pytest -q               58 passed in 4.40s
 2026-06-15T08:44:20.660Z INFO  tool.exec name=run_command cmd="uv run python -m tests.scripted_session" → exit=0 dur=1.2s
     → initialize          ← capabilities {hover,completion,definition}
@@ -261,7 +261,7 @@ $ uv run lha mission-start --title pylsp-mini --workdir .lha/workspaces/pylsp-mi
     → completion @8:6     ← ["add","addr","address"]
     → definition @8:6     ← file:///…/sample.py 0:4-0:7
     → shutdown/exit       ← ok
-2026-06-15T08:44:51.330Z INFO  verify.final ok checks=[ruff,mypy,pytest,scripted_session]
+2026-06-15T08:44:51.330Z INFO  verify.final ok checks=[ruff,ty,pytest,scripted_session]
 2026-06-15T08:44:51.880Z INFO  mission.complete items=14/14 cycles=615 head=9d8c7b6 status=DONE
 2026-06-15T08:44:51.900Z INFO  governor.final cum_usd=178.60 ceiling=400.00 crashes_survived=1 loop_trips=1 reviewer_blocking=2 scope_cuts=1 skills_learned=2 transport_attempts=14
 
