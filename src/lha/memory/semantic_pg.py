@@ -1,9 +1,12 @@
 """Postgres + pgvector semantic store (production implementation of ``SemanticIndex``).
 
 Same interface as the in-memory index, so callers never change. Requires the ``postgres`` extra
-(``psycopg`` + ``pgvector``) and the schema in ``db/migrations/0001_init.sql``. Queries are gated
+(``psycopg`` + ``pgvector``) and the schema in ``db/migrations/`` (0002 makes ``id`` text). Queries are gated
 by (embedding_model, embedding_version) so vectors are never compared across embedder versions.
 Imported only when ``LHA_MODEL_BACKEND``-adjacent config selects Postgres — not at package import.
+
+Vector parameters are cast explicitly (``%s::vector``): a plain Python ``list`` is sent as a
+``float8[]``, for which pgvector has no ``<=>`` operator (only an explicit/assignment cast).
 
 Rows are keyed by ``MemoryRecord.id`` (so a dense hit maps back to the same record the caller
 stored, e.g. for hybrid fusion), and re-adding an id upserts rather than duplicating. The
@@ -74,7 +77,7 @@ class PgSemanticIndex:
                 await conn.execute(
                     "INSERT INTO semantic_memory "
                     "(id, mission_id, text, embedding, embedding_model, embedding_version, valid) "
-                    "VALUES (%s, %s, %s, %s, %s, %s, %s) "
+                    "VALUES (%s, %s, %s, %s::vector, %s, %s, %s) "
                     "ON CONFLICT (id) DO UPDATE SET mission_id = EXCLUDED.mission_id, "
                     "text = EXCLUDED.text, embedding = EXCLUDED.embedding, "
                     "embedding_model = EXCLUDED.embedding_model, "
@@ -97,10 +100,10 @@ class PgSemanticIndex:
         async with pool.connection() as conn:
             cursor = await conn.execute(
                 "SELECT id, text, embedding_model, embedding_version, valid, "
-                "1 - (embedding <=> %s) AS score "
+                "1 - (embedding <=> %s::vector) AS score "
                 "FROM semantic_memory "
                 "WHERE valid AND embedding_model = %s AND embedding_version = %s "
-                "ORDER BY embedding <=> %s LIMIT %s",
+                "ORDER BY embedding <=> %s::vector LIMIT %s",
                 (
                     query_vec,
                     self._embedder.name,

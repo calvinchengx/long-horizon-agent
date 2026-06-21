@@ -11,13 +11,19 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from pathlib import Path
 
 from lha.contracts.verify import HARNESS_INTEGRITY_CHECK, CheckResult
 
+# Any file under a directory with one of these names, at ANY depth (``tests/``, ``src/pkg/tests/``).
 HARNESS_DIRS: tuple[str, ...] = ("tests", "test")
-HARNESS_ROOT_FILES: tuple[str, ...] = ("pyproject.toml", "setup.cfg", "tox.ini", "pytest.ini")
-HARNESS_ANYWHERE_FILES: tuple[str, ...] = ("conftest.py",)
+# Repo-level config that decides what the test run means.
+HARNESS_ROOT_FILES: tuple[str, ...] = ("pyproject.toml", "setup.cfg", ".coveragerc")
+# Test runner config / fixtures, protected wherever they live.
+HARNESS_ANYWHERE_FILES: tuple[str, ...] = ("conftest.py", "tox.ini", "pytest.ini", "noxfile.py")
+# pytest's default discovery patterns, protected anywhere (``pkg/test_models.py``).
+_TEST_FILE_RE = re.compile(r"^(test_.*|.*_test)\.py$")
 _SKIP_DIRS = frozenset(
     {
         ".git",
@@ -42,9 +48,10 @@ HarnessSnapshot = dict[str, str]
 def _is_harness_file(rel: str) -> bool:
     parts = rel.split("/")
     return (
-        (parts[0] in HARNESS_DIRS and len(parts) > 1)
+        any(part in HARNESS_DIRS for part in parts[:-1])
         or rel in HARNESS_ROOT_FILES
         or parts[-1] in HARNESS_ANYWHERE_FILES
+        or bool(_TEST_FILE_RE.match(parts[-1]))
     )
 
 

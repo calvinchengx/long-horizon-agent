@@ -22,23 +22,42 @@ _SECRET_KEY = re.compile(
     r"|dsn|(^|[_-])(token|auth)$",
     re.IGNORECASE,
 )
+# camelCase word boundary (``accessToken`` -> ``access_Token``) so suffix rules apply to it too.
+_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
+
+# Token prefixes are matched when NOT preceded by an alphanumeric (``\b`` would miss ``x_sk-...``).
+_NB = r"(?<![A-Za-z0-9])"
 
 _SECRET_VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     # Provider keys: Anthropic/OpenAI (sk-...), GitHub, Slack, AWS access key ids, Google.
-    (re.compile(r"\b(sk-[A-Za-z0-9_\-]{16,})"), REDACTED),
-    (re.compile(r"\b(gh[pousr]_[A-Za-z0-9]{20,})"), REDACTED),
-    (re.compile(r"\b(xox[abposr]-[A-Za-z0-9-]{10,})"), REDACTED),
-    (re.compile(r"\b(AKIA[0-9A-Z]{16})\b"), REDACTED),
-    (re.compile(r"\b(AIza[0-9A-Za-z_\-]{30,})"), REDACTED),
-    # "Bearer <token>" in headers or messages.
+    (re.compile(_NB + r"(sk-[A-Za-z0-9_\-]{16,})"), REDACTED),
+    (re.compile(_NB + r"(gh[pousr]_[A-Za-z0-9]{20,})"), REDACTED),
+    (re.compile(_NB + r"(github_pat_[A-Za-z0-9_]{20,})"), REDACTED),
+    (re.compile(_NB + r"(xox[abposr]-[A-Za-z0-9-]{10,})"), REDACTED),
+    (re.compile(_NB + r"(AKIA[0-9A-Z]{16})\b"), REDACTED),
+    (re.compile(_NB + r"(AIza[0-9A-Za-z_\-]{30,})"), REDACTED),
+    # "Authorization: <scheme> <credentials>" (Basic/Bearer/Digest/Token, or a bare value).
+    (
+        re.compile(
+            r"(?i)\b(authorization\s*[:=]\s*[\"']?(?:(?:basic|bearer|digest|token)\s+)?)"
+            r"[^\s\"',;]+"
+        ),
+        r"\1" + REDACTED,
+    ),
+    # "Bearer <token>" elsewhere in headers or messages.
     (re.compile(r"(?i)\b(bearer)\s+[A-Za-z0-9._~+/\-]+=*"), r"\1 " + REDACTED),
-    # scheme://user:password@host -> scheme://user:***@host
-    (re.compile(r"(\b[a-z][a-z0-9+.\-]*://[^/\s:@]+:)[^@\s/]+@"), r"\1" + REDACTED + "@"),
+    # scheme://user:password@host -> scheme://user:***@host. The user may be empty
+    # (``redis://:pw@host``) and the password may contain '@' (greedy up to the LAST '@' before
+    # the host's path/query).
+    (
+        re.compile(r"(\b[a-z][a-z0-9+.\-]*://[^/\s:@]*:)[^\s/?#]*@"),
+        r"\1" + REDACTED + "@",
+    ),
 )
 
 
 def is_secret_key(key: str) -> bool:
-    return bool(_SECRET_KEY.search(key))
+    return bool(_SECRET_KEY.search(key) or _SECRET_KEY.search(_CAMEL_BOUNDARY.sub("_", key)))
 
 
 def redact_text(text: str) -> str:
