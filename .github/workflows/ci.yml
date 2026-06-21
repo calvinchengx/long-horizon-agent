@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - name: Sync (core + dev)
+        run: uv sync --locked
+
+      - name: Ruff (lint)
+        run: uv run ruff check .
+
+      - name: Ruff (format)
+        run: uv run ruff format --check .
+
+      - name: Mypy (strict)
+        run: uv run mypy
+
+      - name: Pytest (unit)
+        run: uv run pytest -q tests/unit
+
+      # Durability + load tests boot a Temporal time-skipping test server (a binary that
+      # temporalio downloads on first use). They gate the build: the durability guarantees the
+      # README claims are only claimed because this step passes.
+      - name: Pytest (integration - Temporal test server)
+        run: uv run pytest -q tests/durability tests/load
+        timeout-minutes: 12
