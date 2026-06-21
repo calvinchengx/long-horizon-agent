@@ -16,6 +16,7 @@ workspace root, so this module:
 
 from __future__ import annotations
 
+import errno
 import os
 import posixpath
 import stat
@@ -26,6 +27,9 @@ PROTECTED_DIRS = frozenset({".lha", ".git"})
 
 _O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _O_BINARY = getattr(os, "O_BINARY", 0)
+# Opening a FIFO blocks until a peer appears; O_NONBLOCK makes the open return immediately so the
+# regular-file check in ``_verify_fd`` can reject it (blocking mode is restored before real IO).
+_O_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 
 
 class PathEscapeError(PermissionError):
@@ -102,12 +106,14 @@ def _verify_fd(root: Path, relpath: str, fd: int, expected: Path) -> None:
         raise PathEscapeError(f"path changed during open: {relpath!r}") from exc
     if again != expected or (current.st_dev, current.st_ino) != (st.st_dev, st.st_ino):
         raise PathEscapeError(f"path changed during open: {relpath!r}")
+    if _O_NONBLOCK:
+        os.set_blocking(fd, True)
 
 
 def read_text_within(root: str | os.PathLike[str], relpath: str) -> str:
     """Read a UTF-8 file at ``relpath`` inside ``root`` (containment checked before and after)."""
     target = resolve_within(root, relpath)
-    fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY)
+    fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     with os.fdopen(fd, "rb") as handle:
         _verify_fd(Path(root).resolve(), relpath, handle.fileno(), target)
         return handle.read().decode("utf-8")
@@ -122,7 +128,13 @@ def write_text_within(root: str | os.PathLike[str], relpath: str, content: str) 
     target.parent.mkdir(parents=True, exist_ok=True)
     # Re-resolve after mkdir: a racing symlink swap of a parent must not redirect the write.
     target = resolve_within(root, relpath)
-    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW | _O_BINARY, 0o644)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK
+    try:
+        fd = os.open(target, flags, 0o644)
+    except OSError as exc:
+        if exc.errno == errno.ENXIO:  # a FIFO with no reader (O_NONBLOCK): not a regular file
+            raise IsADirectoryError(f"not a regular file: {relpath!r}") from exc
+        raise
     with os.fdopen(fd, "wb") as handle:
         _verify_fd(root_resolved, relpath, handle.fileno(), target)
         handle.write(content.encode("utf-8"))
