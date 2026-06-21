@@ -1,6 +1,6 @@
 """Postgres repositories (requires the ``postgres`` extra).
 
-Persist mission state + the cost ledger to the tables in ``db/migrations/`` (0001 + 0002) so a
+Persist mission state + the cost ledger to the tables in ``db/migrations/`` (0001-0003) so a
 mission's status/spend is queryable with plain SQL and survives independently of git. Imported
 only when Postgres is configured — not at package import.
 """
@@ -22,7 +22,12 @@ _INSERT_COST = (
 
 
 class CostLedgerRepo:
-    """Persists per-call spend to ``cost_ledger`` — idempotently (requires migration 0002)."""
+    """Persists per-call spend to ``cost_ledger`` — idempotently (requires migrations 0002+0003).
+
+    A call whose cost is unknown (``cost_known=False``, e.g. an unpriced model) is stored with
+    ``usd = NULL`` — never as $0 — so ``total_usd`` is the KNOWN spend and ``unknown_cost_calls``
+    says how much of the spend is unaccounted for.
+    """
 
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
@@ -44,7 +49,7 @@ class CostLedgerRepo:
                     entry.model,
                     entry.input_tokens,
                     entry.output_tokens,
-                    entry.usd,
+                    entry.usd if entry.cost_known else None,
                     entry.role,
                     entry.cost_known,
                     key,
@@ -60,6 +65,16 @@ class CostLedgerRepo:
             )
             row = await cursor.fetchone()
             return float(row[0]) if row else 0.0
+
+    async def unknown_cost_calls(self, mission_id: str) -> int:
+        """Number of recorded calls whose cost is unknown (``usd IS NULL``)."""
+        async with await psycopg.AsyncConnection.connect(self._dsn, autocommit=True) as conn:
+            cursor = await conn.execute(
+                "SELECT COUNT(*) FROM cost_ledger WHERE mission_id = %s AND NOT cost_known",
+                (mission_id,),
+            )
+            row = await cursor.fetchone()
+            return int(row[0]) if row else 0
 
 
 class MissionRepo:
