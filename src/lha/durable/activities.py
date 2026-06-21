@@ -1,0 +1,490 @@
+"""Temporal activities — where all the non-deterministic work happens.
+
+The cycle activity runs the REAL integrated ``AgentLoop`` (model → tools-in-sandbox → deterministic
+verify → git checkpoint) inside the configured sandbox, with every model call metered against the
+mission budget. Temporal journals each activity's *result*: a completed cycle is never re-run on
+replay. Work inside an activity attempt that crashes is NOT journaled — the attempt is retried from
+scratch (its model calls are re-spent), so each attempt is made safe to repeat:
+
+  * **Exclusive**: a per-workdir file lock (under ``.git/``) means two attempts (e.g. a zombie
+    attempt after a heartbeat timeout and its retry) can never mutate the same checkout at once.
+  * **Clean start**: every attempt first resets the checkout to ``HEAD`` (``reset --hard`` +
+    ``clean -ffdx``), so partial edits from a crashed attempt are discarded, never committed.
+  * **Exactly-once commit per cycle id**: if ``HEAD`` already carries this cycle's checkpoint (the
+    previous attempt committed, then crashed before reporting), the attempt returns that result
+    instead of advancing another item.
+  * **Heartbeats** every few seconds while the cycle runs, so a dead worker is detected by the
+    activity's ``heartbeat_timeout`` instead of its (long) start-to-close timeout.
+
+Budget: spend of every attempt is appended to a journal under ``.git/lha/`` (outside the
+worktree, so the reset keeps it) and seeds the next attempt's ledger — the governor sees the whole
+mission's spend, including failed attempts. ``BudgetExceeded`` and configuration errors are raised
+as NON-retryable ``ApplicationError``\\ s (types ``ERROR_BUDGET_EXCEEDED`` / ``ERROR_CONFIG``).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import fcntl
+import json
+import os
+from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
+
+from temporalio import activity
+from temporalio.exceptions import ApplicationError
+
+from lha.agent.loop import AgentLoop
+from lha.config import Settings, get_settings
+from lha.contracts.model import ModelProvider
+from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
+from lha.contracts.tools import ToolContext
+from lha.contracts.verify import Check, checks_from_commands
+from lha.durable.types import (
+    ERROR_BUDGET_EXCEEDED,
+    ERROR_CONFIG,
+    CycleInput,
+    CycleResult,
+    HealthInput,
+    HealthReport,
+    UnblockInput,
+)
+from lha.execution import UnsafeSandboxError, open_sandbox
+from lha.execution.dispatcher import AllowListDispatcher
+from lha.execution.tools import default_local_tools
+from lha.governor.cost import CostEntry, CostLedger
+from lha.governor.governor import BudgetGovernor
+from lha.governor.metering import BudgetExceeded, CostMeter
+from lha.ids import idempotency_key
+from lha.model import build_provider
+from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
+from lha.state import git_ops
+from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
+from lha.verify.verifier import DeterministicVerifier, default_python_checks
+
+#: Builds the lead model for one cycle (tests inject scripted models here).
+ModelFactory = Callable[[Settings, SituationSnapshot], ModelProvider]
+
+HEARTBEAT_EVERY_S = 5.0
+LOCK_WAIT_S = 300.0
+_LOCK_POLL_S = 0.5
+_LOCK_FILE = "lha-cycle.lock"
+_SPEND_FILE = "lha/spend.ndjson"
+# How many trailing committed events to scan for an already-committed cycle id.
+_RECENT_EVENTS = 64
+
+
+class WorkdirBusyError(RuntimeError):
+    """Another attempt holds the workdir lock (retryable)."""
+
+
+def _default_model_factory(settings: Settings, _snapshot: SituationSnapshot) -> ModelProvider:
+    return build_provider(settings)
+
+
+def _config_error(message: str, exc: BaseException | None = None) -> ApplicationError:
+    err = ApplicationError(message, type=ERROR_CONFIG, non_retryable=True)
+    if exc is not None:
+        err.__cause__ = exc
+    return err
+
+
+def resolve_checks(check_commands: list[list[str]] | None) -> list[Check]:
+    """``None`` → the default Python gate; an explicit empty list is a configuration error."""
+    if check_commands is None:
+        return default_python_checks()
+    commands = [cmd for cmd in check_commands if cmd]
+    if not commands:
+        raise _config_error(
+            "check_commands is empty: at least one gating check is required (an item is only "
+            "marked done by a passing check); omit it to use the default Python checks"
+        )
+    return checks_from_commands(commands)
+
+
+def _heartbeat(*details: object) -> None:
+    if activity.in_activity():
+        activity.heartbeat(*details)
+
+
+async def _with_heartbeat[T](awaitable: Awaitable[T], detail: str) -> T:
+    """Await ``awaitable`` while heartbeating every ``HEARTBEAT_EVERY_S`` seconds."""
+
+    async def _beat() -> None:
+        while True:
+            _heartbeat(detail)
+            await asyncio.sleep(HEARTBEAT_EVERY_S)
+
+    beater = asyncio.create_task(_beat())
+    try:
+        return await awaitable
+    finally:
+        beater.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await beater
+
+
+@contextlib.asynccontextmanager
+async def workdir_lock(workdir: str, *, wait_s: float = LOCK_WAIT_S) -> AsyncIterator[None]:
+    """Exclusive, per-checkout lock (``flock`` on a file in ``.git/``), heartbeating while waiting."""
+    path = await asyncio.to_thread(git_ops.git_dir, workdir) / _LOCK_FILE
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
+    try:
+        waited = 0.0
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if waited >= wait_s:
+                    raise WorkdirBusyError(
+                        f"workdir {workdir} is locked by another cycle attempt"
+                    ) from None
+                _heartbeat("waiting for workdir lock")
+                await asyncio.sleep(_LOCK_POLL_S)
+                waited += _LOCK_POLL_S
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+# --- spend journal (outside the worktree; survives reset_to_head) --------------------------
+def _spend_path(workdir: str) -> Path:
+    return git_ops.git_dir(workdir) / _SPEND_FILE
+
+
+def read_prior_spend(workdir: str) -> tuple[float, int]:
+    """(known USD, unknown-cost call count) over every recorded attempt of this mission."""
+    path = _spend_path(workdir)
+    if not path.exists():
+        return 0.0, 0
+    by_key: dict[str, tuple[float, int]] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+            by_key[str(row["key"])] = (float(row["usd"]), int(row["unknown"]))
+        except (ValueError, KeyError, TypeError):
+            continue  # a torn last line from a crash mid-append
+    return sum(v[0] for v in by_key.values()), sum(v[1] for v in by_key.values())
+
+
+def record_spend(workdir: str, *, key: str, cycle_id: str, ledger: CostLedger) -> None:
+    """Append one attempt's spend (idempotent per ``key``: readers keep the last row per key)."""
+    own = [e for e in ledger.entries if e.cycle_id != _PRIOR_CYCLE]
+    if not own:
+        return
+    path = _spend_path(workdir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row = {
+        "key": key,
+        "cycle_id": cycle_id,
+        "usd": sum(e.usd for e in own),
+        "unknown": sum(1 for e in own if not e.cost_known),
+        "calls": len(own),
+    }
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+_PRIOR_CYCLE = "(prior)"
+
+
+def build_cycle_meter(settings: Settings, inp: CycleInput) -> CostMeter:
+    """A meter whose ledger is seeded with the mission's prior spend and whose ceiling is the
+    mission budget (``inp.budget_usd`` or the worker's ``budget_usd_ceiling``)."""
+    ledger = CostLedger()
+    prior_usd, prior_unknown = read_prior_spend(inp.workdir)
+    if prior_usd:
+        ledger.entries.append(
+            CostEntry(
+                cycle_id=_PRIOR_CYCLE,
+                model="(prior)",
+                input_tokens=0,
+                output_tokens=0,
+                usd=prior_usd,
+            )
+        )
+    for _ in range(prior_unknown):
+        ledger.entries.append(
+            CostEntry(
+                cycle_id=_PRIOR_CYCLE,
+                model="(prior)",
+                input_tokens=0,
+                output_tokens=0,
+                usd=0.0,
+                cost_known=False,
+            )
+        )
+    governor = BudgetGovernor(
+        ceiling_usd=inp.budget_usd if inp.budget_usd is not None else settings.budget_usd_ceiling,
+        max_cycles=inp.max_cycles,
+        allow_unknown_cost=settings.allow_unpriced_models,
+    )
+    meter = CostMeter(ledger=ledger, governor=governor)
+    meter.cycle_id = inp.cycle_id
+    return meter
+
+
+# --- exactly-once per cycle id ------------------------------------------------------------
+def committed_cycle_event(workdir: str, cycle_id: str) -> dict[str, object] | None:
+    """The payload of ``cycle_id``'s checkpoint event if ``HEAD`` already contains it."""
+    rel = f"{ANCHOR_DIR}/{EVENTS_FILE}"
+    try:
+        raw = git_ops.run_git(workdir, "show", f"HEAD:{rel}")
+    except git_ops.GitError:
+        return None
+    for line in reversed(raw.splitlines()[-_RECENT_EVENTS:]):
+        try:
+            event = EventRecord.model_validate_json(line)
+        except ValueError:
+            continue
+        if event.kind == "cycle" and event.cycle_id == cycle_id:
+            return event.payload
+    return None
+
+
+def _result_from_snapshot(
+    snapshot: SituationSnapshot,
+    *,
+    item_id: str | None,
+    advanced: bool,
+    note: str,
+    verdict: str = "",
+    item_blocked: bool = False,
+    reason: str = "",
+    spent_usd: float = 0.0,
+) -> CycleResult:
+    return CycleResult(
+        item_id=item_id,
+        advanced=advanced,
+        head_sha=snapshot.head_sha,
+        is_complete=snapshot.is_complete,
+        items_done=snapshot.items_done,
+        items_total=snapshot.items_total,
+        note=note,
+        verdict=verdict,
+        is_deadlocked=snapshot.is_deadlocked,
+        item_blocked=item_blocked,
+        reason=reason or snapshot.deadlock_reason,
+        spent_usd=spent_usd,
+    )
+
+
+def _anchor_text(snapshot: SituationSnapshot, inp: CycleInput) -> str:
+    """Extra prompt context: operator steering (the loop recites the mission spec itself)."""
+    parts = [] if snapshot.mission else [f"Mission {inp.mission_id}"]
+    if inp.steer_notes:
+        notes = "\n".join(f"- {note}" for note in inp.steer_notes)
+        parts.append(f"Operator steering (most recent last):\n{notes}")
+    return "\n\n".join(parts)
+
+
+async def _execute_cycle(
+    inp: CycleInput,
+    *,
+    settings: Settings | None = None,
+    model_factory: ModelFactory | None = None,
+) -> CycleResult:
+    """Advance the mission by one verified item via the real agent loop (safe to retry)."""
+    settings = settings or get_settings()
+    factory = model_factory or _default_model_factory
+    checks = resolve_checks(inp.check_commands)
+    attempt = activity.info().attempt if activity.in_activity() else 1
+
+    async with workdir_lock(inp.workdir):
+        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        anchor = GitMissionAnchor(inp.workdir)
+        snapshot = await anchor.read_situational_awareness()
+
+        payload = await asyncio.to_thread(committed_cycle_event, inp.workdir, inp.cycle_id)
+        if payload is not None:  # a previous attempt committed this cycle, then crashed
+            item = payload.get("item_id")
+            return _result_from_snapshot(
+                snapshot,
+                item_id=str(item) if item is not None else None,
+                advanced=True,
+                verdict=str(payload.get("verdict", "")),
+                item_blocked=payload.get("status") == "blocked",
+                note="already committed by a previous attempt",
+            )
+        if snapshot.is_complete or snapshot.is_deadlocked:
+            return _result_from_snapshot(
+                snapshot, item_id=None, advanced=False, note="nothing actionable"
+            )
+
+        meter = await asyncio.to_thread(build_cycle_meter, settings, inp)
+        try:
+            model = meter.wrap(factory(settings, snapshot), role="lead")
+        except ValueError as exc:  # e.g. missing API key / base URL for the configured backend
+            raise _config_error(f"cannot build the model: {exc}", exc) from exc
+        try:
+            session = await open_sandbox(
+                settings.sandbox,
+                workdir=inp.workdir,
+                allow_unsafe_local=settings.allow_unsafe_local,
+            )
+        except (UnsafeSandboxError, ValueError) as exc:
+            await model.aclose()
+            raise _config_error(f"cannot open the sandbox: {exc}", exc) from exc
+
+        try:
+            loop = AgentLoop(
+                model=model,
+                dispatcher=AllowListDispatcher.for_tools(
+                    default_local_tools(), allow_mutating=True
+                ),
+                verifier=DeterministicVerifier(),
+                anchor=anchor,
+                max_turns=settings.max_turns_per_cycle,
+            )
+            outcome = await _with_heartbeat(
+                loop.run_cycle(
+                    ctx=ToolContext(mission_id=inp.mission_id, session=session),
+                    mission_id=inp.mission_id,
+                    cycle_id=inp.cycle_id,
+                    anchor_text=_anchor_text(snapshot, inp),
+                    checks=checks,
+                ),
+                inp.cycle_id,
+            )
+        except BudgetExceeded as exc:
+            raise ApplicationError(
+                str(exc), type=ERROR_BUDGET_EXCEEDED, non_retryable=True
+            ) from exc
+        finally:
+            await session.close()
+            await model.aclose()
+            await asyncio.to_thread(
+                record_spend,
+                inp.workdir,
+                key=idempotency_key(inp.mission_id, inp.cycle_id, attempt),
+                cycle_id=inp.cycle_id,
+                ledger=meter.ledger,
+            )
+
+        after = await anchor.read_situational_awareness()
+        return _result_from_snapshot(
+            after,
+            item_id=outcome.item_id,
+            advanced=outcome.advanced,
+            verdict=outcome.verdict,
+            item_blocked=outcome.item_blocked,
+            reason=outcome.reason,
+            note=f"verdict={outcome.verdict} tools={outcome.tool_calls} turns={outcome.turns}",
+            spent_usd=sum(e.usd for e in meter.ledger.entries if e.cycle_id == inp.cycle_id),
+        )
+
+
+def make_cycle_activity(
+    *, settings: Settings | None = None, model_factory: ModelFactory | None = None
+) -> Callable[[CycleInput], Awaitable[CycleResult]]:
+    """A ``run_agent_cycle`` activity bound to explicit settings / model factory (tests, embeds)."""
+
+    @activity.defn(name="run_agent_cycle")
+    async def run_agent_cycle_bound(inp: CycleInput) -> CycleResult:
+        return await _execute_cycle(inp, settings=settings, model_factory=model_factory)
+
+    return run_agent_cycle_bound
+
+
+@activity.defn
+async def run_agent_cycle(inp: CycleInput) -> CycleResult:
+    """Activity wrapper around one retry-safe agent cycle (worker settings, configured model)."""
+    return await _execute_cycle(inp)
+
+
+# --- health probe (used while parked) -----------------------------------------------------
+async def probe_health(inp: HealthInput, *, settings: Settings | None = None) -> HealthReport:
+    """Probe the critical dependencies (git checkout, model config, sandbox)."""
+    settings = settings or get_settings()
+    statuses: list[DependencyStatus] = []
+
+    ok_repo = await asyncio.to_thread(
+        lambda: git_ops.is_repo(inp.workdir) and git_ops.has_commits(inp.workdir)
+    )
+    statuses.append(
+        DependencyStatus("git", Health.OK if ok_repo else Health.DOWN, "" if ok_repo else "no repo")
+    )
+    try:
+        provider = build_provider(settings)
+        close = getattr(provider, "aclose", None)
+        if close is not None:
+            await close()
+        statuses.append(DependencyStatus("model", Health.OK))
+    except Exception as exc:  # config problems surface here
+        statuses.append(DependencyStatus("model", Health.DOWN, f"{type(exc).__name__}: {exc}"))
+    try:
+        session = await open_sandbox(
+            settings.sandbox, workdir=inp.workdir, allow_unsafe_local=settings.allow_unsafe_local
+        )
+        await session.close()
+        statuses.append(DependencyStatus("sandbox", Health.OK))
+    except Exception as exc:
+        statuses.append(DependencyStatus("sandbox", Health.DOWN, f"{type(exc).__name__}: {exc}"))
+
+    decision = decide_safe_park(statuses)
+    detail = "; ".join(f"{s.name}: {s.detail}" for s in statuses if s.detail)
+    return HealthReport(
+        healthy=not decision.park,
+        reason=decision.reason + (f" ({detail})" if detail else ""),
+        degraded=decision.degraded,
+    )
+
+
+@activity.defn
+async def check_mission_health(inp: HealthInput) -> HealthReport:
+    """Activity: are the mission's critical dependencies up again?"""
+    return await probe_health(inp)
+
+
+# --- human-approved retry of blocked items ------------------------------------------------
+async def _unblock(inp: UnblockInput) -> CycleResult:
+    async with workdir_lock(inp.workdir):
+        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        anchor = GitMissionAnchor(inp.workdir)
+        checklist = await anchor.read_checklist()
+        blocked = [item.id for item in checklist.blocked_items]
+        for item_id in blocked:
+            checklist.unblock(item_id)
+        if blocked:
+            await anchor.commit_checkpoint(
+                Checkpoint(
+                    cycle_id=inp.cycle_id,
+                    progress_summary=f"- {inp.cycle_id} human retry: unblocked {', '.join(blocked)}",
+                    checklist=checklist,
+                    events=[
+                        EventRecord(
+                            kind="unblock", cycle_id=inp.cycle_id, payload={"items": blocked}
+                        )
+                    ],
+                    commit_message=f"lha: unblock {', '.join(blocked)} (human retry)",
+                )
+            )
+        snapshot = await anchor.read_situational_awareness()
+        return _result_from_snapshot(
+            snapshot, item_id=None, advanced=bool(blocked), note=f"unblocked {blocked}"
+        )
+
+
+@activity.defn
+async def unblock_items(inp: UnblockInput) -> CycleResult:
+    """Activity: reset every ``blocked`` item to retryable (a human chose "retry")."""
+    return await _unblock(inp)
+
+
+# --- read-only snapshot (terminal summaries) ----------------------------------------------
+async def _read_snapshot(inp: HealthInput) -> CycleResult:
+    snapshot = await GitMissionAnchor(inp.workdir).read_situational_awareness()
+    return _result_from_snapshot(snapshot, item_id=None, advanced=False, note="snapshot")
+
+
+@activity.defn
+async def read_mission_snapshot(inp: HealthInput) -> CycleResult:
+    """Activity: the committed checklist counts + HEAD sha (read-only, no reset)."""
+    return await _read_snapshot(inp)
