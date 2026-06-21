@@ -137,15 +137,28 @@ class DecisionLog:
         """Recompute the hash chain; any edit, reorder, deletion or unchained line fails it."""
         if not self._path.exists():
             return ChainVerification(ok=True, checked=0)
-        contents = self.load()
+        try:
+            contents = self.load()
+        except DecisionLogCorruptError as exc:
+            return ChainVerification(ok=False, checked=0, problem=str(exc))
         torn = contents.torn_tail is not None
         prev = GENESIS_HASH
         checked = 0
-        text = self._path.read_bytes()[: contents.intact_bytes].decode("utf-8")
-        for number, line in enumerate(text.splitlines(), start=1):
-            if not line.strip():
+        # Split ONLY on "\n" (the record separator): ``str.splitlines`` also breaks on U+2028,
+        # U+2029, \x85 etc., which ``json.dumps(ensure_ascii=False)`` leaves unescaped in strings.
+        raw_lines = self._path.read_bytes()[: contents.intact_bytes].split(b"\n")
+        for number, raw in enumerate(raw_lines, start=1):
+            if not raw.strip():
                 continue
-            envelope = json.loads(line)
+            try:
+                envelope = json.loads(raw.decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as exc:
+                return ChainVerification(
+                    ok=False,
+                    checked=checked,
+                    problem=f"line {number}: unreadable record: {exc}",
+                    torn_tail=torn,
+                )
             if not (isinstance(envelope, dict) and "hash" in envelope and "record" in envelope):
                 return ChainVerification(
                     ok=False,
@@ -160,7 +173,9 @@ class DecisionLog:
                     problem=f"line {number}: prev-hash mismatch",
                     torn_tail=torn,
                 )
-            if _chain_hash(prev, envelope["record"]) != envelope["hash"]:
+            if not isinstance(envelope["record"], dict) or (
+                _chain_hash(prev, envelope["record"]) != envelope["hash"]
+            ):
                 return ChainVerification(
                     ok=False,
                     checked=checked,

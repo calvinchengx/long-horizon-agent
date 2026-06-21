@@ -12,6 +12,7 @@ from lha.coordination.ownership import (
     FileOwnershipMap,
     InvalidPathError,
     LeaseRequest,
+    OwnershipConflictError,
     OwnershipViolation,
 )
 from lha.coordination.ticket import (
@@ -32,6 +33,7 @@ __all__ = [
     "IllegalTransitionError",
     "InvalidPathError",
     "LeaseRequest",
+    "OwnershipConflictError",
     "OwnershipViolation",
     "TaskContract",
     "Ticket",

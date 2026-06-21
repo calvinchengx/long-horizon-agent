@@ -20,8 +20,9 @@ from pathlib import Path
 GIT_TIMEOUT_S = 120.0
 
 # Paths ``reset_to_head`` never deletes even though they are untracked/ignored: dependency
-# environments that are expensive to rebuild and the harness's own local stores.
-RESET_KEEP: tuple[str, ...] = (".venv", "venv", "node_modules", ".lha/objects")
+# environments that are expensive to rebuild, local env/secret files the operator placed there,
+# and the harness's own local object store.
+RESET_KEEP: tuple[str, ...] = (".venv", "venv", "node_modules", ".env", ".env.*", ".lha/objects")
 
 
 class GitError(RuntimeError):
@@ -67,10 +68,24 @@ def run_git(cwd: str | Path, *args: str, check: bool = True, timeout: float | No
     return proc.stdout.strip()
 
 
+def toplevel(cwd: str | Path) -> Path | None:
+    """The (resolved) top-level directory of the work tree containing ``cwd``, or ``None``."""
+    proc = _run(cwd, ["rev-parse", "--show-toplevel"])
+    out = proc.stdout.strip()
+    if proc.returncode != 0 or not out:
+        return None
+    return Path(out).resolve()
+
+
 def is_repo(cwd: str | Path) -> bool:
-    """True if ``cwd`` is inside a git work tree."""
-    proc = _run(cwd, ["rev-parse", "--is-inside-work-tree"])
-    return proc.returncode == 0 and proc.stdout.strip() == "true"
+    """True if ``cwd`` is the TOP LEVEL of a git work tree.
+
+    Merely being *inside* some work tree is not enough: a workdir nested in another repository
+    (e.g. ``.lha/workspaces/x`` under the user's project) must get its own repo — otherwise
+    ``git config`` / ``git add -A`` / ``git commit`` would act on the enclosing repository.
+    """
+    root = toplevel(cwd)
+    return root is not None and root == Path(cwd).resolve()
 
 
 def init_repo(
@@ -101,13 +116,19 @@ def head_sha(cwd: str | Path) -> str:
     return run_git(cwd, "rev-parse", "HEAD")
 
 
-def commit_all(cwd: str | Path, message: str) -> str:
+def commit_all(cwd: str | Path, message: str, *, force_paths: tuple[str, ...] = ()) -> str:
     """Stage everything and commit; return the resulting HEAD sha.
+
+    ``force_paths`` are additionally staged with ``git add -f`` so they are committed even when
+    the repository's ``.gitignore`` excludes them (e.g. the harness's own ``.lha/`` anchor files).
 
     If there is nothing to commit, this is a no-op that returns the current HEAD (so callers
     can treat "checkpoint with no changes" as benign and idempotent).
     """
     run_git(cwd, "add", "-A")
+    existing = [p for p in force_paths if (Path(cwd) / p).exists()]
+    if existing:
+        run_git(cwd, "add", "-f", "--", *existing)
     # Exit code, not porcelain text: 0 = index matches HEAD (nothing staged), 1 = changes.
     staged = _run(cwd, ["diff", "--cached", "--quiet"])
     if staged.returncode == 0:
@@ -116,6 +137,18 @@ def commit_all(cwd: str | Path, message: str) -> str:
         raise GitError(f"git diff --cached failed ({staged.returncode}): {staged.stderr.strip()}")
     run_git(cwd, "commit", "-m", message)
     return head_sha(cwd)
+
+
+def exists_at_head(cwd: str | Path, relpath: str) -> bool:
+    """True if ``relpath`` (relative to ``cwd``, not the repo root) exists in ``HEAD``."""
+    if not has_commits(cwd):
+        return False
+    return _run(cwd, ["cat-file", "-e", f"HEAD:./{relpath}"]).returncode == 0
+
+
+def show_at_head(cwd: str | Path, relpath: str) -> str:
+    """The content of ``relpath`` (relative to ``cwd``) at ``HEAD`` (raises ``GitError``)."""
+    return run_git(cwd, "show", f"HEAD:./{relpath}")
 
 
 def git_dir(cwd: str | Path) -> Path:
