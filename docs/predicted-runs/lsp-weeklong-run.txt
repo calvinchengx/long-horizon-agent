@@ -1,0 +1,277 @@
+# illustrative log (fiction modeled on the real TraceRecorder/structlog stream; NOT executed).
+# continuous timestamped stream; day boundaries appear only as sleep.durable/wake pairs.
+# thinking is a terse DEBUG trace field; tool stdout is captured (large payloads claim-checked to object store).
+# this is the LONG view (failures written out, not elided). to capture a real one: verify + LHA_ANTHROPIC_API_KEY + `uv run lha mission-start`.
+
+$ uv run lha mission-start --title pylsp-mini --workdir .lha/workspaces/pylsp-mini --task @mission.txt
+2026-06-08T09:00:01.002Z INFO  cli.start version=0.1.0 mission=mission_4c7e21a9 workdir=.lha/workspaces/pylsp-mini
+2026-06-08T09:00:01.118Z INFO  temporal.connect addr=localhost:7233 ns=default build_id=lha-7f1c data_converter=ClaimCheckCodec(threshold=32768)
+2026-06-08T09:00:01.331Z INFO  workflow.started wf=mission:mission_4c7e21a9 run=01J9Z7QF3KQ2 task_queue=lha-mission
+2026-06-08T09:00:01.402Z INFO  anchor.init head=- files=4 ; git.init "Initialized empty Git repository"
+2026-06-08T09:00:01.560Z INFO  governor.config ceiling_usd=400.00 max_cycles=2000 stall_limit=5
+
+# ── intake + deep research ───────────────────────────────────────────────────
+2026-06-08T09:00:02.011Z INFO  planner.turn cycle=plan-0 model=claude-opus-4-8 tok_in=1204 tok_out=412 cache_read=0 lat=6.2s cost=0.0112
+2026-06-08T09:00:02.012Z DEBUG planner.thinking ▸ "I do not have the LSP wire format memorised precisely. Guessing it will burn cycles. Spend on READ-research first: (a) base protocol framing, (b) study a real server's transport on GitHub, (c) exact JSON for hover/completion/definition, (d) python stdio gotchas. Then plan."
+2026-06-08T09:00:08.700Z INFO  research.fanout n=4 task_queue=lha-research rule_of_two=ok caps=2
+2026-06-08T09:00:09.140Z INFO  tool.exec agent=researcher-1 name=web_search q="language server protocol 3.17 base protocol header part Content-Length" → 8 results dur=1.91s
+    1. microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#baseProtocol
+    2. microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#headerPart
+    3. microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#contentPart
+2026-06-08T09:00:12.560Z INFO  tool.exec agent=researcher-1 name=web_fetch url=microsoft.github.io/.../specification/#headerPart → 200 dur=3.40s egress=allow(microsoft.github.io)
+    extract ▸ "header field 'Content-Length' (REQUIRED) = length of content part in BYTES; header lines are ASCII, terminated by \\r\\n; the header section ends with a blank \\r\\n; content part default charset = utf-8."
+2026-06-08T09:00:16.880Z INFO  tool.exec agent=researcher-1 name=web_fetch url=microsoft.github.io/.../#initialize → 200 dur=3.1s
+    extract ▸ "initialize request: params.capabilities (ClientCapabilities); response: result.capabilities (ServerCapabilities). after the response the client sends 'initialized' (a notification, no id)."
+2026-06-08T09:00:20.100Z INFO  research.brief id=1 ▸ "FRAME ON BYTES. Content-Length = len(utf8(body)). headers ASCII + CRLF; blank CRLF ends headers. body=utf-8 JSON-RPC 2.0. POSITIONS: line 0-based; 'character' is UTF-16 CODE UNITS (HAZARD-1)."
+2026-06-08T09:00:13.220Z INFO  tool.exec agent=researcher-2 name=bash cmd="gh repo view openlawlibrary/pygls --json description,stargazerCount,homepageUrl" → exit=0 dur=1.10s
+    {"description":"A pythonic generic Language Server (pygls).","stargazerCount":1503}
+2026-06-08T09:00:18.020Z INFO  tool.exec agent=researcher-2 name=bash cmd="git clone --depth 1 https://github.com/openlawlibrary/pygls /tmp/ref/pygls" → exit=0 dur=4.61s
+    Receiving objects: 100% (412/412), 1.21 MiB | 3.0 MiB/s, done.
+2026-06-08T09:00:23.110Z INFO  tool.exec agent=researcher-2 name=bash cmd="git clone --depth 1 https://github.com/python-lsp/python-lsp-server /tmp/ref/pylsp" → exit=0 dur=5.02s
+2026-06-08T09:00:28.300Z INFO  tool.exec agent=researcher-2 name=glob pattern="/tmp/ref/pygls/pygls/**/*.py" → 14 files dur=0.20s
+2026-06-08T09:00:28.560Z INFO  tool.exec agent=researcher-2 name=grep pattern="Content-Length|stdin.buffer|setmode|readexactly" path=/tmp/ref → 11 hits dur=0.34s
+    /tmp/ref/pygls/pygls/io_.py:44:   line = rfile.readline()
+    /tmp/ref/pygls/pygls/io_.py:48:   return rfile.read(content_length)
+    /tmp/ref/pygls/pygls/protocol/json_rpc.py:188:  header = f"Content-Length: {len(body)}\r\n\r\n"
+    /tmp/ref/pylsp/pylsp/_utils.py:73:  if os.name == "nt": ...setmode(sys.stdout.fileno(), os.O_BINARY)
+2026-06-08T09:00:31.880Z INFO  tool.exec agent=researcher-2 name=read path=/tmp/ref/pygls/pygls/io_.py lines=30-110 dur=0.18s
+2026-06-08T09:00:34.220Z INFO  tool.exec agent=researcher-2 name=read path=/tmp/ref/pygls/pygls/protocol/json_rpc.py lines=170-210 dur=0.16s
+2026-06-08T09:00:36.700Z INFO  research.brief id=2 ▸ "pygls: read header lines off sys.stdin.BUFFER until blank; parse Content-Length; read(content_length) EXACTLY; write headers+body to sys.stdout.BUFFER. NEVER print()/input(). pylsp explicitly setmode(O_BINARY) on Windows. Transport is small + synchronous-ish; protocol sits on top."
+2026-06-08T09:00:24.000Z INFO  tool.exec agent=researcher-3 name=web_fetch url=…/#textDocument_hover → 200 dur=2.6s
+2026-06-08T09:00:27.400Z INFO  tool.exec agent=researcher-3 name=web_fetch url=…/#textDocument_completion → 200 dur=2.7s
+2026-06-08T09:00:30.900Z INFO  tool.exec agent=researcher-3 name=web_fetch url=…/#textDocument_definition → 200 dur=2.5s
+2026-06-08T09:00:33.500Z INFO  research.brief id=3 ▸ "Hover{contents:MarkupContent{kind:'markdown'|'plaintext',value},range?}; CompletionList{isIncomplete,items:[{label,kind?,detail?,documentation?}]}; definition→Location{uri,range{start{line,character},end{...}}} (range end exclusive)."
+2026-06-08T09:00:25.660Z INFO  tool.exec agent=researcher-4 name=web_search q="python language server stdin stdout binary mode windows pipe" → 8 results dur=1.8s
+2026-06-08T09:00:29.110Z INFO  tool.exec agent=researcher-4 name=read path=/tmp/ref/pylsp/pylsp/_utils.py lines=60-95 dur=0.15s
+2026-06-08T09:00:31.470Z INFO  research.brief id=4 ▸ "Windows: sys.stdout TEXT mode translates \\n→\\r\\n → corrupts binary framing. Use sys.std{in,out}.buffer; or msvcrt.setmode(fd, O_BINARY). [HAZARD-2] Also: stdout buffering + a full pipe can deadlock a reader that waits on the writer."
+2026-06-08T09:47:55.090Z INFO  planner.turn cycle=plan-0 model=claude-opus-4-8 tok_in=9220 tok_out=2031 cache_read=7400 lat=10.9s cost=0.0701
+2026-06-08T09:47:55.091Z DEBUG planner.thinking ▸ "research solid. spec surface is big and I want to do it justice → planning the FULL server: framing, init, hover, completion, definition, diagnostics-on-didChange, formatting, documentSymbol, rename. 31 items. lead builds transport; implementers fan out per feature. [no self-critique of over-scope recorded — this is the seed of the coming thrash]"
+2026-06-08T09:47:55.640Z INFO  checklist.write items=31 sha256=4b1c… (01 transport, 02 init, 03 hover, 04 completion, 05 definition, 06 diagnostics, 07 formatting, 08 documentSymbol, 09 rename, …)
+2026-06-08T09:47:55.700Z INFO  ownership.map lead=[transport,dispatch,index] implementers=[per-feature] shared→lead=[pyproject.toml,__init__.py,conftest.py]
+2026-06-08T09:47:55.910Z INFO  decisions.append id=1 "asyncio over stdio" ; id=2 "scope=full server"
+2026-06-08T09:47:56.220Z INFO  git.commit head=0c1d2e3 msg="lha: initialize mission anchor" files=4 ins=39
+2026-06-08T18:32:04.330Z INFO  sleep.durable until=2026-06-09T07:30:00Z reason=idle-eod
+2026-06-08T18:32:04.331Z INFO  consolidate episodes=12 facts=5 ; governor.tick cum_usd=0.094
+
+# ── transport, attempt 1..n — the grind begins ───────────────────────────────
+2026-06-09T07:30:00.044Z INFO  wake active=01 reground=git+anchor dur=0.041s
+2026-06-09T07:30:01.220Z INFO  governor.authorize cycle=c1 allow=true projected_usd=0.06 spent=0.094
+2026-06-09T07:30:04.118Z INFO  lead.turn cycle=c1 model=claude-opus-4-8 tok_in=8112 tok_out=905 cache_read=5900 lat=12.1s cost=0.0712
+2026-06-09T07:30:04.119Z DEBUG lead.thinking ▸ "read→dispatch→write loop. recv=input(); send=print(json)+flush. simplest path."
+2026-06-09T07:30:16.470Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py bytes=812 dur=0.05s
+2026-06-09T07:30:16.560Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/server.py bytes=604 dur=0.04s
+2026-06-09T07:30:16.640Z INFO  tool.exec cycle=c1 name=write_file path=tests/_fakeclient.py bytes=1640 dur=0.05s  # speaks real framing; asserts on the wire
+2026-06-09T07:30:16.700Z INFO  tool.exec cycle=c1 name=write_file path=tests/test_initialize.py bytes=470 dur=0.03s
+2026-06-09T08:01:59.880Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest tests/test_initialize.py -q --timeout=10" → exit=1 dur=10.62s
+    ============================= test session starts =============================
+    platform win32 -- Python 3.12.13, pytest-9.0.3 ; collected 1 item
+    tests/test_initialize.py F                                               [100%]
+    tests/_fakeclient.py:55: in _read_response
+        header = self._read_until(b"\r\n\r\n")
+    E   Failed: Timeout >10.0s
+    1 failed in 10.62s
+2026-06-09T08:02:10.441Z WARN  verify.fail cycle=c1 attempt=1 reason=timeout tests=0/1
+2026-06-09T08:05:33.900Z DEBUG lead.thinking ▸ "hang. maybe flush. add explicit flush + echo sent bytes to stderr."
+2026-06-09T08:06:20.620Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 2) dur=0.04s
+2026-06-09T08:06:43.110Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest … --timeout=20" → exit=1 dur=20.5s
+    FAILED test_handshake - Failed: Timeout >20.0s
+    -- captured stderr -- [server→] {"jsonrpc": "2.0", "id": 1, "result": {"capabilities": {...}}}\n
+2026-06-09T08:26:51.300Z DEBUG lead.thinking ▸ "stderr proves it: bare JSON + \\n, NO Content-Length header. client waits forever. brief-1 said this. let me check the exact header format I'm supposed to emit."
+2026-06-09T08:27:30.660Z INFO  tool.exec cycle=c1 name=web_search q="lsp Content-Length header example raw message jsonrpc" → 6 results dur=1.7s
+2026-06-09T08:27:34.880Z INFO  tool.exec cycle=c1 name=web_fetch url=microsoft.github.io/.../#headerPart → 200(cache) dur=0.2s
+    extract ▸ "Content-Length: 126\\r\\n\\r\\n{...json...}"
+2026-06-09T08:28:10.440Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 3: sys.stdout.write(f'Content-Length: {len(body)}\\r\\n\\r\\n{body}')) dur=0.05s
+2026-06-09T09:20:38.770Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest … --timeout=15" → exit=1 dur=2.13s
+    tests/_fakeclient.py:71: in _read_body
+        raise ValueError(f"read {got} bytes for body but Content-Length said {n}")
+    E   ValueError: read 248 bytes for body but Content-Length said 246
+2026-06-09T09:20:40.120Z WARN  verify.fail cycle=c1 attempt=3 reason=byte-mismatch delta=+2 tests=0/1
+2026-06-09T09:21:05.660Z DEBUG lead.thinking ▸ "+2 bytes. body has no newlines (json.dumps default). so the 2 extra bytes are on the WIRE not the body… my '\\r\\n\\r\\n' has two '\\n'; on Windows text-mode stdout each '\\n'→'\\r\\n' = +2 bytes the client counts. researching the windows behaviour to be sure."
+2026-06-09T09:22:02.330Z INFO  tool.exec cycle=c1 name=web_search q="python windows stdout text mode \\n translated \\r\\n disable binary" → 7 results dur=1.6s
+2026-06-09T09:22:06.880Z INFO  tool.exec cycle=c1 name=web_fetch url=docs.python.org/3/library/sys.html#sys.stdout → 200 dur=2.2s
+    extract ▸ "to write/read binary data use sys.stdout.buffer / sys.stdin.buffer."
+2026-06-09T09:23:30.040Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 4: write header via sys.stdout (text), body via sys.stdout.buffer) dur=0.05s
+2026-06-09T09:24:55.510Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest …" → exit=1 dur=1.41s
+    tests/_fakeclient.py:58: in _read_header
+        key, _, val = line.decode("ascii").partition(":")
+    E   UnicodeDecodeError: 'ascii' codec can't decode byte 0xef in position 0
+2026-06-09T09:25:12.880Z DEBUG lead.thinking ▸ "now the header is garbage. mixing text-mode header + binary body desyncs the stream (a leftover buffered byte / BOM 0xef leaked). need ONE stream. write everything via sys.stdout.buffer as bytes."
+2026-06-09T09:40:11.220Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 5: everything via stdout.buffer; recv still input()) dur=0.05s
+2026-06-09T09:41:02.660Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest … --timeout=12" → exit=1 dur=12.4s
+    Failed: Timeout >12.0s   # write side ok now; READ side hangs
+2026-06-09T09:55:48.300Z DEBUG lead.thinking ▸ "write fixed; read hangs. input() reads a LINE; the request body has no trailing newline (and may contain none) so input() blocks. need to read headers line-by-line then read exactly n bytes — off stdin.buffer."
+2026-06-09T10:10:30.880Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 6: stdin.buffer.readline + read(n)) dur=0.06s
+2026-06-09T10:11:40.110Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest …" → exit=1 dur=1.1s
+    json.decoder.JSONDecodeError: Unterminated string starting at: line 1 column 180 (char 179)
+2026-06-09T10:12:05.660Z DEBUG lead.thinking ▸ "partial read. stream.read(n) can return FEWER than n bytes on a pipe; I read once and json-parsed a truncated body. must loop until I've read exactly n bytes."
+2026-06-09T10:25:14.880Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 7: loop read until len==n) dur=0.05s
+2026-06-09T10:26:02.330Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest …" → exit=1 dur=0.9s
+    ValueError: invalid literal for int() with base 10: ' 246'   # header parse
+2026-06-09T10:26:30.440Z DEBUG lead.thinking ▸ "header value has a leading space ('Content-Length: 246'); int(' 246') is fine actually… no — I split on ':' and took [1] but my line still had the trailing CRLF → int('246\\r\\n') fails on some paths. strip()."
+2026-06-09T10:40:22.110Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 8: strip header value) dur=0.04s
+2026-06-09T10:41:10.880Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest …" → exit=1 dur=0.8s
+    ValueError: read 251 bytes for body but Content-Length said 248  # unicode body now
+2026-06-09T10:42:00.330Z DEBUG lead.thinking ▸ "ascii bodies pass; a body with 'café' fails by 1 (é=2 utf8 bytes). on SEND I used len(body) = CHARACTERS not utf-8 BYTES. researching the right length."
+2026-06-09T10:43:05.660Z INFO  tool.exec cycle=c1 name=web_search q="python content-length json utf-8 byte length len encode" → 5 results dur=1.4s
+2026-06-09T10:55:40.880Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 9: body=json.encode('utf-8'); Content-Length=len(body_bytes)) dur=0.05s
+2026-06-09T10:56:20.110Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest …" → exit=1 dur=0.7s
+    TypeError: a bytes-like object is required, not 'str'   # header still a str into buffer.write
+2026-06-09T11:10:14.880Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 10: encode header ascii too) dur=0.04s
+2026-06-09T11:11:02.330Z INFO  tool.exec cycle=c1 name=run_command cmd="uv run pytest … --timeout=12" → exit=1 dur=12.3s
+    Failed: Timeout >12.0s   # intermittent: asyncio reader via run_in_executor sometimes never returns
+2026-06-09T11:30:48.300Z DEBUG lead.thinking ▸ "now it's intermittent. the asyncio wrapper around blocking stdin reads (run_in_executor) sometimes deadlocks vs the event loop. the SYNC framing is finally close, but the async scaffolding around it is fighting me."
+2026-06-09T13:05:11.660Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 11: tweak executor) dur=0.05s  → run_command → Timeout
+2026-06-09T15:20:33.880Z INFO  tool.exec cycle=c1 name=write_file path=pylsp_mini/transport.py (attempt 12: different loop policy) dur=0.05s → run_command → Timeout
+2026-06-09T17:48:02.300Z WARN  loop_detector signature="01:transport:edit" count=3 action=warn
+2026-06-09T17:48:02.301Z INFO  governor.tick cum_usd=31.29 tests=0/1 active=01 cycles_today=1 attempts=12
+2026-06-09T18:35:10.900Z INFO  episodic.append kind=struggle item=01 attempts=12 note="framing nearly right; async scaffolding deadlocks; stream-mode + char/byte + partial-read all hit"
+2026-06-09T18:35:10.901Z INFO  skill.admit count=0 reason="nothing passed the gate; the system records no progress it didn't earn"
+2026-06-09T18:35:11.000Z INFO  sleep.durable until=2026-06-10T07:30:00Z
+
+# ── still failing: a wrong rewrite, a deadlock, a crash, a loop-trip ──────────
+2026-06-10T07:30:00.060Z INFO  wake active=01  (transport STILL red after a full day)
+2026-06-10T07:31:40.220Z DEBUG lead.thinking ▸ "new theory: asyncio is the disease. rip it out; two threads (reader/writer) + queues."
+2026-06-10T07:32:10.660Z INFO  tool.exec cycle=c187 name=write_file path=pylsp_mini/transport.py bytes=1730 dur=0.06s (threads+queue rewrite)
+2026-06-10T09:55:02.140Z INFO  tool.exec cycle=c187 name=run_command cmd="uv run pytest … --timeout=15" → exit=1 dur=15.4s
+    .../pylsp_mini/transport.py:51: in _writer_loop
+        body = self._outq.get()        # blocks forever
+    E   Failed: Timeout >15.0s   (reader blocked on stdin.buffer.read(n); writer blocked on empty queue → deadlock)
+2026-06-10T09:55:30.700Z WARN  verify.fail cycle=c187 reason=deadlock
+2026-06-10T09:56:10.330Z INFO  tool.exec cycle=c187 name=web_search q="python threads stdin stdout pipe deadlock language server reader writer" → 7 results dur=1.7s
+2026-06-10T09:58:44.880Z INFO  tool.exec cycle=c187 name=read path=/tmp/ref/pygls/pygls/server.py lines=1-80 dur=0.2s  # how do THEY avoid this?
+2026-06-10T10:02:20.110Z DEBUG lead.thinking ▸ "pygls runs the read loop and dispatch on one side and writes inline; they don't block a writer thread on a queue while the reader holds the GIL on a blocking read. my two-thread design is the bug. I keep adding machinery."
+2026-06-10T10:05:33.660Z INFO  tool.exec cycle=c188 name=write_file path=pylsp_mini/transport.py (attempt: single reader thread + inline writes) dur=0.06s → run_command → exit=1 deadlock (writes race the reader's buffer)
+2026-06-10T10:15:09.330Z ERROR loop_detector signature="01:transport:rewrite" count=4 action=TRIP
+2026-06-10T10:15:09.334Z INFO  orchestrator.pause item=01 ; escalate=reviewer reason=loop-trip
+2026-06-10T10:15:40.880Z INFO  reviewer.turn model=claude-opus-4-8 ctx=fresh tok_in=6010 tok_out=812 cache_read=0 lat=9.6s cost=0.0601
+2026-06-10T10:15:40.882Z INFO  reviewer.finding sev=blocking kind=architecture ▸ "you are solving THREE problems in one file and they keep colliding: (1) framing, (2) text-vs-binary streams, (3) concurrency. SEPARATE them. (a) framing = a pure byte-level pair read_message(stream)->dict / write_message(stream,dict); UNIT-TEST it in isolation (no server/threads/async) — exactly what pygls/io_.py does. (b) use sys.std{in,out}.buffer only; never print()/input(). (c) a minimal server needs NO concurrency — a synchronous read→dispatch→write loop removes the deadlock entirely; add async later only if a feature needs it."
+2026-06-10T10:15:40.883Z INFO  reviewer.finding sev=advisory kind=scope ▸ "a broken core + 31 planned items is the real problem; cut scope until the core is green."
+2026-06-10T13:48:12.770Z ERROR worker.disconnect reason="connection reset (host OS update reboot)" inflight_cycle=c190
+2026-06-10T13:55:40.110Z WARN  temporal.replay wf=mission:mission_4c7e21a9 events=631 (completed activities served from cache; 0 tokens re-spent; 0 double commits)
+2026-06-10T13:55:41.020Z INFO  reconcile.in_flight ticket=01 branch=feat/transport → adopt (branch present, unmerged)
+2026-06-10T13:55:41.880Z INFO  sandbox.restore snapshot=snap_c189 head=5e6f7a8
+2026-06-10T13:55:42.001Z DEBUG orchestrator.note ▸ "replay restored state EXACTLY → a still-RED transport. durability protects WORK, not CORRECTNESS. resuming exactly where we were stuck."
+2026-06-10T18:20:33.400Z INFO  governor.tick cum_usd=76.19 tests=2/12 (only module-import + server-constructs pass)
+2026-06-10T18:20:33.500Z INFO  sleep.durable until=2026-06-11T07:30:00Z
+
+# ── overnight: learn from the failures (self-improvement), then re-plan ───────
+2026-06-11T07:00:05.220Z INFO  librarian.consolidate window=2d episodes=29 → lessons=4
+2026-06-11T07:00:05.221Z INFO  librarian.lesson L1 "wire-protocol framing is byte-level + stream-mode-sensitive → isolate & unit-test FIRST"
+2026-06-11T07:00:05.222Z INFO  librarian.lesson L2 "never fix 3 entangled problems in one file; split them"
+2026-06-11T07:00:05.223Z INFO  librarian.lesson L3 "stream.read(n) on a pipe can short-read → loop until n bytes"
+2026-06-11T07:00:05.224Z INFO  librarian.lesson L4 "over-scoping an unproven core causes thrash"
+2026-06-11T07:00:06.880Z INFO  reflection.write item=01 ▸ "the 12 attempts were the same 3 bugs reshuffled. stop editing transport.py in place; build framing as a tested unit, sync, binary."
+2026-06-11T07:30:00.070Z INFO  wake active=01
+2026-06-11T07:30:45.660Z INFO  planner.turn cycle=replan-1 model=claude-opus-4-8 tok_in=7740 tok_out=1410 cache_read=6100 lat=11.2s cost=0.0731
+2026-06-11T07:30:45.661Z DEBUG planner.thinking ▸ "root cause was MY over-scope as much as the bugs. cut diagnostics/formatting/documentSymbol/rename. scope 31→14. re-order: prove transport as a standalone TESTED UNIT before any feature. adopt the reviewer's decomposition + the 4 lessons."
+2026-06-11T07:31:02.300Z INFO  state.migrate checklist v1→v2 items=14 (dropped 06-09,plus 4 sub-items)
+2026-06-11T07:31:02.560Z INFO  decisions.append id=3 "narrow→14; transport-first TDD; SYNC loop; binary streams (sys.*.buffer)"
+
+# ── the turnaround: framing as a tested unit → FIRST GREEN ───────────────────
+2026-06-11T07:31:40.090Z INFO  lead.turn cycle=c201 model=claude-opus-4-8 tok_in=9340 tok_out=1190 cache_read=8100 lat=14.0s cost=0.0841 skill_in_ctx=lsp-framing(draft from L1/L3)
+2026-06-11T07:31:40.091Z DEBUG lead.thinking ▸ "clean head. framing as a pure fn over BYTES, tested first: round-trip, multibyte byte-count, header-with-spaces, AND a stream that returns 1 byte per read (the short-read bug from L3). no server/async/features."
+2026-06-11T07:31:52.400Z INFO  tool.exec cycle=c201 name=write_file path=tests/test_framing.py bytes=1180 dur=0.05s
+2026-06-11T07:31:52.470Z INFO  tool.exec cycle=c201 name=write_file path=pylsp_mini/jsonrpc.py bytes=812 dur=0.05s
+    # pylsp_mini/jsonrpc.py
+    import json
+    from typing import BinaryIO
+    def write_message(stream: BinaryIO, msg: dict) -> None:
+        body = json.dumps(msg, separators=(",", ":")).encode("utf-8")
+        stream.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii"))
+        stream.write(body); stream.flush()
+    def read_message(stream: BinaryIO) -> dict | None:
+        headers: dict[str, str] = {}
+        while (line := stream.readline()) not in (b"\r\n", b""):
+            k, _, v = line.decode("ascii").partition(":"); headers[k.strip().lower()] = v.strip()
+        if not line: return None                        # EOF
+        n = int(headers["content-length"]); body = b""
+        while len(body) < n:                            # loop — pipes short-read (L3)
+            chunk = stream.read(n - len(body))
+            if not chunk: break
+            body += chunk
+        return json.loads(body.decode("utf-8"))
+2026-06-11T09:10:21.330Z INFO  tool.exec cycle=c201 name=run_command cmd="uv run pytest tests/test_framing.py -q" → exit=0 dur=0.41s
+    collected 7 items
+    tests/test_framing.py .......                                            [100%]
+    7 passed in 0.13s
+2026-06-11T09:10:21.770Z INFO  verify.ok cycle=c201 checks=[pytest]   ← FIRST GREEN (cycle 201, ~2.5 days in)
+2026-06-11T09:10:30.880Z INFO  tool.exec name=run_command cmd="uv run ruff check pylsp_mini/jsonrpc.py" → exit=0 "All checks passed!"
+2026-06-11T09:10:36.220Z INFO  tool.exec name=run_command cmd="uv run mypy pylsp_mini/jsonrpc.py" → exit=0 "Success: no issues found in 1 source file"
+2026-06-11T09:11:02.140Z INFO  git.commit head=a1f2e3d msg="lha: transport framing (isolated, byte-tested)" files=3 ins=70
+2026-06-11T09:11:02.300Z INFO  skill.confirm name=lsp-framing precond=[python,stdio] proven_by=tests/test_framing.py
+2026-06-11T09:30:10.660Z DEBUG lead.thinking ▸ "framing solid → server loop is trivial + SYNCHRONOUS: read_message→dispatch on method→write_message. no async. initialize returns capabilities; shutdown→null then exit."
+2026-06-11T09:31:55.880Z INFO  tool.exec cycle=c202 name=write_file path=pylsp_mini/server.py bytes=1180 dur=0.05s
+2026-06-11T11:24:40.120Z INFO  tool.exec cycle=c202 name=run_command cmd="uv run pytest tests/test_initialize.py -q" → exit=0 dur=0.5s "1 passed"
+2026-06-11T11:24:40.560Z INFO  verify.ok cycle=c202 ; git.commit head=b3c4d5e msg="lha: initialize/shutdown handshake"
+2026-06-11T11:24:40.700Z INFO  governor.tick cum_usd=103.90 tests=9/14
+2026-06-11T18:15:09.330Z INFO  sleep.durable until=2026-06-12T07:30:00Z
+
+# ── features fan out (skill reused, no relapse) ──────────────────────────────
+2026-06-12T07:30:00.050Z INFO  wake active=03 effort_scaling=fanout reason="hover+completion are disjoint files"
+2026-06-12T07:30:03.220Z INFO  child.spawn wf=subagent:…:implementer:0 ticket={feature:hover,write_set:[features/hover.py,tests/test_hover.py],budget_tok:120000}
+2026-06-12T07:30:03.230Z INFO  child.spawn wf=subagent:…:implementer:1 ticket={feature:completion,write_set:[features/completion.py,tests/test_completion.py]}
+2026-06-12T07:33:41.900Z INFO  tool.exec agent=implementer-0 name=web_fetch url=…/#textDocument_hover → 200(cache) dur=0.3s
+2026-06-12T07:51:10.220Z INFO  tool.exec agent=implementer-0 name=run_command cmd="uv run pytest tests/test_hover.py -q" → exit=1 dur=0.4s  "1 failed: hover returned None at end-of-identifier"
+2026-06-12T07:52:02.660Z DEBUG implementer-0.thinking ▸ "off-by-one: cursor at the char AFTER the identifier should still resolve it; widen the word-span scan to include cursor==end."
+2026-06-12T08:58:12.110Z INFO  child.done implementer-0 branch=feat/hover verify=ok brief="hover via word-under-cursor + index; 5 tests" skill_reused=lsp-framing
+2026-06-12T09:12:40.660Z INFO  child.done implementer-1 branch=feat/completion verify=ok brief="prefix completion over index; 4 tests"
+2026-06-12T13:50:22.300Z INFO  integrator.merge branch=feat/hover→main ; verify.integration=ok ; saga.register revert(a1..)
+2026-06-12T13:51:05.880Z INFO  integrator.merge branch=feat/completion→main (rebased) ; verify.integration=ok
+2026-06-12T13:51:06.020Z INFO  git.commit head=c7d8e9f msg="lha: integrate hover+completion"
+2026-06-12T18:02:11.770Z INFO  sleep.durable until=2026-06-13T08:00:00Z ; governor.tick cum_usd=131.0
+
+# ── definition + the UTF-16 hazard finally bites (and is fixed) ──────────────
+2026-06-13T08:00:00.060Z INFO  wake active=05 (definition)
+2026-06-13T08:44:30.220Z INFO  tool.exec cycle=c388 name=write_file path=pylsp_mini/features/definition.py ; pytest → 7 passed
+2026-06-13T09:30:15.900Z INFO  tool.exec agent=tester name=write_file path=tests/test_positions_unicode.py bytes=560 (adversarial: an emoji before the target symbol)
+2026-06-13T09:31:02.330Z INFO  tool.exec agent=tester name=run_command cmd="uv run pytest tests/test_positions_unicode.py -q" → exit=1 dur=0.20s
+    >       assert loc["range"]["start"]["character"] == 9
+    E       assert 7 == 9
+2026-06-13T09:31:45.660Z INFO  reviewer.finding sev=blocking ▸ "HAZARD-1 from day0, forgotten: LSP 'character' = UTF-16 CODE UNITS; you used Python str indices (codepoints). '\\U0001f600' is 1 codepoint but 2 UTF-16 units → every column after an astral char is off by one. convert at the boundary."
+2026-06-13T09:32:10.110Z INFO  tool.exec cycle=c390 name=web_fetch url=microsoft.github.io/.../#positionEncodingKind → 200 dur=2.1s
+    extract ▸ "default PositionEncodingKind = 'utf-16'; servers may negotiate utf-8/utf-32 via capabilities."
+2026-06-13T09:33:40.880Z INFO  tool.exec cycle=c390 name=write_file path=pylsp_mini/positions.py (utf16_to_index/index_to_utf16) ; rewire handlers
+2026-06-13T11:50:02.220Z INFO  tool.exec name=run_command cmd="uv run pytest tests/test_positions_unicode.py -q" → exit=0 "9 passed"
+2026-06-13T11:50:02.660Z INFO  verify.ok ; skill.admit name=lsp-utf16-offsets proven_by=tests/test_positions_unicode.py ; decision_log.consistency_check=ok
+2026-06-13T18:30:44.300Z INFO  sleep.durable until=2026-06-14T08:00:00Z ; governor.tick cum_usd=157.2
+
+# ── robustness, incremental sync, trust the gate ─────────────────────────────
+2026-06-14T08:00:00.050Z INFO  wake active=08 (incremental sync + robustness)
+2026-06-14T08:20:11.220Z INFO  tool.exec cycle=c441 name=write_file path=pylsp_mini/document_store.py (didOpen/didChange) ; pytest → 1 failed "range edit off-by-one on multi-line replace"
+2026-06-14T08:41:30.660Z DEBUG lead.thinking ▸ "incremental range replace: end position is EXCLUSIVE; I treated it inclusive, dropping a char. fix slice bounds."
+2026-06-14T08:55:02.110Z INFO  tool.exec name=run_command cmd="uv run pytest tests/test_didchange.py -q" → exit=0 "6 passed"
+2026-06-14T09:10:40.880Z INFO  tool.exec cycle=c447 name=write_file path=pylsp_mini/server.py (unknown method → JSON-RPC error -32601) ; pytest → ok
+2026-06-14T09:35:10.880Z INFO  tool.exec agent=tester name=run_command cmd="uv run pytest tests/test_framing_fuzz.py -q" → exit=0 "1000 passed" note="fuzz byte-boundary splits + multibyte"
+2026-06-14T09:36:02.140Z INFO  tool.exec name=run_command cmd="uv run pytest --cov -q" → exit=0 "coverage: 91%"
+2026-06-14T09:48:55.300Z INFO  tool.exec name=run_command cmd="uv run mutmut run" → exit=0 "killed 89/106 (score 0.84)"
+2026-06-14T09:49:00.020Z INFO  gate.trusted coverage=0.91 mutation=0.84
+2026-06-14T10:20:33.770Z INFO  tool.exec name=write_file path=README.md ; name=write_file path=.github/workflows/ci.yml ; name=write_file path=Makefile
+2026-06-14T18:01:09.880Z INFO  sleep.durable until=2026-06-15T08:00:00Z ; governor.tick cum_usd=178.6
+
+# ── final gate ───────────────────────────────────────────────────────────────
+2026-06-15T08:00:00.040Z INFO  wake active=14 (final gate)
+2026-06-15T08:43:02.220Z INFO  tool.exec name=run_command cmd="make check" → exit=0 dur=44.1s
+    uv run ruff check .            All checks passed!
+    uv run mypy                    Success: no issues found in 14 source files
+    uv run pytest -q               58 passed in 4.40s
+2026-06-15T08:44:20.660Z INFO  tool.exec name=run_command cmd="uv run python -m tests.scripted_session" → exit=0 dur=1.2s
+    → initialize          ← capabilities {hover,completion,definition}
+    → didOpen sample.py
+    → hover @0:4          ← "def add(a: int, b: int) -> int"
+    → completion @8:6     ← ["add","addr","address"]
+    → definition @8:6     ← file:///…/sample.py 0:4-0:7
+    → shutdown/exit       ← ok
+2026-06-15T08:44:51.330Z INFO  verify.final ok checks=[ruff,mypy,pytest,scripted_session]
+2026-06-15T08:44:51.880Z INFO  mission.complete items=14/14 cycles=615 head=9d8c7b6 status=DONE
+2026-06-15T08:44:51.900Z INFO  governor.final cum_usd=178.60 ceiling=400.00 crashes_survived=1 loop_trips=1 reviewer_blocking=2 scope_cuts=1 skills_learned=2 transport_attempts=14
+
+# ── offline: make the lesson permanent ───────────────────────────────────────
+2026-06-15T22:14:03.220Z INFO  evolve.start wf=evolution:mission_4c7e21a9 model=claude-opus-4-8 reads=failure_traces(2026-06-09,2026-06-10)
+2026-06-15T22:14:03.221Z DEBUG evolver.thinking ▸ "~2.5 days lost to one root cause: hard wire-protocol + over-scope + 3 entangled bugs edited in place. propose standing Lead-prompt rules."
+2026-06-15T22:14:40.660Z INFO  evolve.candidate diff="+ for stdio/wire-protocol: implement+unit-test byte-level framing in ISOLATION first (incl. a short-read stream + a multibyte body); use binary streams (sys.*.buffer); start synchronous. + if an unproven core has >~10 dependent items, cut scope until the core is green. + never edit one file repeatedly to chase entangled bugs — split them."
+2026-06-15T22:14:55.880Z INFO  eval.run set=wire-protocol-gold n=20 baseline=0.71 candidate=0.85
+2026-06-15T22:15:30.220Z INFO  judge.verdict model=claude-opus-4-8 promote=true delta=+0.14 regressions=0
+2026-06-15T22:15:31.020Z INFO  replay.histories n=9 result=9/9 clean
+2026-06-15T22:15:31.440Z INFO  evolve.promote target=prompts/lead.md mode=PR human_approval=required (never hot-patched a live run)
+2026-06-15T22:15:31.600Z INFO  skills.consolidate admitted=2 pruned=0 namespace=per-repo
+2026-06-15T22:15:31.700Z INFO  evolve.note ▸ "net effect: a future wire-protocol mission should skip the multi-day thrash. the self-improvement loop pays for itself."
