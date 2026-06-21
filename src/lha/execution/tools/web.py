@@ -16,11 +16,14 @@ import httpx
 from lha.contracts.tools import ToolContext, ToolResult, ToolSpec
 from lha.execution.tools.limits import MAX_TOOL_OUTPUT
 from lha.safety.egress import (
+    DEFAULT_PORTS,
     CredentialBroker,
     EgressDenied,
     EgressPolicy,
+    ParsedURL,
     Resolver,
     check_resolved_addresses,
+    normalize_host,
     system_resolver,
 )
 
@@ -170,6 +173,9 @@ class FetchUrlTool:
                 headers = self._broker.resolve_headers(headers, host=parsed.host)
             try:
                 request = self._client.build_request("GET", url, headers=headers or None)
+                mismatch = _target_mismatch(request, parsed)
+                if mismatch:
+                    return ToolResult.failure(f"egress blocked by policy: {mismatch} ({url!r})")
                 resp = await self._client.send(request, stream=True, follow_redirects=False)
                 try:
                     if resp.is_redirect:
@@ -187,6 +193,21 @@ class FetchUrlTool:
             text = body.decode(resp.encoding or "utf-8", errors="replace")
             return ToolResult.success(_html_to_text(text)[:MAX_TOOL_OUTPUT])
         return ToolResult.failure(f"fetch_url failed: more than {self.MAX_REDIRECTS} redirects")
+
+
+def _target_mismatch(request: httpx.Request, parsed: ParsedURL) -> str | None:
+    """The host/port httpx will actually connect to must be exactly what the policy checked."""
+    try:
+        actual_host = normalize_host(request.url.raw_host.decode("ascii"))
+    except UnicodeDecodeError:
+        return "request host is not ASCII after encoding"
+    actual_port = request.url.port or DEFAULT_PORTS.get(request.url.scheme, -1)
+    if actual_host != parsed.host or actual_port != parsed.port:
+        return (
+            f"request target {actual_host}:{actual_port} differs from the checked "
+            f"{parsed.host}:{parsed.port}"
+        )
+    return None
 
 
 async def _read_capped(resp: httpx.Response, limit: int) -> bytes:

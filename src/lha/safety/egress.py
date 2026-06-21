@@ -17,21 +17,32 @@ import socket
 from collections.abc import Awaitable, Callable, Iterable
 from urllib.parse import urlsplit
 
+import idna
 from pydantic import BaseModel, Field, field_validator
 
 # (host, port) -> list of IP address strings.
 Resolver = Callable[[str, int], Awaitable[list[str]]]
 
 _DEFAULT_PORTS = {"http": 80, "https": 443}
+DEFAULT_PORTS = _DEFAULT_PORTS  # public alias (scheme -> default port)
 
 
 class EgressDenied(PermissionError):
     """Raised when a URL or its resolved addresses are not permitted."""
 
 
+def _clean_host(host: str) -> str:
+    return host.strip().strip("[]").rstrip(".").lower()
+
+
 def normalize_host(host: str) -> str:
-    """Lower-case, strip a trailing dot, IDNA-encode; IPv6 literals lose their brackets."""
-    host = host.strip().strip("[]").rstrip(".").lower()
+    """Lower-case, strip a trailing dot, IDNA-encode; IPv6 literals lose their brackets.
+
+    Non-ASCII hosts are encoded with IDNA 2008 + UTS#46 (the ``idna`` package, which is what
+    httpx uses when connecting), so the host the policy checks is the host actually contacted.
+    Returns ``""`` for hosts that cannot be encoded (callers treat that as invalid / denied).
+    """
+    host = _clean_host(host)
     if not host:
         return ""
     try:
@@ -39,10 +50,28 @@ def normalize_host(host: str) -> str:
         return host
     except ValueError:
         pass
-    try:
-        return host.encode("idna").decode("ascii")
-    except UnicodeError:
+    if host.isascii():
         return host
+    try:
+        return idna.encode(host, uts46=True).decode("ascii").lower()
+    except (idna.IDNAError, UnicodeError, ValueError):
+        return ""
+
+
+def is_ambiguous_idn(host: str) -> bool:
+    """True if IDNA 2003 and IDNA 2008 encode ``host`` differently (e.g. ``ß``, ``ς``, ZWJ).
+
+    Such hosts name two different domains depending on the encoder, so egress refuses them.
+    """
+    host = _clean_host(host)
+    if not host or host.isascii():
+        return False
+    modern = normalize_host(host)
+    try:
+        legacy = host.encode("idna").decode("ascii").lower()
+    except UnicodeError:
+        return False
+    return legacy != modern
 
 
 class ParsedURL(BaseModel):
@@ -63,9 +92,12 @@ def parse_url(url: str) -> ParsedURL:
         raise EgressDenied(f"scheme not allowed: {scheme!r}")
     if parts.username is not None or parts.password is not None:
         raise EgressDenied("credentials in the url are not allowed")
-    host = normalize_host(parts.hostname or "")
+    raw_host = parts.hostname or ""
+    if is_ambiguous_idn(raw_host):
+        raise EgressDenied(f"ambiguous internationalized host (IDNA 2003/2008 differ): {url!r}")
+    host = normalize_host(raw_host)
     if not host:
-        raise EgressDenied(f"url has no host: {url!r}")
+        raise EgressDenied(f"url has no valid host: {url!r}")
     return ParsedURL(scheme=scheme, host=host, port=port or _DEFAULT_PORTS[scheme])
 
 
