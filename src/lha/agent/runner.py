@@ -63,6 +63,13 @@ def build_meter(settings: Settings) -> CostMeter:
     return CostMeter(ledger=CostLedger(), governor=governor)
 
 
+async def aclose_provider(provider: object | None) -> None:
+    """Close a provider that owns resources (e.g. an HTTP client); no-op for ``None``/stubs."""
+    close = getattr(provider, "aclose", None)
+    if close is not None:
+        await close()
+
+
 def full_access_dispatcher(*, allow_egress: bool = False) -> AllowListDispatcher:
     """The Lead's dispatcher: every default tool, mutating allowed (explicit — the default is
     fail-closed)."""
@@ -105,11 +112,15 @@ async def run_mission_local(
     cycles = 0
     last_head = ""
     stopped = "max_cycles"
+    # A provider built here owns its HTTP client and is closed here; a caller's ``model`` is not.
+    owned_model: ModelProvider | None = None
     try:
+        if model is None:
+            model = owned_model = build_provider(settings)
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(title=title, description=description, items=checklist)
         loop = AgentLoop(
-            model=meter.wrap(model or build_provider(settings), role="lead"),
+            model=meter.wrap(model, role="lead"),
             dispatcher=full_access_dispatcher(allow_egress=allow_egress),
             verifier=DeterministicVerifier(),
             anchor=anchor,
@@ -160,7 +171,10 @@ async def run_mission_local(
 
         final = await anchor.read_checklist()
     finally:
-        await session.close()
+        try:
+            await session.close()
+        finally:
+            await aclose_provider(owned_model)
     items_done = sum(1 for item in final.items if item.status == "done")
     return MissionSummary(
         mission_id=mission_id,
@@ -192,8 +206,13 @@ async def plan_and_run_local(
     """
     settings = settings or get_settings()
     meter = meter or build_meter(settings)
-    planner = Planner(meter.wrap(build_provider(settings), role="planner"))
-    checklist = await planner.plan(title=title, description=task)
+    planner_model = build_provider(settings)
+    try:
+        checklist = await Planner(meter.wrap(planner_model, role="planner")).plan(
+            title=title, description=task
+        )
+    finally:
+        await aclose_provider(planner_model)
     return await run_mission_local(
         workdir=workdir,
         title=title,

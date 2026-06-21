@@ -65,6 +65,7 @@ class OpenAICompatModel(ModelProvider):
         api_key: str | None = None,
         price_in_per_mtok: float | None = None,
         price_out_per_mtok: float | None = None,
+        default_max_tokens: int = 8192,
         timeout_s: float = 120.0,
         client: httpx.AsyncClient | None = None,
         label: str = "openai_compat",
@@ -78,6 +79,9 @@ class OpenAICompatModel(ModelProvider):
         self._base_url = base_url.rstrip("/")
         self._model = model_name
         self._api_key = api_key
+        # Always sent as ``max_tokens`` so the budget meter's worst-case reservation (which uses
+        # this cap) bounds the real output, rather than an unknown server-side default.
+        self.default_max_tokens = default_max_tokens
         self._price: ModelPrice | None = (
             ModelPrice(price_in_per_mtok, price_out_per_mtok)
             if price_in_per_mtok is not None and price_out_per_mtok is not None
@@ -99,9 +103,8 @@ class OpenAICompatModel(ModelProvider):
         payload: dict[str, object] = {
             "model": self._model,
             "messages": _to_openai_messages(messages),
+            "max_tokens": max_tokens or self.default_max_tokens,
         }
-        if max_tokens is not None:
-            payload["max_tokens"] = max_tokens
         if tools:
             payload["tools"] = tools
         headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}

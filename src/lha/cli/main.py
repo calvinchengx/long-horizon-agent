@@ -245,7 +245,7 @@ def orchestrate(
     unsafe_local: bool = typer.Option(False, "--unsafe-local", help=_UNSAFE_LOCAL_HELP),
 ) -> None:
     """Plan, then run the FULL multi-agent org (research fan-out + Lead + review) locally."""
-    from lha.agent.runner import MissionSummary, build_meter
+    from lha.agent.runner import MissionSummary, aclose_provider, build_meter
     from lha.agents.orchestrator import Orchestrator
     from lha.agents.planner import Planner
     from lha.contracts.verify import checks_from_commands
@@ -256,8 +256,12 @@ def orchestrate(
 
     async def _mission() -> MissionSummary:
         meter = build_meter(settings)  # planner + every org role share one budget
-        planner = Planner(meter.wrap(build_provider(settings), role="planner"))
-        checklist = await planner.plan(title=title, description=task)
+        planner_model = build_provider(settings)
+        try:
+            planner = Planner(meter.wrap(planner_model, role="planner"))
+            checklist = await planner.plan(title=title, description=task)
+        finally:
+            await aclose_provider(planner_model)
         return await Orchestrator(settings, meter=meter).run_mission(
             workdir=workdir, title=title, description=task, checklist=checklist, checks=checks
         )
@@ -288,7 +292,7 @@ def mission_start(
     ),
 ) -> None:
     """Plan + initialize the anchor, then start a durable MissionWorkflow on Temporal."""
-    from lha.agent.runner import build_meter
+    from lha.agent.runner import aclose_provider, build_meter
     from lha.agents.planner import Planner
     from lha.config import get_settings
     from lha.durable.types import MissionInput
@@ -303,8 +307,12 @@ def mission_start(
     async def _start() -> str:
         settings = get_settings()
         meter = build_meter(settings)
-        planner = Planner(meter.wrap(build_provider(settings), role="planner"))
-        checklist = await planner.plan(title=title, description=task)
+        planner_model = build_provider(settings)
+        try:
+            planner = Planner(meter.wrap(planner_model, role="planner"))
+            checklist = await planner.plan(title=title, description=task)
+        finally:
+            await aclose_provider(planner_model)
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(title=title, description=task, items=checklist)
         client = await connect_client(settings)
