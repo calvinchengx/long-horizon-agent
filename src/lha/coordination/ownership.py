@@ -84,6 +84,19 @@ def is_shared(path: str) -> bool:
     )
 
 
+def _key(path: str) -> str:
+    """The ownership-map key for ``path``: normalized AND case-folded.
+
+    Case-insensitive filesystems (macOS/Windows defaults) map ``Models.py`` and ``models.py`` to
+    the same file, so they must map to the same owner — otherwise two writers could each "own" it.
+    """
+    return _normalize(path).casefold()
+
+
+class OwnershipConflictError(ValueError):
+    """``assign`` was asked to hand a file that another writer already owns to a new writer."""
+
+
 class OwnershipViolation(BaseModel):
     """A write to a path the writer does not own."""
 
@@ -103,18 +116,42 @@ class LeaseRequest(BaseModel):
 class FileOwnershipMap(BaseModel):
     """Maps file paths to their single permitted writer."""
 
-    owners: dict[str, str] = Field(default_factory=dict)  # normalized path -> writer id
+    # normalized + case-folded path -> writer id (see ``_key``)
+    owners: dict[str, str] = Field(default_factory=dict)
 
     def assign(self, path: str, writer: str) -> None:
-        """Assign ``path`` to ``writer``. Shared files can only ever belong to the lead."""
+        """Assign ``path`` to ``writer``. Shared files can only ever belong to the lead.
+
+        Re-assigning a file to its current owner is a no-op. Handing a file that another writer
+        already owns to a different writer raises ``OwnershipConflictError`` — ownership is never
+        silently stolen (use ``reassign`` to transfer it explicitly).
+        """
+        key = self._checked_key(path, writer)
+        current = self.owners.get(key)
+        if current is not None and current != writer:
+            raise OwnershipConflictError(
+                f"{_normalize(path)!r} is already owned by {current!r}; "
+                f"refusing to hand it to {writer!r} (use reassign)"
+            )
+        self.owners[key] = writer
+
+    def reassign(self, path: str, writer: str) -> str | None:
+        """Explicitly transfer ``path`` to ``writer``; returns the previous owner (if any)."""
+        key = self._checked_key(path, writer)
+        previous = self.owners.get(key)
+        self.owners[key] = writer
+        return previous
+
+    @staticmethod
+    def _checked_key(path: str, writer: str) -> str:
         norm = _normalize(path)
         if is_shared(norm) and writer != LEAD:
             raise ValueError(f"shared file {norm!r} can only be owned by the lead")
-        self.owners[norm] = writer
+        return norm.casefold()
 
     def owner_of(self, path: str) -> str | None:
         try:
-            return self.owners.get(_normalize(path))
+            return self.owners.get(_key(path))
         except InvalidPathError:
             return None
 
@@ -129,7 +166,7 @@ class FileOwnershipMap(BaseModel):
             return False
         if is_shared(norm):
             return writer == LEAD
-        owner = self.owners.get(norm)
+        owner = self.owners.get(norm.casefold())
         if owner is None:
             return writer == LEAD  # unassigned space belongs to the serial lead
         return writer == owner

@@ -21,7 +21,6 @@ Layout (inside the worked repo):
 from __future__ import annotations
 
 import asyncio
-import subprocess
 from pathlib import Path
 
 from lha.contracts.state import (
@@ -40,6 +39,10 @@ CHECKLIST_FILE = "checklist.json"
 PROGRESS_FILE = "progress.md"
 DECISIONS_FILE = "decisions.ndjson"
 EVENTS_FILE = "events.ndjson"
+# The harness-owned anchor files. They are force-added on every commit so a target repo whose
+# ``.gitignore`` excludes ``.lha/`` still gets them committed (otherwise reads would silently fall
+# back to the agent-editable working tree).
+ANCHOR_FILES = (MISSION_FILE, CHECKLIST_FILE, PROGRESS_FILE, DECISIONS_FILE, EVENTS_FILE)
 
 # progress.md is appended every cycle; keep it bounded (oldest entries are trimmed first).
 MAX_PROGRESS_CHARS = 16_000
@@ -110,7 +113,7 @@ class GitMissionAnchor:
         self._path(DECISIONS_FILE).write_text("", encoding="utf-8")
         self._path(EVENTS_FILE).write_text("", encoding="utf-8")
         self._pending_events.clear()
-        return git_ops.commit_all(self.workdir, "lha: initialize mission anchor")
+        return self._commit_all("lha: initialize mission anchor")
 
     def _read_sync(self) -> SituationSnapshot:
         checklist = self._read_checklist()
@@ -142,19 +145,32 @@ class GitMissionAnchor:
         self._write_checklist(checkpoint.checklist)
         if checkpoint.progress_summary.strip():
             self._append_progress(checkpoint.progress_summary)
-        if checkpoint.decisions:
-            with self._path(DECISIONS_FILE).open("a", encoding="utf-8") as fh:
-                for decision in checkpoint.decisions:
-                    fh.write(decision.model_dump_json() + "\n")
+        # The append-only logs are REBUILT from their committed content + the new records, so
+        # the write is idempotent: pending events already appended to the working tree (and not
+        # discarded by the restore, e.g. when the file is not yet tracked) are never duplicated.
+        self._rebuild_log(DECISIONS_FILE, [d.model_dump_json() for d in checkpoint.decisions])
         events = [*self._pending_events, *checkpoint.events]
-        if events:
-            with self._path(EVENTS_FILE).open("a", encoding="utf-8") as fh:
-                for event in events:
-                    fh.write(event.model_dump_json() + "\n")
+        self._rebuild_log(EVENTS_FILE, [e.model_dump_json() for e in events])
         message = checkpoint.commit_message or f"lha: checkpoint {checkpoint.cycle_id}"
-        sha = git_ops.commit_all(self.workdir, message)
+        sha = self._commit_all(message)
         self._pending_events.clear()
         return sha
+
+    def _commit_all(self, message: str) -> str:
+        force = tuple(f"{ANCHOR_DIR}/{name}" for name in ANCHOR_FILES)
+        return git_ops.commit_all(self.workdir, message, force_paths=force)
+
+    def _committed_text(self, name: str) -> str:
+        """The committed (``HEAD``) content of anchor file ``name``; ``""`` if not committed."""
+        rel = f"{ANCHOR_DIR}/{name}"
+        return git_ops.show_at_head(self.workdir, rel) if self._tracked_at_head(rel) else ""
+
+    def _rebuild_log(self, name: str, new_lines: list[str]) -> None:
+        """Rewrite an append-only log as committed content + ``new_lines`` (idempotent)."""
+        base = self._committed_text(name)
+        if base and not base.endswith("\n"):
+            base += "\n"
+        self._path(name).write_text(base + "".join(f"{ln}\n" for ln in new_lines), "utf-8")
 
     def _restore_sync(self, relpaths: list[str]) -> list[str]:
         restored: list[str] = []
@@ -173,27 +189,21 @@ class GitMissionAnchor:
         git_ops.run_git(self.workdir, "clean", "-fdq", "--", ANCHOR_DIR)
 
     def _tracked_at_head(self, relpath: str) -> bool:
-        if not git_ops.has_commits(self.workdir):
-            return False
-        proc = subprocess.run(
-            ["git", "cat-file", "-e", f"HEAD:{relpath}"],
-            cwd=str(self.workdir),
-            capture_output=True,
-            text=True,
-        )
-        return proc.returncode == 0
+        # ``HEAD:./path`` is resolved relative to the workdir, not the repository root.
+        return git_ops.exists_at_head(self.workdir, relpath)
 
     def _read_anchor_file(self, name: str) -> str | None:
         """Read an anchor file from ``HEAD`` (committed truth); fall back to the working tree."""
         rel = f"{ANCHOR_DIR}/{name}"
         if self._tracked_at_head(rel):
-            return git_ops.run_git(self.workdir, "show", f"HEAD:{rel}")
+            return git_ops.show_at_head(self.workdir, rel)
         path = self._path(name)
         return path.read_text(encoding="utf-8") if path.exists() else None
 
     def _append_progress(self, entry: str) -> None:
         path = self._path(PROGRESS_FILE)
-        current = path.read_text(encoding="utf-8") if path.exists() else _PROGRESS_MARKER
+        # Committed truth first (never the agent-editable working tree when HEAD has it).
+        current = self._read_anchor_file(PROGRESS_FILE) or _PROGRESS_MARKER
         if not current.endswith("\n"):
             current += "\n"
         current += entry.strip() + "\n"
@@ -214,7 +224,9 @@ class GitMissionAnchor:
         raw = self._read_anchor_file(DECISIONS_FILE)
         if not raw:
             return []
-        lines = [ln for ln in raw.splitlines() if ln.strip()]
+        # Split ONLY on "\n": ``str.splitlines`` also breaks on U+2028/U+2029/\x85, which JSON
+        # serializers leave unescaped inside strings.
+        lines = [ln for ln in raw.split("\n") if ln.strip()]
         return [DecisionRecord.model_validate_json(ln) for ln in lines[-n:]]
 
 
