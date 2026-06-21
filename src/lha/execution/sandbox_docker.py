@@ -25,6 +25,7 @@ import io
 import os
 import posixpath
 import tarfile
+import time
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -37,6 +38,10 @@ _CONTAINER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 _TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the deadline hit
 _KILLED_EXIT = 137  # 128 + SIGKILL (from `timeout -k`)
 _HOST_GRACE_S = 30
+_EXIT_POLL_S = 0.1  # exec_inspect poll interval while the process is still running
+# Indirection so tests can drive the exec deadline without touching the event loop's clock.
+_clock = time.monotonic
+_sleep = time.sleep
 
 
 def _default_user() -> str:
@@ -96,6 +101,7 @@ class DockerSandboxSession(SandboxSession):
         wrapped = ["timeout", "-k", "5", f"{timeout}s", *argv]
 
         def _run() -> ExecResult:
+            started = _clock()
             out, err = BoundedBuffer(self._max_output), BoundedBuffer(self._max_output)
             exec_id = self._container.client.api.exec_create(
                 self._container.id,
@@ -112,10 +118,30 @@ class DockerSandboxSession(SandboxSession):
                     out.write(stdout_b)
                 if stderr_b:
                     err.write(stderr_b)
+            # The output stream can end before the process does (it closed stdout/stderr), so
+            # wait for the exec to actually finish; an unknown exit code is never "success".
             info = self._container.client.api.exec_inspect(exec_id)
-            code = int(info.get("ExitCode") or 0)
-            timed_out = code in (_TIMEOUT_EXIT, _KILLED_EXIT)
-            stderr = err.text() + (f"\n[timed out after {timeout}s]" if timed_out else "")
+            while info.get("Running") and _clock() - started < timeout + _HOST_GRACE_S:
+                _sleep(_EXIT_POLL_S)
+                info = self._container.client.api.exec_inspect(exec_id)
+            raw_code = info.get("ExitCode")
+            if info.get("Running") or raw_code is None:
+                return ExecResult(
+                    exit_code=-1,
+                    stdout=out.text(),
+                    stderr=err.text() + "\n[exit status unknown: process did not report one]",
+                )
+            code = int(raw_code)
+            # 124/137 only mean "our deadline hit" if the deadline actually passed; otherwise
+            # they are the program's own status (137 is typically an OOM kill in the container).
+            deadline_hit = _clock() - started >= timeout
+            timed_out = deadline_hit and code in (_TIMEOUT_EXIT, _KILLED_EXIT)
+            note = ""
+            if timed_out:
+                note = f"\n[timed out after {timeout}s]"
+            elif code == _KILLED_EXIT:
+                note = "\n[killed by SIGKILL (exit 137), e.g. out of memory]"
+            stderr = err.text() + note
             return ExecResult(
                 exit_code=-1 if timed_out else code,
                 stdout=out.text(),

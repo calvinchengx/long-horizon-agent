@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from lha.execution import sandbox_docker
 from lha.execution.factory import UnsafeSandboxError, build_sandbox, open_sandbox
 from lha.execution.paths import PathEscapeError
 from lha.execution.sandbox_docker import DockerSandbox, DockerSandboxSession
@@ -134,7 +135,9 @@ async def test_docker_exec_wraps_timeout_env_and_bounds_output() -> None:
 
 
 @pytest.mark.asyncio
-async def test_docker_exec_reports_timeout_and_validates() -> None:
+async def test_docker_exec_reports_timeout_and_validates(monkeypatch: pytest.MonkeyPatch) -> None:
+    ticks = iter([0.0, 5.0, 5.0, 5.0])  # the deadline (1s) has passed when the exit is read
+    monkeypatch.setattr(sandbox_docker, "_clock", lambda: next(ticks))
     container = _FakeContainer()
     container.api.exit_code = 124
     session = DockerSandboxSession(container)
