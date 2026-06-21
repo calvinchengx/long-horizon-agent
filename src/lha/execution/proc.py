@@ -127,8 +127,11 @@ class BoundedBuffer:
 
 
 def _drain(stream: IO[bytes], sink: BoundedBuffer) -> None:
+    # Popen pipes are buffered readers: ``read1`` returns what is available without waiting to
+    # fill the whole chunk. Fall back to ``read`` for plain ``IO[bytes]`` streams.
+    read = getattr(stream, "read1", stream.read)
     try:
-        while chunk := stream.read1(_READ_CHUNK):  # type: ignore[attr-defined]
+        while chunk := read(_READ_CHUNK):
             sink.write(chunk)
     except (OSError, ValueError):
         pass

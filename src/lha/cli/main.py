@@ -25,7 +25,7 @@ app.add_typer(db_app, name="db")
 
 _CHECK_HELP = (
     'A gating verification command, shell-quoted (repeatable), e.g. --check "uv run pytest -q". '
-    "Added to the default Python checks (ruff, mypy, pytest) unless --no-default-checks."
+    "Added to the default Python checks (ruff, ty, pytest) unless --no-default-checks."
 )
 _NO_DEFAULT_CHECKS_HELP = (
     "Do not add the default Python checks; requires at least one --check "

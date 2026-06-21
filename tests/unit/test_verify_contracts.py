@@ -92,7 +92,7 @@ def test_check_requires_a_command() -> None:
 def test_derive_check_name_skips_runners() -> None:
     assert derive_check_name(["uv", "run", "pytest", "-q"]) == "pytest"
     assert derive_check_name(["uv", "run", "--frozen", "ruff", "check", "."]) == "ruff"
-    assert derive_check_name(["python3", "-m", "mypy", "src"]) == "mypy"
+    assert derive_check_name(["python3", "-m", "ty", "check"]) == "ty"
     assert derive_check_name(["/usr/bin/python3.12", "-c", "print(1)"]) == "python"
     assert derive_check_name(["npx", "tsc"]) == "tsc"
 
@@ -110,7 +110,7 @@ def test_unique_names_reserve_harness_integrity() -> None:
 
 
 def test_default_python_checks() -> None:
-    assert [c.name for c in default_python_checks()] == ["ruff", "mypy", "pytest"]
+    assert [c.name for c in default_python_checks()] == ["ruff", "ty", "pytest"]
     assert all(c.gating for c in default_python_checks())
 
 

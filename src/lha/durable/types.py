@@ -59,7 +59,7 @@ class MissionInput:
     # Must be >= 1.
     cycles_before_can: int = 200
     # Deterministic verification commands (each an argv) that gate every item. ``None`` = the
-    # default Python gate (ruff + mypy + pytest via uv). An explicit EMPTY list is rejected: an item
+    # default Python gate (ruff + ty + pytest via uv). An explicit EMPTY list is rejected: an item
     # is only ever marked done by at least one passing gating check.
     check_commands: list[list[str]] | None = None
     # Spend ceiling for the whole mission (USD); ``None`` = the worker's ``budget_usd_ceiling``.

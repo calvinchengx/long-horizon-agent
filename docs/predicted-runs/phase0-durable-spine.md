@@ -11,15 +11,15 @@
 $ uv run ruff check .
 All checks passed!
 
-$ uv run mypy
-Success: no issues found in N source files
+$ uv run ty check
+All checks passed!
 
 $ uv run pytest -q
 ......................                                                   [100%]
 ~30 passed in ~25s
 ```
 
-**What to compare:** ruff clean, mypy clean (strict), all tests green. The durability tests
+**What to compare:** ruff clean, ty clean, all tests green. The durability tests
 (`tests/durability/test_durable_spine.py`) are the key ones:
 
 - `test_mission_completes` — a 3-item mission runs to completion; exactly **3** `lha: complete …`
