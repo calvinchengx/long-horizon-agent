@@ -405,11 +405,17 @@ async def probe_health(inp: HealthInput, *, settings: Settings | None = None) ->
     settings = settings or get_settings()
     statuses: list[DependencyStatus] = []
 
-    ok_repo = await asyncio.to_thread(
-        lambda: git_ops.is_repo(inp.workdir) and git_ops.has_commits(inp.workdir)
-    )
+    def _git_ok() -> bool:
+        try:
+            return git_ops.is_repo(inp.workdir) and git_ops.has_commits(inp.workdir)
+        except (OSError, git_ops.GitError):
+            return False
+
+    ok_repo = await asyncio.to_thread(_git_ok)
     statuses.append(
-        DependencyStatus("git", Health.OK if ok_repo else Health.DOWN, "" if ok_repo else "no repo")
+        DependencyStatus(
+            "git", Health.OK if ok_repo else Health.DOWN, "" if ok_repo else "no usable repo"
+        )
     )
     try:
         provider = build_provider(settings)
