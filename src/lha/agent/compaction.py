@@ -49,9 +49,11 @@ async def compact_messages(
     if len(rest) <= keep_last:
         return messages
 
+    keep_last = max(0, keep_last)
     split = len(rest) - keep_last
     # Keep an action and its observation together: don't start the kept tail on an observation.
-    while split > 0 and _is_observation(rest[split]):
+    # (``split == len(rest)`` means an empty tail: nothing to check, and indexing would overflow.)
+    while 0 < split < len(rest) and _is_observation(rest[split]):
         split -= 1
     to_summarize, recent = rest[:split], rest[split:]
     if not to_summarize:
