@@ -14,7 +14,7 @@ from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ChildWorkflowError
+from temporalio.exceptions import ActivityError, ChildWorkflowError
 
 with workflow.unsafe.imports_passed_through():
     from lha.durable.agent_activities import run_subagent
@@ -49,7 +49,7 @@ class SubAgentWorkflow:
 
 def _describe(inp: SubAgentInput, exc: BaseException) -> str:
     cause: BaseException = exc
-    while isinstance(cause, ChildWorkflowError) and cause.cause is not None:
+    while isinstance(cause, ChildWorkflowError | ActivityError) and cause.cause is not None:
         cause = cause.cause
     return f"{inp.role_name}: {type(cause).__name__}: {cause}"
 

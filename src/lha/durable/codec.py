@@ -45,7 +45,7 @@ class ClaimCheckCodec(PayloadCodec):
     async def encode(self, payloads: Sequence[Payload]) -> list[Payload]:
         encoded: list[Payload] = []
         for payload in payloads:
-            if payload.ByteSize() > self._threshold:
+            if len(payload.data) > self._threshold:
                 key = await self._store.put(payload.SerializeToString(deterministic=True))
                 encoded.append(
                     Payload(metadata={"encoding": _CLAIMCHECK_ENCODING}, data=key.encode("ascii"))
