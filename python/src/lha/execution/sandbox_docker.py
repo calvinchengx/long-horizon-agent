@@ -402,7 +402,10 @@ class DockerSandbox(Sandbox):
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
             "read_only": self._read_only_root,
-            "tmpfs": {"/tmp": "rw,nosuid,nodev,size=512m"},
+            # ``exec``: Docker mounts tmpfs noexec by default, which breaks every toolchain that
+            # builds then runs a binary there (``go test``). Code already runs from /workspace,
+            # so this adds nothing an agent could not do anyway. Go/uv/pnpm caches live here too.
+            "tmpfs": {"/tmp": "rw,exec,nosuid,nodev,size=1g"},
         }
 
     async def open(self, *, workdir: str, snapshot_id: str | None = None) -> SandboxSession:
