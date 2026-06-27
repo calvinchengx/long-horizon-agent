@@ -1,0 +1,51 @@
+---
+title: LHA — Long-Horizon Agent
+description: A durable agent organization that makes verified progress on software missions spanning days to weeks.
+template: splash
+hero:
+  tagline: A durable agent organization that makes verified progress on software missions spanning days to weeks, surviving crashes, reboots and context-window limits.
+  actions:
+    - text: Quickstart
+      link: /long-horizon-agent/02-quickstart/
+      icon: right-arrow
+    - text: Architecture
+      link: /long-horizon-agent/05-architecture/
+      variant: minimal
+    - text: GitHub
+      link: https://github.com/calvinchengx/long-horizon-agent
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+The model thinks in short bursts; the **system** runs for weeks. LHA treats long-horizon autonomy
+as an engineering problem, not a model capability.
+
+<CardGrid>
+  <Card title="Truth outside the model" icon="document">
+    A git repo plus a structured checklist, progress log and decision log (the `.lha/` mission
+    anchor) is re-read every cycle, so a restart rebuilds situational awareness in seconds.
+  </Card>
+  <Card title="Durable execution" icon="rocket">
+    Missions run as Temporal workflows. Each agent cycle is a journaled activity: a crashed worker
+    resumes from the last completed cycle, and waiting on an outage is a durable timer.
+  </Card>
+  <Card title="Deterministic verification" icon="approve-check">
+    An item is done only when real tests, lint and type checks pass in the sandbox, never on the
+    model's say-so.
+  </Card>
+  <Card title="Guardrails" icon="warning">
+    Sandboxed execution, irreversible commands refused outright, default-deny
+    egress and a budget governor that stops spend before it happens.
+  </Card>
+</CardGrid>
+
+## Start here
+
+<CardGrid>
+  <LinkCard title="Introduction" href="/long-horizon-agent/01-introduction/" description="What LHA is, the ideas behind it and its current status." />
+  <LinkCard title="Quickstart" href="/long-horizon-agent/02-quickstart/" description="Run a first mission locally, at $0." />
+  <LinkCard title="Choosing an implementation" href="/long-horizon-agent/04-choosing-an-implementation/" description="Python and Go: what is shared and what is ported." />
+  <LinkCard title="Honesty policy" href="/long-horizon-agent/22-honesty/" description="What is proven by tests and what is still frontier." />
+</CardGrid>
