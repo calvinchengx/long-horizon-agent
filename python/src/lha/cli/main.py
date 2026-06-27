@@ -421,8 +421,12 @@ def mission_start(
         24.0,
         help="On deadlock, wait this long for a human 'retry' or 'abort' (0 = end immediately).",
     ),
-    approval_timeout_hours: float = typer.Option(
-        24.0, help="How long an irreversible action waits for approval before it is rejected."
+    approval_timeout_hours: float | None = typer.Option(
+        None,
+        help=(
+            "How long an irreversible action waits for approval before it is rejected "
+            "(default: LHA_APPROVAL_TIMEOUT_S, 24h)."
+        ),
     ),
     max_cycles: int | None = typer.Option(None, help="Cycle ceiling (default: LHA_MAX_CYCLES)."),
 ) -> None:
@@ -476,7 +480,11 @@ def mission_start(
                 check_commands=check_commands,
                 max_cycles=max_cycles if max_cycles is not None else settings.max_cycles,
                 deadlock_gate_seconds=int(deadlock_gate_hours * 3600),
-                approval_timeout_seconds=int(approval_timeout_hours * 3600),
+                approval_timeout_seconds=(
+                    int(approval_timeout_hours * 3600)
+                    if approval_timeout_hours is not None
+                    else settings.approval_timeout_s
+                ),
             ),
             id=f"mission:{mission_id}",
             task_queue=settings.task_queue,
