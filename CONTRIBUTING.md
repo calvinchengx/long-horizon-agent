@@ -19,6 +19,13 @@ uv run ty check              # type-check (src/)
 uv run pytest -q             # tests
 ```
 
+Coverage (the floor lives in `pyproject.toml` as `fail_under`; CI enforces it):
+
+```bash
+uv run pytest -q --cov --cov-report= tests/unit tests/durability tests/load
+uv run coverage report
+```
+
 CI (`.github/workflows/ci.yml`) runs exactly these on every push/PR.
 
 ### Integration tests (real Postgres + Docker)
