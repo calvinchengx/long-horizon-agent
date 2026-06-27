@@ -26,14 +26,19 @@ type Check struct {
 	Command  []string `json:"command"`
 	Gating   bool     `json:"gating"`
 	TimeoutS *int     `json:"timeout_s"`
+	// Where is "sandbox" (default) or "trusted" (an operator-defined check run outside it).
+	Where string `json:"where"`
 }
 
 // UnmarshalJSON applies defaults (gating=true) and validates a non-empty command.
 func (c *Check) UnmarshalJSON(data []byte) error {
 	type alias Check
-	a := alias{Gating: true}
+	a := alias{Gating: true, Where: "sandbox"}
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
+	}
+	if a.Where != "sandbox" && a.Where != "trusted" {
+		return fmt.Errorf("check where must be sandbox or trusted, got %q", a.Where)
 	}
 	if len(a.Command) == 0 {
 		return errors.New("check command must have at least 1 item")
@@ -225,7 +230,7 @@ func ChecksFromCommands(commands [][]string, gating bool) []Check {
 		if len(cmd) == 0 {
 			continue
 		}
-		checks = append(checks, Check{Name: DeriveCheckName(cmd), Command: append([]string{}, cmd...), Gating: gating})
+		checks = append(checks, Check{Name: DeriveCheckName(cmd), Command: append([]string{}, cmd...), Gating: gating, Where: "sandbox"})
 	}
 	return EnsureUniqueCheckNames(checks)
 }

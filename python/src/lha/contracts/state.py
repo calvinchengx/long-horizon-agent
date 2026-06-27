@@ -14,7 +14,7 @@ from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-ItemStatus = Literal["todo", "in_progress", "blocked", "done"]
+ItemStatus = Literal["todo", "in_progress", "blocked", "done", "split"]
 
 
 class MissionSpec(BaseModel):
@@ -27,6 +27,9 @@ class MissionSpec(BaseModel):
     title: str
     description: str
     acceptance: str = ""
+    # Workspace-relative paths of vendored, read-only reference material (API docs, schemas, SDK
+    # behaviour notes) the agent should consult; see ``lha vendor``.
+    references: list[str] = Field(default_factory=list)
     schema_version: int = 1
 
     def render_anchor(self) -> str:
@@ -34,6 +37,12 @@ class MissionSpec(BaseModel):
         text = f"Mission: {self.title}\n\n{self.description}".rstrip()
         if self.acceptance.strip():
             text += f"\n\nDefinition of done: {self.acceptance.strip()}"
+        if self.references:
+            listed = "\n".join(f"- {ref}" for ref in self.references)
+            text += (
+                "\n\nReference material (vendored, read-only; consult it instead of guessing):\n"
+                + listed
+            )
         return text
 
 
@@ -45,7 +54,13 @@ class ChecklistItem(BaseModel):
       * ``blocked`` — failed verification ``max_consecutive_failures`` times in a row (or was
         blocked by a human); NOT re-picked until ``Checklist.unblock`` is called. Independent
         items keep making progress.
-      * ``done`` — verified by at least one gating check.
+      * ``done`` — verified by at least one gating check (and every one of its witnesses).
+      * ``split`` — was blocked and has been replaced by smaller child items (``<id>.1``,
+        ``<id>.2``, ...); resolved when they are. Never counted as done.
+
+    ``witnesses`` name the item's own acceptance checks (``go:TestX``, ``pytest:<node>``,
+    ``cmd:<shell>``, ``trusted:<name>``; see ``lha.verify.witnesses``). They gate the item in
+    addition to the mission's checks, so "Livy on real Spark" cannot pass on unit tests alone.
     """
 
     id: str
@@ -61,6 +76,7 @@ class ChecklistItem(BaseModel):
     last_failure: str = ""
     # Opt-in: this item legitimately needs to modify pre-existing tests / test config.
     allow_harness_edits: bool = False
+    witnesses: list[str] = Field(default_factory=list)
     notes: str = ""
     schema_version: int = 1
 
@@ -103,7 +119,10 @@ class Checklist(BaseModel):
 
     @property
     def all_done(self) -> bool:
-        return bool(self.items) and all(i.status == "done" for i in self.items)
+        """Every item is done or was split into children that are (at least one item done)."""
+        return any(i.status == "done" for i in self.items) and all(
+            i.status in ("done", "split") for i in self.items
+        )
 
     @property
     def is_complete(self) -> bool:
@@ -118,6 +137,11 @@ class Checklist(BaseModel):
     @property
     def items_done(self) -> int:
         return sum(1 for i in self.items if i.status == "done")
+
+    @property
+    def items_total(self) -> int:
+        """Work items: split parents are replaced by their children, so they don't count."""
+        return sum(1 for i in self.items if i.status != "split")
 
     @property
     def blocked_items(self) -> list[ChecklistItem]:
@@ -222,6 +246,49 @@ class Checklist(BaseModel):
             item.status = "todo"
         item.consecutive_failures = 0
         return item
+
+    def split(self, item_id: str, drafts: list[ChecklistItem]) -> list[ChecklistItem]:
+        """Replace an unfinished item with ordered child items ``<id>.1``, ``<id>.2``, ...
+
+        Only each draft's ``description``, ``witnesses`` and ``allow_harness_edits`` are used; ids
+        and dependencies are assigned here: the first child inherits the parent's dependencies,
+        each later child depends on the one before it, and the parent's witnesses move to the LAST
+        child (so the original acceptance still gates the result). Items that depended on the
+        parent now depend on the last child. The parent becomes ``split`` (never ``done``).
+        """
+        parent = self._require(item_id)
+        if parent.status not in ("todo", "in_progress", "blocked"):
+            raise ValueError(f"item {item_id!r} is {parent.status}; only open items can be split")
+        if len(drafts) < 2:
+            raise ValueError("a split needs at least two child items")
+        ids = [f"{parent.id}.{n}" for n in range(1, len(drafts) + 1)]
+        clash = [i for i in ids if self.get(i) is not None]
+        if clash:
+            raise ValueError(f"child ids already exist: {clash}")
+        children: list[ChecklistItem] = []
+        for n, (child_id, draft) in enumerate(zip(ids, drafts, strict=True)):
+            witnesses = list(draft.witnesses)
+            if n == len(drafts) - 1:
+                witnesses += [w for w in parent.witnesses if w not in witnesses]
+            children.append(
+                ChecklistItem(
+                    id=child_id,
+                    description=draft.description,
+                    depends_on=list(parent.depends_on) if n == 0 else [ids[n - 1]],
+                    witnesses=witnesses,
+                    allow_harness_edits=draft.allow_harness_edits or parent.allow_harness_edits,
+                    notes=f"split from {parent.id}",
+                )
+            )
+        for other in self.items:
+            if parent.id in other.depends_on:
+                other.depends_on = [ids[-1] if d == parent.id else d for d in other.depends_on]
+        parent.status = "split"
+        note = f"split into {', '.join(ids)}"
+        parent.notes = f"{parent.notes}; {note}" if parent.notes else note
+        at = self.items.index(parent) + 1
+        self.items[at:at] = children
+        return children
 
     def _require(self, item_id: str) -> ChecklistItem:
         item = self.get(item_id)

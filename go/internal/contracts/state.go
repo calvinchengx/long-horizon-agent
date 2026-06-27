@@ -15,14 +15,26 @@ const (
 	StatusInProgress = "in_progress"
 	StatusBlocked    = "blocked"
 	StatusDone       = "done"
+	// StatusSplit marks an item the replanner replaced with child items <id>.1, <id>.2, ...
+	StatusSplit = "split"
 )
 
 // MissionSpec is the immutable mission definition, written once at initialization.
 type MissionSpec struct {
-	Title         string `json:"title"`
-	Description   string `json:"description"`
-	Acceptance    string `json:"acceptance"`
-	SchemaVersion int    `json:"schema_version"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Acceptance  string `json:"acceptance"`
+	// Workspace-relative paths of vendored, read-only reference material.
+	References    []string `json:"references"`
+	SchemaVersion int      `json:"schema_version"`
+}
+
+// MarshalJSON never emits null for references.
+func (m MissionSpec) MarshalJSON() ([]byte, error) {
+	type alias MissionSpec
+	a := alias(m)
+	a.References = orEmpty(a.References)
+	return json.Marshal(a)
 }
 
 // UnmarshalJSON applies the pydantic defaults for missing fields.
@@ -32,6 +44,7 @@ func (m *MissionSpec) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
 	}
+	a.References = orEmpty(a.References)
 	*m = MissionSpec(a)
 	return nil
 }
@@ -41,6 +54,14 @@ func (m MissionSpec) RenderAnchor() string {
 	text := strings.TrimRight(fmt.Sprintf("Mission: %s\n\n%s", m.Title, m.Description), pyWhitespace)
 	if acc := strings.TrimSpace(m.Acceptance); acc != "" {
 		text += "\n\nDefinition of done: " + acc
+	}
+	if len(m.References) > 0 {
+		listed := make([]string, len(m.References))
+		for i, ref := range m.References {
+			listed[i] = "- " + ref
+		}
+		text += "\n\nReference material (vendored, read-only; consult it instead of guessing):\n" +
+			strings.Join(listed, "\n")
 	}
 	return text
 }
@@ -59,15 +80,18 @@ type ChecklistItem struct {
 	ConsecutiveFailures int      `json:"consecutive_failures"`
 	LastFailure         string   `json:"last_failure"`
 	AllowHarnessEdits   bool     `json:"allow_harness_edits"`
-	Notes               string   `json:"notes"`
-	SchemaVersion       int      `json:"schema_version"`
+	// Witnesses are the item's own acceptance checks (go:TestX, pytest:<node>, cmd:, trusted:).
+	Witnesses     []string `json:"witnesses"`
+	Notes         string   `json:"notes"`
+	SchemaVersion int      `json:"schema_version"`
 }
 
 // NewChecklistItem builds an item with the pydantic defaults.
 func NewChecklistItem(id, description string, dependsOn ...string) ChecklistItem {
 	return ChecklistItem{
 		ID: id, Description: description, Status: StatusTodo,
-		VerifiedBy: []string{}, DependsOn: append([]string{}, dependsOn...), SchemaVersion: 1,
+		VerifiedBy: []string{}, DependsOn: append([]string{}, dependsOn...), Witnesses: []string{},
+		SchemaVersion: 1,
 	}
 }
 
@@ -77,6 +101,7 @@ func (i ChecklistItem) MarshalJSON() ([]byte, error) {
 	a := alias(i)
 	a.VerifiedBy = orEmpty(a.VerifiedBy)
 	a.DependsOn = orEmpty(a.DependsOn)
+	a.Witnesses = orEmpty(a.Witnesses)
 	return json.Marshal(a)
 }
 
@@ -88,12 +113,13 @@ func (i *ChecklistItem) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	switch a.Status {
-	case StatusTodo, StatusInProgress, StatusBlocked, StatusDone:
+	case StatusTodo, StatusInProgress, StatusBlocked, StatusDone, StatusSplit:
 	default:
 		return fmt.Errorf("invalid checklist item status %q", a.Status)
 	}
 	a.VerifiedBy = orEmpty(a.VerifiedBy)
 	a.DependsOn = orEmpty(a.DependsOn)
+	a.Witnesses = orEmpty(a.Witnesses)
 	*i = ChecklistItem(a)
 	return nil
 }
@@ -182,17 +208,30 @@ func (c *Checklist) NextActionable() *ChecklistItem {
 	return firstReady
 }
 
-// AllDone reports a non-empty checklist whose items are all done.
+// AllDone reports every item done or split into children (and at least one item done).
 func (c *Checklist) AllDone() bool {
-	if len(c.Items) == 0 {
-		return false
-	}
+	anyDone := false
 	for _, it := range c.Items {
-		if it.Status != StatusDone {
+		switch it.Status {
+		case StatusDone:
+			anyDone = true
+		case StatusSplit:
+		default:
 			return false
 		}
 	}
-	return true
+	return anyDone
+}
+
+// ItemsTotal counts work items: split parents are replaced by their children.
+func (c *Checklist) ItemsTotal() int {
+	n := 0
+	for _, it := range c.Items {
+		if it.Status != StatusSplit {
+			n++
+		}
+	}
+	return n
 }
 
 // IsComplete reports every item verified done (an empty checklist is NOT complete).
@@ -381,6 +420,84 @@ func (c *Checklist) Unblock(id string) (*ChecklistItem, error) {
 	}
 	it.ConsecutiveFailures = 0
 	return it, nil
+}
+
+// Split replaces an unfinished item with ordered children <id>.1 .. <id>.n (python:
+// Checklist.split). Only each draft's Description, Witnesses and AllowHarnessEdits are used: the
+// first child inherits the parent's dependencies, each later child depends on the one before, the
+// parent's witnesses move to the LAST child, dependents are re-pointed at the last child, and the
+// parent becomes split (never done).
+func (c *Checklist) Split(id string, drafts []ChecklistItem) ([]ChecklistItem, error) {
+	parent, err := c.require(id)
+	if err != nil {
+		return nil, err
+	}
+	switch parent.Status {
+	case StatusTodo, StatusInProgress, StatusBlocked:
+	default:
+		return nil, fmt.Errorf("item %s is %s; only open items can be split", PyRepr(id), parent.Status)
+	}
+	if len(drafts) < 2 {
+		return nil, errors.New("a split needs at least two child items")
+	}
+	ids := make([]string, len(drafts))
+	clash := []string{}
+	for n := range drafts {
+		ids[n] = fmt.Sprintf("%s.%d", parent.ID, n+1)
+		if c.Get(ids[n]) != nil {
+			clash = append(clash, PyRepr(ids[n]))
+		}
+	}
+	if len(clash) > 0 {
+		return nil, fmt.Errorf("child ids already exist: [%s]", strings.Join(clash, ", "))
+	}
+	parentID, parentDeps := parent.ID, append([]string{}, parent.DependsOn...)
+	parentWitnesses, parentHarness := append([]string{}, parent.Witnesses...), parent.AllowHarnessEdits
+	children := make([]ChecklistItem, len(drafts))
+	for n, d := range drafts {
+		witnesses := append([]string{}, d.Witnesses...)
+		if n == len(drafts)-1 {
+			for _, w := range parentWitnesses {
+				if indexOf(witnesses, w) < 0 {
+					witnesses = append(witnesses, w)
+				}
+			}
+		}
+		deps := []string{ids[max(n-1, 0)]}
+		if n == 0 {
+			deps = append([]string{}, parentDeps...)
+		}
+		child := NewChecklistItem(ids[n], d.Description, deps...)
+		child.Witnesses = witnesses
+		child.AllowHarnessEdits = d.AllowHarnessEdits || parentHarness
+		child.Notes = "split from " + parentID
+		children[n] = child
+	}
+	for idx := range c.Items {
+		for k, dep := range c.Items[idx].DependsOn {
+			if dep == parentID {
+				c.Items[idx].DependsOn[k] = ids[len(ids)-1]
+			}
+		}
+	}
+	parent.Status = StatusSplit
+	note := "split into " + strings.Join(ids, ", ")
+	if parent.Notes != "" {
+		parent.Notes += "; " + note
+	} else {
+		parent.Notes = note
+	}
+	at := 0
+	for i := range c.Items {
+		if c.Items[i].ID == parentID {
+			at = i + 1
+			break
+		}
+	}
+	items := append([]ChecklistItem{}, c.Items[:at]...)
+	items = append(items, children...)
+	c.Items = append(items, c.Items[at:]...)
+	return children, nil
 }
 
 // DecisionRecord is a durable, never-compacted record of a design decision.

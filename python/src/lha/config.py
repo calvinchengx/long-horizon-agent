@@ -11,6 +11,7 @@ never show them; read the raw value only at the point of use via ``.get_secret_v
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Literal
 
@@ -71,6 +72,12 @@ class Settings(BaseSettings):
     # Consecutive failed (non-progressing) attempts on the same item before it is declared
     # stuck (the LoopDetector threshold).
     stall_limit: int = 5
+    # Replanning: when an item blocks, the model may split it into smaller child items (at most
+    # ``max_replans`` splits per mission, nested at most ``max_split_depth`` levels). 0 disables.
+    max_replans: int = 20
+    max_split_depth: int = 2
+    # How long a durable mission waits on a human for an approval / deadlock decision.
+    approval_timeout_s: int = 86_400
 
     # --- Execution sandbox -----------------------------------------------------------
     # Where agent tool calls and verification checks run. "docker" (default) and "e2b" isolate
@@ -79,11 +86,54 @@ class Settings(BaseSettings):
     # also set (LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true).
     sandbox: SandboxKind = "docker"
     allow_unsafe_local: bool = False
+    # Docker image the sandbox runs (needs the toolchains the checks use: this default has Python
+    # and uv; see sandbox/Dockerfile for a Go + uv + Node/pnpm image).
+    sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
+    # Comma-separated hosts the SANDBOX may reach (package registries, e.g.
+    # "proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org"). Empty = no network.
+    # Enforced by an egress proxy on an internal Docker network, not by the agent's goodwill.
+    sandbox_egress: str = ""
+    # Comma-separated hosts the lead's fetch_url tool may read (reference docs). Empty = no web.
+    web_allow_hosts: str = ""
+    # Operator-defined checks that run OUTSIDE the sandbox (e.g. e2e suites needing Docker), as a
+    # JSON object of name -> argv, referenced by items as witnesses "trusted:<name>".
+    trusted_checks: str = ""
+    # Comma-separated globs (workspace-relative) the agent may not modify, on top of the test
+    # files harness integrity always protects, e.g. "Makefile,e2e/**,.github/**".
+    harness_paths: str = ""
 
     # --- Observability ---------------------------------------------------------------
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
+
+    def sandbox_egress_hosts(self) -> list[str]:
+        return _csv(self.sandbox_egress)
+
+    def web_hosts(self) -> list[str]:
+        return _csv(self.web_allow_hosts)
+
+    def harness_globs(self) -> list[str]:
+        return _csv(self.harness_paths)
+
+    def trusted_check_commands(self) -> dict[str, list[str]]:
+        """``trusted_checks`` parsed (raises ``ValueError`` on malformed JSON or entries)."""
+        if not self.trusted_checks.strip():
+            return {}
+        try:
+            parsed = json.loads(self.trusted_checks)
+        except ValueError as exc:
+            raise ValueError(f"LHA_TRUSTED_CHECKS is not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("LHA_TRUSTED_CHECKS must be a JSON object of name -> argv list")
+        out: dict[str, list[str]] = {}
+        for name, argv in parsed.items():
+            if not (isinstance(argv, list) and argv and all(isinstance(a, str) for a in argv)):
+                raise ValueError(
+                    f"LHA_TRUSTED_CHECKS[{name!r}] must be a non-empty list of strings"
+                )
+            out[str(name)] = list(argv)
+        return out
 
     def redacted(self) -> dict[str, object]:
         """All settings as a dict with every ``SecretStr`` field masked (``***`` if set).
@@ -102,3 +152,7 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return the process-wide settings (cached)."""
     return Settings()
+
+
+def _csv(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]

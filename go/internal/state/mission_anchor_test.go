@@ -72,7 +72,7 @@ func TestInitializeCreatesCommittedAnchor(t *testing.T) {
 	if got := readText(t, filepath.Join(dir, AnchorDir, ProgressFile)); got != wantProgress {
 		t.Fatalf("progress = %q", got)
 	}
-	wantMission := "{\n  \"title\": \"T\",\n  \"description\": \"D\",\n  \"acceptance\": \"\",\n  \"schema_version\": 1\n}"
+	wantMission := "{\n  \"title\": \"T\",\n  \"description\": \"D\",\n  \"acceptance\": \"\",\n  \"references\": [],\n  \"schema_version\": 1\n}"
 	if got := readText(t, filepath.Join(dir, AnchorDir, MissionFile)); got != wantMission {
 		t.Fatalf("mission.json = %q", got)
 	}

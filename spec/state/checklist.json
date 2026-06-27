@@ -27,6 +27,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -40,6 +41,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -53,6 +55,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -80,6 +83,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -93,6 +97,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -120,6 +125,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -135,6 +141,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -150,6 +157,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -177,6 +185,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -190,6 +199,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -217,6 +227,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -230,6 +241,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -257,6 +269,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -272,6 +285,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -285,6 +299,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -314,6 +329,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -345,6 +361,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -376,6 +393,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -391,6 +409,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -406,6 +425,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -435,6 +455,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      },
@@ -448,6 +469,7 @@
       "consecutive_failures": 0,
       "last_failure": "",
       "allow_harness_edits": false,
+      "witnesses": [],
       "notes": "",
       "schema_version": 1
      }
@@ -477,6 +499,7 @@
      "consecutive_failures": 0,
      "last_failure": "",
      "allow_harness_edits": false,
+     "witnesses": [],
      "notes": "",
      "schema_version": 1
     },
@@ -492,6 +515,7 @@
      "consecutive_failures": 0,
      "last_failure": "",
      "allow_harness_edits": false,
+     "witnesses": [],
      "notes": "",
      "schema_version": 1
     }
@@ -516,6 +540,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -531,6 +556,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -557,6 +583,7 @@
        "consecutive_failures": 1,
        "last_failure": "tests failed",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -572,6 +599,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -598,6 +626,7 @@
        "consecutive_failures": 2,
        "last_failure": "tests failed again",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -613,6 +642,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -639,6 +669,7 @@
        "consecutive_failures": 3,
        "last_failure": "still failing",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -654,6 +685,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -678,6 +710,7 @@
        "consecutive_failures": 0,
        "last_failure": "still failing",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -693,6 +726,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -724,6 +758,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -739,6 +774,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -766,6 +802,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -781,6 +818,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -811,6 +849,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       },
@@ -828,6 +867,7 @@
        "consecutive_failures": 0,
        "last_failure": "",
        "allow_harness_edits": false,
+       "witnesses": [],
        "notes": "",
        "schema_version": 1
       }
@@ -836,5 +876,164 @@
     }
    }
   ]
+ },
+ "split": {
+  "initial": {
+   "items": [
+    {
+     "id": "01",
+     "description": "task 01",
+     "status": "done",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "coarse item",
+     "status": "blocked",
+     "verified_by": [],
+     "depends_on": [
+      "01"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "go:TestCoarse"
+     ],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "03",
+     "description": "task 03",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "02"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    }
+   ],
+   "schema_version": 1
+  },
+  "item_id": "02",
+  "drafts": [
+   {
+    "description": "first half",
+    "witnesses": []
+   },
+   {
+    "description": "second half",
+    "witnesses": [
+     "cmd:true"
+    ]
+   }
+  ],
+  "after": {
+   "items": [
+    {
+     "id": "01",
+     "description": "task 01",
+     "status": "done",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "coarse item",
+     "status": "split",
+     "verified_by": [],
+     "depends_on": [
+      "01"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "go:TestCoarse"
+     ],
+     "notes": "split into 02.1, 02.2",
+     "schema_version": 1
+    },
+    {
+     "id": "02.1",
+     "description": "first half",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "01"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "split from 02",
+     "schema_version": 1
+    },
+    {
+     "id": "02.2",
+     "description": "second half",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "02.1"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "cmd:true",
+      "go:TestCoarse"
+     ],
+     "notes": "split from 02",
+     "schema_version": 1
+    },
+    {
+     "id": "03",
+     "description": "task 03",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "02.2"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    }
+   ],
+   "schema_version": 1
+  },
+  "next_actionable": "02.1",
+  "items_total": 4,
+  "is_complete": false
  }
 }

@@ -61,9 +61,17 @@ type Settings struct {
 	MaxCycles        int     `env:"max_cycles" default:"1000"`
 	MaxTurnsPerCycle int     `env:"max_turns_per_cycle" default:"8"`
 	StallLimit       int     `env:"stall_limit" default:"5"`
+	MaxReplans       int     `env:"max_replans" default:"20"`
+	MaxSplitDepth    int     `env:"max_split_depth" default:"2"`
+	ApprovalTimeoutS int     `env:"approval_timeout_s" default:"86400"`
 
 	Sandbox          string `env:"sandbox" default:"docker" choices:"docker,e2b,local"`
 	AllowUnsafeLocal bool   `env:"allow_unsafe_local" default:"false"`
+	SandboxImage     string `env:"sandbox_image" default:"ghcr.io/astral-sh/uv:python3.12-bookworm-slim"`
+	SandboxEgress    string `env:"sandbox_egress" default:""`
+	WebAllowHosts    string `env:"web_allow_hosts" default:""`
+	TrustedChecks    string `env:"trusted_checks" default:""`
+	HarnessPaths     string `env:"harness_paths" default:""`
 
 	LangfuseHost      *string `env:"langfuse_host"`
 	LangfusePublicKey *string `env:"langfuse_public_key"`
@@ -238,4 +246,15 @@ func contains(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// CSV splits a comma-separated setting (python: config._csv), dropping blanks.
+func CSV(value string) []string {
+	out := []string{}
+	for _, part := range strings.Split(value, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
