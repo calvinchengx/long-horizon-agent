@@ -373,7 +373,11 @@ async def test_harness_tampering_fails_and_is_reverted(tmp_path: Path) -> None:
     item = (await anchor.read_checklist()).items[0]
     assert "harness_integrity" in item.last_failure and "tests/test_core.py" in item.last_failure
     assert (tmp_path / "tests/test_core.py").read_text(encoding="utf-8") == "assert 1 == 2\n"
-    assert (tmp_path / "tests/test_new.py").exists()  # new tests are fine
+    # New tests are not a harness violation, but the failed attempt is rolled back as a whole:
+    # its new file is kept on the attempt ref, not in the checkout.
+    assert not (tmp_path / "tests/test_new.py").exists()
+    saved = git_ops.run_git(tmp_path, "show", "refs/lha/attempts/m1/c1:tests/test_new.py")
+    assert saved == "x = 1"
 
 
 @pytest.mark.asyncio
