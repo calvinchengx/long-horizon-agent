@@ -38,3 +38,38 @@ jobs:
       - name: Pytest (integration - Temporal test server)
         run: uv run pytest -q tests/durability tests/load
         timeout-minutes: 12
+
+  services-integration:
+    # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker
+    # sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network).
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: lha
+          POSTGRES_PASSWORD: lha
+          POSTGRES_DB: lha
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lha" --health-interval 5s --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.8"
+          enable-cache: true
+
+      - name: Sync (core + dev + postgres + sandbox)
+        run: uv sync --locked --extra postgres --extra sandbox
+
+      - name: Pytest (integration - real Postgres + Docker)
+        env:
+          LHA_IT_POSTGRES_DSN: postgresql://lha:lha@127.0.0.1:5432/lha
+          LHA_IT_DOCKER: "1"
+        run: uv run pytest -q tests/integration
+        timeout-minutes: 10

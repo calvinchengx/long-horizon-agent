@@ -91,3 +91,6 @@ error-on-warning = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "integration: needs real services (LHA_IT_POSTGRES_DSN / LHA_IT_DOCKER=1); skipped otherwise",
+]
