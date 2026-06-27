@@ -329,9 +329,47 @@ def export_checklist() -> None:
         else:
             checklist.record_success(args["item_id"], args["verified_by"])
         steps.append({"op": op, "args": args, "after": json.loads(checklist.model_dump_json())})
+    # Replanning: a blocked item with a witness and a dependent is split into two children.
+    split = Checklist(
+        items=[
+            _item("01", "done"),
+            ChecklistItem(
+                id="02",
+                description="coarse item",
+                status="blocked",
+                depends_on=["01"],
+                witnesses=["go:TestCoarse"],
+            ),
+            _item("03", deps=["02"]),
+        ]
+    )
+    split_initial = json.loads(split.model_dump_json())
+    split.split(
+        "02",
+        [
+            ChecklistItem(id="x", description="first half"),
+            ChecklistItem(id="y", description="second half", witnesses=["cmd:true"]),
+        ],
+    )
+    splits = {
+        "initial": split_initial,
+        "item_id": "02",
+        "drafts": [
+            {"description": "first half", "witnesses": []},
+            {"description": "second half", "witnesses": ["cmd:true"]},
+        ],
+        "after": json.loads(split.model_dump_json()),
+        "next_actionable": (split.next_actionable() or ChecklistItem(id="", description="")).id,
+        "items_total": split.items_total,
+        "is_complete": split.is_complete,
+    }
     _write(
         "state/checklist.json",
-        {"scenarios": scenarios, "transitions": {"initial": initial, "steps": steps}},
+        {
+            "scenarios": scenarios,
+            "transitions": {"initial": initial, "steps": steps},
+            "split": splits,
+        },
     )
 
 

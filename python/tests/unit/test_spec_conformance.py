@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from lha.contracts.model import Usage
-from lha.contracts.state import Checklist
+from lha.contracts.state import Checklist, ChecklistItem
 from lha.contracts.verify import checks_from_commands, derive_check_name
 from lha.coordination.decision_log import _canonical, _chain_hash
 from lha.coordination.ownership import is_shared
@@ -100,6 +100,21 @@ def test_checklist() -> None:
         else:
             checklist.record_success(args["item_id"], args["verified_by"])
         assert json.loads(checklist.model_dump_json()) == step["after"], step["op"]
+    split = spec["split"]
+    checklist = Checklist.model_validate(split["initial"])
+    checklist.split(
+        split["item_id"],
+        [
+            ChecklistItem(id=f"d{n}", description=d["description"], witnesses=d["witnesses"])
+            for n, d in enumerate(split["drafts"])
+        ],
+    )
+    assert json.loads(checklist.model_dump_json()) == split["after"]
+    assert (checklist.next_actionable() or ChecklistItem(id="", description="")).id == split[
+        "next_actionable"
+    ]
+    assert checklist.items_total == split["items_total"]
+    assert checklist.is_complete == split["is_complete"]
 
 
 def test_decision_chain() -> None:

@@ -29,8 +29,16 @@ Verdict = Literal["passed", "failed", "unverified"]
 HARNESS_INTEGRITY_CHECK = "harness_integrity"
 
 
+CheckWhere = Literal["sandbox", "trusted"]
+
+
 class Check(BaseModel):
-    """A single deterministic check: an argv run in the sandbox session's work directory."""
+    """A single deterministic check: an argv run in the sandbox session's work directory.
+
+    ``where="trusted"`` checks do NOT run in the sandbox: they are operator-defined commands (e.g.
+    an e2e suite that needs a Docker daemon) run by a ``TrustedRunner`` outside it, against a
+    clean worktree of the candidate commit (see ``lha.verify.trusted``).
+    """
 
     name: str
     command: list[str] = Field(min_length=1)
@@ -38,6 +46,7 @@ class Check(BaseModel):
     gating: bool = True
     # Per-check timeout override (seconds); ``None`` uses the verifier's default.
     timeout_s: int | None = None
+    where: CheckWhere = "sandbox"
 
 
 class CheckResult(BaseModel):

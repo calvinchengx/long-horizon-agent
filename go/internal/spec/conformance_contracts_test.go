@@ -61,6 +61,18 @@ func TestChecklist(t *testing.T) {
 				After json.RawMessage `json:"after"`
 			} `json:"steps"`
 		} `json:"transitions"`
+		Split struct {
+			Initial contracts.Checklist `json:"initial"`
+			ItemID  string              `json:"item_id"`
+			Drafts  []struct {
+				Description string   `json:"description"`
+				Witnesses   []string `json:"witnesses"`
+			} `json:"drafts"`
+			After          json.RawMessage `json:"after"`
+			NextActionable string          `json:"next_actionable"`
+			ItemsTotal     int             `json:"items_total"`
+			IsComplete     bool            `json:"is_complete"`
+		} `json:"split"`
 	}
 	Load(t, "state/checklist.json", &s)
 	for _, c := range s.Scenarios {
@@ -103,6 +115,27 @@ func TestChecklist(t *testing.T) {
 			t.Fatalf("%s: %v", step.Op, err)
 		}
 		JSONEqual(t, step.Op, cl, step.After)
+	}
+
+	sp := s.Split
+	split := sp.Initial
+	drafts := []contracts.ChecklistItem{}
+	for _, d := range sp.Drafts {
+		draft := contracts.NewChecklistItem("draft", d.Description)
+		draft.Witnesses = d.Witnesses
+		drafts = append(drafts, draft)
+	}
+	if _, err := split.Split(sp.ItemID, drafts); err != nil {
+		t.Fatalf("split: %v", err)
+	}
+	JSONEqual(t, "split", split, sp.After)
+	next := ""
+	if it := split.NextActionable(); it != nil {
+		next = it.ID
+	}
+	if next != sp.NextActionable || split.ItemsTotal() != sp.ItemsTotal || split.IsComplete() != sp.IsComplete {
+		t.Errorf("after split: next=%q total=%d complete=%v, want %q %d %v",
+			next, split.ItemsTotal(), split.IsComplete(), sp.NextActionable, sp.ItemsTotal, sp.IsComplete)
 	}
 }
 
