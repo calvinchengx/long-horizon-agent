@@ -74,6 +74,12 @@ def build_messages(
     )
     recent = "\n".join(snapshot.recent_commits[:10]) or "(none yet)"
     user = f"Active checklist item: [{item.id}] {item.description}\n\n"
+    if item.witnesses:
+        listed = "\n".join(f"- {w}" for w in item.witnesses)
+        user += (
+            "This item is done only when ALL of these acceptance checks (witnesses) pass, in "
+            f"addition to the mission's checks:\n{listed}\n\n"
+        )
     if item.last_failure:
         user += (
             f"Previous attempt #{item.attempts} FAILED verification:\n"
