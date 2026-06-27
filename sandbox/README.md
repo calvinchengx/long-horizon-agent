@@ -30,7 +30,7 @@ docker build -t lha-sandbox:go1.26 --build-arg GO_VERSION=1.26.8 --build-arg PNP
 export LHA_SANDBOX=docker
 export LHA_SANDBOX_IMAGE=lha-sandbox:latest
 # Go + Python + npm package registries, and nothing else:
-export LHA_SANDBOX_EGRESS="proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org,registry.npmjs.org"
+export LHA_SANDBOX_EGRESS="proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org,registry.npmjs.org"
 ```
 
 `LHA_SANDBOX_EGRESS` is a comma-separated allow-list:
@@ -44,7 +44,7 @@ Registries that commonly need adding:
 
 | Ecosystem | Hosts |
 | --- | --- |
-| Go modules | `proxy.golang.org`, `sum.golang.org`. Modules that `GOPROXY` can't serve (for example `GOPRIVATE` or `direct`) also need their VCS host, such as `github.com` or `codeload.github.com`. |
+| Go modules | `proxy.golang.org`, `sum.golang.org` and `storage.googleapis.com` (the proxy redirects module zip downloads there; without it they fail with 403 Forbidden). Modules that `GOPROXY` can't serve (for example `GOPRIVATE` or `direct`) also need their VCS host, such as `github.com` or `codeload.github.com`. |
 | Python (pip/uv) | `pypi.org`, `files.pythonhosted.org` |
 | npm/pnpm/yarn | `registry.npmjs.org`. Yarn classic also needs `registry.yarnpkg.com`. |
 | corepack (downloading a pinned package manager) | `registry.npmjs.org`, `repo.yarnpkg.com` |

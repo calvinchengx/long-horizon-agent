@@ -17,6 +17,7 @@ import asyncio
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
+from lha.agent.assembly import open_lead_sandbox
 from lha.agents.roles import ROLES
 from lha.agents.subagent import SubAgent
 from lha.config import get_settings
@@ -29,7 +30,7 @@ from lha.durable.types import (
     SubAgentInput,
     SubAgentOutput,
 )
-from lha.execution import UnsafeSandboxError, open_sandbox
+from lha.execution import UnsafeSandboxError
 from lha.execution.tools.toolset import build_run_dispatcher
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor
@@ -87,9 +88,8 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         ) from exc
     try:
         model = meter.wrap(build_provider(settings), role=inp.role_name)
-        session = await open_sandbox(
-            settings.sandbox, workdir=inp.workdir, allow_unsafe_local=settings.allow_unsafe_local
-        )
+        # The same sandbox as the lead: image, egress allow-list and resource limits.
+        session = await open_lead_sandbox(settings, inp.workdir)
     except (UnsafeSandboxError, ValueError) as exc:
         raise ApplicationError(
             f"cannot start sub-agent: {exc}", type=ERROR_CONFIG, non_retryable=True

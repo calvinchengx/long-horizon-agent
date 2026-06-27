@@ -98,7 +98,16 @@ only the registries it needs:
 ```bash
 docker build -t lha-sandbox:dev sandbox
 export LHA_SANDBOX_IMAGE=lha-sandbox:dev
-export LHA_SANDBOX_EGRESS='proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org,registry.npmjs.org'
+export LHA_SANDBOX_EGRESS='proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org,registry.npmjs.org'
+```
+
+`storage.googleapis.com` is needed because `proxy.golang.org` redirects module downloads there.
+A real project also needs a bigger sandbox than the defaults (2 GB of memory, a 1 GB `/tmp` for the
+toolchain caches). For fabric-emulator, `go build` was killed at 2 GB and the module cache did not
+fit in 1 GB:
+
+```bash
+export LHA_SANDBOX_MEMORY=8g LHA_SANDBOX_TMP_SIZE=4g LHA_SANDBOX_CPUS=6
 ```
 
 With an allow-list set, the sandbox container sits on an internal Docker network whose only exit is

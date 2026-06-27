@@ -8,7 +8,7 @@ entry points). ``docker`` and ``e2b`` import their optional extras lazily.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from lha.contracts.sandbox import Sandbox, SandboxSession
 
@@ -30,6 +30,9 @@ def build_sandbox(
     image: str | None = None,
     template: str | None = None,
     egress_hosts: Sequence[str] = (),
+    memory: str | None = None,
+    cpus: float | None = None,
+    tmp_size: str | None = None,
 ) -> Sandbox:
     """Return the ``Sandbox`` for ``kind`` (``"local"`` | ``"docker"`` | ``"e2b"``).
 
@@ -39,6 +42,8 @@ def build_sandbox(
       per-session proxy that reaches only those hosts (``.example.org`` = domain + subdomains).
       Empty (default) keeps ``network_mode="none"``. Mutually exclusive with ``network=True``.
     - ``image`` / ``template``: docker image (default ``DEFAULT_DOCKER_IMAGE``) / E2B template.
+    - ``memory`` / ``cpus`` / ``tmp_size``: docker only; the container's limits and the size of
+      its ``/tmp`` tmpfs, where toolchain caches live (``None`` keeps the defaults).
 
     Raises ``ValueError`` for an unknown kind, or for ``network=True`` with ``egress_hosts``.
     """
@@ -56,8 +61,18 @@ def build_sandbox(
     if normalized == "docker":
         from lha.execution.sandbox_docker import DockerSandbox
 
+        limits: dict[str, Any] = {}
+        if memory:
+            limits["mem_limit"] = memory
+        if cpus:
+            limits["cpus"] = cpus
+        if tmp_size:
+            limits["tmp_size"] = tmp_size
         return DockerSandbox(
-            image or DEFAULT_DOCKER_IMAGE, network=network, egress_hosts=tuple(egress_hosts)
+            image or DEFAULT_DOCKER_IMAGE,
+            network=network,
+            egress_hosts=tuple(egress_hosts),
+            **limits,
         )
     if normalized == "e2b":
         from lha.execution.sandbox_e2b import E2BSandbox
@@ -76,6 +91,9 @@ async def open_sandbox(
     image: str | None = None,
     template: str | None = None,
     egress_hosts: Sequence[str] = (),
+    memory: str | None = None,
+    cpus: float | None = None,
+    tmp_size: str | None = None,
 ) -> SandboxSession:
     """``build_sandbox(...)`` then ``open(workdir=..., snapshot_id=...)`` in one call."""
     sandbox = build_sandbox(
@@ -85,5 +103,8 @@ async def open_sandbox(
         image=image,
         template=template,
         egress_hosts=egress_hosts,
+        memory=memory,
+        cpus=cpus,
+        tmp_size=tmp_size,
     )
     return await sandbox.open(workdir=workdir, snapshot_id=snapshot_id)

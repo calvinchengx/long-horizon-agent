@@ -330,6 +330,7 @@ class DockerSandbox(Sandbox):
         mem_limit: str = "2g",
         pids_limit: int = 512,
         cpus: float = 2.0,
+        tmp_size: str = "1g",
         user: str | None = None,
         read_only_root: bool = True,
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
@@ -355,6 +356,7 @@ class DockerSandbox(Sandbox):
         self._mem_limit = mem_limit
         self._pids_limit = pids_limit
         self._nano_cpus = int(cpus * 1_000_000_000)
+        self._tmp_size = tmp_size
         self._user = user or _default_user()
         self._read_only_root = read_only_root
         self._max_output = max_output_bytes
@@ -408,7 +410,8 @@ class DockerSandbox(Sandbox):
             # ``exec``: Docker mounts tmpfs noexec by default, which breaks every toolchain that
             # builds then runs a binary there (``go test``). Code already runs from /workspace,
             # so this adds nothing an agent could not do anyway. Go/uv/pnpm caches live here too.
-            "tmpfs": {"/tmp": "rw,exec,nosuid,nodev,size=1g"},
+            # tmpfs pages count against ``mem_limit``: size the two together.
+            "tmpfs": {"/tmp": f"rw,exec,nosuid,nodev,size={self._tmp_size}"},
         }
 
     async def open(self, *, workdir: str, snapshot_id: str | None = None) -> SandboxSession:
