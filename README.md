@@ -70,6 +70,11 @@ work. That is also what you see with the default
 without isolation; the default `docker` sandbox is the one to use for anything you did not write.
 The [quickstart](docs/02-quickstart.md) covers real models, Temporal and the full organization.
 
+To run it with Claude Code instead, on a Claude Pro/Max login or an API key, set
+`LHA_LEAD_ENGINE=claude_code`: each cycle becomes one `claude -p` session that uses LHA's
+sandboxed tools, and LHA still verifies and commits the result. See
+[models](docs/13-models.md#claude_code-claude-code-claude--p).
+
 ## Repository layout
 
 | Path | Contents |

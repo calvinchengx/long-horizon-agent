@@ -7,6 +7,7 @@ backend from ``Settings.model_backend`` so the rest of the system never imports 
 - ``ollama``       -> local models via Ollama's OpenAI-compatible API ($0/offline)
 - ``openai_compat``-> any OpenAI-compatible endpoint (Groq/Gemini/OpenRouter, ...)
 - ``claude``       -> the Anthropic Messages API
+- ``claude_code``  -> the Claude Code CLI (``claude -p``), e.g. on a Pro/Max login
 
 ``LHA_FALLBACK_MODELS`` turns the result into a ``FailoverModel`` (primary, then each fallback).
 ``lha.model.health.probe_model`` contacts the configured provider(s) cheaply (health probe)."""
@@ -20,6 +21,8 @@ import httpx
 from lha.config import Settings, get_settings
 from lha.contracts.model import ModelProvider
 from lha.model.claude import ClaudeModel
+from lha.model.claude_code import DEFAULT_MODEL as CLAUDE_CODE_DEFAULT_MODEL
+from lha.model.claude_code import ClaudeCodeModel
 from lha.model.failover import FailoverModel
 from lha.model.openai_compat import OpenAICompatModel
 from lha.model.pricing import ModelPrice
@@ -36,7 +39,7 @@ def secret_value(value: object) -> str | None:
     return str(raw) if raw else None
 
 
-_BACKENDS = ("stub", "ollama", "openai_compat", "claude")
+_BACKENDS = ("stub", "ollama", "openai_compat", "claude", "claude_code")
 # Inside a failover chain each member retries a transient error once before the chain moves on,
 # so an outage fails over in seconds instead of after the full per-provider backoff.
 CHAIN_MEMBER_RETRIES = 1
@@ -127,6 +130,18 @@ def _build_backend(
             api_key=api_key, model_name=name, client=client, price=price, max_retries=max_retries
         )
 
+    if backend == "claude_code":
+        # Left at the stub's default name, the model is Claude Code's own choice.
+        stub_default = Settings.model_fields["model_name"].default
+        return ClaudeCodeModel(
+            model_name=CLAUDE_CODE_DEFAULT_MODEL if name == stub_default else name,
+            binary=settings.claude_code_bin,
+            max_budget_usd=settings.claude_code_max_budget_usd,
+            timeout_s=settings.claude_code_timeout_s,
+            price=price,
+            max_retries=max_retries,
+        )
+
     raise ValueError(f"Unknown model backend: {backend!r}")
 
 
@@ -191,6 +206,7 @@ def build_provider(
 
 __all__ = [
     "CHAIN_MEMBER_RETRIES",
+    "ClaudeCodeModel",
     "ClaudeModel",
     "FailoverModel",
     "FallbackSpec",

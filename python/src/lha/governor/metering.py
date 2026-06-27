@@ -173,6 +173,42 @@ class MeteredModel(ModelProvider):
                 )
         return result
 
+    async def run_external[T](
+        self, run: Callable[[], Awaitable[tuple[T, Usage]]], *, worst_case_usd: float
+    ) -> T:
+        """Meter work that spends outside ``complete()`` (a whole ``claude -p`` session).
+
+        Authorized with ``worst_case_usd`` like any call; afterwards the cost the work itself
+        reported (``Usage.reported_cost_usd``) is recorded. Work that reported nothing (killed
+        on a timeout) is charged its full ``worst_case_usd``: conservative, never $0.
+        ``run`` returns its result and the usage to record.
+        """
+        meter = self._meter
+        decision = meter.governor.authorize_call(
+            meter.ledger, worst_case_usd=worst_case_usd, reserved_usd=meter.reserved_usd
+        )
+        if not decision.allow:
+            raise BudgetExceeded(decision)
+        meter._reserve(worst_case_usd)
+        try:
+            result, usage = await run()
+        finally:
+            meter._release(worst_case_usd)
+        entry = meter.ledger.record(
+            cycle_id=meter.cycle_id,
+            usage=usage,
+            usd=worst_case_usd if usage.reported_cost_usd is None else usage.reported_cost_usd,
+            role=self.role,
+        )
+        if meter.on_record is not None:
+            try:
+                await meter.on_record(entry)
+            except Exception as exc:  # persistence must never fail completed work
+                structlog.get_logger("lha.governor").warning(
+                    "cost_hook_failed", error=f"{type(exc).__name__}: {exc}"
+                )
+        return result
+
     def estimate_cost_usd(self, usage: Usage) -> float:
         return self._provider.estimate_cost_usd(usage)
 
@@ -180,3 +216,16 @@ class MeteredModel(ModelProvider):
         close = getattr(self._provider, "aclose", None)
         if close is not None:
             await close()
+
+
+async def run_external[T](
+    model: ModelProvider | None,
+    run: Callable[[], Awaitable[tuple[T, Usage]]],
+    *,
+    worst_case_usd: float,
+) -> T:
+    """``MeteredModel.run_external`` when ``model`` is metered; otherwise just ``run``."""
+    if isinstance(model, MeteredModel):
+        return await model.run_external(run, worst_case_usd=worst_case_usd)
+    result, _ = await run()
+    return result

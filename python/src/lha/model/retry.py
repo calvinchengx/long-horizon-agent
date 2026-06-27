@@ -22,6 +22,8 @@ Sleep = Callable[[float], Awaitable[None]]
 
 def is_retryable(exc: BaseException) -> bool:
     """True for transient errors worth retrying / failing over on."""
+    if getattr(exc, "retryable", False) is True:  # non-HTTP backends mark their own (claude -p)
+        return True
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
         return status in RETRYABLE_STATUS or status >= 500

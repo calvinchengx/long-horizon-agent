@@ -4,13 +4,16 @@ The local runner, the durable cycle activity and the multi-agent orchestrator mu
 the SAME way: the configured sandbox image with its egress allow-list, the tool set (plus the
 web tools under the egress policy and the Rule of Two, see ``lha.execution.tools.toolset``), the
 human gate, a verifier that runs operator-defined trusted checks outside the sandbox,
-operator-protected harness paths, and the replanner. Keeping it in one place is what stops the three paths from drifting apart.
+operator-protected harness paths, the replanner, and the lead engine (the built-in turn loop, or
+one ``claude -p`` session per cycle). Keeping it in one place is what stops the three paths from
+drifting apart.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from lha.agent.claude_code_engine import ClaudeCodeEngine
 from lha.agent.loop import AgentLoop
 from lha.agents.replanner import Replanner
 from lha.config import Settings
@@ -23,6 +26,7 @@ from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.factory import open_sandbox
 from lha.execution.tools import with_decision_tool
 from lha.execution.tools.toolset import build_run_dispatcher, run_tools
+from lha.model.claude_code import DEFAULT_MODEL
 from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.trusted import CommandTrustedRunner, TrustedAwareVerifier
@@ -65,6 +69,43 @@ def lead_verifier(workdir: str) -> Verifier:
     return TrustedAwareVerifier(DeterministicVerifier(), CommandTrustedRunner(), workdir)
 
 
+def lead_engine(settings: Settings, *, guarded: bool = False) -> ClaudeCodeEngine | None:
+    """The ``claude_code`` lead engine from settings, or ``None`` for the built-in loop.
+
+    Native Claude Code tools act on the host with no sandbox, so they need ``sandbox=local`` and
+    ``allow_unsafe_local``, and they cannot run under a ``guarded`` dispatcher (the orchestrator's
+    ownership guard only sees calls that go through LHA's tools).
+    """
+    if settings.lead_engine != "claude_code":
+        return None
+    if settings.claude_code_tools == "native":
+        if settings.sandbox != "local" or not settings.allow_unsafe_local:
+            raise ValueError(
+                "LHA_CLAUDE_CODE_TOOLS=native runs Claude Code's own tools on the host with no "
+                "isolation: it needs LHA_SANDBOX=local and LHA_ALLOW_UNSAFE_LOCAL=true "
+                "(or use the default LHA_CLAUDE_CODE_TOOLS=lha)"
+            )
+        if guarded:
+            raise ValueError(
+                "LHA_CLAUDE_CODE_TOOLS=native bypasses the orchestrator's file-ownership guard; "
+                "use LHA_CLAUDE_CODE_TOOLS=lha with the multi-agent organization"
+            )
+    uses_cli_model = settings.model_backend == "claude_code"
+    stub_default = Settings.model_fields["model_name"].default
+    model = (
+        settings.model_name
+        if uses_cli_model and settings.model_name != stub_default
+        else DEFAULT_MODEL
+    )
+    return ClaudeCodeEngine(
+        binary=settings.claude_code_bin,
+        model=model,
+        tools=settings.claude_code_tools,
+        max_budget_usd=settings.claude_code_max_budget_usd,
+        timeout_s=settings.claude_code_timeout_s,
+    )
+
+
 def build_lead_loop(
     settings: Settings,
     *,
@@ -101,4 +142,5 @@ def build_lead_loop(
         max_replans=settings.max_replans,
         max_split_depth=settings.max_split_depth,
         memory=memory,
+        engine=lead_engine(settings, guarded=dispatcher is not None),
     )

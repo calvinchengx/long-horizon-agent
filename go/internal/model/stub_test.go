@@ -40,7 +40,7 @@ func TestStubMatchesPythonOutput(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, _ := json.Marshal(r)
-	want := `{"text":"[stub:fe59dea9] acknowledged 2 message(s).","thinking":"deterministic stub reasoning for digest fe59dea9","tool_calls":[],"usage":{"input_tokens":13,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"cache_creation_1h_input_tokens":0,"model":"stub:stub-1","provider":""},"stop_reason":"end_turn","session_id":null}`
+	want := `{"text":"[stub:fe59dea9] acknowledged 2 message(s).","thinking":"deterministic stub reasoning for digest fe59dea9","tool_calls":[],"usage":{"input_tokens":13,"output_tokens":10,"cache_read_input_tokens":0,"cache_creation_input_tokens":0,"cache_creation_1h_input_tokens":0,"model":"stub:stub-1","provider":"","reported_cost_usd":null},"stop_reason":"end_turn","session_id":null}`
 	if string(got) != want {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
