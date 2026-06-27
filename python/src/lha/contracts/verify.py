@@ -9,7 +9,7 @@ verdict over zero gating checks is ``"unverified"``, never a vacuous pass.
 Checks run inside the sandbox session (where the code lives), never on the orchestrating host.
 
 Swapping the ``Verifier`` is how the engine adapts to other domains — but reliability is only
-ever as good as the verifier the domain can provide (see docs/architecture.md, honesty policy).
+ever as good as the verifier the domain can provide (see docs/05-architecture.md and docs/22-honesty.md).
 """
 
 from __future__ import annotations

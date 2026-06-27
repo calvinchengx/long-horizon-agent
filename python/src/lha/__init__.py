@@ -2,7 +2,7 @@
 
 A durable, self-improving agent organization for long-horizon software missions.
 
-The package is organized by plane (see docs/architecture.md):
+The package is organized by plane (see docs/05-architecture.md):
 - ``contracts``: the swappable Protocols that keep every plane decoupled.
 - ``durable``:   the Temporal control plane (the spine).
 - ``agents``:    the role "brains" (Claude Agent SDK loops).

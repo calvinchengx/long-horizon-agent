@@ -62,7 +62,8 @@ LHA_IT_POSTGRES_DSN=postgresql://lha:lha@127.0.0.1:55432/lha LHA_IT_DOCKER=1 uv 
 
 ## Project layout
 
-See [docs/architecture.md](docs/architecture.md) for the four planes and the asymmetric org.
+See [docs/05-architecture.md](docs/05-architecture.md) for the four planes and the asymmetric org,
+and the [documentation site](https://calvinchengx.github.io/long-horizon-agent/) for everything else.
 
 ## Optional extras
 
