@@ -1,0 +1,468 @@
+package state
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+)
+
+// Anchor layout inside the worked repo:
+//
+//	.lha/mission.json       — the immutable MissionSpec, written at init
+//	.lha/checklist.json     — the machine-readable Checklist
+//	.lha/progress.md        — human-readable progress narrative (appended, size-bounded)
+//	.lha/decisions.ndjson   — append-only DecisionRecord log (never compacted)
+//	.lha/events.ndjson      — append-only EventRecord (episodic) log
+const (
+	AnchorDir     = ".lha"
+	MissionFile   = "mission.json"
+	ChecklistFile = "checklist.json"
+	ProgressFile  = "progress.md"
+	DecisionsFile = "decisions.ndjson"
+	EventsFile    = "events.ndjson"
+)
+
+// AnchorFiles are the harness-owned anchor files. They are force-added on every commit so a
+// target repo whose .gitignore excludes .lha/ still gets them committed.
+var AnchorFiles = []string{MissionFile, ChecklistFile, ProgressFile, DecisionsFile, EventsFile}
+
+// MaxProgressChars bounds progress.md (oldest entries are trimmed first), in characters.
+const MaxProgressChars = 16_000
+
+const progressMarker = "## Progress\n\n"
+
+// GitMissionAnchor is a contracts.DurableState backed by a git repo at its workdir.
+//
+// Anchor files are committed alongside the agent's code changes, so every checkpoint is one
+// atomic commit capturing both the work and the progress. Reads come from the committed HEAD
+// (not the agent-editable working tree), and CommitCheckpoint restores .lha/ to HEAD before
+// rewriting it from the harness's own in-memory state: agent edits to anchor files are
+// discarded, never committed. The on-disk format is shared with the Python implementation.
+type GitMissionAnchor struct {
+	workdir     string
+	anchor      string
+	maxProgress int
+
+	mu sync.Mutex
+	// Events appended (uncommitted) via AppendEvent; re-applied after the .lha restore in
+	// CommitCheckpoint so they are not lost.
+	pendingEvents []contracts.EventRecord
+	// skipRestore disables the .lha restore (tests prove the log rebuild is idempotent anyway).
+	skipRestore bool
+}
+
+var _ contracts.DurableState = (*GitMissionAnchor)(nil)
+
+// AnchorOption configures a GitMissionAnchor.
+type AnchorOption func(*GitMissionAnchor)
+
+// WithMaxProgressChars overrides MaxProgressChars.
+func WithMaxProgressChars(n int) AnchorOption {
+	return func(a *GitMissionAnchor) { a.maxProgress = n }
+}
+
+// NewGitMissionAnchor returns an anchor for the repo at workdir.
+func NewGitMissionAnchor(workdir string, opts ...AnchorOption) *GitMissionAnchor {
+	a := &GitMissionAnchor{
+		workdir:     workdir,
+		anchor:      filepath.Join(workdir, AnchorDir),
+		maxProgress: MaxProgressChars,
+	}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
+}
+
+// Workdir is the repository directory.
+func (a *GitMissionAnchor) Workdir() string { return a.workdir }
+
+func (a *GitMissionAnchor) path(name string) string { return filepath.Join(a.anchor, name) }
+
+// Initialize writes the immutable mission spec + initial anchor and commits (acceptance "").
+func (a *GitMissionAnchor) Initialize(ctx context.Context, title, description string, items contracts.Checklist) (string, error) {
+	return a.InitializeWithAcceptance(ctx, title, description, "", items)
+}
+
+// InitializeWithAcceptance writes the mission spec (with its definition of done) + the initial
+// anchor and commits; a checklist with dependency errors is rejected before anything is written.
+func (a *GitMissionAnchor) InitializeWithAcceptance(ctx context.Context, title, description, acceptance string, items contracts.Checklist) (string, error) {
+	if errs := items.DependencyErrors(); len(errs) > 0 {
+		return "", errors.New("invalid checklist: " + strings.Join(errs, "; "))
+	}
+	spec := contracts.MissionSpec{Title: title, Description: description, Acceptance: acceptance, SchemaVersion: 1}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := InitRepo(ctx, a.workdir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(a.anchor, 0o777); err != nil {
+		return "", err
+	}
+	missionJSON, err := pydanticJSON(spec, true)
+	if err != nil {
+		return "", err
+	}
+	if err := a.writeFile(MissionFile, string(missionJSON)); err != nil {
+		return "", err
+	}
+	if err := a.writeChecklist(items); err != nil {
+		return "", err
+	}
+	progress := "# Mission: " + spec.Title + "\n\n" + spec.Description + "\n\n" +
+		progressMarker + "- _initialized; no work yet._\n"
+	if err := a.writeFile(ProgressFile, progress); err != nil {
+		return "", err
+	}
+	// Create the append-only logs (empty).
+	for _, name := range []string{DecisionsFile, EventsFile} {
+		if err := a.writeFile(name, ""); err != nil {
+			return "", err
+		}
+	}
+	a.pendingEvents = nil
+	return a.commitAll(ctx, "lha: initialize mission anchor")
+}
+
+// ReadSituationalAwareness reconstructs the full picture from the committed anchor + git log.
+func (a *GitMissionAnchor) ReadSituationalAwareness(ctx context.Context) (contracts.SituationSnapshot, error) {
+	var snap contracts.SituationSnapshot
+	checklist, err := a.ReadChecklist(ctx)
+	if err != nil {
+		return snap, err
+	}
+	if snap.HeadSHA, err = HeadSHA(ctx, a.workdir); err != nil {
+		return snap, err
+	}
+	if snap.RecentCommits, err = LogOneline(ctx, a.workdir, 10); err != nil {
+		return snap, err
+	}
+	if snap.Mission, err = a.ReadMission(ctx); err != nil {
+		return snap, err
+	}
+	progress, _, err := a.readAnchorFile(ctx, ProgressFile)
+	if err != nil {
+		return snap, err
+	}
+	snap.ProgressSummary = progress
+	snap.OpenItems = []contracts.ChecklistItem{}
+	for _, it := range checklist.Items {
+		if it.IsOpen() {
+			snap.OpenItems = append(snap.OpenItems, it)
+		}
+	}
+	if snap.LastDecisions, err = a.readRecentDecisions(ctx, 5); err != nil {
+		return snap, err
+	}
+	if next := checklist.NextActionable(); next != nil {
+		item := *next
+		snap.ActiveItem = &item
+	}
+	snap.IsComplete = checklist.IsComplete()
+	snap.IsDeadlocked = checklist.IsDeadlocked()
+	snap.DeadlockReason = checklist.DeadlockReason()
+	snap.ItemsDone = checklist.ItemsDone()
+	snap.ItemsTotal = len(checklist.Items)
+	return snap, nil
+}
+
+// ReadChecklist returns the full committed checklist (all items, not just the open ones).
+func (a *GitMissionAnchor) ReadChecklist(ctx context.Context) (contracts.Checklist, error) {
+	raw, ok, err := a.readAnchorFile(ctx, ChecklistFile)
+	if err != nil {
+		return contracts.Checklist{}, err
+	}
+	if !ok {
+		return contracts.Checklist{Items: []contracts.ChecklistItem{}, SchemaVersion: 1}, nil
+	}
+	var cl contracts.Checklist
+	if err := json.Unmarshal([]byte(raw), &cl); err != nil {
+		return contracts.Checklist{}, err
+	}
+	return cl, nil
+}
+
+// ReadMission returns the immutable mission spec (nil for anchors created before it existed).
+func (a *GitMissionAnchor) ReadMission(ctx context.Context) (*contracts.MissionSpec, error) {
+	raw, ok, err := a.readAnchorFile(ctx, MissionFile)
+	if err != nil || !ok {
+		return nil, err
+	}
+	var spec contracts.MissionSpec
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return nil, err
+	}
+	return &spec, nil
+}
+
+// AppendEvent appends an event to the working-tree events log; it is committed (exactly once)
+// by the next CommitCheckpoint.
+func (a *GitMissionAnchor) AppendEvent(_ context.Context, event contracts.EventRecord) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if err := os.MkdirAll(a.anchor, 0o777); err != nil {
+		return err
+	}
+	line, err := pydanticJSON(event, false)
+	if err != nil {
+		return err
+	}
+	fh, err := os.OpenFile(a.path(EventsFile), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o666)
+	if err != nil {
+		return err
+	}
+	if _, err := fh.Write(append(line, '\n')); err != nil {
+		_ = fh.Close()
+		return err
+	}
+	if err := fh.Close(); err != nil {
+		return err
+	}
+	a.pendingEvents = append(a.pendingEvents, event)
+	return nil
+}
+
+// CommitCheckpoint restores .lha/ to HEAD, rewrites it from the checkpoint and commits
+// everything (work + anchor) atomically; it returns the new HEAD sha.
+func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Checkpoint) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	// Harness truth: discard whatever the agent did to .lha/ during the cycle.
+	if !a.skipRestore {
+		if err := a.restoreAnchorDir(ctx); err != nil {
+			return "", err
+		}
+	}
+	if err := os.MkdirAll(a.anchor, 0o777); err != nil {
+		return "", err
+	}
+	if err := a.writeChecklist(cp.Checklist); err != nil {
+		return "", err
+	}
+	if pyStrip(cp.ProgressSummary) != "" {
+		if err := a.appendProgress(ctx, cp.ProgressSummary); err != nil {
+			return "", err
+		}
+	}
+	// The append-only logs are REBUILT from their committed content + the new records, so the
+	// write is idempotent: pending events already appended to the working tree are never
+	// duplicated.
+	decisions := make([]any, 0, len(cp.Decisions))
+	for _, d := range cp.Decisions {
+		decisions = append(decisions, d)
+	}
+	if err := a.rebuildLog(ctx, DecisionsFile, decisions); err != nil {
+		return "", err
+	}
+	events := make([]any, 0, len(a.pendingEvents)+len(cp.Events))
+	for _, e := range a.pendingEvents {
+		events = append(events, e)
+	}
+	for _, e := range cp.Events {
+		events = append(events, e)
+	}
+	if err := a.rebuildLog(ctx, EventsFile, events); err != nil {
+		return "", err
+	}
+	message := cp.CommitMessage
+	if message == "" {
+		message = "lha: checkpoint " + cp.CycleID
+	}
+	sha, err := a.commitAll(ctx, message)
+	if err != nil {
+		return "", err
+	}
+	a.pendingEvents = nil
+	return sha, nil
+}
+
+// RestoreFromHead restores tracked relpaths to their HEAD content; it returns the ones restored.
+func (a *GitMissionAnchor) RestoreFromHead(ctx context.Context, relpaths []string) ([]string, error) {
+	restored := []string{}
+	for _, rel := range relpaths {
+		tracked, err := ExistsAtHead(ctx, a.workdir, rel)
+		if err != nil {
+			return restored, err
+		}
+		if tracked {
+			if _, err := RunGit(ctx, a.workdir, "checkout", "HEAD", "--", rel); err != nil {
+				return restored, err
+			}
+			restored = append(restored, rel)
+		}
+	}
+	return restored, nil
+}
+
+// --- helpers -----------------------------------------------------------------------------
+
+func (a *GitMissionAnchor) commitAll(ctx context.Context, message string) (string, error) {
+	force := make([]string, 0, len(AnchorFiles))
+	for _, name := range AnchorFiles {
+		force = append(force, AnchorDir+"/"+name)
+	}
+	return CommitAll(ctx, a.workdir, message, force...)
+}
+
+func (a *GitMissionAnchor) writeFile(name, content string) error {
+	return os.WriteFile(a.path(name), []byte(content), 0o666)
+}
+
+func (a *GitMissionAnchor) writeChecklist(cl contracts.Checklist) error {
+	data, err := pydanticJSON(cl, true)
+	if err != nil {
+		return err
+	}
+	return a.writeFile(ChecklistFile, string(data))
+}
+
+// committedText is the committed (HEAD) content of anchor file name; "" if not committed.
+func (a *GitMissionAnchor) committedText(ctx context.Context, name string) (string, error) {
+	rel := AnchorDir + "/" + name
+	tracked, err := ExistsAtHead(ctx, a.workdir, rel)
+	if err != nil || !tracked {
+		return "", err
+	}
+	return ShowAtHead(ctx, a.workdir, rel)
+}
+
+// rebuildLog rewrites an append-only log as committed content + records (idempotent).
+func (a *GitMissionAnchor) rebuildLog(ctx context.Context, name string, records []any) error {
+	base, err := a.committedText(ctx, name)
+	if err != nil {
+		return err
+	}
+	if base != "" && !strings.HasSuffix(base, "\n") {
+		base += "\n"
+	}
+	var b strings.Builder
+	b.WriteString(base)
+	for _, rec := range records {
+		line, err := pydanticJSON(rec, false)
+		if err != nil {
+			return err
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	return a.writeFile(name, b.String())
+}
+
+// restoreAnchorDir resets .lha/ to HEAD (tracked files restored, untracked additions removed).
+func (a *GitMissionAnchor) restoreAnchorDir(ctx context.Context) error {
+	tracked, err := ExistsAtHead(ctx, a.workdir, AnchorDir)
+	if err != nil || !tracked {
+		return err
+	}
+	if _, err := RunGit(ctx, a.workdir, "checkout", "HEAD", "--", AnchorDir); err != nil {
+		return err
+	}
+	_, err = RunGit(ctx, a.workdir, "clean", "-fdq", "--", AnchorDir)
+	return err
+}
+
+// readAnchorFile reads an anchor file from HEAD (committed truth), falling back to the working
+// tree; ok is false when neither has it.
+func (a *GitMissionAnchor) readAnchorFile(ctx context.Context, name string) (text string, ok bool, err error) {
+	rel := AnchorDir + "/" + name
+	tracked, err := ExistsAtHead(ctx, a.workdir, rel)
+	if err != nil {
+		return "", false, err
+	}
+	if tracked {
+		text, err := ShowAtHead(ctx, a.workdir, rel)
+		return text, err == nil, err
+	}
+	data, err := os.ReadFile(a.path(name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return universalNewlines(string(data)), true, nil
+}
+
+func (a *GitMissionAnchor) appendProgress(ctx context.Context, entry string) error {
+	// Committed truth first (never the agent-editable working tree when HEAD has it).
+	current, _, err := a.readAnchorFile(ctx, ProgressFile)
+	if err != nil {
+		return err
+	}
+	if current == "" {
+		current = progressMarker
+	}
+	if !strings.HasSuffix(current, "\n") {
+		current += "\n"
+	}
+	current += pyStrip(entry) + "\n"
+	return a.writeFile(ProgressFile, boundProgress(current, a.maxProgress))
+}
+
+func (a *GitMissionAnchor) readRecentDecisions(ctx context.Context, n int) ([]contracts.DecisionRecord, error) {
+	raw, _, err := a.readAnchorFile(ctx, DecisionsFile)
+	if err != nil {
+		return nil, err
+	}
+	out := []contracts.DecisionRecord{}
+	if raw == "" {
+		return out, nil
+	}
+	// Split ONLY on "\n": U+2028/U+2029/\x85 are left unescaped inside JSON strings.
+	var lines []string
+	for _, ln := range strings.Split(raw, "\n") {
+		if pyStrip(ln) != "" {
+			lines = append(lines, ln)
+		}
+	}
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	for _, ln := range lines {
+		var d contracts.DecisionRecord
+		if err := json.Unmarshal([]byte(ln), &d); err != nil {
+			return nil, err
+		}
+		if d.Affected == nil {
+			d.Affected = []string{}
+		}
+		out = append(out, d)
+	}
+	return out, nil
+}
+
+// boundProgress trims the OLDEST progress entries so text fits in limit characters (the header
+// up to and including the "## Progress" marker is kept).
+func boundProgress(text string, limit int) string {
+	if runeLen(text) <= limit {
+		return text
+	}
+	split := 0
+	if at := strings.Index(text, progressMarker); at != -1 {
+		split = at + len(progressMarker)
+	}
+	header, body := text[:split], text[split:]
+	const note = "- _(older entries trimmed)_\n"
+	var lines []string
+	for _, ln := range pySplitlines(body, true) {
+		if ln != note {
+			lines = append(lines, ln)
+		}
+	}
+	size := runeLen(header) + runeLen(note)
+	for _, ln := range lines {
+		size += runeLen(ln)
+	}
+	for len(lines) > 0 && size > limit {
+		size -= runeLen(lines[0])
+		lines = lines[1:]
+	}
+	return header + note + strings.Join(lines, "")
+}
