@@ -5,6 +5,10 @@ could "fix" a red check by weakening a pre-existing test, deleting it, or loosen
 ``pyproject.toml``/``conftest.py``. The harness snapshots hashes of those files at cycle start;
 any modified or deleted file yields a FAILING gating ``harness_integrity`` check (unless the
 checklist item explicitly allows harness edits). New test files are always fine.
+
+Operators can protect more than tests: ``extra_globs`` (``LHA_HARNESS_PATHS``, e.g. ``Makefile``,
+``e2e/**``, ``.github/**``) adds the files that DEFINE the checks — above all the targets trusted
+checks run outside the sandbox — so the agent cannot rewrite what a gate executes.
 """
 
 from __future__ import annotations
@@ -63,8 +67,36 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def snapshot_harness(workdir: str | Path) -> HarnessSnapshot:
-    """Map each existing harness file (posix relpath) to its sha256."""
+def glob_regex(pattern: str) -> re.Pattern[str]:
+    """A workspace-relative glob as a regex: ``**`` spans directories, ``*``/``?`` do not."""
+    out: list[str] = []
+    i = 0
+    pattern = pattern.strip().lstrip("/")
+    while i < len(pattern):
+        if pattern.startswith("**/", i):
+            out.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            out.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            out.append("[^/]")
+            i += 1
+        else:
+            out.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("^" + "".join(out) + "$")
+
+
+def snapshot_harness(workdir: str | Path, extra_globs: tuple[str, ...] = ()) -> HarnessSnapshot:
+    """Map each existing harness file (posix relpath) to its sha256.
+
+    ``extra_globs`` protects additional operator-chosen paths (see the module docstring).
+    """
+    extra = [glob_regex(g) for g in extra_globs if g.strip()]
     root = Path(workdir)
     snapshot: HarnessSnapshot = {}
     for dirpath, dirnames, filenames in os.walk(root):
@@ -72,7 +104,8 @@ def snapshot_harness(workdir: str | Path) -> HarnessSnapshot:
         for filename in filenames:
             path = Path(dirpath) / filename
             rel = path.relative_to(root).as_posix()
-            if _is_harness_file(rel) and path.is_file() and not path.is_symlink():
+            protected = _is_harness_file(rel) or any(rx.match(rel) for rx in extra)
+            if protected and path.is_file() and not path.is_symlink():
                 try:
                     snapshot[rel] = _sha256(path)
                 except OSError:
