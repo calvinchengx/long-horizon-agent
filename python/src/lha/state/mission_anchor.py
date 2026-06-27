@@ -68,13 +68,24 @@ class GitMissionAnchor:
 
     # --- DurableState API ------------------------------------------------------------
     async def initialize(
-        self, *, title: str, description: str, items: Checklist, acceptance: str = ""
+        self,
+        *,
+        title: str,
+        description: str,
+        items: Checklist,
+        acceptance: str = "",
+        references: list[str] | None = None,
     ) -> str:
         """Write the immutable mission spec + initial anchor and commit; reject broken plans."""
         errors = items.dependency_errors()
         if errors:
             raise ValueError("invalid checklist: " + "; ".join(errors))
-        spec = MissionSpec(title=title, description=description, acceptance=acceptance)
+        spec = MissionSpec(
+            title=title,
+            description=description,
+            acceptance=acceptance,
+            references=list(references or []),
+        )
         return await asyncio.to_thread(self._initialize_sync, spec, items)
 
     async def read_situational_awareness(self) -> SituationSnapshot:
