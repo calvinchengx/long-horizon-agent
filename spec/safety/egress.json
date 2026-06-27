@@ -151,6 +151,10 @@
    "public": false
   },
   {
+   "address": "fec0::1",
+   "public": false
+  },
+  {
    "address": "93.184.216.34",
    "public": true
   },

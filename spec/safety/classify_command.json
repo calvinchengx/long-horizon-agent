@@ -1432,6 +1432,30 @@
   },
   {
    "argv": [
+    "sh",
+    "-c",
+    "echo x >| .git/y"
+   ],
+   "reason": "redirection writes a harness-owned path ('.git/y')"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo x 2>| .git/hooks/pre-commit"
+   ],
+   "reason": "redirection writes a harness-owned path ('.git/hooks/pre-commit')"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "cat > \".git/config\""
+   ],
+   "reason": "redirection writes a harness-owned path ('.git/config')"
+  },
+  {
+   "argv": [
     "find",
     ".",
     "-exec",
@@ -1654,6 +1678,22 @@
     "sh",
     "-c",
     "ls .git > files.txt"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "ls >| out.txt"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo \"a > b\""
    ],
    "reason": null
   },

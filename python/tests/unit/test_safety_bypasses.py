@@ -42,6 +42,9 @@ GATED = [
     ["sh", "-c", "echo x >.git/config"],
     ["sh", "-c", "true &> .git/config"],
     ["sh", "-c", "cmd 2> .lha/events.ndjson"],
+    ["sh", "-c", "echo x >| .git/y"],
+    ["sh", "-c", "echo x 2>| .git/hooks/pre-commit"],
+    ["sh", "-c", 'cat > ".git/config"'],
     # commands hidden behind find / more launchers
     ["find", ".", "-exec", "git", "push", ";"],
     ["find", ".", "-execdir", "git", "push", "{}", "+"],
@@ -74,6 +77,8 @@ ALLOWED = [
     ["git", "clone", "https://example.com/r.git"],
     ["sh", "-c", "pytest -q > out.txt 2>&1"],
     ["sh", "-c", "ls .git > files.txt"],
+    ["sh", "-c", "ls >| out.txt"],
+    ["sh", "-c", 'echo "a > b"'],
     ["sh", "-c", "echo $HOME"],
     ["sh", "-c", "for f in *.py; do ruff check $f; done"],
     ["find", ".", "-name", "*.pyc", "-delete"],

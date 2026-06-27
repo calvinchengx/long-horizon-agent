@@ -3,6 +3,7 @@ package safety
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -1157,6 +1158,10 @@ func isSeparatorToken(token string) bool {
 }
 
 // classifyScript classifies each simple command of a sh -c script string (and its substitutions).
+// scriptRedirect finds a redirection and its target in RAW script text (python: _SCRIPT_REDIRECT;
+// the tokenizer splits ">|" into ">" and a pipe, so the target is checked before tokenizing).
+var scriptRedirect = regexp.MustCompile(`(?:[0-9]+|&)?(?:>>?\|?|<>)[ \t]*("[^"]*"|'[^']*'|[^ \t\n\r\f\v;&|()<>]+)`)
+
 func classifyScript(script string, depth int) string {
 	if depth > 3 {
 		return "deeply nested shell invocation"
@@ -1168,6 +1173,12 @@ func classifyScript(script string, depth int) string {
 	}
 	if err != nil {
 		return "unparseable shell script"
+	}
+	for _, m := range scriptRedirect.FindAllStringSubmatch(script, -1) {
+		target := strings.Trim(m[1], "'\"")
+		if target != "" && touchesProtected(target) {
+			return "redirection writes a harness-owned path (" + contracts.PyRepr(target) + ")"
+		}
 	}
 	for _, body := range nested {
 		if reason := classifyScript(body, depth+1); reason != "" {
