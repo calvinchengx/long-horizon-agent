@@ -4,7 +4,12 @@ The host workdir is bind-mounted at ``/workspace`` (so the harness's git anchor/
 agent's edits), and commands run inside a locked-down container:
 
 - ``network_mode="none"`` by default: this is where egress default-deny is actually *enforced* for
-  ``run_command`` (``curl``/``pip install`` cannot reach anything). Opt in with ``network=True``.
+  ``run_command`` (``curl``/``pip install`` cannot reach anything). Opt in with ``network=True``
+  (full network), or — better — give ``egress_hosts`` (an operator allow-list such as
+  ``["pypi.org", "files.pythonhosted.org"]``): each session then gets its own ``--internal``
+  network with no route out, plus a proxy container (``egress_proxy.py``) that is the only way
+  out and forwards only to the allow-listed hosts. The sandbox gets ``HTTP(S)_PROXY`` pointing at
+  it; code that ignores the proxy has no route at all.
 - resource limits (``mem_limit``, ``pids_limit``, ``nano_cpus``), ``cap_drop=["ALL"]``,
   ``no-new-privileges``, a non-root user (the host uid:gid on POSIX so files stay owned by the
   operator, else ``nobody``), and a read-only root filesystem with tmpfs ``/tmp``;
@@ -21,11 +26,14 @@ the ``sandbox`` extra (``docker``); the client can be injected (unit tests use a
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import os
 import posixpath
+import secrets
 import tarfile
 import time
+from collections.abc import Callable, Sequence
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -39,6 +47,13 @@ _TIMEOUT_EXIT = 124  # coreutils `timeout` exit status when the deadline hit
 _KILLED_EXIT = 137  # 128 + SIGKILL (from `timeout -k`)
 _HOST_GRACE_S = 30
 _EXIT_POLL_S = 0.1  # exec_inspect poll interval while the process is still running
+DEFAULT_IMAGE = "python:3.12-slim"
+DEFAULT_PROXY_IMAGE = "python:3.12-alpine"
+PROXY_PORT = 3128
+_PROXY_SOURCE = Path(__file__).with_name("egress_proxy.py")
+_PROXY_READY = "lha-egress-proxy listening"  # egress_proxy.READY_MESSAGE
+_PROXY_READY_TIMEOUT_S = 60.0
+_RESOURCE_PREFIX = "lha-egress-"
 # Indirection so tests can drive the exec deadline without touching the event loop's clock.
 _clock = time.monotonic
 _sleep = time.sleep
@@ -50,6 +65,13 @@ def _default_user() -> str:
     return "65534:65534"
 
 
+def _validate_egress_hosts(hosts: Sequence[str]) -> None:
+    """Fail fast (at construction, not inside the proxy container) on a malformed allow-list."""
+    from lha.execution.egress_proxy import parse_allow_list
+
+    parse_allow_list(hosts)
+
+
 class DockerSandboxSession(SandboxSession):
     def __init__(
         self,
@@ -57,10 +79,12 @@ class DockerSandboxSession(SandboxSession):
         workdir: str = _WORKDIR,
         *,
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
+        on_close: Callable[[], None] | None = None,
     ) -> None:
         self._container = container
         self.workdir = workdir
         self._max_output = max_output_bytes
+        self._on_close = on_close  # tears down per-session egress resources (proxy + network)
 
     def _container_path(self, relpath: str) -> str:
         """Lexically contain ``relpath``, then confirm with ``realpath`` inside the container."""
@@ -183,21 +207,123 @@ class DockerSandboxSession(SandboxSession):
 
     async def close(self) -> None:
         def _stop() -> None:
-            self._container.stop(timeout=5)
-            self._container.remove(force=True)
+            try:
+                self._container.stop(timeout=5)
+                self._container.remove(force=True)
+            finally:
+                if self._on_close is not None:
+                    on_close, self._on_close = self._on_close, None
+                    on_close()
 
         await asyncio.to_thread(_stop)
 
 
+class _EgressGate:
+    """The per-session egress resources: an ``--internal`` network and the proxy container.
+
+    ``teardown`` is best-effort and idempotent: it force-removes the proxy container and the
+    network, swallowing errors, so a failed ``open`` or ``close`` never leaks them.
+    """
+
+    def __init__(self, client: Any, token: str) -> None:
+        self._client = client
+        self.network_name = f"{_RESOURCE_PREFIX}{token}"
+        self.proxy_name = f"{_RESOURCE_PREFIX}proxy-{token}"
+        self.network: Any | None = None
+        self.proxy: Any | None = None
+
+    @property
+    def proxy_url(self) -> str:
+        return f"http://{self.proxy_name}:{PROXY_PORT}"
+
+    def proxy_env(self) -> dict[str, str]:
+        url = self.proxy_url
+        no_proxy = "localhost,127.0.0.1"
+        return {
+            "HTTP_PROXY": url,
+            "HTTPS_PROXY": url,
+            "http_proxy": url,
+            "https_proxy": url,
+            "NO_PROXY": no_proxy,
+            "no_proxy": no_proxy,
+        }
+
+    def create(self, *, proxy_image: str, egress_hosts: Sequence[str]) -> None:
+        self.network = self._client.networks.create(
+            self.network_name, driver="bridge", internal=True, labels={"lha.egress": "network"}
+        )
+        self.proxy = self._client.containers.run(
+            proxy_image,
+            command=["python", "-c", _PROXY_SOURCE.read_text(encoding="utf-8")],
+            name=self.proxy_name,
+            detach=True,
+            # Default bridge = the way out; the internal network is joined below.
+            network="bridge",
+            environment={
+                "LHA_PROXY_ALLOW": ",".join(egress_hosts),
+                "LHA_PROXY_PORT": str(PROXY_PORT),
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONUNBUFFERED": "1",
+            },
+            labels={"lha.egress": "proxy"},
+            user="65534:65534",
+            cap_drop=["ALL"],
+            security_opt=["no-new-privileges:true"],
+            read_only=True,
+            tmpfs={"/tmp": "rw,nosuid,nodev,size=16m"},
+            mem_limit="256m",
+            pids_limit=128,
+        )
+        self.network.connect(self.proxy)
+        self._wait_ready()
+
+    def _wait_ready(self) -> None:
+        assert self.proxy is not None
+        deadline = _clock() + _PROXY_READY_TIMEOUT_S
+        while True:
+            logs = bytes(self.proxy.logs()).decode("utf-8", errors="replace")
+            if _PROXY_READY in logs:
+                return
+            self.proxy.reload()
+            if self.proxy.status in ("exited", "dead"):
+                raise RuntimeError(f"egress proxy exited during startup:\n{logs[-2000:]}")
+            if _clock() >= deadline:
+                raise RuntimeError(f"egress proxy not ready after {_PROXY_READY_TIMEOUT_S}s")
+            _sleep(_EXIT_POLL_S)
+
+    def teardown(self) -> None:
+        proxy, self.proxy = self.proxy, None
+        network, self.network = self.network, None
+        if proxy is None:  # creation may have failed after the container existed: look it up
+            with contextlib.suppress(Exception):
+                proxy = self._client.containers.get(self.proxy_name)
+        if proxy is not None:
+            with contextlib.suppress(Exception):
+                proxy.remove(force=True)
+        if network is None:
+            with contextlib.suppress(Exception):
+                network = self._client.networks.get(self.network_name)
+        if network is not None:
+            with contextlib.suppress(Exception):
+                network.remove()
+
+
 class DockerSandbox(Sandbox):
-    """Opens hardened containers. ``network=False`` (default) means no network at all."""
+    """Opens hardened containers.
+
+    ``network=False`` and no ``egress_hosts`` (the default) means no network at all.
+    ``egress_hosts`` routes egress through a per-session allow-list proxy (see the module doc);
+    ``network=True`` is the unrestricted default bridge. The two are mutually exclusive.
+    """
 
     def __init__(
         self,
-        image: str = "python:3.12-slim",
+        image: str = DEFAULT_IMAGE,
         *,
         client: Any | None = None,
         network: bool = False,
+        egress_hosts: Sequence[str] = (),
+        proxy_image: str = DEFAULT_PROXY_IMAGE,
         mem_limit: str = "2g",
         pids_limit: int = 512,
         cpus: float = 2.0,
@@ -206,7 +332,17 @@ class DockerSandbox(Sandbox):
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
     ) -> None:
         self.name = "docker"
+        hosts = tuple(h.strip() for h in egress_hosts if h.strip())
+        if network and hosts:
+            raise ValueError(
+                "network=True (unrestricted network) and egress_hosts (allow-list proxy) are "
+                "mutually exclusive"
+            )
+        if hosts:
+            _validate_egress_hosts(hosts)
         self._image = image
+        self._egress_hosts = hosts
+        self._proxy_image = proxy_image
         if client is None:
             import docker
 
@@ -220,22 +356,45 @@ class DockerSandbox(Sandbox):
         self._read_only_root = read_only_root
         self._max_output = max_output_bytes
 
-    def run_kwargs(self, workdir: str) -> dict[str, Any]:
-        """The ``containers.run`` hardening options (exposed for inspection/tests)."""
+    @property
+    def image(self) -> str:
+        return self._image
+
+    @property
+    def egress_hosts(self) -> tuple[str, ...]:
+        return self._egress_hosts
+
+    def run_kwargs(
+        self,
+        workdir: str,
+        *,
+        egress_network: str | None = None,
+        proxy_env: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        """The ``containers.run`` hardening options (exposed for inspection/tests).
+
+        With ``egress_network`` the container joins ONLY that (internal) network instead of
+        ``network_mode="none"``/``"bridge"``, and ``proxy_env`` is added to its environment.
+        """
         host = Path(workdir).resolve()
         volumes: dict[str, dict[str, str]] = {str(host): {"bind": _WORKDIR, "mode": "rw"}}
         for name in sorted(PROTECTED_DIRS):
             if (host / name).is_dir():
                 volumes[str(host / name)] = {"bind": f"{_WORKDIR}/{name}", "mode": "ro"}
+        networking: dict[str, Any]
+        if egress_network is not None:
+            networking = {"network": egress_network}
+        else:
+            networking = {"network_mode": "bridge" if self._network else "none"}
         return {
             "command": ["sleep", "infinity"],
             "detach": True,
             "tty": False,
             "working_dir": _WORKDIR,
             "user": self._user,
-            "environment": {"HOME": _WORKDIR, "LANG": "C.UTF-8"},
+            "environment": {"HOME": _WORKDIR, "LANG": "C.UTF-8", **(proxy_env or {})},
             "volumes": volumes,
-            "network_mode": "bridge" if self._network else "none",
+            **networking,
             "mem_limit": self._mem_limit,
             "memswap_limit": self._mem_limit,
             "pids_limit": self._pids_limit,
@@ -249,13 +408,32 @@ class DockerSandbox(Sandbox):
     async def open(self, *, workdir: str, snapshot_id: str | None = None) -> SandboxSession:
         image = snapshot_id or self._image
         await asyncio.to_thread(lambda: Path(workdir).mkdir(parents=True, exist_ok=True))
-        kwargs = self.run_kwargs(workdir)
+        if not self._egress_hosts:
+            kwargs = self.run_kwargs(workdir)
 
-        def _start() -> Any:
-            return self._client.containers.run(image, **kwargs)
+            def _start() -> Any:
+                return self._client.containers.run(image, **kwargs)
 
-        container = await asyncio.to_thread(_start)
-        return DockerSandboxSession(container, max_output_bytes=self._max_output)
+            container = await asyncio.to_thread(_start)
+            return DockerSandboxSession(container, max_output_bytes=self._max_output)
+
+        gate = _EgressGate(self._client, secrets.token_hex(6))
+
+        def _start_gated() -> Any:
+            try:
+                gate.create(proxy_image=self._proxy_image, egress_hosts=self._egress_hosts)
+                kwargs = self.run_kwargs(
+                    workdir, egress_network=gate.network_name, proxy_env=gate.proxy_env()
+                )
+                return self._client.containers.run(image, **kwargs)
+            except BaseException:
+                gate.teardown()
+                raise
+
+        container = await asyncio.to_thread(_start_gated)
+        return DockerSandboxSession(
+            container, max_output_bytes=self._max_output, on_close=gate.teardown
+        )
 
     async def snapshot(self, session: SandboxSession) -> Snapshot:
         assert isinstance(session, DockerSandboxSession)
