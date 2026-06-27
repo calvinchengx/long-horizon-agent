@@ -35,7 +35,7 @@ from pathlib import Path
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from lha.agent.loop import AgentLoop
+from lha.agent.assembly import build_lead_loop, open_lead_sandbox
 from lha.config import Settings, get_settings
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
@@ -48,20 +48,20 @@ from lha.durable.types import (
     CycleResult,
     HealthInput,
     HealthReport,
+    PendingApproval,
     UnblockInput,
 )
-from lha.execution import UnsafeSandboxError, open_sandbox
-from lha.execution.dispatcher import AllowListDispatcher
-from lha.execution.tools import default_local_tools
+from lha.execution import UnsafeSandboxError
 from lha.governor.cost import CostEntry, CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import BudgetExceeded, CostMeter
+from lha.hitl.approvals import DeferredApprovalGate
 from lha.ids import idempotency_key
 from lha.model import build_provider
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
-from lha.verify.verifier import DeterministicVerifier, default_python_checks
+from lha.verify.verifier import default_python_checks
 
 #: Builds the lead model for one cycle (tests inject scripted models here).
 ModelFactory = Callable[[Settings, SituationSnapshot], ModelProvider]
@@ -259,6 +259,9 @@ def _result_from_snapshot(
     item_blocked: bool = False,
     reason: str = "",
     spent_usd: float = 0.0,
+    item_split: bool = False,
+    pending_approvals: list[PendingApproval] | None = None,
+    used_approvals: list[str] | None = None,
 ) -> CycleResult:
     return CycleResult(
         item_id=item_id,
@@ -273,6 +276,9 @@ def _result_from_snapshot(
         item_blocked=item_blocked,
         reason=reason or snapshot.deadlock_reason,
         spent_usd=spent_usd,
+        item_split=item_split,
+        pending_approvals=list(pending_approvals or []),
+        used_approvals=list(used_approvals or []),
     )
 
 
@@ -282,6 +288,12 @@ def _anchor_text(snapshot: SituationSnapshot, inp: CycleInput) -> str:
     if inp.steer_notes:
         notes = "\n".join(f"- {note}" for note in inp.steer_notes)
         parts.append(f"Operator steering (most recent last):\n{notes}")
+    if inp.approved_actions:
+        approved = "\n".join(f"- {a.summary}" for a in inp.approved_actions)
+        parts.append(
+            "An operator APPROVED these previously queued actions; each is allowed once, "
+            f"exactly as requested:\n{approved}"
+        )
     return "\n\n".join(parts)
 
 
@@ -324,25 +336,19 @@ async def _execute_cycle(
         except ValueError as exc:  # e.g. missing API key / base URL for the configured backend
             raise _config_error(f"cannot build the model: {exc}", exc) from exc
         try:
-            session = await open_sandbox(
-                settings.sandbox,
-                workdir=inp.workdir,
-                allow_unsafe_local=settings.allow_unsafe_local,
-            )
+            session = await open_lead_sandbox(settings, inp.workdir)
         except (UnsafeSandboxError, ValueError) as exc:
             await model.aclose()
             raise _config_error(f"cannot open the sandbox: {exc}", exc) from exc
 
+        gate = DeferredApprovalGate(approved=[a.fingerprint for a in inp.approved_actions])
         try:
-            loop = AgentLoop(
-                model=model,
-                dispatcher=AllowListDispatcher.for_tools(
-                    default_local_tools(), allow_mutating=True
-                ),
-                verifier=DeterministicVerifier(),
-                anchor=anchor,
-                max_turns=settings.max_turns_per_cycle,
-            )
+            try:
+                loop = build_lead_loop(
+                    settings, model=model, anchor=anchor, workdir=inp.workdir, gate=gate
+                )
+            except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
+                raise _config_error(f"invalid configuration: {exc}", exc) from exc
             outcome = await _with_heartbeat(
                 loop.run_cycle(
                     ctx=ToolContext(mission_id=inp.mission_id, session=session),
@@ -378,6 +384,9 @@ async def _execute_cycle(
             reason=outcome.reason,
             note=f"verdict={outcome.verdict} tools={outcome.tool_calls} turns={outcome.turns}",
             spent_usd=sum(e.usd for e in meter.ledger.entries if e.cycle_id == inp.cycle_id),
+            item_split=outcome.item_split,
+            pending_approvals=[PendingApproval(**p) for p in gate.pending],
+            used_approvals=list(gate.used),
         )
 
 
@@ -426,9 +435,7 @@ async def probe_health(inp: HealthInput, *, settings: Settings | None = None) ->
     except Exception as exc:  # config problems surface here
         statuses.append(DependencyStatus("model", Health.DOWN, f"{type(exc).__name__}: {exc}"))
     try:
-        session = await open_sandbox(
-            settings.sandbox, workdir=inp.workdir, allow_unsafe_local=settings.allow_unsafe_local
-        )
+        session = await open_lead_sandbox(settings, inp.workdir)
         await session.close()
         statuses.append(DependencyStatus("sandbox", Health.OK))
     except Exception as exc:

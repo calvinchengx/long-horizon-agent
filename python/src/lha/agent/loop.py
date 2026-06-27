@@ -16,19 +16,31 @@ Harness truth (the agent can never write its own verdict):
   * A failed attempt keeps the item ``in_progress``; after ``max_consecutive_failures`` in a row it
     becomes ``blocked`` (not re-picked), so independent items proceed and the mission can't burn
     forever on one item. No actionable item + not complete => ``is_deadlocked``.
+  * An item's own ``witnesses`` gate it on top of the mission checks (``lha.verify.witnesses``); an
+    unresolvable witness is a failing check, never a skipped one.
+  * With a ``replanner``, a newly blocked item is split into smaller children (bounded by
+    ``max_replans`` per mission and ``max_split_depth``); the parent's witnesses gate the last one.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from lha.agent.prompt import build_messages, corrective_message
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall, TurnResult
 from lha.contracts.state import Checklist, ChecklistItem, Checkpoint, EventRecord
 from lha.contracts.tools import ToolContext, ToolDispatcher
-from lha.contracts.verify import Check, VerificationResult, Verifier, ensure_unique_check_names
+from lha.contracts.verify import (
+    Check,
+    CheckResult,
+    VerificationResult,
+    Verifier,
+    ensure_unique_check_names,
+)
 from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.harness_integrity import (
@@ -38,6 +50,10 @@ from lha.verify.harness_integrity import (
     snapshot_harness,
     violated_paths,
 )
+from lha.verify.witnesses import parse_witness
+
+if TYPE_CHECKING:
+    from lha.agents.replanner import Replanner
 
 _OBSERVATION_CAP = 4000
 _TRUNCATED_STOP_REASONS = frozenset({"max_tokens", "length", "model_length"})
@@ -78,6 +94,7 @@ class CycleOutcome:
     verdict: str = ""  # "passed" | "failed" | "unverified" | "" (no item worked)
     is_deadlocked: bool = False
     item_blocked: bool = False  # this cycle's failure pushed the item to ``blocked``
+    item_split: bool = False  # ...and the replanner replaced it with smaller child items
     reason: str = ""  # deadlock reason / failure summary
     items_done: int = 0
     items_total: int = 0
@@ -145,6 +162,11 @@ class AgentLoop:
         max_turns: int = 8,
         max_consecutive_failures: int = 3,
         verify_on_done: bool = True,
+        trusted_checks: Mapping[str, list[str]] | None = None,
+        harness_globs: tuple[str, ...] = (),
+        replanner: Replanner | None = None,
+        max_replans: int = 0,
+        max_split_depth: int = 2,
     ) -> None:
         self._model = model
         self._dispatcher = dispatcher
@@ -154,6 +176,11 @@ class AgentLoop:
         self._max_turns = max_turns
         self._max_failures = max_consecutive_failures
         self._verify_on_done = verify_on_done
+        self._trusted = dict(trusted_checks or {})
+        self._harness_globs = harness_globs
+        self._replanner = replanner
+        self._max_replans = max_replans
+        self._max_split_depth = max_split_depth
 
     async def run_cycle(
         self,
@@ -164,7 +191,6 @@ class AgentLoop:
         anchor_text: str | None = None,
         checks: list[Check] | None = None,
     ) -> CycleOutcome:
-        gate = ensure_unique_check_names(checks or [])
         checklist = await self._anchor.read_checklist()  # committed truth, owned in memory
         snapshot = await self._anchor.read_situational_awareness()
         mission = await self._anchor.read_mission()
@@ -175,12 +201,14 @@ class AgentLoop:
         if item is None:  # unreachable: not complete and not deadlocked implies an item
             return self._idle_outcome(checklist, snapshot.head_sha)
         item = checklist.start(item.id)
+        witness_checks, witness_errors = self._witness_checks(item)
+        gate = ensure_unique_check_names([*(checks or []), *witness_checks])
 
         workdir = ctx.session.workdir
         harness_before: HarnessSnapshot | None = None
         tampered: list[str] = []  # sticky for the whole cycle, even after files are reverted
         if not item.allow_harness_edits:
-            harness_before = await asyncio.to_thread(snapshot_harness, workdir)
+            harness_before = await asyncio.to_thread(snapshot_harness, workdir, self._harness_globs)
 
         messages = build_messages(
             anchor_text=anchor_text or "",
@@ -227,7 +255,9 @@ class AgentLoop:
             if action.done:
                 if not self._verify_on_done or turns == self._max_turns:
                     break
-                core = await self._verifier.verify(ctx.session, gate)
+                core = self._with_errors(
+                    await self._verifier.verify(ctx.session, gate), witness_errors
+                )
                 dirty = False
                 verification = await self._with_integrity(core, ctx, harness_before, tampered)
                 if verification.verdict != "failed":
@@ -255,11 +285,14 @@ class AgentLoop:
             dirty = True
 
         if core is None or dirty:
-            core = await self._verifier.verify(ctx.session, gate)
+            core = self._with_errors(await self._verifier.verify(ctx.session, gate), witness_errors)
         # Always re-check the harness right before committing (tampering needs no tool call).
         verification = await self._with_integrity(core, ctx, harness_before, tampered)
 
-        head = await self._checkpoint(checklist, item, cycle_id, verification, tool_calls)
+        mission_text = mission.render_anchor() if mission else snapshot.anchor_text()
+        head = await self._checkpoint(
+            checklist, item, cycle_id, verification, tool_calls, mission_text
+        )
         self._emit(
             "checkpoint",
             mission_id,
@@ -279,9 +312,10 @@ class AgentLoop:
             verdict=verification.verdict,
             is_deadlocked=checklist.is_deadlocked,
             item_blocked=item.status == "blocked",
+            item_split=item.status == "split",
             reason=checklist.deadlock_reason() or item.last_failure[:500],
             items_done=checklist.items_done,
-            items_total=len(checklist.items),
+            items_total=checklist.items_total,
         )
 
     # --- internals ---------------------------------------------------------------------
@@ -297,7 +331,7 @@ class AgentLoop:
             is_deadlocked=checklist.is_deadlocked,
             reason=checklist.deadlock_reason(),
             items_done=checklist.items_done,
-            items_total=len(checklist.items),
+            items_total=checklist.items_total,
         )
 
     def _trace_turn(self, result: TurnResult, mission_id: str, cycle_id: str) -> None:
@@ -319,6 +353,30 @@ class AgentLoop:
         observation = (tool_result.content or tool_result.error or "")[:_OBSERVATION_CAP]
         return f"OBSERVATION ({call.name}, tool_use_id={call.id}): {observation}"
 
+    def _witness_checks(self, item: ChecklistItem) -> tuple[list[Check], list[CheckResult]]:
+        """The item's witnesses as checks, plus a failing result for each unusable witness."""
+        checks: list[Check] = []
+        errors: list[CheckResult] = []
+        for witness in item.witnesses:
+            try:
+                checks.append(parse_witness(witness, self._trusted))
+            except ValueError as exc:
+                errors.append(
+                    CheckResult(
+                        name=witness,
+                        passed=False,
+                        exit_code=2,
+                        output_tail=f"invalid witness: {exc}",
+                    )
+                )
+        return checks, errors
+
+    @staticmethod
+    def _with_errors(
+        verification: VerificationResult, errors: list[CheckResult]
+    ) -> VerificationResult:
+        return verification.with_results(errors) if errors else verification
+
     async def _with_integrity(
         self,
         verification: VerificationResult,
@@ -329,7 +387,7 @@ class AgentLoop:
         """Add a failing ``harness_integrity`` result if pre-existing harness files changed."""
         if harness_before is None:
             return verification
-        after = await asyncio.to_thread(snapshot_harness, ctx.session.workdir)
+        after = await asyncio.to_thread(snapshot_harness, ctx.session.workdir, self._harness_globs)
         violations = harness_violations(harness_before, after)
         if violations:
             # Revert the tampering so it is never committed (nor the next cycle's baseline).
@@ -346,7 +404,9 @@ class AgentLoop:
         cycle_id: str,
         verification: VerificationResult,
         tool_calls: int,
+        mission_text: str = "",
     ) -> str:
+        split_into: list[str] = []
         if verification.all_green:
             checklist.record_success(
                 item.id, [r.name for r in verification.results if r.gating and r.passed]
@@ -360,6 +420,11 @@ class AgentLoop:
             )
             verb = "block" if item.status == "blocked" else "attempt"
             note = f"{verification.verdict} (attempt {item.attempts}, status {item.status})"
+            if item.status == "blocked":
+                split_into = await self._maybe_split(checklist, item, mission_text)
+                if split_into:
+                    verb = "split"
+                    note += f"; split into {', '.join(split_into)}"
         return await self._anchor.commit_checkpoint(
             Checkpoint(
                 cycle_id=cycle_id,
@@ -375,6 +440,7 @@ class AgentLoop:
                             "verdict": verification.verdict,
                             "status": item.status,
                             "tool_calls": tool_calls,
+                            "split_into": split_into,
                             "checks": [
                                 {
                                     "name": r.name,
@@ -391,6 +457,21 @@ class AgentLoop:
                 commit_message=f"lha: {verb} {item.id} ({item.description})",
             )
         )
+
+    async def _maybe_split(
+        self, checklist: Checklist, item: ChecklistItem, mission_text: str
+    ) -> list[str]:
+        """Split a newly blocked item via the replanner, within the mission's replan budget."""
+        if self._replanner is None or self._max_replans <= 0:
+            return []
+        if sum(1 for i in checklist.items if i.status == "split") >= self._max_replans:
+            return []
+        if item.id.count(".") >= self._max_split_depth:
+            return []
+        drafts = await self._replanner.split(mission_text=mission_text, item=item)
+        if len(drafts) < 2:
+            return []
+        return [child.id for child in checklist.split(item.id, drafts)]
 
     def _emit(self, kind: str, mission_id: str, cycle_id: str, **data: object) -> None:
         if self._recorder is not None:
