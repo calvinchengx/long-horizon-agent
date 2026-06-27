@@ -49,9 +49,11 @@ attempt that crashed are made again (and paid for again) by the retry.
 
 An item becomes `done` only when the deterministic verifier returns a `passed` verdict: at
 least one gating check (an argv such as `uv run pytest -q`) ran in the sandbox and every gating
-check exited 0. A model saying "done" only ends its turn loop. Zero gating checks is `unverified`,
-never a pass. Pre-existing tests and test configuration are hashed at cycle start so the agent
-cannot pass the gate by weakening it. See [verification](07-verification.md).
+check exited 0. An item can also name its own acceptance checks (`witnesses`, such as
+`go:TestLivy`), which must pass too. A model saying "done" only ends its turn loop. Zero gating
+checks is `unverified`, never a pass. Pre-existing tests and test configuration (plus any paths
+the operator protects) are hashed at cycle start so the agent cannot pass the gate by weakening
+it. See [verification](07-verification.md).
 
 ### Guardrails
 
@@ -60,10 +62,12 @@ cannot pass the gate by weakening it. See [verification](07-verification.md).
 - **Tool dispatcher.** Every tool call passes an allow-list, JSON-schema argument validation,
   workspace path containment, and write protection for `.lha/` and `.git/`.
 - **Human gate on irreversible commands.** Shell commands classified as irreversible or
-  outward-facing (for example `git push`) are sent to a human gate; with no gate configured,
-  which is the case for the built-in run paths, they are denied.
-- **Default-deny egress.** Web tools are not in the default tool set, and the Docker sandbox runs
-  with no network by default.
+  outward-facing (for example `git push`) are sent to a human. A durable mission queues the exact
+  call and waits as `WAITING_ON_HUMAN` for `lha mission-approve`; a local run asks on the
+  terminal with `--approve-interactive`; otherwise the command is denied.
+- **Default-deny egress.** The Docker sandbox has no network unless the operator lists hosts in
+  `LHA_SANDBOX_EGRESS`, which a proxy on an internal Docker network enforces. The lead gets the
+  `fetch_url` tool only when `LHA_WEB_ALLOW_HOSTS` lists hosts it may read.
 - **Budget governor.** Each model call is authorized before it runs against a USD ceiling
   (`LHA_BUDGET_USD_CEILING`, default 10.0). Calls whose cost cannot be computed are refused
   unless `LHA_ALLOW_UNPRICED_MODELS=true`.
@@ -83,9 +87,10 @@ The project is early and under active development.
 |---|---|
 | Python single-agent spine (`lha mission`, `lha run-local`) | Implemented and tested |
 | Python durable spine (`lha worker`, `lha mission-start`) | Implemented; durability and replay tests run against the Temporal test server in CI |
+| Large-mission features: imported checklists with witnesses, trusted checks, protected paths, replanning of blocked items, sandbox image and egress allow-list, vendored references, human approval of irreversible actions | Implemented and wired into every Python run path (local, durable, `orchestrate`); an end-to-end test exercises them together on real Docker |
 | Python local multi-agent flow (`lha orchestrate`: researchers, lead, reviewer) | Implemented; runs locally only, not on Temporal |
 | Memory (episodic/semantic/skills), Postgres persistence, Langfuse export | Library code with tests; not wired into the mission run paths |
-| Go port | Library packages in progress; no CLI or Temporal worker yet |
+| Go port | Library packages in progress (contracts and config include the new fields); no CLI or Temporal worker yet |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 
 ## Where to go next

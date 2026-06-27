@@ -40,8 +40,9 @@ What happens:
    `uv run ty check`, `uv run pytest -q`). With no tests in the workspace the pytest check
    fails (exit 5, "no tests ran"; a check whose tool is not installed also fails), so the
    verdict is `failed` and the item stays `in_progress`.
-5. After 3 consecutive failed cycles the item becomes `blocked`. Nothing else is actionable, so
-   the mission stops as deadlocked.
+5. After 3 consecutive failed cycles the item becomes `blocked`. The replanner then asks the
+   model to split it into smaller items; the stub's reply is not a usable split, so the item
+   stays blocked. Nothing else is actionable, so the mission stops as deadlocked.
 
 Structured log lines (`cycle_started`, `llm_turn`, `invalid_reply`, `checkpoint`) are printed
 as it runs. The run ends with a summary like this (the mission id and commit sha differ per
@@ -96,6 +97,11 @@ A `done` item lists the checks that proved it in `verified_by`. Use a fresh `--w
 run: running again in the same directory re-initializes the anchor on top of the existing
 history.
 
+To skip the Planner and start from your own plan, pass `--checklist FILE` instead of `--task`: a
+JSON checklist or a Markdown roadmap of `- [ ] item` lines, where each item can name its own
+acceptance checks, for example `- [ ] Add hello() (witness: pytest:test_hello.py)`. See
+[the mission anchor](06-mission-anchor.md#importing-a-checklist).
+
 ## About the sandbox
 
 `--sandbox local --unsafe-local` runs the agent's shell commands and the checks directly on your
@@ -105,9 +111,13 @@ arbitrary commands are not. Use it only for tasks and models you are prepared to
 The default sandbox is `docker`, which needs the `sandbox` extra (`uv sync --extra sandbox`) and
 a running Docker daemon. It bind-mounts the workdir into a container with no network, dropped
 capabilities, resource limits, a read-only root filesystem and read-only `.git/` and `.lha/`.
-The container image is `python:3.12-slim`, which does not include `uv`, so the uv-based checks
-used above do not run there; choose checks that exist in the image. Without the extra, a docker
-run stops with `error: python module 'docker' is not installed; install the 'sandbox' extra`.
+The default image (`LHA_SANDBOX_IMAGE`) is `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`,
+which has Python 3.12 and uv but no ruff, ty or pytest. With no network, `uv run --with pytest`
+cannot download pytest, so either allow the package index
+(`LHA_SANDBOX_EGRESS=pypi.org,files.pythonhosted.org`) or use an image that already has the
+tools; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds one with Go, uv and Node/pnpm. See
+[installation](03-installation.md#sandbox-image-and-egress). Without the extra, a docker run
+stops with `error: python module 'docker' is not installed; install the 'sandbox' extra`.
 
 ## Next steps
 

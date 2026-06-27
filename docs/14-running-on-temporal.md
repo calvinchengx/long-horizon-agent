@@ -47,9 +47,10 @@ ClaimCheck data converter over `LHA_OBJECT_STORE_ROOT`, and polls `LHA_TASK_QUEU
 | Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `run_subagent` |
 
 It runs until interrupted. It has no options; everything comes from `LHA_*` settings of the worker
-process. The model backend, sandbox (`LHA_SANDBOX`, default `docker`), budget ceiling and
-`max_turns_per_cycle` used by a mission are the **worker's**, not the settings of the process that
-started the mission. Settings are read once per process, so a change takes effect after a worker
+process. The model backend, sandbox (`LHA_SANDBOX`, default `docker`), sandbox image and egress
+allow-list, `LHA_WEB_ALLOW_HOSTS`, `LHA_TRUSTED_CHECKS`, `LHA_HARNESS_PATHS`, replanning limits,
+budget ceiling and `max_turns_per_cycle` used by a mission are the **worker's**, not the settings
+of the process that started the mission. Trusted checks run on the worker's host. Settings are read once per process, so a change takes effect after a worker
 restart. If the server is unreachable, the command exits with a Python traceback.
 
 [`python/Dockerfile`](../python/Dockerfile) builds a worker image whose default command is
@@ -61,38 +62,58 @@ daemon or use `LHA_SANDBOX=e2b`.
 ```bash
 cd python
 uv run lha mission-start --task "Add a slugify() helper with tests" \
-  --workdir "$PWD/.lha/workspaces/slugify"
+  --workdir .lha/workspaces/slugify
 # started mission mission_3f9a1c0b2d4e (workflow id: mission:mission_3f9a1c0b2d4e)
+
+# or from your own checklist, with vendored references
+uv run lha mission-start --checklist roadmap.md --reference reference/api.md.txt \
+  --workdir /srv/missions/emulator --deadlock-gate-hours 48
 ```
 
 `lha mission-start`, in order:
 
-1. Plans the task into a checklist with the configured model (one metered call against
-   `LHA_BUDGET_USD_CEILING` in this process).
-2. Initializes the git mission anchor at `--workdir` (see [06-mission-anchor.md](06-mission-anchor.md)).
+1. With `--task`, plans the task into a checklist with the configured model (one metered call
+   against `LHA_BUDGET_USD_CEILING` in this process). With `--checklist FILE`, imports the file
+   instead ([importing a checklist](06-mission-anchor.md#importing-a-checklist)); one of the two
+   is required.
+2. Initializes the git mission anchor at `--workdir`, including any `--reference` paths (see
+   [06-mission-anchor.md](06-mission-anchor.md)).
 3. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing
-   `MissionInput(mission_id, workdir, check_commands)`.
+   `MissionInput` with `mission_id`, `workdir`, `check_commands`, `max_cycles`,
+   `deadlock_gate_seconds` and `approval_timeout_seconds`.
 
-It prints the id and returns; it does not wait for the mission. The workflow's other inputs keep
-their defaults: `max_cycles=1000`, `cycles_before_can=200`, `budget_usd=None` (the worker's
-ceiling), `park_initial_seconds=60`, `park_max_seconds=3600`, `deadlock_gate_seconds=0`.
-`LHA_MAX_CYCLES` is not passed. There is no `--sandbox` option: the worker's `LHA_SANDBOX` applies.
+It prints the id and returns; it does not wait for the mission. Options that shape the workflow:
 
-`--workdir` is passed to the worker as given. A relative path is resolved against the worker's
-current directory, so use an absolute path unless the worker runs in the same directory. The
-worker must be able to reach the same filesystem path.
+| Option | Default | `MissionInput` field |
+|---|---|---|
+| `--max-cycles N` | `LHA_MAX_CYCLES` (1000) | `max_cycles` |
+| `--deadlock-gate-hours H` | 24 (`0` ends a deadlocked mission immediately) | `deadlock_gate_seconds` |
+| `--approval-timeout-hours H` | `LHA_APPROVAL_TIMEOUT_S` (24h) | `approval_timeout_seconds` |
+
+The other inputs keep their defaults: `cycles_before_can=200`, `budget_usd=None` (the worker's
+ceiling), `park_initial_seconds=60`, `park_max_seconds=3600`. There is no `--sandbox` option: the
+worker's `LHA_SANDBOX` applies.
+
+`--workdir` is resolved to an absolute path in the CLI process before it is sent, so a relative
+path means relative to where you ran `mission-start`. The worker must be able to reach the same
+filesystem path.
 
 ## 4. Watch it
 
 ```bash
 uv run lha mission-status mission_3f9a1c0b2d4e
 # status=RUNNING cycles=3
+
+uv run lha mission-status mission_3f9a1c0b2d4e
+# status=WAITING_ON_HUMAN cycles=7
+# waiting on: Mission mission_3f9a1c0b2d4e wants to run an irreversible action: run_command {'argv': ['git', 'push', 'origin', 'main']} (git push (outward-facing / rewrites history)). Approve or reject? [approve / reject]
 ```
 
-`mission-status` sends two queries, `status_v1` and `cycles_done`. Queries work while the workflow
-runs and after it has closed, but a worker must be polling the task queue to answer them. The
-workflow also answers `last_item`, `park_reason` and `rejected_decisions`, which the CLI does not
-expose; use the Temporal UI or `temporal workflow query`.
+`mission-status` sends three queries, `status_v1`, `cycles_done` and `open_question`, and prints
+the question on a second line when a human gate is open. Queries work while the workflow runs and
+after it has closed, but a worker must be polling the task queue to answer them. The workflow also
+answers `last_item`, `park_reason` and `rejected_decisions`, which the CLI does not expose; use
+the Temporal UI or `temporal workflow query`.
 
 Statuses the workflow sets:
 
@@ -100,7 +121,7 @@ Statuses the workflow sets:
 |---|---|
 | `RUNNING` | dispatching or running a cycle |
 | `DEGRADED_PARK` | a cycle exhausted its retries; sleeping and probing health |
-| `WAITING_ON_HUMAN` | a deadlock gate is open (only when `deadlock_gate_seconds > 0`) |
+| `WAITING_ON_HUMAN` | a human gate is open: an irreversible action awaits approval, or the mission is deadlocked and `deadlock_gate_seconds > 0` |
 | `DONE` | every item verified done |
 | `IMPOSSIBLE` | deadlocked: items remain and none is actionable |
 | `ABORTED` | budget exhausted, `max_cycles` reached, or a non-retryable failure |
@@ -116,17 +137,26 @@ The committed work is in git: `git -C <workdir> log --oneline` and `<workdir>/.l
 ## 5. Gates and abort
 
 ```bash
-uv run lha mission-approve mission_3f9a1c0b2d4e --decision retry
+uv run lha mission-approve mission_3f9a1c0b2d4e --decision approve   # an action gate
+uv run lha mission-approve mission_3f9a1c0b2d4e --decision retry     # a deadlock gate
 uv run lha mission-abort   mission_3f9a1c0b2d4e
 ```
 
-`mission-approve` sends the `human_decision_v1` signal with `--decision` (default `approve`). The
-workflow stores it until a gate consumes it. The only gate in `MissionWorkflow` is the deadlock
-gate, which offers `retry` and `abort` (default `abort` on timeout). A decision that matches no
-offered option (compared case-insensitively) is discarded, recorded in `rejected_decisions`, and
-the gate keeps waiting. Because `mission-start` leaves `deadlock_gate_seconds` at `0`, a mission
-started from the CLI never opens this gate: a deadlock ends the mission immediately with status
-`IMPOSSIBLE`. The help text's `approve | reject | abort` does not match the gate's options.
+`mission-approve` sends the `human_decision_v1` signal. `--decision` is required and must be one
+of `approve`, `reject`, `retry` or `abort` (anything else fails in the CLI). The workflow stores it
+until a gate consumes it. `MissionWorkflow` opens two kinds of gate
+([08-durable-execution.md](08-durable-execution.md#human-gates)):
+
+| Gate | Opens when | Options | On timeout |
+|---|---|---|---|
+| Action approval | a cycle attempted an irreversible command (for example `git push`) | `approve`, `reject` | `reject` after `--approval-timeout-hours` |
+| Deadlock | no item is actionable and `--deadlock-gate-hours` is not 0 | `retry`, `abort` | `abort` after `--deadlock-gate-hours` |
+
+An approved action is allowed once, in a later cycle, for exactly the same command and arguments.
+A decision that does not match the open gate's options (compared case-insensitively) is
+discarded, recorded in `rejected_decisions`, and the gate keeps waiting, so run `mission-status`
+first to see which gate is open. With `--deadlock-gate-hours 0`, a deadlock ends the mission
+immediately with status `IMPOSSIBLE`.
 
 `mission-abort` requests cancellation of the workflow. Temporal delivers it to a running
 `run_agent_cycle` at its next heartbeat (every 5 s). The workflow does not catch it: it closes as

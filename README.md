@@ -31,8 +31,10 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
   cycle in flight is retried), and waiting on an outage is a durable timer.
 - **Deterministic verification.** An item is done only when real checks (tests, lint, type
   checks) pass in the sandbox, never on the model's say-so.
-- **Guardrails.** Sandboxed execution, irreversible commands (`git push`, deploys, uploads)
-  refused outright, default-deny network egress, and a budget governor that
+- **Guardrails.** Sandboxed execution; irreversible commands (`git push`, deploys, uploads) go
+  to a human for approval (durable missions wait as `WAITING_ON_HUMAN`, local runs can ask on
+  the terminal with `--approve-interactive`, otherwise they are refused); default-deny network
+  egress, with an optional per-host allow-list enforced by a proxy; and a budget governor that
   refuses spend before it happens.
 
 ## Two implementations
@@ -56,8 +58,9 @@ git -C ../.lha/workspaces/demo log --oneline
 ```
 
 This runs at $0 against a local [Ollama](https://ollama.com). The mission is done only when the
-check passes: if the model's code fails it three times in a row, the item is blocked and the run
-ends `deadlocked` instead of accepting broken work. That is also what you see with the default
+check passes: if the model's code fails it three times in a row, the item is blocked (the model
+may first split it into smaller items) and the run ends `deadlocked` instead of accepting broken
+work. That is also what you see with the default
 `stub` model, which writes nothing, and it can happen with small local models. `--sandbox local` runs commands on your host
 without isolation; the default `docker` sandbox is the one to use for anything you did not write.
 The [quickstart](docs/02-quickstart.md) covers real models, Temporal and the full organization.

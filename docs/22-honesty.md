@@ -17,8 +17,10 @@ its tests show.
    *unknown*, never as `$0`, and the governor refuses to spend an unknown amount unless
    `LHA_ALLOW_UNPRICED_MODELS=true` (see [10-cost-and-budget.md](10-cost-and-budget.md)).
 4. **The model never marks its own work done.** An item is `done` only when at least one gating
-   check (a real command, run in the sandbox) passes. The model's "done" only ends its turn (see
-   [07-verification.md](07-verification.md)).
+   check (a real command, run in the sandbox or, for an operator's trusted check, on the host)
+   passes, and every one of the item's witnesses passes. The model's "done" only ends its turn
+   (see [07-verification.md](07-verification.md)). Splitting a blocked item moves its witnesses to
+   the last child, so replanning cannot lower the bar.
 5. **Docs describe the code as it is.** Designed-but-unwired features are labelled **planned**.
    These pages were checked against the code; where they disagree with the code, the code wins
    and the page is a bug.
@@ -40,10 +42,15 @@ suites; see [20-testing.md](20-testing.md)):
 | The anchor reconstructs state from git after a restart | `tests/unit/test_mission_anchor.py` |
 | Verification gates completion; harness tampering is reverted and fails the item | `tests/unit/test_agent_loop.py`, `test_loop_checklist.py`, `test_verify_contracts.py` |
 | Command classification, egress checks and redaction behave as specified | `tests/unit/test_safety*.py`, `test_obs_redact.py`, `spec/` cases |
-| Migrations, the idempotent cost ledger and the pgvector index work on real Postgres; the Docker sandbox enforces its limits | `tests/integration/` (CI job `python-services-integration`) |
+| Witnesses gate items (a missing Go test fails), trusted checks run outside the sandbox on the candidate commit, protected paths are reverted, blocked items are split within the replan budget | `tests/unit/test_large_missions.py`, `test_witnesses.py`, `test_trusted_runner.py` |
+| Irreversible actions wait for a human on the durable path; an approval is used once, a rejection is not re-asked | `tests/durability/test_approvals.py`, `tests/unit/test_large_missions.py` |
+| The sandbox egress proxy allows only listed hosts, refuses private addresses, and leaves no containers or networks behind | `tests/unit/test_egress_proxy.py`, `tests/integration/test_docker_egress.py` |
+| Migrations, the idempotent cost ledger and the pgvector index work on real Postgres; the Docker sandbox enforces its limits; one mission exercises every large-mission feature together on real Docker | `tests/integration/` (CI job `python-services-integration`), including `test_large_mission_e2e.py` |
 
-These tests use the stub model and simulated failures. They prove that the system behaves
-correctly around the model; they say nothing about how well any model does the work.
+These tests use the stub model (scripted, including the replanner's split and the approver's
+answer) and simulated failures. They prove that the system behaves correctly around the model;
+they say nothing about how well any model does the work, including how good a model's splits of
+a blocked item are.
 
 ## Not proven
 
@@ -55,10 +62,13 @@ correctly around the model; they say nothing about how well any model does the w
   reviewer, and is unit-tested with scripted models. There is no measurement showing it beats the
   single-agent loop on real tasks.
 - **Operational features that are built but not wired.** Langfuse export, OpenTelemetry export
-  from the CLI, the Postgres repositories, semantic memory, sub-agent fan-out inside the durable
-  workflow, saga compensation, orphan reconciliation, offline prompt evolution and the eval
-  harness exist as tested library code with no command or workflow calling them (see
-  [23-roadmap.md](23-roadmap.md)).
+  from the CLI, the Postgres repositories (including the cost ledger), semantic and episodic
+  memory, file ownership, the hash-chained decision log, sub-agent fan-out inside the durable
+  workflow, saga compensation, orphan reconciliation, flaky-test quarantine, offline prompt
+  evolution and the eval harness exist as tested library code with no command or workflow
+  calling them (see [23-roadmap.md](23-roadmap.md)). The large-mission features (checklist
+  import, witnesses, trusted checks, protected paths, replanning, sandbox image and egress,
+  references, approvals) are wired into every Python run path.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends are tested against mocked HTTP, not
   live endpoints.

@@ -6,8 +6,9 @@ finished only ends its turn loop; it has no effect on the item's status.
 
 Code: [`python/src/lha/contracts/verify.py`](../python/src/lha/contracts/verify.py) (types,
 verdict rules, check naming) and [`python/src/lha/verify/`](../python/src/lha/verify/)
-(`DeterministicVerifier`, harness integrity, flaky quarantine). Go mirror:
-[`go/internal/verify/`](../go/internal/verify/).
+(`DeterministicVerifier`, witnesses, trusted checks, harness integrity, flaky quarantine). Go
+mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier and harness
+integrity but not yet witnesses, trusted checks or extra protected paths.
 
 ## Checks
 
@@ -19,12 +20,14 @@ A `Check` is:
 | `command` | An argv list (at least one element), run in the sandbox session's workdir |
 | `gating` | `true` (default): a non-zero exit blocks the item. `false`: advisory, recorded but never blocks |
 | `timeout_s` | Per-check timeout; `null` uses the verifier default of 1200 seconds |
+| `where` | `sandbox` (default) or `trusted`: an operator-defined check run outside the sandbox (see [trusted checks](#trusted-checks)) |
 
 `DeterministicVerifier.verify` runs the checks in order through the sandbox's `exec`, so they
 run where the code is (inside the container for `docker`), not on the orchestrating host. Each
 produces a `CheckResult`: `name`, `passed`, `exit_code`, `gating`, `duration_s`, `timed_out`,
 `output_tail`, `output_ref`. If the sandbox cannot execute a check, the result is a failure with
-exit code `-1`, never a pass.
+exit code `-1`, never a pass. `DeterministicVerifier` refuses to run a `where="trusted"` check
+in the sandbox: it returns a failing result saying no trusted runner is configured.
 
 ## Verdict rules
 
@@ -45,13 +48,14 @@ passing gating checks.
 
 Within a cycle (see [architecture](05-architecture.md#the-cycle)):
 
-1. When the model signals done, the checks run. If the verdict is `failed` and turns remain, the
-   failure report is sent back to the model and the loop continues.
+1. When the model signals done, the mission's checks and the active item's
+   [witnesses](#witnesses) run. If the verdict is `failed` and turns remain, the failure report
+   is sent back to the model and the loop continues.
 2. At the end of the cycle, the checks run again if the workspace changed since the last run (or
    no run happened), and the harness-integrity result is added.
 3. The final verdict decides the checkpoint: `passed` gives `record_success`; anything else gives
-   `record_failure`, which blocks the item after 3 consecutive failures
-   ([item lifecycle](06-mission-anchor.md#item-lifecycle)).
+   `record_failure`, which blocks the item after 3 consecutive failures; a newly blocked item
+   may then be split by the replanner ([item lifecycle](06-mission-anchor.md#item-lifecycle)).
 
 ## Choosing checks
 
@@ -65,9 +69,12 @@ When no checks are given, the gate is the standard one for a uv-managed Python r
 | `ty` | `uv run ty check` |
 | `pytest` | `uv run pytest -q` |
 
-These only make sense for such a repository, and they need `uv` wherever the checks run. The
-Docker sandbox's image is `python:3.12-slim`, which has no `uv` and no network, so in the
-`docker` sandbox you need checks that exist in that image.
+These only make sense for such a repository, and they need `uv`, and the tools, wherever the
+checks run. The Docker sandbox's default image (`LHA_SANDBOX_IMAGE`,
+`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`) has uv but no network, so `uv run` can only use
+tools the workspace already has installed, unless `LHA_SANDBOX_EGRESS` allows the package index.
+Choose checks the image can run, or build an image that has them
+([installation](03-installation.md#sandbox-image-and-egress)).
 
 ### CLI flags
 
@@ -98,6 +105,65 @@ name is used (unsafe characters replaced with `_`, at most 40 characters). For e
 name `harness_integrity` is reserved. The cases are pinned in
 [`spec/contracts/check_names.json`](../spec/contracts/check_names.json).
 
+## Witnesses
+
+The mission's checks prove the repository still builds; they do not prove that a particular item
+was delivered. An item's `witnesses` name its own acceptance checks, which gate that item in
+addition to the mission's checks
+([`verify/witnesses.py`](../python/src/lha/verify/witnesses.py)). Each witness becomes a gating
+check named after the witness string:
+
+| Witness | Runs | Passes when |
+|---|---|---|
+| `go:TestName` or `go:TestName@<packages>` | `go test -count=1 -run '^TestName$' -v <packages>` (default `./...`); subtests as `TestX/sub` | `go test` exits 0 and prints `--- PASS: TestName`, so a missing, skipped or filtered-out test fails |
+| `pytest:<node id>` | `uv run pytest -q <node id>` | exit 0 (pytest exits 5 when nothing is collected) |
+| `cmd:<shell command>` | `sh -c <command>` | exit 0 |
+| `trusted:<name>` (alias `ci:<name>`) | the operator's command `<name>` from `LHA_TRUSTED_CHECKS`, outside the sandbox | exit 0 |
+
+Witness syntax is validated when a checklist is imported (Go test names must be identifiers,
+package patterns and pytest node ids may not contain shell metacharacters or start with `-`). A
+witness that cannot be turned into a check at run time, for example `trusted:e2e` when no `e2e`
+command is defined, is recorded as a failing check (exit code 2, `invalid witness: ...`), never
+skipped. When the replanner splits an item, its witnesses move to the last child, so splitting
+never weakens the item's acceptance.
+
+Witnesses are written in a [checklist file](06-mission-anchor.md#importing-a-checklist); the
+Planner does not produce them.
+
+## Trusted checks
+
+Some evidence cannot be produced in the sandbox: an end-to-end suite that needs a Docker daemon, a
+real database, a GPU or a CI job. The operator defines such commands in `LHA_TRUSTED_CHECKS`, a
+JSON object of name to argv:
+
+```bash
+export LHA_TRUSTED_CHECKS='{"e2e": ["make", "e2e"], "ci": ["./scripts/ci-and-wait.sh"]}'
+```
+
+Items reference them by name only (`trusted:e2e`); an item can never define the argv. The lead's
+verifier ([`verify/trusted.py`](../python/src/lha/verify/trusted.py), `TrustedAwareVerifier`)
+runs sandbox checks in the sandbox and trusted checks with `CommandTrustedRunner`:
+
+1. It makes a candidate commit of the current working tree (tracked and untracked, non-ignored
+   files) using a temporary index, without moving `HEAD` or touching the real index or working
+   tree.
+2. For each trusted check, it adds a detached `git worktree` of that commit, runs the argv on the
+   host from the worktree directory that corresponds to the workspace, with the host environment
+   plus `LHA_CHECK_COMMIT`, `LHA_CHECK_WORKTREE` and `LHA_CHECK_NAME`, and removes the worktree
+   afterwards.
+3. The default timeout is 3600 seconds (or the check's `timeout_s`); on timeout the whole process
+   group is killed. A failure to build the commit, create the worktree or run the command is a
+   failing result.
+
+Trusted checks run code the agent wrote (tests, build scripts, `Makefile` targets) outside the
+sandbox, with the privileges of the process running the mission (the local CLI, or the Temporal
+worker). The sandbox's network and filesystem limits do not apply. Run missions that use them
+on a dedicated, disposable machine with no secrets, or make the trusted command a small script
+that hands `LHA_CHECK_COMMIT` to CI and waits for the verdict. Protect the files a trusted check
+executes with `LHA_HARNESS_PATHS` (next section) so the agent cannot rewrite what the gate runs.
+Malformed `LHA_TRUSTED_CHECKS` is a configuration error: local runs stop, and the durable
+activity fails with a non-retryable `MissionConfigError`.
+
 ## Output tails
 
 Each result keeps the last 4,000 characters of the combined output (stdout, then
@@ -127,6 +193,11 @@ Protected files:
 Directories such as `.git`, `.lha`, `.venv`, `node_modules`, caches, `build` and `dist` are not
 scanned, and symlinks are ignored. The rules are pinned in
 [`spec/verify/harness_files.json`](../spec/verify/harness_files.json).
+
+Operators can protect more with `LHA_HARNESS_PATHS`, a comma-separated list of
+workspace-relative globs, for example `Makefile,e2e/**,.github/**`. `**` spans directories;
+`*` and `?` do not cross `/`. Use it for the files that define the checks, above all the targets
+that trusted checks execute.
 
 If a protected file that existed at cycle start was modified or deleted:
 

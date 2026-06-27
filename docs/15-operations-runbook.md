@@ -13,7 +13,7 @@ The durable `MissionWorkflow` exposes its status through the `status_v1` query
 |---|---|---|
 | `RUNNING` | a cycle is being dispatched or is running | nothing |
 | `DEGRADED_PARK` | a cycle failed 5 attempts with retryable errors; the workflow sleeps and probes health | read the `park_reason` query; fix the dependency |
-| `WAITING_ON_HUMAN` | the deadlock gate is open | send `retry` or `abort` with `lha mission-approve` |
+| `WAITING_ON_HUMAN` | a human gate is open: an irreversible action awaits approval, or the mission is deadlocked | run `lha mission-status` to see the question, then `lha mission-approve` with `approve`/`reject` or `retry`/`abort` |
 | `DONE` | every item verified done | nothing |
 | `IMPOSSIBLE` | deadlocked: items remain, none actionable | inspect blocked items; start a new mission |
 | `ABORTED` | budget exhausted, `max_cycles` reached, or a non-retryable failure | see below |
@@ -29,9 +29,11 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
 
 - **Committed truth**: `git -C <workdir> log --oneline`, `<workdir>/.lha/progress.md`,
   `<workdir>/.lha/checklist.json`. Each cycle is one commit: `lha: complete <id> (...)`,
-  `lha: attempt <id> (...)` or `lha: block <id> (...)`.
+  `lha: attempt <id> (...)`, `lha: block <id> (...)` or `lha: split <id> (...)` (the item was
+  blocked and replaced by children `<id>.1`, `<id>.2`, ...).
 - **Workflow**: the Temporal UI (<http://localhost:8080>) shows every activity, attempt, failure
-  and timer. `lha mission-status` returns status and cycle count.
+  and timer. `lha mission-status` returns status, cycle count and, when a gate is open, the
+  question it is waiting on.
 - **Spend**: `<workdir>/.git/lha/spend.ndjson` holds one row per cycle attempt (`usd`, `unknown`,
   `calls`). Each `run_agent_cycle` result in the history carries `spent_usd` for that cycle.
 - **Langfuse**: no LHA code sends data to Langfuse (see [16-observability.md](16-observability.md)).
@@ -40,11 +42,11 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
 
 | Outcome | Status | Cause |
 |---|---|---|
-| `completed` | `DONE` | every checklist item is `done` |
-| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) |
+| `completed` | `DONE` | every checklist item is `done` (split items count through their children) |
+| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) and no `retry` from a human within the deadlock gate (24 h by default) |
 | `budget_exhausted` | `ABORTED` | the governor refused a model call (`BudgetExceeded`, non-retryable) |
-| `max_cycles` | `ABORTED` | `cycles_done >= max_cycles` (1000 for CLI-started missions) |
-| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused |
+| `max_cycles` | `ABORTED` | `cycles_done >= max_cycles` (`--max-cycles`, default `LHA_MAX_CYCLES`, 1000) |
+| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, malformed `LHA_TRUSTED_CHECKS` or `LHA_SANDBOX_EGRESS` |
 
 An unpriced `openai_compat` model without `LHA_ALLOW_UNPRICED_MODELS=true` is refused by the
 governor on the first call, so the mission ends as `budget_exhausted`. Invalid `MissionInput`
@@ -52,20 +54,34 @@ values (an empty `check_commands`, `cycles_before_can < 1`, `max_cycles < 0`) fa
 before the first cycle.
 
 An item becomes `blocked` after 3 consecutive failed verifications (the `AgentLoop` default; not
-configurable through settings). Blocked items are skipped so independent items continue; when
-only blocked items remain the mission is deadlocked.
+configurable through settings). The replanner then tries to split it into smaller items
+(at most `LHA_MAX_REPLANS` splits per mission, nested at most `LHA_MAX_SPLIT_DEPTH` levels).
+Blocked items are skipped so independent items continue; when only blocked items remain the
+mission is deadlocked and the deadlock gate opens.
 
-There is no command to resume a mission whose workflow has closed. `lha mission-start` plans and
-initializes a new anchor.
+There is no command to resume a mission whose workflow has closed. `lha mission-start` plans (or
+imports) and initializes a new anchor.
 
 ## Common actions
 
-**Resolve the deadlock gate.** The gate opens only when the workflow was started with
-`deadlock_gate_seconds > 0`, which `lha mission-start` does not set; start the workflow from code
-with a `MissionInput` to use it. While open, `lha mission-approve <id> --decision retry` runs
+**Approve or reject an irreversible action.** When the agent tries a gated command (for example
+`git push`, a publish, an upload), the durable cycle queues it and the workflow waits as
+`WAITING_ON_HUMAN`. `lha mission-status <id>` prints the tool, its exact arguments and the reason.
+Check what would be sent (for example `git -C <workdir> log origin/main..HEAD`), then run
+`lha mission-approve <id> --decision approve` or `--decision reject`. No cycles run while the
+gate is open. An approved call is allowed once, in the next cycles, only with the same arguments;
+if the agent changes them, it is asked again. A rejected call is not asked about again. With no
+answer within `--approval-timeout-hours` (default `LHA_APPROVAL_TIMEOUT_S`, 24h) the action is rejected. Several queued
+actions are asked one at a time.
+
+**Resolve the deadlock gate.** `lha mission-start` opens it for `--deadlock-gate-hours` (default
+24; `0` turns it off). While open, `lha mission-approve <id> --decision retry` runs
 `unblock_items` (every `blocked` item back to retryable, committed as
 `lha: unblock ... (human retry)`) and the mission continues; `abort`, or the timeout, ends it as
-`deadlocked`.
+`deadlocked`. Before retrying, read `last_failure` of the blocked items in
+`<workdir>/.lha/checklist.json`: if the check cannot pass as configured (a missing tool in the
+sandbox image, a host not in `LHA_SANDBOX_EGRESS`, an undefined `trusted:` check), fix the worker
+settings and restart the worker first, or the items block again.
 
 **Steer.** Send `steer_v1` with a note (`temporal workflow signal --workflow-id mission:<id>
 --name steer_v1 --input '"..."'`). Following cycles include it in the prompt.
@@ -79,12 +95,31 @@ next attempt uses the new ceiling, seeded with the spend already in `.git/lha/sp
 only helps before the mission ends: once a call is refused the outcome is `budget_exhausted` and
 the workflow closes.
 
-**Change the model or sandbox.** Same as the budget: worker settings, applied after a restart.
+**Change the model or sandbox.** Same as the budget: worker settings (`LHA_MODEL_*`,
+`LHA_SANDBOX`, `LHA_SANDBOX_IMAGE`), applied after a restart.
 
-**Allow an egress domain.** There is no setting for the egress allow-list. The web tools
-(`fetch_url`, `web_search`) deny every request unless code constructs them with an
-`EgressPolicy`, and the Docker sandbox runs with `network_mode="none"`. **Planned**: an
-operator-configurable allow-list.
+**Allow an egress domain.** Two settings, both read by the worker:
+
+- `LHA_SANDBOX_EGRESS`: hosts the sandbox's commands may reach through the egress proxy (package
+  registries). A host alone allows ports 80 and 443; `.example.org` allows the domain and its
+  subdomains; `host:port` allows another port.
+- `LHA_WEB_ALLOW_HOSTS`: hosts the lead's `fetch_url` may read. Empty means no `fetch_url`.
+
+For reference material that does not change, prefer `lha vendor` once over opening the network
+to every cycle.
+
+**Egress incidents.** A check that fails with a download error (`403` from the proxy, `CONNECT
+tunnel failed`, a name that does not resolve) usually means a missing host. While the session is
+open, `docker logs lha-egress-proxy-<id>` shows one allowed/denied line per request; the
+containers and networks are labelled `lha.egress`. Add the host and restart the worker. If a
+worker died without closing its session, remove leftovers with
+`docker ps -a --filter label=lha.egress` and `docker network ls --filter label=lha.egress`. If
+the agent reached something it should not have, remove the host from the allow-list; the proxy
+never allows IP literals or hosts that resolve to private, loopback or link-local addresses.
+
+**Protect files the gate depends on.** Set `LHA_HARNESS_PATHS` (for example
+`Makefile,e2e/**,.github/**`) on the worker so edits to them fail the `harness_integrity` check
+and are reverted. Do this for anything a `trusted:` check runs.
 
 ## Degradation modes
 
@@ -128,11 +163,12 @@ alerts on park.
   moves on. The local runners also stop when one item fails `LHA_STALL_LIMIT` consecutive times
   (`loop on item <id>`); with the default of 5 the item is blocked first, so this fires only when
   the limit is 3 or less. The durable workflow has no such detector.
-- `ops/lifecycle.py` (`should_declare_impossible`, `MissionOutcome`) and the `AutoPolicyGate` /
-  `CallbackGate` classes in `hitl/gate.py` are library code with no caller. **Planned**: a
-  "declare impossible?" gate, gates with an escalation ladder, and persisting gates to the
-  `hitl_gates` table. Today the one durable gate is the deadlock gate, with a timeout and a
-  default of `abort`.
+- `ops/lifecycle.py` (`should_declare_impossible`, `MissionOutcome`) and the
+  `AutoPolicyGate` class in `hitl/gate.py` are library code with no caller (`CallbackGate`
+  backs the local `--approve-interactive` prompt). **Planned**: a "declare impossible?" gate,
+  gates with an escalation ladder, and persisting gates to the `hitl_gates` table. Today the
+  durable gates are the action-approval gate (default `reject`) and the deadlock gate (default
+  `abort`), both with a timeout.
 
 ## Safe deploys during an in-flight mission
 

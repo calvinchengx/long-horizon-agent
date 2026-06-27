@@ -64,7 +64,9 @@ The governor refuses to spend an unknown amount:
 `CostMeter` ([metering.py](../python/src/lha/governor/metering.py)) holds one ledger, one governor
 and a running total of in-flight reservations. Every provider a mission uses is wrapped with
 `meter.wrap(provider, role=…)`, which returns a `MeteredModel`. The planner, lead, researchers,
-reviewer and reflection models are all wrapped. For each `complete()` call:
+reviewer and reflection models are all wrapped. The replanner uses the lead's metered model, so
+the call that splits a blocked item is authorized against the budget and recorded under role
+`lead` in the same cycle. For each `complete()` call:
 
 1. **Worst case.** The input-token estimate is deliberately high: characters / 2, plus the size
    of tool-call arguments and tool schemas, plus 8 tokens per message. Output is assumed to be

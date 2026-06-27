@@ -6,7 +6,7 @@
 |---|---|
 | `git` | Always. Every mission workspace is a git repository; the mission anchor is committed to it. |
 | [uv](https://docs.astral.sh/uv/) | The Python implementation. uv provisions Python 3.12 (`python/.python-version`). |
-| Docker daemon | The default `docker` sandbox, the Docker image, and the compose stack. |
+| Docker daemon | The default `docker` sandbox (and its egress proxy), the Docker images, and the compose stack. |
 | Go (version in [`go/go.mod`](../go/go.mod), currently 1.26) | Building and testing the Go packages. |
 | [Ollama](https://ollama.com) | Optional: local models at $0. |
 
@@ -91,6 +91,36 @@ also needs the `sandbox` extra added to the build.
 
 There is no Go image yet.
 
+## Sandbox image and egress
+
+The `docker` sandbox runs agent commands and checks in `LHA_SANDBOX_IMAGE`, default
+`ghcr.io/astral-sh/uv:python3.12-bookworm-slim` (Python 3.12 and uv). The image must contain
+every tool your checks and witnesses call. For Go or Node projects, build the reference polyglot
+image in [`sandbox/`](../sandbox/) (Go, uv with Python 3.12, Node.js with npm/corepack and pnpm,
+git, make):
+
+```bash
+docker build -t lha-sandbox:latest sandbox/     # from the repository root
+export LHA_SANDBOX_IMAGE=lha-sandbox:latest
+```
+
+The image keeps every cache under `/tmp`, because the sandbox runs as the host uid with a
+read-only root filesystem and a 1 GB `/tmp` tmpfs mounted `exec` (so `go test` can run the binaries it
+builds). [`sandbox/README.md`](../sandbox/README.md) lists the versions and build arguments.
+
+By default the sandbox has no network. To let package managers reach specific registries, list
+the hosts:
+
+```bash
+export LHA_SANDBOX_EGRESS="proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org,registry.npmjs.org"
+```
+
+Each sandbox session then gets its own `--internal` Docker network (no route out) and a proxy
+container (`python:3.12-alpine`, running
+[`egress_proxy.py`](../python/src/lha/execution/egress_proxy.py)) that is the only way out and
+forwards only to the listed hosts. The first run pulls that image. Both are removed when the
+session closes. See [safety model](09-safety-model.md#sandbox-network).
+
 ## Local service stack
 
 [`docker-compose.yml`](../docker-compose.yml) runs the services used by the durable path:
@@ -128,11 +158,12 @@ volume. To apply them to an existing database, install the `postgres` extra and 
 `python/`:
 
 ```bash
-LHA_POSTGRES_DSN=postgresql://lha:lha@localhost:5432/lha \
-  uv run lha db migrate --migrations-dir ../db/migrations
+LHA_POSTGRES_DSN=postgresql://lha:lha@localhost:5432/lha uv run lha db migrate
 ```
 
-The default `--migrations-dir` is `db/migrations`, relative to the current directory.
+Without `--migrations-dir`, the command uses `db/migrations` in the current directory, or
+`../db/migrations` if that does not exist, so it works from both the repository root and
+`python/`.
 
 The mission run paths do not read from Postgres or send traces to Langfuse today;
 `LHA_POSTGRES_DSN` is used by `lha db migrate`, and the Langfuse settings by the optional client

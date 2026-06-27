@@ -21,12 +21,14 @@ limited to reads and review. The code enforces this split:
 
 | Command | Agents involved |
 |---|---|
-| `lha run-local` | Lead only (checklist given with `--item`) |
-| `lha mission` | Planner, then Lead |
-| `lha orchestrate` | Planner, then per item: 2 Researchers, Lead, Reflection on failure, Reviewer on success |
-| `lha mission-start` + `lha worker` | Planner (at start, in the CLI process), then Lead cycles inside `MissionWorkflow` |
+| `lha run-local` | Lead (checklist given with `--item` or `--checklist`), Replanner when an item blocks |
+| `lha mission` | Planner (skipped with `--checklist`), then Lead, Replanner when an item blocks |
+| `lha orchestrate` | Planner, then per item: 2 Researchers, Lead, Reflection on failure, Reviewer on success; Replanner when an item blocks |
+| `lha mission-start` + `lha worker` | Planner (at start, in the CLI process; skipped with `--checklist`), then Lead cycles inside `MissionWorkflow`, Replanner when an item blocks |
 
-The durable workflow currently runs only the Lead loop. Research fan-out, review and reflection
+All run paths build the Lead the same way ([agent/assembly.py](../python/src/lha/agent/assembly.py)),
+so the Replanner runs wherever the Lead does. The durable workflow otherwise runs only the Lead
+loop. Research fan-out, review and reflection
 exist only in the local `orchestrate` flow ([Durable execution](08-durable-execution.md)).
 
 ### `lha orchestrate` wiring
@@ -50,9 +52,10 @@ with the same meter. For each cycle, the orchestrator:
    at 20,000 chars, then 8,000 inside the reviewer). A blocking verdict reopens the item: status
    `todo`, `verified_by` cleared, the review notes attached, and a checkpoint committed.
 
-`--check`, `--no-default-checks`, `--sandbox` and `--unsafe-local` are the only knobs. The CLI
-does not expose `allow_egress`, so researchers have no network tools even though their role spec
-sets `allow_egress=True`.
+The command-line knobs are `--check`, `--no-default-checks`, `--sandbox`, `--unsafe-local`,
+`--reference` and `--approve-interactive`; the rest comes from `LHA_*` settings. The CLI does not
+expose `allow_egress`, so researchers have no network tools even though their role spec sets
+`allow_egress=True`. The Lead gets `fetch_url` when `LHA_WEB_ALLOW_HOSTS` is set.
 
 ## Roles
 
@@ -65,7 +68,8 @@ other backend uses the single configured model for all roles.
 | Role / module | Tier | Mutating | What the code does | Used by a CLI path |
 |---|---|---|---|---|
 | Planner ([planner.py](../python/src/lha/agents/planner.py)) | opus | no | One model call. It parses a JSON array into `ChecklistItem`s with ids `01`, `02`, … and keeps only dependencies on earlier steps (dropped ones are noted). If nothing parses, it creates a single item from the description | `mission`, `orchestrate`, `mission-start` |
-| Lead (`AgentLoop`, [agent/loop.py](../python/src/lha/agent/loop.py)) | opus | yes | Works one item per cycle: tools, gating checks, checkpoint commit | all |
+| Lead (`AgentLoop`, [agent/loop.py](../python/src/lha/agent/loop.py)) | opus | yes | Works one item per cycle: tools, gating checks and witnesses, checkpoint commit | all |
+| Replanner ([replanner.py](../python/src/lha/agents/replanner.py)) | lead's model | no tools | One model call when an item has just become `blocked`: given the mission, the item, its witnesses and the latest failure report (last 3,000 chars), returns a JSON array of 2 to 6 smaller steps. `Checklist.split` replaces the item with them; fewer than 2 usable steps means no split. Bounded by `LHA_MAX_REPLANS` and `LHA_MAX_SPLIT_DEPTH` | all (unless `LHA_MAX_REPLANS=0`) |
 | Researcher ([team.py](../python/src/lha/agents/team.py)) | haiku | no | Read-only `SubAgent` that returns a brief (capped at 8,000 chars) | `orchestrate` |
 | Reviewer ([reviewer.py](../python/src/lha/agents/reviewer.py)) | opus | no | Fresh-context review that returns JSON `verdict` / `blocking_issues` / `advisory`. An unparseable reply counts as blocking, and "approve" with issues counts as "block" | `orchestrate` |
 | Reflection ([reflection.py](../python/src/lha/agents/reflection.py)) | lead's model | no tools | Short post-mortem (at most 2,000 chars) prepended to the next attempt | `orchestrate` |
