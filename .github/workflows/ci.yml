@@ -79,9 +79,20 @@ jobs:
       - name: Sync (core + dev + postgres + sandbox)
         run: uv sync --locked --extra postgres --extra sandbox
 
+      # The large-mission end-to-end test runs the lead in the polyglot sandbox image and a
+      # trusted e2e check (go run) on the runner itself.
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - name: Build the reference sandbox image
+        working-directory: sandbox
+        run: docker build -t lha-sandbox:dev .
+
       - name: Pytest (integration - real Postgres + Docker)
         env:
           LHA_IT_POSTGRES_DSN: postgresql://lha:lha@127.0.0.1:5432/lha
           LHA_IT_DOCKER: "1"
         run: uv run pytest -q tests/integration
-        timeout-minutes: 10
+        timeout-minutes: 20
