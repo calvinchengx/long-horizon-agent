@@ -21,6 +21,17 @@ uv run pytest -q             # tests
 
 CI (`.github/workflows/ci.yml`) runs exactly these on every push/PR.
 
+### Integration tests (real Postgres + Docker)
+
+`tests/integration/` runs against real services and is skipped unless you opt in. Use a
+throwaway pgvector container on a free port (it creates and drops its own databases):
+
+```bash
+docker run -d --name lha-it-pg -e POSTGRES_USER=lha -e POSTGRES_PASSWORD=lha -e POSTGRES_DB=lha -p 127.0.0.1:55432:5432 pgvector/pgvector:pg16
+uv sync --extra postgres --extra sandbox
+LHA_IT_POSTGRES_DSN=postgresql://lha:lha@127.0.0.1:55432/lha LHA_IT_DOCKER=1 uv run pytest -q tests/integration
+```
+
 ## Conventions
 
 - **Typed.** All of `src/` passes `ty check` (warnings are errors). Public functions are fully annotated.
