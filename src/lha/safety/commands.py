@@ -5,15 +5,19 @@ human decision (it is routed through a ``HITLGate`` by the dispatcher), else ``N
 
 - publishing / pushing: ``git push``, package publish (npm/pnpm/yarn/twine/uv/poetry/cargo/gem...),
   ``docker push``;
-- history-destroying git ops (``reset --hard``, ``clean -f``, ``branch -D``, ``filter-branch``...);
+- history-destroying git ops (``reset --hard``, ``clean -f``, ``branch -D``, ``filter-branch``...),
+  and git config that defines what git runs or where it pushes (aliases, hooks, remotes), whether
+  set with ``git config``, ``git -c`` or ``GIT_CONFIG_*`` environment variables;
 - deploy / infra CLIs (kubectl, helm, terraform, pulumi, aws, gcloud, az, fly, vercel, gh, ...);
 - network uploads and remote shells (``curl -d/-F/-T/-X POST``, ``wget --post-*``, scp, rsync to a
   remote, ssh, nc, ...);
-- ``rm -r``/``rm`` of absolute, home or parent paths, and any mutation of ``.git``/``.lha``;
+- ``rm -r``/``rm`` of absolute, home or parent paths, and any mutation of ``.git``/``.lha``
+  (including shell redirections and ``find -delete``);
 - privilege escalation (sudo/doas/su).
 
-It unwraps common launchers (``env``, ``nohup``, ``timeout``, ``uv run``, ``npx``,
-``python -m``...) and ``sh -c`` / ``bash -c`` script strings. This is a guardrail, not a sandbox:
+It unwraps common launchers (``env``, ``nohup``, ``timeout``, ``setsid``, ``flock``, ``watch``,
+``uv run``, ``npx``, ``python -m``...), ``find -exec`` and ``sh -c`` / ``bash -c`` script strings,
+and fails closed on a command name that comes from a shell expansion. This is a guardrail, not a sandbox:
 an arbitrary program (``python -c ...``) can still do anything its sandbox allows, which is why
 network isolation is enforced at the sandbox level (Docker ``network_mode="none"``).
 """
@@ -21,6 +25,7 @@ network isolation is enforced at the sandbox level (Docker ``network_mode="none"
 from __future__ import annotations
 
 import posixpath
+import re
 import shlex
 from collections.abc import Sequence
 
@@ -141,6 +146,40 @@ _WRAPPERS: dict[str, _OptSpec] = {
         scripts=_F({"-c", "--call"}),
     ),
     "bunx": _OptSpec("", "p", _F({"--bun"}), _F({"--package"})),
+    "setsid": _OptSpec("cfw", "", _F({"--ctty", "--fork", "--wait"})),
+    # ``flock [opts] FILE CMD...`` (or ``flock FILE -c CMD``, handled in ``_unwrap``).
+    "flock": _OptSpec(
+        "sxnoFu",
+        "wEc",
+        _F({"--shared", "--exclusive", "--nonblock", "--close", "--no-fork", "--unlock"}),
+        _F({"--wait", "--timeout", "--conflict-exit-code", "--command"}),
+        scripts=_F({"-c", "--command"}),
+        positional=1,
+    ),
+    "taskset": _OptSpec("acp", "", _F({"--all-tasks", "--cpu-list", "--pid"}), positional=1),
+    "chrt": _OptSpec(
+        "abdfiomprRe",
+        "TPD",
+        _F({"--all-tasks", "--batch", "--deadline", "--fifo", "--idle", "--other", "--rr"}),
+        _F({"--sched-runtime", "--sched-period", "--sched-deadline"}),
+        positional=1,
+    ),
+    "unbuffer": _OptSpec("p"),
+    "caffeinate": _OptSpec("dimsu", "tw"),
+    # ``watch`` joins its arguments into a ``sh -c`` string (see ``_unwrap``).
+    "watch": _OptSpec(
+        "bcdegtwx",
+        "nq",
+        _F({"--beep", "--color", "--differences", "--errexit", "--chgexit", "--no-title"}),
+        _F({"--interval", "--equexit"}),
+    ),
+    "script": _OptSpec(
+        "aefqk",
+        "cEIOBTm",
+        _F({"--append", "--flush", "--quiet"}),
+        _F({"--command"}),
+        scripts=_F({"-c", "--command"}),
+    ),
     "uvx": _OptSpec(
         "qvn",
         "pf",
@@ -169,7 +208,28 @@ _WRAPPERS: dict[str, _OptSpec] = {
 _RUNNER_OPTS = _OptSpec(
     "qv",
     "pf",
-    _F({"--quiet", "--verbose", "--offline", "--isolated", "--frozen", "--locked", "--no-sync"}),
+    _F(
+        {
+            "--quiet",
+            "--verbose",
+            "--offline",
+            "--isolated",
+            "--frozen",
+            "--locked",
+            "--no-sync",
+            "--all-extras",
+            "--no-dev",
+            "--all-packages",
+            "--all-groups",
+            "--exact",
+            "--no-progress",
+            "--refresh",
+            "--reinstall",
+            "--compile-bytecode",
+            "--no-editable",
+            "--native-tls",
+        }
+    ),
     _F(
         {
             "--with",
@@ -285,7 +345,45 @@ _ALWAYS_GATED = frozenset(
         "dd",
     }
 )
-_GIT_ALWAYS = frozenset({"push", "filter-branch", "filter-repo", "update-ref", "send-email"})
+_GIT_ALWAYS = frozenset(
+    {"push", "send-pack", "filter-branch", "filter-repo", "update-ref", "send-email"}
+)
+# git config keys that define commands git will run, or where it pushes. Setting one (with
+# ``git config`` or ``git -c``) is gated: an alias can rename any subcommand (``alias.p=push``).
+_GIT_EXEC_CONFIG = (
+    "alias.",
+    "include.",
+    "includeif.",
+    "core.hookspath",
+    "core.fsmonitor",
+    "core.sshcommand",
+    "core.gitproxy",
+    "core.pager",
+    "core.editor",
+    "credential.",
+    "protocol.",
+    "remote.",
+    "url.",
+    "pushurl",
+    "filter.",
+    "diff.",
+    "merge.",
+    "uploadpack.",
+    "receivepack.",
+)
+_GIT_CONFIG_READS = frozenset(
+    {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "get", "list"}
+)
+# Environment variables that inject git config (and therefore aliases) into every git call.
+_GIT_CONFIG_ENV = re.compile(
+    r"^GIT_CONFIG(?:_PARAMETERS|_COUNT|_KEY_\d+|_VALUE_\d+|_GLOBAL|_SYSTEM)?=", re.IGNORECASE
+)
+# Shell redirection operators inside a word: ``>``, ``>>``, ``>|``, ``&>``, ``2>``, ``<>``.
+_REDIRECT = re.compile(r"(?:\d*|&)(?:>>?\|?|<>)")
+# httpie request items that send a body: ``k=v``, ``k:=json``, ``k@file``, ``k=@file``.
+_HTTPIE_DATA_ITEM = re.compile(r"^[A-Za-z0-9_.\[\]-]+(?::=@|:=|=@|=(?!=)|@)")
+_HTTPIE = frozenset({"http", "https", "xh", "xhs"})
+_FIND_EXEC = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 _CURL_UPLOAD_FLAGS = frozenset(
     {
         "-d",
@@ -408,6 +506,11 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
     out: list[list[str]] = []
     for scripts, command in _parse_opts(spec, rest):
         out.extend(["sh", "-c", script] for script in scripts)
+        if head == "flock" and command[:1] in (["-c"], ["--command"]):
+            out.extend(["sh", "-c", script] for script in command[1:2])
+            continue
+        if head == "watch" and command:  # run as ``sh -c "<args joined>"`` (unless ``-x``)
+            out.append(["sh", "-c", " ".join(command)])
         out.extend(_unwrap(command, depth + 1))
         if len(out) > _MAX_CANDIDATES:
             raise _Ambiguous("too many ways to read the launcher options")
@@ -451,21 +554,32 @@ def _classify_git(args: list[str]) -> str | None:
             config = opt.split("=", 1)[1]
         else:
             config = ""
-        if config.strip().lower().startswith("alias."):
-            return "git alias defined on the command line (could rename any subcommand)"
+        if _git_exec_config(config.partition("=")[0]):
+            return f"git -c {config.partition('=')[0]} (defines what git runs or where it pushes)"
         takes_value = opt in ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env")
         args = args[2:] if takes_value else args[1:]
     if not args:
         return None
     sub, rest = args[0], args[1:]
-    if sub in _GIT_ALWAYS:
+    if "$" in sub:
+        return "git subcommand comes from a shell expansion (cannot classify)"
+    if sub in _GIT_ALWAYS or sub.startswith("remote-"):
         return f"git {sub} (outward-facing / rewrites history)"
+    if sub == "config" and not _GIT_CONFIG_READS.intersection(rest):
+        key = next((a for a in rest if not a.startswith("-") and a not in ("set", "add")), "")
+        if _git_exec_config(key):
+            return f"git config {key} (defines what git runs or where it pushes)"
+    for arg in rest:
+        if arg.startswith(("--upload-pack", "--receive-pack", "--exec=")) or "ext::" in arg:
+            return f"git {sub} {arg.partition('=')[0]} runs an arbitrary transport command"
+    if sub in ("clone", "ls-remote") and "-u" in rest:
+        return f"git {sub} -u runs an arbitrary upload-pack command"
     if sub == "reset" and "--hard" in rest:
         return "git reset --hard discards work"
     if sub == "clean" and any(a.startswith("-") and "f" in a.lstrip("-") for a in rest):
         return "git clean -f deletes untracked files"
-    if sub == "branch" and any(a in ("-D", "--delete", "-d") for a in rest):
-        return "git branch delete"
+    if sub == "branch" and _git_branch_force_delete(rest):
+        return "git branch force-delete (discards unmerged work)"
     if sub == "remote" and rest[:1] and rest[0] in ("add", "set-url", "remove", "rm"):
         return "git remote reconfiguration"
     if sub == "reflog" and rest[:1] == ["expire"]:
@@ -474,6 +588,69 @@ def _classify_git(args: list[str]) -> str | None:
         return f"git {sub} rewrites history"
     if sub in ("checkout", "switch", "restore") and ("-f" in rest or "--force" in rest):
         return f"git {sub} --force discards work"
+    return None
+
+
+def _git_exec_config(key: str) -> bool:
+    key = key.strip().lower()
+    return bool(key) and (key.startswith(_GIT_EXEC_CONFIG) or key.endswith(".pushurl"))
+
+
+def _git_branch_force_delete(rest: list[str]) -> bool:
+    """``-D``, ``-df``/``-Df`` bundles, or ``-d``/``--delete`` together with ``-f``/``--force``.
+
+    A plain ``-d`` only deletes branches that are already merged, so it is not gated.
+    """
+    shorts = "".join(a[1:] for a in rest if a.startswith("-") and not a.startswith("--"))
+    delete = "d" in shorts or "--delete" in rest
+    force = "f" in shorts or "--force" in rest
+    return "D" in shorts or (delete and force)
+
+
+def _injects_git_config(tokens: list[str]) -> str | None:
+    hit = next((t for t in tokens if _GIT_CONFIG_ENV.match(t)), None)
+    if hit is None:
+        return None
+    return f"git config injected via the environment ({hit.partition('=')[0]})"
+
+
+def _redirect_into_protected(tokens: list[str]) -> str | None:
+    """A shell redirection (``>``/``>>``/``&>``/``2>``...) whose target is ``.git``/``.lha``."""
+    for i, token in enumerate(tokens):
+        match = _REDIRECT.search(token)
+        if match is None:
+            continue
+        target = token[match.end() :] or (tokens[i + 1] if i + 1 < len(tokens) else "")
+        if target and _touches_protected(target):
+            return f"redirection writes a harness-owned path ({target!r})"
+    return None
+
+
+def _find_exec_commands(args: list[str]) -> list[list[str]]:
+    """The commands a ``find`` runs via ``-exec``/``-execdir``/``-ok``/``-okdir``."""
+    commands: list[list[str]] = []
+    i = 0
+    while i < len(args):
+        if args[i] in _FIND_EXEC:
+            end = i + 1
+            while end < len(args) and args[end] not in (";", "+", "\\;"):
+                end += 1
+            commands.append(args[i + 1 : end])
+            i = end
+        i += 1
+    return commands
+
+
+def _classify_httpie(args: list[str]) -> str | None:
+    if any(a in ("-f", "--form", "--multipart") or a.startswith("--raw") for a in args):
+        return "httpie request with a body"
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        if arg.upper() in _WRITE_METHODS:
+            return f"httpie {arg.upper()} request"
+        if "://" not in arg and _HTTPIE_DATA_ITEM.match(arg):
+            return f"httpie request with a body ({arg.split('=')[0]})"
     return None
 
 
@@ -560,6 +737,9 @@ def _sed_in_place(args: list[str]) -> bool:
 
 
 def _classify_simple(argv: list[str], depth: int) -> str | None:
+    injected = _injects_git_config(argv)
+    if injected:
+        return injected
     try:
         candidates = _unwrap(list(argv))
     except _Ambiguous as exc:
@@ -576,6 +756,8 @@ def _classify_one(argv: list[str], depth: int) -> str | None:
         return None
     tool, args = _base(argv[0]), argv[1:]
 
+    if "$" in argv[0]:
+        return "command name comes from a shell expansion (cannot classify)"
     if tool in _PRIV:
         return f"privilege escalation ({tool})"
     if tool in _SHELLS:
@@ -600,12 +782,22 @@ def _classify_one(argv: list[str], depth: int) -> str | None:
             tool in ("npm", "yarn", "pnpm")
             and subs[:1] == ["run"]
             and len(subs) > 1
-            and any(word in subs[1] for word in ("publish", "deploy", "release"))
+            and {"publish", "deploy", "release"}.intersection(re.split(r"[:._-]", subs[1]))
         ):
             return f"{tool} run {subs[1]} (publish / deploy script)"
         return None
     if tool in ("curl", "wget"):
         return _classify_http(tool, args)
+    if tool in _HTTPIE:
+        return _classify_httpie(args)
+    if tool == "find":
+        for command in _find_exec_commands(args):
+            reason = _classify_simple(command, depth)
+            if reason:
+                return reason
+        if "-delete" in args and any(_touches_protected(a) for a in args if a[:1] != "-"):
+            return "find -delete removes a harness-owned path"
+        return None
     if tool == "rsync":
         targets = [a for a in args if not a.startswith("-")]
         if any(":" in t.split("/", 1)[0] for t in targets):
@@ -712,6 +904,9 @@ def _classify_script(script: str, depth: int) -> str | None:
 
 def _classify_segment(segment: list[str], depth: int) -> str | None:
     """Drop leading reserved words (``{``, ``if``, ``do``...) and ``VAR=value`` prefixes."""
+    blocked = _injects_git_config(segment) or _redirect_into_protected(segment)
+    if blocked:
+        return blocked
     while segment and (segment[0] in _RESERVED_PREFIX or _is_assignment(segment[0])):
         segment = segment[1:]
     # Tokens glued to substitutions (``$(git``/```git``) were classified via ``_substitutions``.
