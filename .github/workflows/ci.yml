@@ -30,14 +30,18 @@ jobs:
         run: uv run ty check
 
       - name: Pytest (unit)
-        run: uv run pytest -q tests/unit
+        run: uv run pytest -q --cov --cov-report= tests/unit
 
       # Durability + load tests boot a Temporal time-skipping test server (a binary that
       # temporalio downloads on first use). They gate the build: the durability guarantees the
       # README claims are only claimed because this step passes.
       - name: Pytest (integration - Temporal test server)
-        run: uv run pytest -q tests/durability tests/load
+        run: uv run pytest -q --cov --cov-append --cov-report= tests/durability tests/load
         timeout-minutes: 12
+
+      # Unit + durability + load coverage, gated by fail_under in pyproject.toml (one floor).
+      - name: Coverage (floor)
+        run: uv run coverage report
 
   services-integration:
     # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker
