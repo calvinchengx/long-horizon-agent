@@ -1,0 +1,58 @@
+{
+ "genesis": "0000000000000000000000000000000000000000000000000000000000000000",
+ "chain": [
+  {
+   "record": {
+    "decision": "Use SQLite for the cache",
+    "rationale": "single node",
+    "affected": [
+     "db.py"
+    ]
+   },
+   "canonical": "{\"affected\":[\"db.py\"],\"decision\":\"Use SQLite for the cache\",\"rationale\":\"single node\"}",
+   "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+   "hash": "6a979529d5e37b899265ad1c9a0ff72e558dc693203e04d3ca0625cacb015f31"
+  },
+  {
+   "record": {
+    "decision": "Ünïcödé ✓ <tag> & \"quotes\"",
+    "rationale": "line\nbreak sep"
+   },
+   "canonical": "{\"decision\":\"Ünïcödé ✓ <tag> & \\\"quotes\\\"\",\"rationale\":\"line\\nbreak sep\"}",
+   "prev": "6a979529d5e37b899265ad1c9a0ff72e558dc693203e04d3ca0625cacb015f31",
+   "hash": "1260dfb09d9bc68093e9cef2908608f8bbfb2961befb564b9208fc4e7f1896a1"
+  },
+  {
+   "record": {
+    "decision": "numbers",
+    "rationale": "types",
+    "n": 3,
+    "f": 1.5,
+    "z": 0.0,
+    "b": true
+   },
+   "canonical": "{\"b\":true,\"decision\":\"numbers\",\"f\":1.5,\"n\":3,\"rationale\":\"types\",\"z\":0.0}",
+   "prev": "1260dfb09d9bc68093e9cef2908608f8bbfb2961befb564b9208fc4e7f1896a1",
+   "hash": "bc1041cd02dd5c3aa1b1bc460dcc01fd957c2217a24a274ca6037e76f6969d60"
+  },
+  {
+   "record": {
+    "nested": {
+     "b": [
+      1,
+      2,
+      {
+       "a": null
+      }
+     ],
+     "a": "x"
+    },
+    "decision": "d",
+    "rationale": "r"
+   },
+   "canonical": "{\"decision\":\"d\",\"nested\":{\"a\":\"x\",\"b\":[1,2,{\"a\":null}]},\"rationale\":\"r\"}",
+   "prev": "bc1041cd02dd5c3aa1b1bc460dcc01fd957c2217a24a274ca6037e76f6969d60",
+   "hash": "304a5bd124bd9281e4095b286cb0aaa594ab1e6b02646d22764e849c48d1f167"
+  }
+ ]
+}

@@ -1,0 +1,76 @@
+{
+ "cases": [
+  {
+   "path": "tests/test_a.py",
+   "harness": true
+  },
+  {
+   "path": "test/helpers.py",
+   "harness": true
+  },
+  {
+   "path": "src/pkg/tests/test_a.py",
+   "harness": true
+  },
+  {
+   "path": "test_app.py",
+   "harness": true
+  },
+  {
+   "path": "pkg/test_models.py",
+   "harness": true
+  },
+  {
+   "path": "pkg/models_test.py",
+   "harness": true
+  },
+  {
+   "path": "conftest.py",
+   "harness": true
+  },
+  {
+   "path": "src/conftest.py",
+   "harness": true
+  },
+  {
+   "path": "pyproject.toml",
+   "harness": true
+  },
+  {
+   "path": "setup.cfg",
+   "harness": true
+  },
+  {
+   "path": ".coveragerc",
+   "harness": true
+  },
+  {
+   "path": "tox.ini",
+   "harness": true
+  },
+  {
+   "path": "sub/pytest.ini",
+   "harness": true
+  },
+  {
+   "path": "noxfile.py",
+   "harness": true
+  },
+  {
+   "path": "src/app.py",
+   "harness": false
+  },
+  {
+   "path": "src/contest.py",
+   "harness": false
+  },
+  {
+   "path": "docs/tests.md",
+   "harness": false
+  },
+  {
+   "path": "latest_results.py",
+   "harness": false
+  }
+ ]
+}

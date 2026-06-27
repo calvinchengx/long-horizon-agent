@@ -1,0 +1,150 @@
+{
+ "redact_text": [
+  {
+   "text": "key sk-ant-abcdefghijklmnop1234 here",
+   "redacted": "key *** here"
+  },
+  {
+   "text": "token ghp_abcdefghijklmnopqrstuvwxyz0123",
+   "redacted": "token ***"
+  },
+  {
+   "text": "github_pat_11ABCDEFGHIJKLMNOPQRST_abcdefghij",
+   "redacted": "***"
+  },
+  {
+   "text": "slack xoxb-1234567890-abcdefghij",
+   "redacted": "slack ***"
+  },
+  {
+   "text": "aws AKIAABCDEFGHIJKLMNOP done",
+   "redacted": "aws *** done"
+  },
+  {
+   "text": "google AIzaSyA1234567890abcdefghijklmnopqrstu",
+   "redacted": "google ***"
+  },
+  {
+   "text": "Authorization: Bearer abc.def.ghi",
+   "redacted": "Authorization: Bearer ***"
+  },
+  {
+   "text": "authorization=Basic dXNlcjpwYXNz",
+   "redacted": "authorization=Basic ***"
+  },
+  {
+   "text": "curl -H 'Authorization: Token t0ps3cret'",
+   "redacted": "curl -H 'Authorization: Token ***'"
+  },
+  {
+   "text": "bearer xyz123==",
+   "redacted": "bearer ***"
+  },
+  {
+   "text": "postgresql://lha:secretpw@db:5432/lha",
+   "redacted": "postgresql://lha:***@db:5432/lha"
+  },
+  {
+   "text": "redis://:hunter2secret@localhost:6379/0",
+   "redacted": "redis://:***@localhost:6379/0"
+  },
+  {
+   "text": "postgresql://u:p@ss@host/db",
+   "redacted": "postgresql://u:***@host/db"
+  },
+  {
+   "text": "https://example.com/path?q=1",
+   "redacted": "https://example.com/path?q=1"
+  },
+  {
+   "text": "plain text with no secrets",
+   "redacted": "plain text with no secrets"
+  },
+  {
+   "text": "x_sk-abcdefghijklmnopqrst",
+   "redacted": "x_***"
+  }
+ ],
+ "is_secret_key": [
+  {
+   "key": "api_key",
+   "secret": true
+  },
+  {
+   "key": "ANTHROPIC_API_KEY",
+   "secret": true
+  },
+  {
+   "key": "password",
+   "secret": true
+  },
+  {
+   "key": "db_password",
+   "secret": true
+  },
+  {
+   "key": "secret",
+   "secret": true
+  },
+  {
+   "key": "client_secret",
+   "secret": true
+  },
+  {
+   "key": "token",
+   "secret": true
+  },
+  {
+   "key": "access_token",
+   "secret": true
+  },
+  {
+   "key": "accessToken",
+   "secret": true
+  },
+  {
+   "key": "refreshToken",
+   "secret": true
+  },
+  {
+   "key": "sessionToken",
+   "secret": true
+  },
+  {
+   "key": "auth",
+   "secret": true
+  },
+  {
+   "key": "authorization",
+   "secret": true
+  },
+  {
+   "key": "dsn",
+   "secret": true
+  },
+  {
+   "key": "postgres_dsn",
+   "secret": true
+  },
+  {
+   "key": "tokens_used",
+   "secret": false
+  },
+  {
+   "key": "input_tokens",
+   "secret": false
+  },
+  {
+   "key": "author",
+   "secret": false
+  },
+  {
+   "key": "name",
+   "secret": false
+  },
+  {
+   "key": "private_key",
+   "secret": true
+  }
+ ]
+}

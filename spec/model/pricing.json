@@ -1,0 +1,278 @@
+{
+ "claude": [
+  {
+   "model": "claude-opus-4-8",
+   "priced": true,
+   "costs": [
+    {
+     "usage": {
+      "input_tokens": 1000000,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 5.0
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 1000000,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 25.0
+    },
+    {
+     "usage": {
+      "input_tokens": 1234,
+      "output_tokens": 567,
+      "cache_read_input_tokens": 10000,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.025345
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 100000,
+      "cache_creation_1h_input_tokens": 40000,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.775
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 10,
+      "cache_creation_1h_input_tokens": 50,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.0001
+    }
+   ]
+  },
+  {
+   "model": "claude-sonnet-4-6",
+   "priced": true,
+   "costs": [
+    {
+     "usage": {
+      "input_tokens": 1000000,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 3.0
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 1000000,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 15.0
+    },
+    {
+     "usage": {
+      "input_tokens": 1234,
+      "output_tokens": 567,
+      "cache_read_input_tokens": 10000,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.015207
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 100000,
+      "cache_creation_1h_input_tokens": 40000,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.46499999999999997
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 10,
+      "cache_creation_1h_input_tokens": 50,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 6.000000000000001e-05
+    }
+   ]
+  },
+  {
+   "model": "claude-haiku-4-5",
+   "priced": true,
+   "costs": [
+    {
+     "usage": {
+      "input_tokens": 1000000,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 1.0
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 1000000,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 5.0
+    },
+    {
+     "usage": {
+      "input_tokens": 1234,
+      "output_tokens": 567,
+      "cache_read_input_tokens": 10000,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.005069
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 100000,
+      "cache_creation_1h_input_tokens": 40000,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.155
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 10,
+      "cache_creation_1h_input_tokens": 50,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 2e-05
+    }
+   ]
+  },
+  {
+   "model": "claude-haiku-4-5-20251001",
+   "priced": true,
+   "costs": [
+    {
+     "usage": {
+      "input_tokens": 1000000,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 1.0
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 1000000,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 5.0
+    },
+    {
+     "usage": {
+      "input_tokens": 1234,
+      "output_tokens": 567,
+      "cache_read_input_tokens": 10000,
+      "cache_creation_input_tokens": 0,
+      "cache_creation_1h_input_tokens": 0,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.005069
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 100000,
+      "cache_creation_1h_input_tokens": 40000,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 0.155
+    },
+    {
+     "usage": {
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation_input_tokens": 10,
+      "cache_creation_1h_input_tokens": 50,
+      "model": "",
+      "provider": ""
+     },
+     "usd": 2e-05
+    }
+   ]
+  },
+  {
+   "model": "claude-imaginary-9",
+   "priced": false,
+   "costs": []
+  },
+  {
+   "model": "gpt-4o",
+   "priced": false,
+   "costs": []
+  }
+ ]
+}

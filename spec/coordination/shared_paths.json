@@ -1,0 +1,52 @@
+{
+ "cases": [
+  {
+   "path": "pyproject.toml",
+   "shared": true
+  },
+  {
+   "path": "uv.lock",
+   "shared": true
+  },
+  {
+   "path": "package.json",
+   "shared": true
+  },
+  {
+   "path": "go.mod",
+   "shared": true
+  },
+  {
+   "path": "services/api/pyproject.toml",
+   "shared": true
+  },
+  {
+   "path": "./uv.lock",
+   "shared": true
+  },
+  {
+   "path": "app/db/migrations/0001_init.py",
+   "shared": true
+  },
+  {
+   "path": "src/pkg/a.py",
+   "shared": false
+  },
+  {
+   "path": "README.md",
+   "shared": false
+  },
+  {
+   "path": ".github/workflows/ci.yml",
+   "shared": false
+  },
+  {
+   "path": "Dockerfile",
+   "shared": false
+  },
+  {
+   "path": "src/__init__.py",
+   "shared": true
+  }
+ ]
+}

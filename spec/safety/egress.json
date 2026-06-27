@@ -1,0 +1,280 @@
+{
+ "normalize_host": [
+  {
+   "host": "Example.COM",
+   "normalized": "example.com"
+  },
+  {
+   "host": "example.com.",
+   "normalized": "example.com"
+  },
+  {
+   "host": "[::1]",
+   "normalized": "::1"
+  },
+  {
+   "host": "bücher.example",
+   "normalized": "xn--bcher-kva.example"
+  },
+  {
+   "host": "straße.de",
+   "normalized": "xn--strae-oqa.de"
+  },
+  {
+   "host": "xn--bcher-kva.example",
+   "normalized": "xn--bcher-kva.example"
+  },
+  {
+   "host": "  spaced.example  ",
+   "normalized": "spaced.example"
+  },
+  {
+   "host": "127.0.0.1",
+   "normalized": "127.0.0.1"
+  },
+  {
+   "host": "",
+   "normalized": ""
+  }
+ ],
+ "parse_url": [
+  {
+   "url": "https://docs.example.com/x",
+   "ok": true,
+   "scheme": "https",
+   "host": "docs.example.com",
+   "port": 443
+  },
+  {
+   "url": "http://docs.example.com:80/x",
+   "ok": true,
+   "scheme": "http",
+   "host": "docs.example.com",
+   "port": 80
+  },
+  {
+   "url": "https://DOCS.EXAMPLE.COM./x",
+   "ok": true,
+   "scheme": "https",
+   "host": "docs.example.com",
+   "port": 443
+  },
+  {
+   "url": "https://docs.example.com:8443/x",
+   "ok": true,
+   "scheme": "https",
+   "host": "docs.example.com",
+   "port": 8443
+  },
+  {
+   "url": "ftp://docs.example.com/x",
+   "ok": false
+  },
+  {
+   "url": "https://user:pw@docs.example.com/x",
+   "ok": false
+  },
+  {
+   "url": "https://straße.de/x",
+   "ok": false
+  },
+  {
+   "url": "https://bücher.example/x",
+   "ok": true,
+   "scheme": "https",
+   "host": "xn--bcher-kva.example",
+   "port": 443
+  },
+  {
+   "url": "https:///nohost",
+   "ok": false
+  },
+  {
+   "url": "https://docs.example.com:99999/x",
+   "ok": false
+  },
+  {
+   "url": "http://[::1]:8080/x",
+   "ok": true,
+   "scheme": "http",
+   "host": "::1",
+   "port": 8080
+  },
+  {
+   "url": "not a url",
+   "ok": false
+  }
+ ],
+ "is_public_address": [
+  {
+   "address": "127.0.0.1",
+   "public": false
+  },
+  {
+   "address": "10.1.2.3",
+   "public": false
+  },
+  {
+   "address": "172.16.0.1",
+   "public": false
+  },
+  {
+   "address": "192.168.1.1",
+   "public": false
+  },
+  {
+   "address": "169.254.169.254",
+   "public": false
+  },
+  {
+   "address": "::1",
+   "public": false
+  },
+  {
+   "address": "::ffff:127.0.0.1",
+   "public": false
+  },
+  {
+   "address": "0.0.0.0",
+   "public": false
+  },
+  {
+   "address": "100.64.0.1",
+   "public": false
+  },
+  {
+   "address": "fc00::1",
+   "public": false
+  },
+  {
+   "address": "fe80::1",
+   "public": false
+  },
+  {
+   "address": "93.184.216.34",
+   "public": true
+  },
+  {
+   "address": "8.8.8.8",
+   "public": true
+  },
+  {
+   "address": "2606:4700:4700::1111",
+   "public": true
+  },
+  {
+   "address": "not-an-ip",
+   "public": false
+  }
+ ],
+ "permits": [
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://docs.example.com/x",
+   "permitted": true
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "http://docs.example.com:80/x",
+   "permitted": true
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://DOCS.EXAMPLE.COM./x",
+   "permitted": true
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://docs.example.com:8443/x",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "ftp://docs.example.com/x",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://user:pw@docs.example.com/x",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://straße.de/x",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://bücher.example/x",
+   "permitted": true
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https:///nohost",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "https://docs.example.com:99999/x",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "http://[::1]:8080/x",
+   "permitted": false
+  },
+  {
+   "allow_hosts": [
+    "docs.example.com",
+    "strasse.de",
+    "xn--bcher-kva.example"
+   ],
+   "url": "not a url",
+   "permitted": false
+  }
+ ]
+}
