@@ -20,6 +20,10 @@ Harness truth (the agent can never write its own verdict):
     unresolvable witness is a failing check, never a skipped one.
   * With a ``replanner``, a newly blocked item is split into smaller children (bounded by
     ``max_replans`` per mission and ``max_split_depth``); the parent's witnesses gate the last one.
+  * A FAILED attempt's code is never committed to the mission's branch: its work tree is saved as
+    ``refs/lha/attempts/<mission>/<cycle>`` and the checkout returns to the last verified state,
+    so the next attempt starts clean (it is told what was rolled back and where it is kept). Only
+    the anchor (checklist, progress, events: the failure record) is committed.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from lha.contracts.verify import (
     ensure_unique_check_names,
 )
 from lha.obs.events import TraceRecorder
+from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.harness_integrity import (
     HarnessSnapshot,
@@ -50,6 +55,7 @@ from lha.verify.harness_integrity import (
     snapshot_harness,
     violated_paths,
 )
+from lha.verify.trusted import candidate_commit
 from lha.verify.witnesses import parse_witness
 
 if TYPE_CHECKING:
@@ -291,7 +297,7 @@ class AgentLoop:
 
         mission_text = mission.render_anchor() if mission else snapshot.anchor_text()
         head = await self._checkpoint(
-            checklist, item, cycle_id, verification, tool_calls, mission_text
+            checklist, item, cycle_id, verification, tool_calls, mission_text, mission_id
         )
         self._emit(
             "checkpoint",
@@ -405,19 +411,26 @@ class AgentLoop:
         verification: VerificationResult,
         tool_calls: int,
         mission_text: str = "",
+        mission_id: str = "",
     ) -> str:
         split_into: list[str] = []
+        rolled_back: list[str] = []
         if verification.all_green:
             checklist.record_success(
                 item.id, [r.name for r in verification.results if r.gating and r.passed]
             )
             verb, note = "complete", "verified"
         else:
-            checklist.record_failure(
-                item.id,
-                verification.failure_report(),
-                max_consecutive_failures=self._max_failures,
-            )
+            ref = f"refs/lha/attempts/{mission_id or 'mission'}/{cycle_id}"
+            rolled_back = await asyncio.to_thread(self._roll_back_attempt, ref)
+            report = verification.failure_report()
+            if rolled_back:
+                shown = ", ".join(rolled_back[:20]) + (" ..." if len(rolled_back) > 20 else "")
+                report += (
+                    "\n\nThis attempt's changes were rolled back to the last verified state "
+                    f"(kept at {ref}): {shown}. Start again from the committed code."
+                )
+            checklist.record_failure(item.id, report, max_consecutive_failures=self._max_failures)
             verb = "block" if item.status == "blocked" else "attempt"
             note = f"{verification.verdict} (attempt {item.attempts}, status {item.status})"
             if item.status == "blocked":
@@ -441,6 +454,7 @@ class AgentLoop:
                             "status": item.status,
                             "tool_calls": tool_calls,
                             "split_into": split_into,
+                            "rolled_back": rolled_back,
                             "checks": [
                                 {
                                     "name": r.name,
@@ -457,6 +471,26 @@ class AgentLoop:
                 commit_message=f"lha: {verb} {item.id} ({item.description})",
             )
         )
+
+    def _roll_back_attempt(self, ref: str) -> list[str]:
+        """Save the work tree under ``ref`` and restore HEAD; return the files that changed.
+
+        Anchor files are excluded from the list (the checkpoint rewrites them anyway).
+        """
+        workdir = self._anchor.workdir
+        snapshot = candidate_commit(workdir, message=f"lha: failed attempt ({ref})")
+        changed = [
+            path
+            for path in git_ops.run_git(
+                workdir, "diff", "--name-only", "HEAD", snapshot
+            ).splitlines()
+            if path and not path.startswith(".lha/")
+        ]
+        if not changed:
+            return []
+        git_ops.run_git(workdir, "update-ref", ref, snapshot)
+        git_ops.discard_changes(workdir)
+        return changed
 
     async def _maybe_split(
         self, checklist: Checklist, item: ChecklistItem, mission_text: str
