@@ -13,15 +13,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lha.agent.loop import AgentLoop
+from lha.agent.assembly import build_lead_loop, open_lead_sandbox
 from lha.agents.planner import Planner
 from lha.config import Settings, get_settings
+from lha.contracts.hitl import HITLGate
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checklist
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check
 from lha.execution.dispatcher import AllowListDispatcher
-from lha.execution.factory import open_sandbox
 from lha.execution.tools import default_local_tools
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor, LoopDetector
@@ -30,7 +30,7 @@ from lha.ids import new_id
 from lha.model import build_provider
 from lha.obs.events import TraceRecorder, configure_logging
 from lha.state.mission_anchor import GitMissionAnchor
-from lha.verify.verifier import DeterministicVerifier, default_python_checks
+from lha.verify.verifier import default_python_checks
 
 
 @dataclass
@@ -90,24 +90,25 @@ async def run_mission_local(
     allow_egress: bool = False,
     meter: CostMeter | None = None,
     model: ModelProvider | None = None,
+    gate: HITLGate | None = None,
+    references: list[str] | None = None,
 ) -> MissionSummary:
     """Initialize the anchor and run cycles until done / deadlocked / over-budget / looping.
 
     ``checks``: the gating verification checks (``None`` => ``default_python_checks()``; an item
     is never marked done without at least one gating check). ``meter``: share one budget/ledger
     with other callers (e.g. the Planner). ``model``: override the lead provider (it is wrapped
-    with the meter either way).
+    with the meter either way). ``gate``: where irreversible commands go for a human decision
+    (``None`` denies them). ``references``: vendored reference paths recited every cycle.
     """
     settings = settings or get_settings()
     configure_logging()
     recorder = TraceRecorder()
     meter = meter or build_meter(settings)
     loop_detector = LoopDetector(threshold=settings.stall_limit)
-    gate = default_python_checks() if checks is None else checks
+    mission_checks = default_python_checks() if checks is None else checks
 
-    session = await open_sandbox(
-        settings.sandbox, workdir=workdir, allow_unsafe_local=settings.allow_unsafe_local
-    )
+    session = await open_lead_sandbox(settings, workdir)
     mission_id = new_id("mission")
     cycles = 0
     last_head = ""
@@ -118,14 +119,20 @@ async def run_mission_local(
         if model is None:
             model = owned_model = build_provider(settings)
         anchor = GitMissionAnchor(workdir)
-        await anchor.initialize(title=title, description=description, items=checklist)
-        loop = AgentLoop(
+        await anchor.initialize(
+            title=title, description=description, items=checklist, references=references
+        )
+        if allow_egress and not settings.web_hosts():
+            raise ValueError(
+                "allow_egress needs LHA_WEB_ALLOW_HOSTS (the hosts fetch_url may read)"
+            )
+        loop = build_lead_loop(
+            settings,
             model=meter.wrap(model, role="lead"),
-            dispatcher=full_access_dispatcher(allow_egress=allow_egress),
-            verifier=DeterministicVerifier(),
             anchor=anchor,
+            workdir=workdir,
+            gate=gate,
             recorder=recorder,
-            max_turns=settings.max_turns_per_cycle,
         )
         ctx = ToolContext(mission_id=mission_id, session=session)
 
@@ -143,7 +150,7 @@ async def run_mission_local(
                     mission_id=mission_id,
                     cycle_id=meter.cycle_id,
                     anchor_text=anchor_text,
-                    checks=gate,
+                    checks=mission_checks,
                 )
             except BudgetExceeded as exc:
                 recorder.record("governor_block", mission_id=mission_id, reason=str(exc))
@@ -175,13 +182,12 @@ async def run_mission_local(
             await session.close()
         finally:
             await aclose_provider(owned_model)
-    items_done = sum(1 for item in final.items if item.status == "done")
     return MissionSummary(
         mission_id=mission_id,
-        completed=bool(final.items) and items_done == len(final.items),
+        completed=final.is_complete,
         cycles=cycles,
-        items_done=items_done,
-        items_total=len(final.items),
+        items_done=final.items_done,
+        items_total=final.items_total,
         total_usd=meter.ledger.total_usd,
         head_sha=last_head,
         stopped_reason=stopped,
@@ -198,6 +204,8 @@ async def plan_and_run_local(
     settings: Settings | None = None,
     allow_egress: bool = False,
     meter: CostMeter | None = None,
+    gate: HITLGate | None = None,
+    references: list[str] | None = None,
 ) -> MissionSummary:
     """Mission intake → execution: the Planner decomposes ``task`` into a checklist, then run it.
 
@@ -222,4 +230,6 @@ async def plan_and_run_local(
         settings=settings,
         allow_egress=allow_egress,
         meter=meter,
+        gate=gate,
+        references=references,
     )

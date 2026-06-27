@@ -139,7 +139,8 @@ def test_db_migrate_applies_with_dsn(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "lha.persistence.db", fake)
     result = runner.invoke(cli.app, ["db", "migrate"])
     assert result.exit_code == 0, result.output
-    assert calls == [("postgresql://u:p@h/db", "db/migrations")]
+    # Run from python/, the default finds the repo's shared ../db/migrations.
+    assert calls == [("postgresql://u:p@h/db", "../db/migrations")]
     assert "postgresql://" not in result.output
 
 

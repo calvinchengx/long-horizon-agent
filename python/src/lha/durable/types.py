@@ -28,6 +28,24 @@ ERROR_CONFIG = "MissionConfigError"
 
 
 @dataclass
+class PendingApproval:
+    """An irreversible tool call the agent attempted that needs a human decision."""
+
+    fingerprint: str
+    tool: str
+    reason: str
+    arguments: str = ""
+
+
+@dataclass
+class ApprovedAction:
+    """A human-approved tool call (by fingerprint), allowed once in a later cycle."""
+
+    fingerprint: str
+    summary: str
+
+
+@dataclass
 class MissionState:
     """State carried across Continue-As-New (pointers + small counters only — never history)."""
 
@@ -46,6 +64,9 @@ class MissionState:
     parks: int = 0
     # How many times a human chose to retry blocked items after a deadlock.
     deadlock_retries: int = 0
+    # Human-approved irreversible actions not yet used, and fingerprints a human rejected.
+    approved_actions: list[ApprovedAction] = field(default_factory=list)
+    rejected_actions: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -70,6 +91,8 @@ class MissionInput:
     # On deadlock (blocked items), wait this long for a human "retry"/"abort" decision; 0 = report
     # the deadlock immediately.
     deadlock_gate_seconds: int = 0
+    # How long to wait for a human to approve/reject an irreversible action before rejecting it.
+    approval_timeout_seconds: int = 86_400
     # Carried across Continue-As-New; ``None`` on the first run.
     state: MissionState | None = None
 
@@ -85,6 +108,7 @@ class CycleInput:
     budget_usd: float | None = None
     max_cycles: int = 1000
     steer_notes: list[str] = field(default_factory=list)
+    approved_actions: list[ApprovedAction] = field(default_factory=list)
 
 
 @dataclass
@@ -107,6 +131,10 @@ class CycleResult:
     item_blocked: bool = False
     reason: str = ""
     spent_usd: float = 0.0
+    item_split: bool = False
+    # Irreversible actions the agent attempted this cycle (need a human), and approvals it used.
+    pending_approvals: list[PendingApproval] = field(default_factory=list)
+    used_approvals: list[str] = field(default_factory=list)
 
 
 @dataclass

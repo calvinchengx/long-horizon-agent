@@ -22,6 +22,7 @@ from lha.contracts.hitl import GateDecision, GateRequest, HITLGate, RiskTier
 from lha.contracts.model import ToolCall
 from lha.contracts.tools import Tool, ToolContext, ToolResult, ToolSpec
 from lha.execution.paths import PathEscapeError, is_protected, is_protected_resolved
+from lha.hitl.approvals import PENDING, action_fingerprint
 from lha.safety.commands import classify_command
 from lha.safety.rule_of_two import Capability, check_rule_of_two, permits
 
@@ -169,12 +170,23 @@ class AllowListDispatcher:
             question=f"Allow {call.name!r}? {reason}",
             risk=RiskTier.IRREVERSIBLE,
             default_action=GateDecision.REJECT,
-            context={"tool": call.name, "arguments": repr(call.arguments)[:2000], "reason": reason},
+            context={
+                "tool": call.name,
+                "arguments": repr(call.arguments)[:2000],
+                "reason": reason,
+                "fingerprint": action_fingerprint(call.name, call.arguments),
+            },
         )
         try:
             resolution = await self._gate.request(request)
         except Exception as exc:
             return f"irreversible action denied (gate error: {type(exc).__name__}): {reason}"
+        if resolution.resolved_by == PENDING:
+            return (
+                f"queued for human approval: {reason}. It is NOT done. An operator will be asked; "
+                "if approved, this exact call is allowed in a later cycle. Continue with other "
+                "work meanwhile and do not try to work around the gate."
+            )
         if resolution.decision is not GateDecision.APPROVE:
             how = "by default" if resolution.defaulted else f"by {resolution.resolved_by or 'gate'}"
             return f"irreversible action denied ({resolution.decision.value} {how}): {reason}"

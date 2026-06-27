@@ -23,20 +23,19 @@ import contextlib
 
 import httpx
 
-from lha.agent.loop import AgentLoop
-from lha.agent.runner import MissionSummary, build_meter, full_access_dispatcher
+from lha.agent.assembly import build_lead_loop, lead_tools, open_lead_sandbox
+from lha.agent.runner import MissionSummary, build_meter
 from lha.agents.reflection import reflect_on_failure
 from lha.agents.reviewer import Reviewer, ReviewResult
 from lha.agents.router import model_for_role
 from lha.agents.team import research_fanout
 from lha.config import Settings, get_settings
+from lha.contracts.hitl import HITLGate
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checklist, Checkpoint
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check
 from lha.execution.dispatcher import AllowListDispatcher
-from lha.execution.factory import open_sandbox
-from lha.execution.tools import default_local_tools
 from lha.governor.governor import LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import new_id
@@ -44,7 +43,7 @@ from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import agent_span
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
-from lha.verify.verifier import DeterministicVerifier, default_python_checks
+from lha.verify.verifier import default_python_checks
 
 _ROLES = ("lead", "researcher", "reviewer")
 _REVIEW_DIFF_CAP = 20_000
@@ -90,6 +89,8 @@ class Orchestrator:
         checklist: Checklist,
         checks: list[Check] | None = None,
         allow_egress: bool = False,
+        gate: HITLGate | None = None,
+        references: list[str] | None = None,
     ) -> MissionSummary:
         """Run the org until complete / deadlocked / over-budget / looping.
 
@@ -101,18 +102,18 @@ class Orchestrator:
         recorder = TraceRecorder()
         meter = self._meter or build_meter(settings)
         loop_detector = LoopDetector(threshold=settings.stall_limit)
-        gate = default_python_checks() if checks is None else checks
+        mission_checks = default_python_checks() if checks is None else checks
 
         # The sandbox session and one shared HTTP pool for every role's provider are both closed
         # when the mission ends, however it ends.
         async with contextlib.AsyncExitStack() as stack:
-            session = await open_sandbox(
-                settings.sandbox, workdir=workdir, allow_unsafe_local=settings.allow_unsafe_local
-            )
+            session = await open_lead_sandbox(settings, workdir)
             stack.push_async_callback(session.close)
             http = await stack.enter_async_context(httpx.AsyncClient(timeout=300.0))
             anchor = GitMissionAnchor(workdir)
-            await anchor.initialize(title=title, description=description, items=checklist)
+            await anchor.initialize(
+                title=title, description=description, items=checklist, references=references
+            )
             raw = {
                 role: self._models.get(role) or model_for_role(role, settings, client=http)
                 for role in _ROLES
@@ -122,17 +123,17 @@ class Orchestrator:
             review_model = meter.wrap(raw["reviewer"], role="reviewer")
             reflection_model = meter.wrap(raw["lead"], role="reflection")
 
-            write_tools = full_access_dispatcher(allow_egress=allow_egress)
+            web = bool(settings.web_hosts())
             read_tools = AllowListDispatcher.for_tools(
-                default_local_tools(), allow_mutating=False, allow_egress=allow_egress
+                lead_tools(settings), allow_mutating=False, allow_egress=allow_egress and web
             )
-            lead = AgentLoop(
+            lead = build_lead_loop(
+                settings,
                 model=lead_model,
-                dispatcher=write_tools,
-                verifier=DeterministicVerifier(),
                 anchor=anchor,
+                workdir=workdir,
+                gate=gate,
                 recorder=recorder,
-                max_turns=settings.max_turns_per_cycle,
             )
             reviewer = Reviewer(review_model, read_tools)
 
@@ -205,7 +206,7 @@ class Orchestrator:
                             mission_id=mission_id,
                             cycle_id=cycle_id,
                             anchor_text=anchor_text,
-                            checks=gate,
+                            checks=mission_checks,
                         )
                     if not outcome.advanced:  # nothing actionable after all
                         stopped = f"deadlocked: {outcome.reason or 'no actionable item'}"
@@ -272,13 +273,12 @@ class Orchestrator:
                 stopped = f"governor: {exc.decision.reason}"
 
             final = await anchor.read_checklist()
-        items_done = sum(1 for i in final.items if i.status == "done")
         return MissionSummary(
             mission_id=mission_id,
-            completed=bool(final.items) and items_done == len(final.items),
+            completed=final.is_complete,
             cycles=cycles,
-            items_done=items_done,
-            items_total=len(final.items),
+            items_done=final.items_done,
+            items_total=final.items_total,
             total_usd=meter.ledger.total_usd,
             head_sha=last_head,
             stopped_reason=stopped,

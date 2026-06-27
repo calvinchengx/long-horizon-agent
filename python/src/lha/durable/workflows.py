@@ -57,6 +57,7 @@ from lha.durable.types import (
     OUTCOME_COMPLETED,
     OUTCOME_DEADLOCKED,
     OUTCOME_MAX_CYCLES,
+    ApprovedAction,
     CycleInput,
     CycleResult,
     HealthInput,
@@ -81,6 +82,7 @@ _SHORT_RETRY = RetryPolicy(maximum_attempts=3)
 MAX_STEER_NOTES = 20
 MAX_STEER_CHARS = 2000
 DEADLOCK_OPTIONS = ("retry", "abort")
+APPROVAL_OPTIONS = ("approve", "reject")
 
 _TERMINAL_STATUS = {
     OUTCOME_COMPLETED: STATUS_DONE,
@@ -110,6 +112,7 @@ class MissionWorkflow:
         self._state = MissionState()
         self._park_reason = ""
         self._rejected_decisions: list[str] = []
+        self._open_question = ""
 
     @workflow.run
     async def run(self, inp: MissionInput) -> MissionResult:
@@ -146,6 +149,7 @@ class MissionWorkflow:
                         budget_usd=inp.budget_usd,
                         max_cycles=inp.max_cycles,
                         steer_notes=list(state.steer_notes),
+                        approved_actions=list(state.approved_actions),
                     ),
                     start_to_close_timeout=CYCLE_START_TO_CLOSE,
                     heartbeat_timeout=CYCLE_HEARTBEAT_TIMEOUT,
@@ -169,6 +173,7 @@ class MissionWorkflow:
 
             state.cycles_done += 1
             self._absorb(result)
+            await self._resolve_approvals(inp, result)
 
             if result.is_complete:
                 return await self._terminal(inp, OUTCOME_COMPLETED)
@@ -192,6 +197,35 @@ class MissionWorkflow:
         state.items_total = result.items_total
         if result.item_id is not None:
             state.last_item = result.item_id
+
+    async def _resolve_approvals(self, inp: MissionInput, result: CycleResult) -> None:
+        """Ask a human about each irreversible action the cycle attempted (durably, one by one).
+
+        Approved actions are passed to the following cycles and allowed ONCE (by fingerprint);
+        rejected ones are remembered so the same request is not asked again.
+        """
+        state = self._state
+        used = set(result.used_approvals)
+        state.approved_actions = [a for a in state.approved_actions if a.fingerprint not in used]
+        known = {a.fingerprint for a in state.approved_actions} | set(state.rejected_actions)
+        for req in result.pending_approvals:
+            if req.fingerprint in known:
+                continue
+            known.add(req.fingerprint)
+            summary = f"{req.tool} {req.arguments}".strip()
+            decision = await self.await_human_gate(
+                question=(
+                    f"Mission {inp.mission_id} wants to run an irreversible action: {summary} "
+                    f"({req.reason}). Approve or reject?"
+                ),
+                options=list(APPROVAL_OPTIONS),
+                default_action="reject",
+                timeout_seconds=inp.approval_timeout_seconds,
+            )
+            if decision == "approve":
+                state.approved_actions.append(ApprovedAction(req.fingerprint, summary[:500]))
+            else:
+                state.rejected_actions.append(req.fingerprint)
 
     def _maybe_continue_as_new(self, inp: MissionInput) -> None:
         if workflow.info().is_continue_as_new_suggested():
@@ -292,6 +326,11 @@ class MissionWorkflow:
         return self._park_reason
 
     @workflow.query
+    def open_question(self) -> str:
+        """The question an open human gate is waiting on ('' when none is open)."""
+        return self._open_question
+
+    @workflow.query
     def rejected_decisions(self) -> list[str]:
         """Human decisions that were discarded because they matched no offered option."""
         return list(self._rejected_decisions)
@@ -337,6 +376,7 @@ class MissionWorkflow:
         state = self._state
         previous = state.status
         state.status = STATUS_WAITING_ON_HUMAN
+        self._open_question = f"{question} [{' / '.join(options)}]"
         deadline = workflow.now() + timedelta(seconds=timeout_seconds)
         try:
             while True:
@@ -360,3 +400,4 @@ class MissionWorkflow:
                     return allowed[default_action.strip().lower()]
         finally:
             state.status = previous
+            self._open_question = ""
