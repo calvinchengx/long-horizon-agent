@@ -4,7 +4,7 @@ Every model call in LHA goes through one interface, `ModelProvider`
 ([`contracts/model.py`](../python/src/lha/contracts/model.py)). `build_provider` in
 [`model/__init__.py`](../python/src/lha/model/__init__.py) is the only place a concrete backend is
 chosen, from `LHA_MODEL_BACKEND` (plus an optional fallback chain, see
-[Failover](#retries-and-failover)). Four backends exist:
+[Failover](#retries-and-failover)). Five backends exist:
 
 | `LHA_MODEL_BACKEND` | Class | Transport | Cost source |
 |---|---|---|---|
@@ -12,6 +12,7 @@ chosen, from `LHA_MODEL_BACKEND` (plus an optional fallback chain, see
 | `ollama` | `OpenAICompatModel` (label `ollama`) | `POST {LHA_OLLAMA_BASE_URL}/v1/chat/completions` | fixed `$0` |
 | `openai_compat` | `OpenAICompatModel` | `POST {LHA_OPENAI_BASE_URL}/chat/completions` | `LHA_OPENAI_PRICE_*`; unknown if unset |
 | `claude` | `ClaudeModel` | `POST https://api.anthropic.com/v1/messages` | built-in table, or `LHA_CLAUDE_PRICE_*` |
+| `claude_code` | `ClaudeCodeModel` | the `claude -p` CLI (Claude Code) | the `total_cost_usd` Claude Code reports |
 
 Every provider is wrapped in a `MeteredModel` (see [10-cost-and-budget.md](10-cost-and-budget.md)):
 the budget governor checks each call's worst-case cost *before* it is sent and records the actual
@@ -149,7 +150,65 @@ priced from the table. With any other backend every role uses `LHA_MODEL_NAME`.
 
 The `claude` extra installs `claude-agent-sdk` for
 [`agents/claude_sdk_lead.py`](../python/src/lha/agents/claude_sdk_lead.py), an optional Lead
-engine. No CLI command uses it.
+engine. No CLI command uses it; to run the lead through Claude Code, use the `claude_code` lead
+engine below.
+
+## `claude_code`: Claude Code (`claude -p`)
+
+LHA can run through the Claude Code CLI instead of an API. With a Claude Pro or Max login it
+needs no API key. It comes in two strengths, and you can use both at once.
+
+**The model backend** (`LHA_MODEL_BACKEND=claude_code`,
+[`model/claude_code.py`](../python/src/lha/model/claude_code.py)). Each model turn is one
+`claude -p --output-format json` call with every built-in tool switched off (`--tools ""`). The
+conversation goes in on stdin, the system prompt with `--system-prompt`, and the lead replies with
+the same JSON actions it uses with any other backend. The planner, replanner and every other role
+work unchanged. `LHA_MODEL_NAME` is passed as `--model` (`sonnet`, `opus`, or a full model id);
+left at its default, Claude Code picks the model.
+
+**The lead engine** (`LHA_LEAD_ENGINE=claude_code`,
+[`agent/claude_code_engine.py`](../python/src/lha/agent/claude_code_engine.py)). A whole lead cycle
+is one `claude -p` session, so Claude Code's own agentic loop does the work: it reads, edits, runs
+tests and iterates for as many turns as it needs. What comes before and after the session is
+unchanged. LHA picks the item and recites the mission anchor; afterwards it runs the checks and
+witnesses, commits verified work or rolls a failed attempt back, and replans blocked items. Each
+cycle starts a fresh session: the anchor in git is the memory, not the chat. Setting
+`LHA_LEAD_ENGINE=claude_code` alone also switches `LHA_MODEL_BACKEND` to `claude_code`, unless
+you set a backend explicitly.
+
+```bash
+claude            # once, to log in (or set ANTHROPIC_API_KEY for API billing)
+cd python
+LHA_LEAD_ENGINE=claude_code LHA_MODEL_NAME=sonnet \
+  uv run lha mission --task "Create hello.py with hello() returning 'hello', and a pytest test" \
+  --workdir ../.lha/workspaces/demo --sandbox local --unsafe-local \
+  --no-default-checks --check "uv run --with pytest pytest -q"
+```
+
+The engine's tools come in two modes, set by `LHA_CLAUDE_CODE_TOOLS`:
+
+| Mode | What Claude Code can use | Guardrails |
+|---|---|---|
+| `lha` (default) | LHA's tools only, served over MCP by an in-process server ([`agent/mcp_bridge.py`](../python/src/lha/agent/mcp_bridge.py)) on 127.0.0.1 with a per-session bearer token; its built-in tools are off | all of LHA's: the configured sandbox (Docker by default), the irreversible-command gate, path rules and the egress allow-list |
+| `native` | its own Read, Edit, Write, Glob, Grep and Bash, on the host workdir | none from LHA beyond a deny list for `git commit`/`push`/`reset`/`checkout` and similar, publishing commands, `gh`, `curl`, `wget`, WebFetch and WebSearch. Prefix rules are not a safety boundary (`sh -c 'git push'` is not caught). Requires `LHA_SANDBOX=local` and `LHA_ALLOW_UNSAFE_LOCAL=true`, and is refused under `lha orchestrate`'s ownership guard |
+
+In both modes the session also gets a `verify` tool. It runs the mission's checks and the item's
+witnesses exactly as the harness will, so Claude Code can iterate to green before it stops. It
+never marks anything done: LHA verifies again after the session.
+
+**Cost and budget.** Before a `claude -p` call runs, the governor authorizes it with
+`LHA_CLAUDE_CODE_MAX_BUDGET_USD` (default $5) as its worst case. The same amount is passed as
+`--max-budget-usd`. Afterwards the ledger records the `total_cost_usd` Claude Code reports.
+Claude Code checks the cap between API calls, so one call can overshoot it by a single turn. On a
+subscription, that figure is the API-equivalent cost, not a bill, but the budget ceiling still
+applies to it: raise `LHA_BUDGET_USD_CEILING` for long missions. A session killed at
+`LHA_CLAUDE_CODE_TIMEOUT_S` (default 3600 s) reports no cost and is charged its full cap. A session
+that stops at its cap or timeout is not wasted: whatever it left in the workdir is verified like
+any other attempt.
+
+**Failures.** An expired login or a bad flag fails the call (and the cycle) without retries; rate
+limits, overload and 5xx answers are retried with backoff like any other backend. Run `claude`
+once in a terminal to log in again.
 
 ## Unpriced models: `LHA_ALLOW_UNPRICED_MODELS`
 
@@ -233,6 +292,7 @@ provider (including the fallback chain) and sends the cheapest request each back
 | `ollama` | `GET {LHA_OLLAMA_BASE_URL}/api/tags` | 2xx and `LHA_MODEL_NAME` (or `<name>:latest`) is pulled |
 | `openai_compat` | `GET {LHA_OPENAI_BASE_URL}/models` with the bearer key | 2xx |
 | `claude` | `GET https://api.anthropic.com/v1/models/{model}` with the API key | 2xx |
+| `claude_code` | `claude --version` | exit 0 (it cannot prove the login is valid) |
 | failover chain | every member, concurrently | any member is healthy |
 
 A configuration error, transport error, timeout or non-2xx response (including 401/403 and 404
@@ -244,5 +304,6 @@ for an unknown Claude model) is reported as DOWN with the reason. See
 `go/internal/model` ports the stub, OpenAI-compatible and Claude backends, pricing, retry and
 failover, and runs the shared `spec/model/pricing.json` cases. The Go settings do not yet read
 `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS` or `LHA_MODEL_PROBE_TIMEOUT_S`, there is no Go
-health probe, and there is no Go CLI to run a mission with. See
+health probe, and there is no Go CLI to run a mission with. The `claude_code` backend and lead engine are
+Python-only; the Go settings reject `LHA_MODEL_BACKEND=claude_code`. See
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).

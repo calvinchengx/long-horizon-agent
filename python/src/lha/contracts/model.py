@@ -29,6 +29,9 @@ class Usage(BaseModel):
     # The provider (``ModelProvider.name``) that served the turn; set by failover so cost is
     # computed with the responding provider's prices, not the first provider's.
     provider: str = ""
+    # USD the provider itself reported for the turn (Claude Code's ``total_cost_usd``), for
+    # backends that bill by more than one model call; ``None`` = price from the token counts.
+    reported_cost_usd: float | None = None
 
 
 class UnknownPriceError(ValueError):

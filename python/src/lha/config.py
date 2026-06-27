@@ -15,10 +15,12 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ModelBackend = Literal["stub", "ollama", "openai_compat", "claude"]
+ModelBackend = Literal["stub", "ollama", "openai_compat", "claude", "claude_code"]
+LeadEngine = Literal["loop", "claude_code"]
+ClaudeCodeTools = Literal["lha", "native"]
 SandboxKind = Literal["docker", "e2b", "local"]
 
 REDACTED = "***"
@@ -53,6 +55,24 @@ class Settings(BaseSettings):
     claude_price_out_per_mtok: float | None = None
     # Let the governor run models whose cost cannot be computed (spend is then unverifiable).
     allow_unpriced_models: bool = False
+
+    # --- Claude Code (``claude -p``; see src/lha/model/claude_code.py) -----------------
+    # ``model_backend=claude_code`` runs each model turn through the ``claude`` CLI, so a Claude
+    # Pro/Max login works without an API key; ``model_name`` is passed as ``--model`` (an alias
+    # such as ``sonnet`` or a full model id; ``default`` keeps Claude Code's own choice).
+    # ``lead_engine=claude_code`` goes further: each lead cycle is ONE ``claude -p`` session that
+    # works the item with its own agentic loop, then LHA verifies and checkpoints as usual.
+    lead_engine: LeadEngine = "loop"
+    claude_code_bin: str = "claude"
+    # lha: Claude Code's built-in tools are off; it gets LHA's tools over MCP, so the sandbox,
+    # the human gate and egress rules still apply. native: its own Read/Edit/Bash on the host
+    # workdir, with no isolation (needs sandbox=local and allow_unsafe_local).
+    claude_code_tools: ClaudeCodeTools = "lha"
+    # Passed as ``--max-budget-usd`` to each ``claude -p`` call and used as that call's
+    # worst-case cost by the budget governor. Claude Code checks it between API calls, so one
+    # call can overshoot it by a single turn.
+    claude_code_max_budget_usd: float = Field(default=5.0, gt=0)
+    claude_code_timeout_s: float = Field(default=3600.0, gt=0)
 
     # --- Durable control plane (Temporal) --------------------------------------------
     temporal_address: str = "localhost:7233"
@@ -197,6 +217,16 @@ class Settings(BaseSettings):
     # JSON POST. Off by default. A secret: chat webhook URLs embed their credential.
     gate_webhook_url: SecretStr | None = None
     gate_webhook_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
+
+    @model_validator(mode="after")
+    def _claude_code_lead_uses_claude_code(self) -> Settings:
+        """``lead_engine=claude_code`` alone also routes the other roles through ``claude -p``.
+
+        Only when ``model_backend`` was left at its ``stub`` default: an explicit backend wins.
+        """
+        if self.lead_engine == "claude_code" and "model_backend" not in self.model_fields_set:
+            self.model_backend = "claude_code"
+        return self
 
     def sandbox_egress_hosts(self) -> list[str]:
         return _csv(self.sandbox_egress)

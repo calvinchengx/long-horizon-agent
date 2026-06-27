@@ -24,6 +24,9 @@ type Usage struct {
 	Model string `json:"model"`
 	// The provider (ModelProvider.Name) that served the turn; set by failover.
 	Provider string `json:"provider"`
+	// USD the provider itself reported for the turn (Claude Code's total_cost_usd); nil means
+	// price from the token counts.
+	ReportedCostUSD *float64 `json:"reported_cost_usd"`
 }
 
 // ErrUnknownPrice is wrapped by errors from EstimateCostUSD when the responding model has no

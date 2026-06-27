@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING
 from lha.agent.prompt import build_messages, corrective_message
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall, TurnResult
 from lha.contracts.state import Checklist, ChecklistItem, Checkpoint, EventRecord
-from lha.contracts.tools import ToolContext, ToolDispatcher
+from lha.contracts.tools import ToolContext, ToolDispatcher, ToolResult
 from lha.contracts.verify import (
     Check,
     CheckResult,
@@ -59,6 +59,7 @@ from lha.verify.trusted import candidate_commit
 from lha.verify.witnesses import parse_witness
 
 if TYPE_CHECKING:
+    from lha.agent.claude_code_engine import ClaudeCodeEngine
     from lha.agents.replanner import Replanner
     from lha.memory.service import CycleMemory
 
@@ -150,6 +151,18 @@ def parse_action(
     return Action(error='JSON has neither "tool" nor "done": true', summary=text[:200])
 
 
+@dataclass
+class _Acting:
+    """What the acting phase of a cycle did (built-in turns or a Claude Code session)."""
+
+    tool_calls: int = 0
+    tools_used: list[str] = field(default_factory=list)
+    done_summary: str = ""
+    turns: int = 0
+    core: VerificationResult | None = None  # verifier verdict, before harness integrity
+    dirty: bool = True  # workspace changed since the last verification (or none ran yet)
+
+
 class AgentLoop:
     """Runs one verified cycle of work using a model + tools + sandbox + verifier + anchor.
 
@@ -175,6 +188,7 @@ class AgentLoop:
         max_replans: int = 0,
         max_split_depth: int = 2,
         memory: CycleMemory | None = None,
+        engine: ClaudeCodeEngine | None = None,
     ) -> None:
         self._model = model
         self._dispatcher = dispatcher
@@ -192,6 +206,10 @@ class AgentLoop:
         # Optional tiered memory (``lha.memory.service``): recalled into the task message before
         # the first turn, fed the committed outcome after the checkpoint. Never fails a cycle.
         self._memory = memory
+        # Optional ``claude_code`` lead engine: the acting phase runs as one ``claude -p``
+        # session instead of ``model`` turns (``model`` still meters it and serves the
+        # replanner). Everything before and after acting is the same.
+        self._engine = engine
 
     async def run_cycle(
         self,
@@ -233,78 +251,42 @@ class AgentLoop:
             item=item,
             specs=self._dispatcher.specs(),
             memory_text=memory_text,
+            engine=self._engine is not None,
         )
         self._emit("cycle_started", mission_id, cycle_id, item_id=item.id)
 
-        tool_calls = 0
-        tools_used: list[str] = []
-        done_summary = ""
-        turns = 0
-        core: VerificationResult | None = None  # verifier verdict, before harness integrity
-        dirty = True  # workspace changed since the last verification (or none ran yet)
-        for turns in range(1, self._max_turns + 1):
-            result = await self._model.complete(messages)
-            self._trace_turn(result, mission_id, cycle_id)
-
-            if result.tool_calls and not is_truncated(result.stop_reason):
-                calls = [
-                    c if c.id else c.model_copy(update={"id": f"{cycle_id}-{turns}-{i}"})
-                    for i, c in enumerate(result.tool_calls)
-                ]
-                # Native round trip: the assistant turn carries its tool_use blocks and each
-                # result answers its call by id, so providers see real tool_use/tool_result pairs.
-                messages.append(
-                    ModelMessage(role="assistant", content=result.text, tool_calls=calls)
-                )
-                for call in calls:  # execute EVERY requested tool call, in order
-                    observation = await self._dispatch(call, ctx, mission_id, cycle_id)
-                    messages.append(
-                        ModelMessage(role="tool", content=observation, tool_call_id=call.id)
-                    )
-                    tool_calls += 1
-                    tools_used.append(call.name)
-                dirty = True
-                continue
-
-            action = parse_action(result.text, [], stop_reason=result.stop_reason)
-            messages.append(ModelMessage(role="assistant", content=result.text))
-            if not action.is_valid:
-                self._emit("invalid_reply", mission_id, cycle_id, reason=action.error)
-                messages.append(corrective_message(action.error))
-                continue
-            if action.done:
-                done_summary = action.summary
-                if not self._verify_on_done or turns == self._max_turns:
-                    break
-                core = self._with_errors(
-                    await self._verifier.verify(ctx.session, gate), witness_errors
-                )
-                dirty = False
-                verification = await self._with_integrity(core, ctx, harness_before, tampered)
-                if verification.verdict != "failed":
-                    break  # green, or unverified (more turns can't create a gate)
-                messages.append(
-                    ModelMessage(
-                        role="user",
-                        content=(
-                            "VERIFICATION FAILED — the item is not done yet. Fix the cause and "
-                            f"signal done again.\n{verification.failure_report()}"
-                        ),
-                    )
-                )
-                continue
-
-            call = ToolCall(
-                id=f"{cycle_id}-{turns}", name=action.tool or "", arguments=action.arguments
+        acting = _Acting()
+        if self._engine is not None:
+            await self._engine_session(
+                acting,
+                messages,
+                ctx,
+                mission_id,
+                cycle_id,
+                gate,
+                witness_errors,
+                harness_before,
+                tampered,
             )
-            messages.append(
-                ModelMessage(
-                    role="user", content=await self._dispatch(call, ctx, mission_id, cycle_id)
-                )
+        else:
+            await self._model_turns(
+                acting,
+                messages,
+                ctx,
+                mission_id,
+                cycle_id,
+                gate,
+                witness_errors,
+                harness_before,
+                tampered,
             )
-            tool_calls += 1
-            tools_used.append(call.name)
-            dirty = True
+        tool_calls, tools_used, done_summary, turns = (
+            acting.tool_calls,
+            acting.tools_used,
+            acting.done_summary,
+            acting.turns,
+        )
+        core, dirty = acting.core, acting.dirty
 
         if core is None or dirty:
             core = self._with_errors(await self._verifier.verify(ctx.session, gate), witness_errors)
@@ -361,6 +343,139 @@ class AgentLoop:
         )
 
     # --- internals ---------------------------------------------------------------------
+    async def _model_turns(
+        self,
+        acting: _Acting,
+        messages: list[ModelMessage],
+        ctx: ToolContext,
+        mission_id: str,
+        cycle_id: str,
+        gate: list[Check],
+        witness_errors: list[CheckResult],
+        harness_before: HarnessSnapshot | None,
+        tampered: list[str],
+    ) -> None:
+        """The built-in lead: model turns, tool calls and verify-on-done, up to ``max_turns``."""
+        for turns in range(1, self._max_turns + 1):
+            acting.turns = turns
+            result = await self._model.complete(messages)
+            self._trace_turn(result, mission_id, cycle_id)
+
+            if result.tool_calls and not is_truncated(result.stop_reason):
+                calls = [
+                    c if c.id else c.model_copy(update={"id": f"{cycle_id}-{turns}-{i}"})
+                    for i, c in enumerate(result.tool_calls)
+                ]
+                # Native round trip: the assistant turn carries its tool_use blocks and each
+                # result answers its call by id, so providers see real tool_use/tool_result pairs.
+                messages.append(
+                    ModelMessage(role="assistant", content=result.text, tool_calls=calls)
+                )
+                for call in calls:  # execute EVERY requested tool call, in order
+                    observation = await self._dispatch(call, ctx, mission_id, cycle_id)
+                    messages.append(
+                        ModelMessage(role="tool", content=observation, tool_call_id=call.id)
+                    )
+                    acting.tool_calls += 1
+                    acting.tools_used.append(call.name)
+                acting.dirty = True
+                continue
+
+            action = parse_action(result.text, [], stop_reason=result.stop_reason)
+            messages.append(ModelMessage(role="assistant", content=result.text))
+            if not action.is_valid:
+                self._emit("invalid_reply", mission_id, cycle_id, reason=action.error)
+                messages.append(corrective_message(action.error))
+                continue
+            if action.done:
+                acting.done_summary = action.summary
+                if not self._verify_on_done or turns == self._max_turns:
+                    return
+                acting.core = self._with_errors(
+                    await self._verifier.verify(ctx.session, gate), witness_errors
+                )
+                acting.dirty = False
+                verification = await self._with_integrity(
+                    acting.core, ctx, harness_before, tampered
+                )
+                if verification.verdict != "failed":
+                    return  # green, or unverified (more turns can't create a gate)
+                messages.append(
+                    ModelMessage(
+                        role="user",
+                        content=(
+                            "VERIFICATION FAILED — the item is not done yet. Fix the cause and "
+                            f"signal done again.\n{verification.failure_report()}"
+                        ),
+                    )
+                )
+                continue
+
+            call = ToolCall(
+                id=f"{cycle_id}-{turns}", name=action.tool or "", arguments=action.arguments
+            )
+            messages.append(
+                ModelMessage(
+                    role="user", content=await self._dispatch(call, ctx, mission_id, cycle_id)
+                )
+            )
+            acting.tool_calls += 1
+            acting.tools_used.append(call.name)
+            acting.dirty = True
+
+    async def _engine_session(
+        self,
+        acting: _Acting,
+        messages: list[ModelMessage],
+        ctx: ToolContext,
+        mission_id: str,
+        cycle_id: str,
+        gate: list[Check],
+        witness_errors: list[CheckResult],
+        harness_before: HarnessSnapshot | None,
+        tampered: list[str],
+    ) -> None:
+        """The ``claude_code`` lead: one Claude Code session using LHA's tools and ``verify``."""
+        engine = self._engine
+        assert engine is not None
+
+        async def dispatch(call: ToolCall) -> ToolResult:
+            result = await self._dispatch_result(call, ctx, mission_id, cycle_id)
+            acting.dirty = True
+            return result
+
+        async def verify() -> VerificationResult:
+            acting.core = self._with_errors(
+                await self._verifier.verify(ctx.session, gate), witness_errors
+            )
+            acting.dirty = engine.native  # native edits bypass the dispatcher: re-verify after
+            return await self._with_integrity(acting.core, ctx, harness_before, tampered)
+
+        run = await engine.run(
+            messages=messages,
+            cwd=ctx.session.workdir,
+            cycle_id=cycle_id,
+            specs=self._dispatcher.specs(),
+            dispatch=dispatch,
+            verify=verify,
+            meter=self._model,
+        )
+        acting.tool_calls = run.tool_calls
+        acting.tools_used = run.tools_used
+        acting.turns = run.turns
+        acting.done_summary = run.summary[:2000]
+        if run.edits_untracked:
+            acting.dirty = True
+        self._emit(
+            "claude_code_session",
+            mission_id,
+            cycle_id,
+            turns=run.turns,
+            tool_calls=run.tool_calls,
+            session_id=run.session_id or "",
+            stopped=run.stopped or "",
+        )
+
     def _idle_outcome(self, checklist: Checklist, head_sha: str) -> CycleOutcome:
         return CycleOutcome(
             item_id=None,
@@ -387,11 +502,17 @@ class AgentLoop:
             stop_reason=result.stop_reason or "",
         )
 
+    async def _dispatch_result(
+        self, call: ToolCall, ctx: ToolContext, mission_id: str, cycle_id: str
+    ) -> ToolResult:
+        tool_result = await self._dispatcher.dispatch(call, ctx)
+        self._emit("tool_call", mission_id, cycle_id, tool=call.name, ok=tool_result.ok)
+        return tool_result
+
     async def _dispatch(
         self, call: ToolCall, ctx: ToolContext, mission_id: str, cycle_id: str
     ) -> str:
-        tool_result = await self._dispatcher.dispatch(call, ctx)
-        self._emit("tool_call", mission_id, cycle_id, tool=call.name, ok=tool_result.ok)
+        tool_result = await self._dispatch_result(call, ctx, mission_id, cycle_id)
         observation = (tool_result.content or tool_result.error or "")[:_OBSERVATION_CAP]
         return f"OBSERVATION ({call.name}, tool_use_id={call.id}): {observation}"
 

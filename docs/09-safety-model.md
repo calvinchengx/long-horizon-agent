@@ -328,3 +328,8 @@ gate.
   checks for weakened test files after the fact ([Verification](07-verification.md)).
 - Redaction is pattern-based. Secrets in unrecognized formats pass through.
 - E2B isolation is not integrated with the host workdir (see section 1).
+- The `claude_code` lead engine with `LHA_CLAUDE_CODE_TOOLS=native` hands the host workdir to
+  Claude Code's own tools. None of the sections above apply to them: only a prefix deny list for
+  git history, publishing and web access, which `sh -c` gets around. The default `lha` mode
+  serves LHA's tools over MCP instead, so everything above still applies
+  ([models](13-models.md#claude_code-claude-code-claude--p)).

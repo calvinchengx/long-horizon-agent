@@ -36,7 +36,7 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_MODEL_BACKEND` | `stub` \| `ollama` \| `openai_compat` \| `claude` | `stub` | which backend `build_provider` constructs |
+| `LHA_MODEL_BACKEND` | `stub` \| `ollama` \| `openai_compat` \| `claude` \| `claude_code` | `stub` (`claude_code` when `LHA_LEAD_ENGINE=claude_code`) | which backend `build_provider` constructs |
 | `LHA_MODEL_NAME` | string | `stub-1` | model id sent to the backend |
 | `LHA_OLLAMA_BASE_URL` | string | `http://localhost:11434` | Ollama server; `/v1` is appended |
 | `LHA_OPENAI_BASE_URL` | string | unset | chat-completions base URL; required for `openai_compat` |
@@ -50,6 +50,11 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 | `LHA_FALLBACK_MODELS` | comma-separated list | empty | ordered fallback chain of `backend:model[@in/out]` entries; non-empty makes `build_provider` return a `FailoverModel` |
 | `LHA_FALLBACK_MAX_ROUNDS` | int (>= 1) | `2` | rounds over the whole chain before the last transient error is raised |
 | `LHA_MODEL_PROBE_TIMEOUT_S` | float (> 0) | `10.0` | timeout of the model health probe a parked durable mission runs |
+| `LHA_LEAD_ENGINE` | `loop` \| `claude_code` | `loop` | `claude_code` runs each lead cycle as one `claude -p` session |
+| `LHA_CLAUDE_CODE_BIN` | string | `claude` | the Claude Code executable |
+| `LHA_CLAUDE_CODE_TOOLS` | `lha` \| `native` | `lha` | the lead engine's tools: LHA's over MCP, or Claude Code's own (unsandboxed) |
+| `LHA_CLAUDE_CODE_MAX_BUDGET_USD` | float (> 0) | `5.0` | `--max-budget-usd` for each `claude -p` call, and its worst case for the governor |
+| `LHA_CLAUDE_CODE_TIMEOUT_S` | float (> 0) | `3600.0` | a `claude -p` call running longer is killed |
 
 See [13-models.md](13-models.md).
 
@@ -223,7 +228,8 @@ governor (including `LHA_APPROVAL_TIMEOUT_S`), sandbox (including `LHA_WEB_ALLOW
 `LHA_WORKSPACE_ROOT` and `LHA_OBJECT_STORE_ROOT`. It does not define `LHA_SQLITE_PATH`,
 `LHA_POSTGRES_FALLBACK_TO_SQLITE`, the `LHA_MEMORY_*` settings, the other web settings,
 `LHA_PRIVATE_DATA`, `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
-`LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS` or the human-gate settings.
+`LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS`, the human-gate settings,
+`LHA_LEAD_ENGINE` or the `LHA_CLAUDE_CODE_*` settings.
 
 ## Secrets
 

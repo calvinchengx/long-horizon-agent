@@ -12,7 +12,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 5.0
     },
@@ -24,7 +25,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 25.0
     },
@@ -36,7 +38,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.025345
     },
@@ -48,7 +51,8 @@
       "cache_creation_input_tokens": 100000,
       "cache_creation_1h_input_tokens": 40000,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.775
     },
@@ -60,7 +64,8 @@
       "cache_creation_input_tokens": 10,
       "cache_creation_1h_input_tokens": 50,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.0001
     }
@@ -78,7 +83,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 3.0
     },
@@ -90,7 +96,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 15.0
     },
@@ -102,7 +109,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.015207
     },
@@ -114,7 +122,8 @@
       "cache_creation_input_tokens": 100000,
       "cache_creation_1h_input_tokens": 40000,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.46499999999999997
     },
@@ -126,7 +135,8 @@
       "cache_creation_input_tokens": 10,
       "cache_creation_1h_input_tokens": 50,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 6.000000000000001e-05
     }
@@ -144,7 +154,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 1.0
     },
@@ -156,7 +167,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 5.0
     },
@@ -168,7 +180,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.005069
     },
@@ -180,7 +193,8 @@
       "cache_creation_input_tokens": 100000,
       "cache_creation_1h_input_tokens": 40000,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.155
     },
@@ -192,7 +206,8 @@
       "cache_creation_input_tokens": 10,
       "cache_creation_1h_input_tokens": 50,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 2e-05
     }
@@ -210,7 +225,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 1.0
     },
@@ -222,7 +238,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 5.0
     },
@@ -234,7 +251,8 @@
       "cache_creation_input_tokens": 0,
       "cache_creation_1h_input_tokens": 0,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.005069
     },
@@ -246,7 +264,8 @@
       "cache_creation_input_tokens": 100000,
       "cache_creation_1h_input_tokens": 40000,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 0.155
     },
@@ -258,7 +277,8 @@
       "cache_creation_input_tokens": 10,
       "cache_creation_1h_input_tokens": 50,
       "model": "",
-      "provider": ""
+      "provider": "",
+      "reported_cost_usd": null
      },
      "usd": 2e-05
     }

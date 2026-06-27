@@ -28,6 +28,18 @@ ACTION_INSTRUCTIONS = (
     "do not modify or delete existing tests or test configuration."
 )
 
+# The claude_code lead engine: Claude Code calls real tools (LHA's over MCP), so no JSON protocol.
+ENGINE_INSTRUCTIONS = (
+    "Work this item in this session with the tools you have. When you believe it is done, call "
+    "the `verify` tool: it runs the mission's deterministic checks and this item's witnesses "
+    "exactly as the harness will after you stop. If it fails, fix the cause and verify again. "
+    "Stop when verify passes, or when you cannot make further progress, and end with a short "
+    "summary of what you changed.\n"
+    "Only a green result from the harness counts. Do not commit, push, or switch branches: the "
+    "harness commits verified work itself. Do not edit files under .lha/ (harness-owned) and do "
+    "not modify or delete existing tests or test configuration."
+)
+
 CORRECTIVE_INSTRUCTIONS = (
     "Your previous reply was not a valid action ({reason}). Reply again with EXACTLY ONE JSON "
     'object and nothing else: {{"tool": "<name>", "arguments": {{...}}}} or '
@@ -137,13 +149,15 @@ def build_messages(
     specs: list[ToolSpec],
     mission_text: str = "",
     memory_text: str = "",
+    engine: bool = False,
 ) -> list[ModelMessage]:
     """Build the initial messages for one cycle: anchor recitation + active item + tools.
 
     ``mission_text`` is the immutable mission recitation (always first); ``anchor_text`` is
     optional caller context (progress, research, reflections), included when it adds anything.
     ``memory_text`` is the already-budgeted memory block (``render_memory_block``); it is capped
-    again at ``MEMORY_HARD_CAP`` here.
+    again at ``MEMORY_HARD_CAP`` here. ``engine``: the prompt for a ``claude_code`` lead session,
+    whose tools are real tool definitions, so they are not listed and no JSON protocol is asked.
     """
     anchor = mission_text.strip() or anchor_text.strip()
     extra = anchor_text.strip() if mission_text.strip() else ""
@@ -151,12 +165,15 @@ def build_messages(
         if len(extra) > _EXTRA_CONTEXT_CAP:
             extra = "...[earlier context trimmed]...\n" + extra[-_EXTRA_CONTEXT_CAP:]
         anchor = f"{anchor}\n\nContext:\n{extra}"
-    system = (
-        f"{anchor}\n\n"
-        f"You are the Lead Engineer. Make verified progress on ONE checklist item per cycle.\n\n"
-        f"Available tools:\n{render_tools(specs)}\n\n"
-        f"{ACTION_INSTRUCTIONS}"
-    )
+    role = "You are the Lead Engineer. Make verified progress on ONE checklist item per cycle."
+    if engine:
+        system = f"{anchor}\n\n{role}\n\n{ENGINE_INSTRUCTIONS}"
+    else:
+        system = (
+            f"{anchor}\n\n{role}\n\n"
+            f"Available tools:\n{render_tools(specs)}\n\n"
+            f"{ACTION_INSTRUCTIONS}"
+        )
     recent = "\n".join(snapshot.recent_commits[:10]) or "(none yet)"
     user = f"Active checklist item: [{item.id}] {item.description}\n\n"
     if item.witnesses:
@@ -176,7 +193,8 @@ def build_messages(
     decisions = render_decisions(snapshot.last_decisions)
     if decisions:
         user += f"{decisions}\n\n"
-    user += f"Recent commits:\n{recent}\n\nWork this item using the tools, then signal done."
+    finish = "call verify" if engine else "signal done"
+    user += f"Recent commits:\n{recent}\n\nWork this item using the tools, then {finish}."
     return [
         ModelMessage(role="system", content=system),
         ModelMessage(role="user", content=user),
