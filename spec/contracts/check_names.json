@@ -1,0 +1,177 @@
+{
+ "derive_check_name": [
+  {
+   "command": [
+    "uv",
+    "run",
+    "pytest",
+    "-q"
+   ],
+   "name": "pytest"
+  },
+  {
+   "command": [
+    "uv",
+    "run",
+    "--frozen",
+    "ruff",
+    "check",
+    "."
+   ],
+   "name": "ruff"
+  },
+  {
+   "command": [
+    "python3",
+    "-m",
+    "ty",
+    "check"
+   ],
+   "name": "ty"
+  },
+  {
+   "command": [
+    "/usr/bin/python3.12",
+    "-c",
+    "print(1)"
+   ],
+   "name": "python"
+  },
+  {
+   "command": [
+    "npx",
+    "tsc"
+   ],
+   "name": "tsc"
+  },
+  {
+   "command": [
+    "npm",
+    "test"
+   ],
+   "name": "test"
+  },
+  {
+   "command": [
+    "make",
+    "check"
+   ],
+   "name": "make"
+  },
+  {
+   "command": [
+    "./scripts/verify.sh"
+   ],
+   "name": "verify.sh"
+  },
+  {
+   "command": [
+    "-v"
+   ],
+   "name": "check"
+  },
+  {
+   "command": [
+    "python",
+    "-m",
+    "pytest",
+    "tests/unit"
+   ],
+   "name": "pytest"
+  },
+  {
+   "command": [
+    "cargo",
+    "test"
+   ],
+   "name": "cargo"
+  },
+  {
+   "command": [
+    "go",
+    "test",
+    "./..."
+   ],
+   "name": "go"
+  },
+  {
+   "command": [
+    "uv",
+    "run",
+    "weird name!!",
+    "x"
+   ],
+   "name": "weird_name"
+  }
+ ],
+ "checks_from_commands": [
+  {
+   "commands": [
+    [
+     "uv",
+     "run",
+     "pytest",
+     "tests/unit"
+    ],
+    [
+     "uv",
+     "run",
+     "pytest",
+     "tests/int"
+    ],
+    []
+   ],
+   "names": [
+    "pytest",
+    "pytest-2"
+   ]
+  },
+  {
+   "commands": [
+    [
+     "harness_integrity"
+    ],
+    [
+     "pytest"
+    ],
+    [
+     "pytest"
+    ],
+    [
+     "pytest"
+    ]
+   ],
+   "names": [
+    "harness_integrity-2",
+    "pytest",
+    "pytest-2",
+    "pytest-3"
+   ]
+  },
+  {
+   "commands": [
+    [
+     "ruff",
+     "check"
+    ],
+    [
+     "uv",
+     "run",
+     "ty",
+     "check"
+    ],
+    [
+     "uv",
+     "run",
+     "pytest",
+     "-q"
+    ]
+   ],
+   "names": [
+    "ruff",
+    "ty",
+    "pytest"
+   ]
+  }
+ ]
+}

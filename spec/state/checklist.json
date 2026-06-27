@@ -1,0 +1,840 @@
+{
+ "scenarios": [
+  {
+   "name": "empty",
+   "checklist": {
+    "items": [],
+    "schema_version": 1
+   },
+   "next_actionable": null,
+   "is_complete": false,
+   "is_deadlocked": true,
+   "deadlock_reason": "checklist has no items",
+   "dependency_errors": [],
+   "items_done": 0
+  },
+  {
+   "name": "fresh",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": "01",
+   "is_complete": false,
+   "is_deadlocked": false,
+   "deadlock_reason": "",
+   "dependency_errors": [],
+   "items_done": 0
+  },
+  {
+   "name": "in_progress_first",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "in_progress",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": "02",
+   "is_complete": false,
+   "is_deadlocked": false,
+   "deadlock_reason": "",
+   "dependency_errors": [],
+   "items_done": 0
+  },
+  {
+   "name": "chain_waits",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "02"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": "02",
+   "is_complete": false,
+   "is_deadlocked": false,
+   "deadlock_reason": "",
+   "dependency_errors": [],
+   "items_done": 1
+  },
+  {
+   "name": "all_done",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": null,
+   "is_complete": true,
+   "is_deadlocked": false,
+   "deadlock_reason": "",
+   "dependency_errors": [],
+   "items_done": 2
+  },
+  {
+   "name": "blocked_only",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": null,
+   "is_complete": false,
+   "is_deadlocked": true,
+   "deadlock_reason": "blocked: 02",
+   "dependency_errors": [],
+   "items_done": 1
+  },
+  {
+   "name": "blocked_dep",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": "03",
+   "is_complete": false,
+   "is_deadlocked": false,
+   "deadlock_reason": "",
+   "dependency_errors": [],
+   "items_done": 0
+  },
+  {
+   "name": "unknown_dep",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "99"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": null,
+   "is_complete": false,
+   "is_deadlocked": true,
+   "deadlock_reason": "item '01' depends on unknown item '99'",
+   "dependency_errors": [
+    "item '01' depends on unknown item '99'"
+   ],
+   "items_done": 0
+  },
+  {
+   "name": "self_dep",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": null,
+   "is_complete": false,
+   "is_deadlocked": true,
+   "deadlock_reason": "item '01' depends on itself",
+   "dependency_errors": [
+    "item '01' depends on itself"
+   ],
+   "items_done": 0
+  },
+  {
+   "name": "cycle",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "03"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "02"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": null,
+   "is_complete": false,
+   "is_deadlocked": true,
+   "deadlock_reason": "dependency cycle: 01 -> 03 -> 02 -> 01",
+   "dependency_errors": [
+    "dependency cycle: 01 -> 03 -> 02 -> 01"
+   ],
+   "items_done": 0
+  },
+  {
+   "name": "duplicate",
+   "checklist": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "next_actionable": "01",
+   "is_complete": false,
+   "is_deadlocked": false,
+   "deadlock_reason": "",
+   "dependency_errors": [
+    "duplicate item id '01'"
+   ],
+   "items_done": 0
+  }
+ ],
+ "transitions": {
+  "initial": {
+   "items": [
+    {
+     "id": "01",
+     "description": "task 01",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "task 02",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "01"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "notes": "",
+     "schema_version": 1
+    }
+   ],
+   "schema_version": 1
+  },
+  "steps": [
+   {
+    "op": "start",
+    "args": {
+     "item_id": "01"
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "in_progress",
+       "verified_by": [],
+       "depends_on": [],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "record_failure",
+    "args": {
+     "item_id": "01",
+     "reason": "tests failed",
+     "max": 3
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "in_progress",
+       "verified_by": [],
+       "depends_on": [],
+       "attempts": 1,
+       "consecutive_failures": 1,
+       "last_failure": "tests failed",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "record_failure",
+    "args": {
+     "item_id": "01",
+     "reason": "tests failed again",
+     "max": 3
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "in_progress",
+       "verified_by": [],
+       "depends_on": [],
+       "attempts": 2,
+       "consecutive_failures": 2,
+       "last_failure": "tests failed again",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "record_failure",
+    "args": {
+     "item_id": "01",
+     "reason": "still failing",
+     "max": 3
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "blocked",
+       "verified_by": [],
+       "depends_on": [],
+       "attempts": 3,
+       "consecutive_failures": 3,
+       "last_failure": "still failing",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "unblock",
+    "args": {
+     "item_id": "01"
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [],
+       "attempts": 3,
+       "consecutive_failures": 0,
+       "last_failure": "still failing",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "record_success",
+    "args": {
+     "item_id": "01",
+     "verified_by": [
+      "pytest",
+      "ruff"
+     ]
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "done",
+       "verified_by": [
+        "pytest",
+        "ruff"
+       ],
+       "depends_on": [],
+       "attempts": 4,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "todo",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "start",
+    "args": {
+     "item_id": "02"
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "done",
+       "verified_by": [
+        "pytest",
+        "ruff"
+       ],
+       "depends_on": [],
+       "attempts": 4,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "in_progress",
+       "verified_by": [],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 0,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   },
+   {
+    "op": "record_success",
+    "args": {
+     "item_id": "02",
+     "verified_by": [
+      "pytest"
+     ]
+    },
+    "after": {
+     "items": [
+      {
+       "id": "01",
+       "description": "task 01",
+       "status": "done",
+       "verified_by": [
+        "pytest",
+        "ruff"
+       ],
+       "depends_on": [],
+       "attempts": 4,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      },
+      {
+       "id": "02",
+       "description": "task 02",
+       "status": "done",
+       "verified_by": [
+        "pytest"
+       ],
+       "depends_on": [
+        "01"
+       ],
+       "attempts": 1,
+       "consecutive_failures": 0,
+       "last_failure": "",
+       "allow_harness_edits": false,
+       "notes": "",
+       "schema_version": 1
+      }
+     ],
+     "schema_version": 1
+    }
+   }
+  ]
+ }
+}
