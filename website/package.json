@@ -1,0 +1,25 @@
+{
+  "name": "long-horizon-agent-docs",
+  "type": "module",
+  "private": true,
+  "packageManager": "pnpm@10.29.3",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "sync": "node scripts/sync-docs.mjs",
+    "dev": "pnpm run sync && astro dev",
+    "build": "pnpm run sync && astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/markdown-remark": "7.3.1",
+    "@astrojs/starlight": "0.42.0",
+    "astro": "7.3.2",
+    "mermaid": "^12.0.0",
+    "sharp": "0.35.4",
+    "unist-util-visit": "^5.1.0"
+  }
+}

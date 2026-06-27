@@ -1,0 +1,13 @@
+packages:
+  - .
+
+# pnpm 10 blocks dependency build scripts by default; allow the ones Astro needs.
+onlyBuiltDependencies:
+  - esbuild
+  - sharp
+
+# Security floors for transitive dependencies of Astro/Starlight (same as the other projects).
+overrides:
+  postcss: ">=8.5.18"
+  js-yaml: ">=4.3.1 <5"
+  nanoid: ">=3.3.17 <4"
