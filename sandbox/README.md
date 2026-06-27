@@ -88,7 +88,7 @@ DockerSandbox starts containers with these settings:
 - `--user <host uid>:<host gid>`
 - `HOME=/workspace`
 - a read-only root filesystem
-- a 512 MB tmpfs at `/tmp`
+- a 1 GB tmpfs at `/tmp`, mounted `exec` (so `go test` can run the binaries it builds there)
 - `--cap-drop ALL`
 - `no-new-privileges`
 
@@ -124,7 +124,7 @@ succeeded:
 
 ## Limits
 
-- **`/tmp` is 512 MB.** Large Go builds or module caches can fill it. Raise the tmpfs size, or
+- **`/tmp` is 1 GB.** Large Go builds or module caches can fill it. Raise the tmpfs size, or
   accept that caches are rebuilt for each session.
 - **The proxy decides by host name only.** It can't tell one package on an allowed host from
   another, because it doesn't intercept TLS. A registry that serves content from arbitrary users,

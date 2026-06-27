@@ -108,6 +108,7 @@ async def test_docker_container_is_hardened(tmp_path: Path) -> None:
     assert kwargs["mem_limit"] and kwargs["pids_limit"] and kwargs["nano_cpus"]
     assert kwargs["user"] and not kwargs["user"].startswith("0:")
     assert "/tmp" in kwargs["tmpfs"]
+    assert "exec" in kwargs["tmpfs"]["/tmp"].split(",")  # go test runs binaries from /tmp
     volumes = kwargs["volumes"]
     assert volumes[str(tmp_path.resolve())] == {"bind": "/workspace", "mode": "rw"}
     assert volumes[str(tmp_path.resolve() / ".git")]["mode"] == "ro"
