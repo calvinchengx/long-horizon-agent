@@ -5,16 +5,17 @@ Safety is enforced in code below the model, never through a prompt. There are se
 1. the sandbox the code runs in;
 2. the tool dispatcher every tool call passes through;
 3. a command classifier that routes irreversible commands to a human gate;
-4. an egress policy for in-process HTTP;
+4. an egress policy for in-process HTTP, and an allow-list proxy for the sandbox's network;
 5. a Rule-of-Two capability check;
 6. secret hygiene in child processes and in traces.
 
 Each layer assumes the others can fail.
 
 Code: [`python/src/lha/safety/`](../python/src/lha/safety/),
-[`python/src/lha/execution/`](../python/src/lha/execution/). The Go port has in-progress
-equivalents of the classifier and egress checks in `go/internal/safety/`, which run the same
-`spec/` cases.
+[`python/src/lha/execution/`](../python/src/lha/execution/),
+[`python/src/lha/hitl/`](../python/src/lha/hitl/). The Go port has equivalents of the classifier
+and egress checks in `go/internal/safety/`, which run the same `spec/` cases; it has no
+sandboxes, egress proxy or approval gates yet.
 
 ## 1. Sandboxes
 
@@ -23,19 +24,23 @@ the single entry point. `LHA_SANDBOX` selects the kind. The default is `docker`.
 
 | Kind | Isolation | Notes |
 |---|---|---|
-| `docker` | container | Needs the `sandbox` extra (`docker>=7.1`). Default image `python:3.12-slim` |
+| `docker` | container | Needs the `sandbox` extra (`docker>=7.1`). Image `LHA_SANDBOX_IMAGE`, default `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds a Go + uv + Node/pnpm image |
 | `e2b` | Firecracker microVM (E2B service) | Imports `e2b_code_interpreter`, which no extra provides. Excluded from coverage, not tested in CI |
 | `local` | none | Refused with `UnsafeSandboxError` unless `LHA_ALLOW_UNSAFE_LOCAL=true` or `--unsafe-local` |
 
 Docker hardening, from `DockerSandbox.run_kwargs()` in
 [sandbox_docker.py](../python/src/lha/execution/sandbox_docker.py):
 
-- `network_mode="none"` unless the sandbox is built with `network=True`. No entry point passes
-  `network=True`. This is where egress for `run_command` is actually blocked.
+- `network_mode="none"` unless `LHA_SANDBOX_EGRESS` lists hosts (then only those hosts, through
+  the egress proxy; see [sandbox network](#sandbox-network)) or the sandbox is built with `network=True` (full
+  network; no entry point passes it, and it cannot be combined with an allow-list). This is where
+  egress for `run_command` is actually blocked.
 - `mem_limit` and `memswap_limit` 2g, `pids_limit` 512, `nano_cpus` for 2 CPUs.
 - `cap_drop=["ALL"]`, `security_opt=["no-new-privileges:true"]`.
 - A non-root user: the host `uid:gid` on POSIX, otherwise `65534:65534`.
-- `read_only=True` root filesystem, `tmpfs /tmp` (`rw,nosuid,nodev,size=512m`).
+- `read_only=True` root filesystem, `tmpfs /tmp` (`rw,exec,nosuid,nodev,size=1g`). `/tmp` is
+  mounted `exec` because toolchains such as `go test` build and run binaries there; code can
+  already run from `/workspace`, so this grants nothing new.
 - The host workdir is bind-mounted read-write at `/workspace`. Its `.git` and `.lha` directories,
   if present, are re-mounted read-only, so code in the container cannot plant hooks or rewrite
   mission state.
@@ -70,17 +75,27 @@ and never raises into the agent loop. Checks run in this order:
    rejected ([paths.py](../python/src/lha/execution/paths.py)). A mutating tool may not target
    `.git/` or `.lha/`, compared case-insensitively.
 6. **Command gate.** If the tool declares a `command_arg` (only `run_command` does), the argv is
-   classified. A gated command is sent to the configured `HITLGate`. With no gate configured it is
-   denied.
+   classified. A gated command is sent to the configured `HITLGate` with its tool, arguments,
+   reason and fingerprint. With no gate configured it is denied.
 
 The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
-`list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). `web_search`
-and `fetch_url` exist but no run path registers them. No run path passes a gate to the
-dispatcher either. In every current entry point, a command the classifier gates is therefore
-denied outright. The workflow's `human_decision_v1` gate is only used for deadlocks
-([Durable execution](08-durable-execution.md)). It is not used for tool calls. `SubAgent` applies
-its role's mutating and egress policy a second time, hiding and refusing tools the role may not
-use, even when the dispatcher would allow them.
+`list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). When
+`LHA_WEB_ALLOW_HOSTS` is set, the lead also gets `fetch_url`, limited to those hosts, and the
+dispatcher allows egress for it ([agent/assembly.py](../python/src/lha/agent/assembly.py)).
+`web_search` exists but no run path registers it. `SubAgent` applies its role's mutating and
+egress policy a second time, hiding and refusing tools the role may not use, even when the
+dispatcher would allow them.
+
+Which gate the dispatcher gets depends on the run path
+([hitl/approvals.py](../python/src/lha/hitl/approvals.py)):
+
+| Run path | Gate | A gated command |
+|---|---|---|
+| Durable (`run_agent_cycle`) | `DeferredApprovalGate` | Denied for now and queued; the workflow waits as `WAITING_ON_HUMAN` for `lha mission-approve --decision approve\|reject`. An approved call is allowed once, in a later cycle, only with exactly the same tool and arguments (matched by fingerprint) |
+| Local (`mission`, `run-local`, `orchestrate`) with `--approve-interactive` | console gate | Asks `allow? [y/N]` on the terminal; anything but `y`/`yes` rejects |
+| Local without `--approve-interactive` | none | Denied |
+
+See [durable execution](08-durable-execution.md#approving-irreversible-actions).
 
 ## 3. Command classifier and human gates
 
@@ -96,7 +111,7 @@ string if a human must decide, otherwise `None`. What it gates:
 | Uploads | `curl -d/-F/-T/--json/--data*/--form*`, `-X/--request POST|PUT|PATCH|DELETE`, `-K/--config`; `wget --post-*`, `--body-*`, `--method` writes, `-e` upload settings; httpie/xh with a body or a write method; `rsync` to `host:` |
 | Remote shells and mail | `ssh`, `scp`, `sftp`, `ftp`, `telnet`, `nc`/`ncat`/`netcat`, `socat`, `sendmail`, `mail`, `mailx` |
 | System | `shutdown`, `reboot`, `halt`, `mkfs`, `dd` |
-| Deletes and protected paths | `rm` of absolute, `~`, `..`, `.` or `*` targets; `rm`, `mv`, `cp`, `ln`, `chmod`, `chown`, `touch`, `tee`, `truncate`, `shred` or `sed -i` on `.git`/`.lha`; `find … -delete` on them; shell redirections (`>`, `>>`, `&>`, `2>`, `<>`) into them |
+| Deletes and protected paths | `rm` of absolute, `~`, `..`, `.` or `*` targets; `rm`, `mv`, `cp`, `ln`, `chmod`, `chown`, `touch`, `tee`, `truncate`, `shred` or `sed -i` on `.git`/`.lha`; `find … -delete` on them; shell redirections (`>`, `>>`, `>\|`, `&>`, `2>`, `<>`) into them. In `sh -c` scripts, redirection targets are also checked in the raw script text, so a clobbering `>\|` (which the tokenizer splits into `>` and a pipe) is caught |
 | Privilege escalation | `sudo`, `doas`, `su`, `pkexec` |
 
 To find the real command, it unwraps:
@@ -120,7 +135,7 @@ It fails closed in these cases:
 - A command name or git subcommand that contains `$` is gated.
 
 The pinned behaviour is [`spec/safety/classify_command.json`](../spec/safety/classify_command.json).
-It has 201 cases of argv mapped to an exact reason, 62 of which are allowed (`null`). Both
+It has 206 cases of argv mapped to an exact reason, 64 of which are allowed (`null`). Both
 `python/tests/unit/test_spec_conformance.py` and `go/internal/spec/conformance_safety_test.go`
 run it. The Python code is the reference. To change behaviour, change Python, regenerate with
 `scripts/export_spec.py`, then make Go pass ([spec/README.md](../spec/README.md)).
@@ -132,8 +147,13 @@ outside the offered options. The dispatcher's requests are `IRREVERSIBLE` with d
 
 ## 4. Egress policy
 
+There are two egress controls: a policy for in-process HTTP (`fetch_url` and `lha vendor`), and
+a proxy for the sandbox's own network.
+
+### In-process HTTP
+
 The egress policy is implemented in [egress.py](../python/src/lha/safety/egress.py) and applies to
-in-process HTTP (`fetch_url`):
+`fetch_url` and to `lha vendor`:
 
 - **Default-deny allow-list.** A URL passes only if its scheme is http/https and in
   `allow_schemes`, its normalized host is in `allow_hosts`, and its port is the scheme default or
@@ -145,6 +165,8 @@ in-process HTTP (`fetch_url`):
   ZWJ…).
 - **Public-address check.** Every resolved address must be globally routable unicast.
   IPv4-mapped, 6to4 and Teredo addresses are unwrapped first. IP literals are checked directly.
+  Deprecated IPv6 site-local addresses (`fec0::/10`) count as private, because some networks
+  still route them internally.
 - **Redirects.** Redirects are not auto-followed. Each hop (at most 5) is re-checked against the
   policy and re-resolved. The request's actual host and port must equal the checked ones. The tool
   ignores host proxy and netrc settings (`trust_env=False`), rejects `Host`/`Proxy-*` headers, and
@@ -153,9 +175,41 @@ in-process HTTP (`fetch_url`):
   or more hosts. `resolve_headers()` substitutes a secret only into requests to a bound host, so
   the agent sees only placeholders.
 
-`web_search` posts to fixed Tavily or Exa endpoints without consulting an `EgressPolicy`.
-There is no setting for an egress allow-list. A caller must construct `EgressPolicy` in code.
-Egress cases are pinned in [`spec/safety/egress.json`](../spec/safety/egress.json).
+`LHA_WEB_ALLOW_HOSTS` (comma-separated hosts, empty by default) is the allow-list for the lead's
+`fetch_url`; with it empty, the tool is not registered. `lha vendor` builds its allow-list from the
+hosts of the URLs it is given. `web_search` posts to fixed Tavily or Exa endpoints without
+consulting an `EgressPolicy`, and no run path registers it. Egress cases are pinned in
+[`spec/safety/egress.json`](../spec/safety/egress.json).
+
+### Sandbox network
+
+With `LHA_SANDBOX_EGRESS` empty (the default) the Docker sandbox has no network. With a
+comma-separated list of hosts, each sandbox session gets
+([sandbox_docker.py](../python/src/lha/execution/sandbox_docker.py),
+[egress_proxy.py](../python/src/lha/execution/egress_proxy.py)):
+
+- an `--internal` Docker network `lha-egress-<random>` with no route out, which is the only
+  network the sandbox container joins;
+- a proxy container `lha-egress-proxy-<random>` (`python:3.12-alpine`, non-root, all capabilities
+  dropped, read-only root) on both that network and the default bridge, running the stdlib-only
+  `egress_proxy.py`;
+- `HTTP_PROXY`/`HTTPS_PROXY` (and lower-case forms) pointing at the proxy, and
+  `NO_PROXY=localhost,127.0.0.1`.
+
+The proxy allows a request only if the host equals an entry, or is a subdomain of an entry
+written with a leading dot (`.golang.org` allows `golang.org` and its subdomains). IP-literal hosts
+are denied. It resolves the host and denies the request if any address is non-public (the same
+rules as above), then connects to the address it checked, without re-resolving. Ports 80 and 443
+are allowed; another port only through an explicit `host:port` entry. It supports `CONNECT`
+(TLS stays end to end, so it sees only the host name) and absolute-URI plain HTTP; everything else
+gets `403`. It logs one line per request to stderr (`docker logs lha-egress-proxy-...`). A
+malformed allow-list is rejected when the sandbox is built. Closing the session, or a failed
+open, removes the proxy container and the network.
+
+The proxy decides by host name only. A host that serves arbitrary users' content (`github.com`,
+`raw.githubusercontent.com`) can be used to pull or push arbitrary data; allow such hosts
+deliberately. Only HTTP(S) is proxied, so SSH remotes have no route. See
+[`sandbox/README.md`](../sandbox/README.md).
 
 ## 5. Rule of two
 
@@ -184,6 +238,10 @@ raises `RuleOfTwoViolation` at construction. With a gate, every egress call goes
 
 - The classifier is a guardrail, not a sandbox. An arbitrary program (`python -c …`, a test
   suite, a build script) can do anything its sandbox allows. With `local` that means the host.
+- Trusted checks (`LHA_TRUSTED_CHECKS`) run agent-written code outside the sandbox, with the
+  privileges of the process running the mission ([verification](07-verification.md#trusted-checks)).
+- An approved action is allowed exactly as it was requested, but the approver sees only the tool
+  and its arguments; what a `git push` sends is whatever the agent committed.
 - DNS rebinding: `fetch_url` resolves and checks addresses, then httpx resolves again when it
   connects. A 0-TTL rebinding server can race the check. Sandbox network isolation is the
   backstop.

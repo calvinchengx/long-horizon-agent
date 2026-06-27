@@ -19,7 +19,7 @@ flowchart TB
     OP(["Operator"]) --> CLI["lha CLI"]
 
     subgraph local["Local runs, no Temporal<br/>lha mission / run-local / orchestrate"]
-        RUN["Planner + AgentLoop<br/>(orchestrate adds researchers + reviewer)"]
+        RUN["Planner + AgentLoop + Replanner<br/>(orchestrate adds researchers + reviewer)"]
     end
 
     subgraph temporal["Durable runs"]
@@ -33,6 +33,8 @@ flowchart TB
     subgraph ext["Outside the process"]
         MODELS["Model providers<br/>Ollama / OpenAI-compatible / Claude / stub"]
         SB["Sandbox<br/>Docker daemon / E2B / local"]
+        PROXY["Egress proxy container<br/>(when LHA_SANDBOX_EGRESS is set)"]
+        TR["Trusted runner<br/>host subprocess, trusted: checks"]
         WS[("Workspace git repo<br/>+ .lha/ anchor")]
         OBJ[("Object store<br/>large payloads")]
         APPDB[("App Postgres + pgvector")]
@@ -43,6 +45,7 @@ flowchart TB
     CLI --> RUN
     CLI -- "mission-start, mission-status,<br/>mission-approve, mission-abort" --> TS
     CLI -- "db migrate" --> APPDB
+    CLI -- "vendor (reference pages)" --> NET
     TS <-- "task queue lha-mission" --> PYW
     TS -.-> GOW
     PYW --> MW
@@ -54,10 +57,18 @@ flowchart TB
     SB --> WS
     RUN -- "read at start,<br/>checkpoint commit" --> WS
     MW -- "read at start,<br/>checkpoint commit" --> WS
+    RUN --> TR
+    MW --> TR
+    TR -- "worktree of the candidate commit" --> WS
+    RUN -- "approval prompt<br/>(--approve-interactive)" --> OP
+    MW -- "WAITING_ON_HUMAN<br/>approve / reject, retry / abort" --> OP
     PYW -- "ClaimCheck codec" --> OBJ
     RUN -. "OTel spans (orchestrate, optional extra)" .-> LF
     MW -. "memory, cost ledger (library only)" .-> APPDB
-    SB -. "web_search / fetch_url (off by default)" .-> NET
+    SB -- "allow-listed hosts only" --> PROXY
+    PROXY --> NET
+    RUN -- "fetch_url (when LHA_WEB_ALLOW_HOSTS is set)" --> NET
+    MW -- "fetch_url (when LHA_WEB_ALLOW_HOSTS is set)" --> NET
 
     classDef planned stroke-dasharray: 5 5
     class GOW,SUB,LF planned
@@ -123,10 +134,12 @@ deadlocked, over budget or at `max_cycles`.
 - **Bounded history.** Continue-As-New every 200 cycles (`cycles_before_can`) or when Temporal
   suggests it; carried state rides in `MissionInput.state`.
 - **Humans.** A `human_decision_v1` signal resolves a gate, `steer_v1` appends an operator
-  note to every following cycle's prompt, and the `status_v1` query distinguishes `RUNNING`,
-  `DEGRADED_PARK` and `WAITING_ON_HUMAN`. The only gate the workflow opens today is an optional
-  retry/abort gate on deadlock (`deadlock_gate_seconds`, default 0, meaning off; `lha mission-start`
-  does not set it).
+  note to every following cycle's prompt, the `status_v1` query distinguishes `RUNNING`,
+  `DEGRADED_PARK` and `WAITING_ON_HUMAN`, and `open_question` returns what an open gate is
+  asking. The workflow opens two kinds of gate: an approve/reject gate for each irreversible
+  action a cycle attempted (`approval_timeout_seconds`, default 24 h, then rejected), and a
+  retry/abort gate on deadlock (`deadlock_gate_seconds`; `lha mission-start` sets 24 h by
+  default, then aborts). See [durable execution](08-durable-execution.md#human-gates).
 
 The `SLEEPING` status is defined (and appears in the database schema) but no code path sets it.
 
@@ -140,18 +153,24 @@ CLI command or activity uses them yet. See [memory](12-memory.md).
 
 ### Execution and tools
 
+- **Assembly** ([`agent/assembly.py`](../python/src/lha/agent/assembly.py)): the local
+  runner, the durable cycle activity and `lha orchestrate` build the lead the same way from
+  settings: sandbox image and egress allow-list, tools, human gate, a verifier that sends
+  `trusted:` checks to the trusted runner, protected harness paths and the replanner.
 - **Sandboxes** ([`execution/factory.py`](../python/src/lha/execution/factory.py)): `docker`
-  (default; no network, dropped capabilities, read-only root and read-only `.git/` and `.lha/`
-  mounts), `e2b`, and `local` (no isolation; refused unless `LHA_ALLOW_UNSAFE_LOCAL=true` or
-  `--unsafe-local`).
+  (default; image `LHA_SANDBOX_IMAGE`, no network unless `LHA_SANDBOX_EGRESS` lists hosts,
+  dropped capabilities, read-only root and read-only `.git/` and `.lha/` mounts), `e2b`, and
+  `local` (no isolation; refused unless `LHA_ALLOW_UNSAFE_LOCAL=true` or `--unsafe-local`).
 - **Dispatcher** ([`execution/dispatcher.py`](../python/src/lha/execution/dispatcher.py)): a
   fail-closed allow-list of tool names, default-deny for mutating and egress tools, JSON-schema
   argument checks, workspace path containment, no writes to `.lha/` or `.git/`, and routing of
-  commands classified as irreversible to a human gate (denied when no gate is configured, which is
-  the case for every built-in run path). It also enforces the "rule of two".
+  commands classified as irreversible to a human gate ([`hitl/approvals.py`](../python/src/lha/hitl/approvals.py)):
+  the durable path queues them for `lha mission-approve`, local runs ask on the terminal with
+  `--approve-interactive`, and with no gate they are denied. It also enforces the "rule of two".
 - **Tools** ([`execution/tools/`](../python/src/lha/execution/tools/)): the default set is
-  `read_file`, `write_file`, `list_files`, `grep` and `run_command`. `web_search` and
-  `fetch_url` exist but are not in the default set, and the run paths disable egress.
+  `read_file`, `write_file`, `list_files`, `grep` and `run_command`. `fetch_url` is added, limited
+  to those hosts, when `LHA_WEB_ALLOW_HOSTS` is set. `web_search` exists but no run path
+  registers it.
 
 See [the safety model](09-safety-model.md).
 
@@ -189,8 +208,9 @@ What runs where today:
 
 | Role | `lha mission` / `lha run-local` / durable | `lha orchestrate` (local only) |
 |---|---|---|
-| Planner | Yes (not in `run-local`, which takes `--item`s) | Yes |
-| Lead Engineer (the `AgentLoop`) | Yes, the only agent | Yes |
+| Planner | Yes (not in `run-local`, or when `--checklist` is given) | Yes |
+| Lead Engineer (the `AgentLoop`) | Yes | Yes |
+| Replanner (splits a blocked item) | Yes, unless `LHA_MAX_REPLANS=0` | Yes |
 | Researchers | No | 2 per item, concurrently, with read-only tools |
 | Reflection after a failed cycle | No | Yes |
 | Reviewer (can reopen a verified item) | No | Yes |
@@ -228,32 +248,38 @@ flowchart TD
     A["Read anchor from HEAD<br/>checklist, mission spec, recent commits"] --> B{"complete or<br/>deadlocked?"}
     B -- yes --> Z["stop"]
     B -- no --> C["Pick next actionable item<br/>mark in_progress"]
-    C --> D["Hash pre-existing test harness files"]
+    C --> D["Hash pre-existing test harness files<br/>+ LHA_HARNESS_PATHS"]
     D --> E["Agent turn loop, up to max_turns<br/>tool calls through the dispatcher"]
-    E -- "model signals done" --> F["Run gating checks"]
+    E -- "model signals done" --> F["Run gating checks<br/>+ the item's witnesses"]
     F -- failed, turns left --> E
     F -- "passed / unverified / no turns left" --> G
     E -- "turns exhausted" --> G["Verify (if workspace changed)<br/>+ harness integrity check"]
     G --> H{"passed?"}
     H -- yes --> I["record_success: done, verified_by"]
     H -- no --> J["record_failure: in_progress,<br/>blocked after 3 in a row"]
+    J -- "newly blocked" --> S["Replanner may split it<br/>into id.1 .. id.n"]
     I --> K["Checkpoint commit: code + .lha/"]
     J --> K
+    S --> K
 ```
 
 1. **Read the anchor.** The checklist, mission spec and recent history are read from the
    committed `HEAD`, not from the working tree or the model.
 2. **Pick an item.** An `in_progress` item first, otherwise the first `todo` item whose
    dependencies are all `done`.
-3. **Agent loop.** The prompt recites the immutable mission spec, then gives the item, its last
-   verification failure, the last 10 commits and the tool list. The model replies with one JSON
+3. **Agent loop.** The prompt recites the immutable mission spec (including its list of vendored
+   references), then gives the item, its witnesses, its last verification failure, the last 10 commits and the tool list. The model replies with one JSON
    action (or native tool calls). Invalid or truncated replies get a corrective turn and never
    count as done.
-4. **Verify.** When the model signals done, the checks run; a failure is fed back and the loop
-   continues while turns remain. The final verdict includes a failing `harness_integrity` check
-   if pre-existing tests or test config were changed.
-5. **Checkpoint.** One git commit containing the code changes and the rewritten anchor, with the
-   message `lha: complete|attempt|block <id> (<description>)`.
+4. **Verify.** When the model signals done, the mission checks and the item's witnesses run
+   (`trusted:` witnesses on the trusted runner, outside the sandbox); a failure is fed back and
+   the loop continues while turns remain. The final verdict includes a failing
+   `harness_integrity` check if pre-existing tests, test config or operator-protected paths were
+   changed.
+5. **Replan.** If the failure just blocked the item and the replan budget allows, the replanner
+   asks the model to split it into 2 to 6 child items; the parent becomes `split`.
+6. **Checkpoint.** One git commit containing the code changes and the rewritten anchor, with the
+   message `lha: complete|attempt|block|split <id> (<description>)`.
 
 Local runners repeat cycles until the checklist is complete, deadlocked, over budget, or a loop
 is detected; the durable workflow does the same across activities.

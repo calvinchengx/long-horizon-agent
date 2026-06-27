@@ -57,9 +57,13 @@ again. Each attempt is made safe to repeat:
   the worktree, so the reset does not remove it. The next attempt's ledger starts from that
   total. See [Cost and budget](10-cost-and-budget.md).
 
-Model, sandbox, budget ceiling and checks come from the worker's settings (`get_settings()` is
-cached per process), except `check_commands` and `budget_usd`, which come from `MissionInput`.
-A missing API key or a refused sandbox raises a non-retryable `MissionConfigError`.
+The lead is assembled by [`agent/assembly.py`](../python/src/lha/agent/assembly.py), the same
+code the local runners use. Model, sandbox kind and image, sandbox egress, `fetch_url` hosts,
+trusted checks, protected harness paths, replanning limits and budget ceiling come from the
+worker's settings (`get_settings()` is cached per process), except `check_commands` and
+`budget_usd`, which come from `MissionInput`. A missing API key, a refused sandbox or malformed
+`LHA_TRUSTED_CHECKS` raises a non-retryable `MissionConfigError`. Trusted checks run on the
+worker host.
 
 ```mermaid
 sequenceDiagram
@@ -85,23 +89,24 @@ sequenceDiagram
             A->>M: complete() (budget checked first)
             A->>S: tool call via AllowListDispatcher
         end
-        A->>S: run gating checks (verifier)
+        A->>S: run gating checks and witnesses (verifier)
         A->>G: commit checkpoint (checklist, progress, cycle event)
         A->>S: close
         A->>G: append attempt spend to spend.ndjson
-        A-->>T: CycleResult (item, verdict, counts, head_sha)
+        A-->>T: CycleResult (item, verdict, counts, head_sha, pending/used approvals)
     end
     T-->>W: result journaled in history
 ```
 
 ## Workflow loop and outcomes
 
-Each iteration: stop at `max_cycles`, otherwise run one cycle and absorb its result
-(`head_sha`, `items_done`, `items_total`, `last_item`). The mission ends with an explicit outcome:
+Each iteration: stop at `max_cycles`, otherwise run one cycle, absorb its result (`head_sha`,
+`items_done`, `items_total`, `last_item`), and ask a human about any irreversible actions it
+queued ([human gates](#human-gates)). The mission ends with an explicit outcome:
 
 | Outcome | Trigger | Final status |
 |---|---|---|
-| `completed` | `is_complete`: every checklist item verified done | `DONE` |
+| `completed` | `is_complete`: every checklist item verified done (or split into children that are) | `DONE` |
 | `deadlocked` | `is_deadlocked`: items remain, none actionable, and no human "retry" | `IMPOSSIBLE` |
 | `budget_exhausted` | the cycle activity raised `BudgetExceeded` | `ABORTED` |
 | `max_cycles` | `cycles_done >= max_cycles` | `ABORTED` |
@@ -130,24 +135,76 @@ which parks only if a critical dependency (`git`, `model`, `sandbox`) is `DOWN`:
   and the cycle is retried.
 - `sandbox`: a sandbox session opens and closes.
 
-## Deadlock and the human gate
+## Human gates
 
-A deadlock is "not complete, but nothing actionable". This happens when items are `blocked` after
-repeated verification failures, or when dependencies can never be satisfied. If
-`MissionInput.deadlock_gate_seconds` is 0 (the default), the mission ends immediately as
-`deadlocked`. Otherwise the workflow calls `await_human_gate` with the options `retry` / `abort`
-and the default `abort`:
+The workflow parks on a human through `await_human_gate`, which it uses for two kinds of
+question. While a gate is open:
 
-- status is `WAITING_ON_HUMAN` while the gate is open, and restored afterwards;
+- status is `WAITING_ON_HUMAN`, and the `open_question` query returns the question followed by the
+  options, for example `... Approve or reject? [approve / reject]` (`lha mission-status` prints it
+  as `waiting on: ...`); both are restored when the gate closes;
+- no cycle runs: the gate is awaited in the workflow loop before the next cycle starts;
 - a decision that arrived before the gate opened is honoured (it is stored until consumed);
 - matching is case-insensitive; a decision that matches no option is recorded in
   `rejected_decisions`, and the gate keeps waiting;
-- on timeout the default is applied.
+- on timeout the default is applied. The wait is a durable timer, so it survives worker restarts.
+
+### Approving irreversible actions
+
+The durable cycle gives the dispatcher a `DeferredApprovalGate`
+([`hitl/approvals.py`](../python/src/lha/hitl/approvals.py)). An activity must not block for
+hours on a person, so when the agent runs a command the classifier flags as irreversible (for
+example `git push`), the gate records it as a pending approval and denies it for now. The model is
+told the action is queued, not done, and to continue with other work.
+
+```mermaid
+sequenceDiagram
+    participant A as run_agent_cycle (cycle cN)
+    participant W as MissionWorkflow
+    participant H as Operator
+    participant B as run_agent_cycle (later cycle)
+    A->>A: agent runs git push, gate queues it (fingerprint)
+    A-->>W: CycleResult.pending_approvals
+    W->>W: status WAITING_ON_HUMAN, open_question set
+    H->>W: lha mission-status (sees the question)
+    H->>W: lha mission-approve --decision approve
+    W->>W: state.approved_actions += fingerprint
+    W->>B: CycleInput.approved_actions
+    B->>B: the same call is allowed once
+    B-->>W: CycleResult.used_approvals
+    W->>W: drop used approvals
+```
+
+- Each pending action is identified by a fingerprint: the first 32 hex characters of the SHA-256
+  of the tool name and its exact arguments as canonical JSON. Approving `git push origin main`
+  does not approve `git push --force` or a push to another remote.
+- After each cycle the workflow asks about every new pending action, one gate at a time, with
+  options `approve` / `reject`, default `reject`, and a timeout of
+  `MissionInput.approval_timeout_seconds` (default 86400; `lha mission-start
+  --approval-timeout-hours`, default `LHA_APPROVAL_TIMEOUT_S`, 24h).
+- An approved action goes into `MissionState.approved_actions` and is passed to every following
+  cycle in `CycleInput.approved_actions`; the cycle prompt lists it as approved, and the gate
+  allows that fingerprint once. The cycle reports it in `used_approvals` and the workflow drops
+  it.
+- A rejected (or timed-out) fingerprint goes into `MissionState.rejected_actions`, so the same
+  request is not asked about again. The agent is still denied if it retries it.
+
+Local runs have no workflow to park. `--approve-interactive` gives the dispatcher a console gate
+that asks `allow? [y/N]` on the terminal; without it, irreversible commands are denied.
+
+### Deadlock
+
+A deadlock is "not complete, but nothing actionable". This happens when items are `blocked` after
+repeated verification failures (and the replanner did not split them), or when dependencies can
+never be satisfied. If `MissionInput.deadlock_gate_seconds` is 0 (the dataclass default), the
+mission ends immediately as `deadlocked`. Otherwise the workflow opens a gate with the options
+`retry` / `abort` and the default `abort`. `lha mission-start` sets it from
+`--deadlock-gate-hours` (default 24; `0` turns it off).
 
 On `retry` the workflow runs `unblock_items` (cycle id `u<n>`) and continues if at least one item
-was unblocked. `lha mission-start` does not set `deadlock_gate_seconds`, so missions started from
-the CLI never open this gate. `lha mission-approve` sends `approve` by default, which this gate
-rejects. Send `--decision retry` or `--decision abort` instead.
+was unblocked. `lha mission-approve` requires `--decision`: `approve` or `reject` for an action
+gate, `retry` or `abort` for a deadlock gate. A decision that does not match the open gate is
+discarded and recorded in `rejected_decisions`.
 
 ## Signals, queries and statuses
 
@@ -159,13 +216,14 @@ rejects. Send `--decision retry` or `--decision abort` instead.
 | `cycles_done` | query | completed cycle count |
 | `last_item` | query | id of the last worked item |
 | `park_reason` | query | why the mission is parked (`""` if not) |
+| `open_question` | query | the question an open human gate is waiting on, with its options (`""` if none) |
 | `rejected_decisions` | query | decisions discarded by a gate |
 
 `signals.py` also defines `UPDATE_VERIFY_VERDICT = "verify_verdict_v1"`. No workflow registers
 an update handler for it. It also defines status `SLEEPING`, which `MissionWorkflow` never sets.
 The statuses the workflow actually uses are `RUNNING`, `DEGRADED_PARK`, `WAITING_ON_HUMAN`,
-`DONE`, `IMPOSSIBLE` and `ABORTED`. The CLI covers `mission-status` (`status_v1` +
-`cycles_done`), `mission-approve` (`human_decision_v1`) and `mission-abort` (workflow
+`DONE`, `IMPOSSIBLE` and `ABORTED`. The CLI covers `mission-status` (`status_v1`,
+`cycles_done` and `open_question`), `mission-approve` (`human_decision_v1`) and `mission-abort` (workflow
 cancellation). There is no CLI command for `steer_v1`.
 
 ## Continue-As-New
@@ -174,9 +232,10 @@ The workflow continues as new every `cycles_before_can` cycles (default 200). It
 whenever Temporal reports `is_continue_as_new_suggested()`, including between park probes. The
 new run receives the same `MissionInput` with `state` set to the current `MissionState`:
 `cycles_done`, `status`, `head_sha`, `items_done`, `items_total`, `last_item`,
-`pending_decision`, `steer_notes`, `parks` and `deadlock_retries`. Nothing else is carried: no
-history and no transcripts. `rejected_decisions` and `park_reason` are instance fields and reset in
-the new run. A run that continued as new during a park starts with a cycle attempt, not another
+`pending_decision`, `steer_notes`, `parks`, `deadlock_retries`, `approved_actions` and
+`rejected_actions`. Nothing else is carried: no history and no transcripts.
+`rejected_decisions`, `park_reason` and `open_question` are instance fields and reset in the new
+run. A run that continued as new during a park starts with a cycle attempt, not another
 sleep.
 
 ## Idempotency

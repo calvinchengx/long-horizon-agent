@@ -69,9 +69,12 @@ code. Without Postgres, state lives in git (the anchor) and the filesystem objec
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
 | `LHA_BUDGET_USD_CEILING` | float | `10.0` | spend ceiling in USD per mission (local runs; durable missions started by the CLI) |
-| `LHA_MAX_CYCLES` | int | `1000` | cycle ceiling for local runs; not passed to durable missions (they use `MissionInput.max_cycles`, default 1000) |
+| `LHA_MAX_CYCLES` | int | `1000` | cycle ceiling for local runs; `lha mission-start` passes it as `MissionInput.max_cycles` unless `--max-cycles` is given (read in the CLI process, not the worker) |
 | `LHA_MAX_TURNS_PER_CYCLE` | int | `8` | model turns per cycle before the acting phase ends |
 | `LHA_STALL_LIMIT` | int | `5` | local runs stop when one item fails this many times in a row; unused by the durable workflow |
+| `LHA_MAX_REPLANS` | int | `20` | splits of blocked items allowed per mission (counted as items with status `split`); `0` disables the replanner |
+| `LHA_MAX_SPLIT_DEPTH` | int | `2` | how deeply splits may nest: an item whose id already has this many dots (`03.1.2`) is not split again |
+| `LHA_APPROVAL_TIMEOUT_S` | int | `86400` | how long a durable mission waits for a human to approve or reject an irreversible action before rejecting it; `lha mission-start --approval-timeout-hours` overrides it per mission (`MissionInput.approval_timeout_seconds`) |
 
 Durable sub-agent activities (`run_subagent`) build their own governor from
 `LHA_BUDGET_USD_CEILING` and `LHA_MAX_CYCLES`. See [10-cost-and-budget.md](10-cost-and-budget.md).
@@ -82,9 +85,25 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 |---|---|---|---|
 | `LHA_SANDBOX` | `docker` \| `e2b` \| `local` | `docker` | where tool calls and checks run; `--sandbox` overrides it for local commands |
 | `LHA_ALLOW_UNSAFE_LOCAL` | bool | `false` | required for `local`, which runs commands on the host with no isolation |
+| `LHA_SANDBOX_IMAGE` | string | `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` | Docker image the sandbox runs; it must contain the tools the checks and witnesses call ([`sandbox/Dockerfile`](../sandbox/Dockerfile) builds a Go + uv + Node/pnpm image) |
+| `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org`; `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. Empty: no network |
+| `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the lead's `fetch_url` tool may read; when set, `fetch_url` is registered. Empty: no web tool |
+| `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
+| `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
 
-`e2b` authenticates through the E2B SDK's own configuration (not an `LHA_*` variable). See
-[09-safety-model.md](09-safety-model.md).
+`LHA_SANDBOX_IMAGE` and `LHA_SANDBOX_EGRESS` apply to `docker` only. `e2b` authenticates through
+the E2B SDK's own configuration (not an `LHA_*` variable). See
+[09-safety-model.md](09-safety-model.md) and, for witnesses, trusted checks and protected paths,
+[07-verification.md](07-verification.md).
+
+Example for a Go project whose end-to-end suite needs Docker on the host:
+
+```bash
+export LHA_SANDBOX_IMAGE=lha-sandbox:latest
+export LHA_SANDBOX_EGRESS=proxy.golang.org,sum.golang.org
+export LHA_TRUSTED_CHECKS='{"e2e": ["make", "e2e"]}'
+export LHA_HARNESS_PATHS='Makefile,e2e/**'
+```
 
 ### Observability
 
@@ -125,7 +144,8 @@ keys do not reach agent-run commands. Keep `.env` out of version control (`.giti
 | Variable / file | Read by | Meaning |
 |---|---|---|
 | `LHA_IT_POSTGRES_DSN` | `tests/integration/conftest.py` | admin DSN for a Postgres with `vector` available; each test creates and drops its own database. Unset: Postgres tests are skipped |
-| `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (pulls `python:3.12-slim`). Otherwise skipped |
+| `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine`, and the egress tests need internet access). Otherwise skipped |
+| `LHA_IT_SANDBOX_IMAGE` | `tests/integration/test_large_mission_e2e.py` | the polyglot sandbox image built from `sandbox/Dockerfile` (default `lha-sandbox:dev`) |
 | `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay history `tests/durability/histories/mission_three_items.json` |
 | `LHA_PYDIFF` | `go/internal/safety/zz_pydiff_test.go` | directory of Python egress dumps for the Go differential tests; unset: skipped |
 | `LHA_APPDB_PASSWORD` | `docker-compose.yml` | `appdb` password (default `lha`) |

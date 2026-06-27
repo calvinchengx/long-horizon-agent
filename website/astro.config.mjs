@@ -59,6 +59,7 @@ export default defineConfig({
             { slug: '14-running-on-temporal' },
             { slug: '15-operations-runbook' },
             { slug: '16-observability' },
+            { slug: '24-large-missions' },
           ],
         },
         {

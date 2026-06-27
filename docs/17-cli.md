@@ -15,13 +15,14 @@ ported. Today `go/cmd/lha` is empty and no Go binary can be built; see [23-roadm
 | [`version`](#lha-version) | print the version | nothing |
 | [`config`](#lha-config) | print resolved settings, secrets masked | nothing |
 | [`db migrate`](#lha-db-migrate) | apply SQL migrations | Postgres, `postgres` extra |
-| [`run-local`](#lha-run-local) | run a given checklist locally | a sandbox |
-| [`mission`](#lha-mission) | plan a task, then run it locally | a sandbox |
+| [`vendor`](#lha-vendor) | snapshot reference pages into the workspace | network access to the URLs |
+| [`run-local`](#lha-run-local) | run a given or imported checklist locally | a sandbox |
+| [`mission`](#lha-mission) | plan a task (or import a checklist), then run it locally | a sandbox |
 | [`orchestrate`](#lha-orchestrate) | plan, then run the multi-agent org locally | a sandbox |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
-| [`mission-start`](#lha-mission-start) | plan and start a durable mission | Temporal, a worker |
-| [`mission-status`](#lha-mission-status) | query status and cycle count | Temporal |
-| [`mission-approve`](#lha-mission-approve) | send a gate decision | Temporal |
+| [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
+| [`mission-status`](#lha-mission-status) | query status, cycle count and any open question | Temporal |
+| [`mission-approve`](#lha-mission-approve) | answer an open human gate | Temporal |
 | [`mission-abort`](#lha-mission-abort) | cancel a durable mission | Temporal |
 
 ## Exit codes
@@ -30,7 +31,7 @@ ported. Today `go/cmd/lha` is empty and no Go binary can be built; see [23-roadm
 |---|---|
 | `0` | success; for the local mission commands, every item verified done |
 | `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`); or an unhandled error (Python traceback) |
-| `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`) |
+| `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`, an invalid `--checklist` file, neither or both of `--item`/`--checklist`, an unknown `--decision`, a refused `vendor` URL) |
 | `3` | the budget governor refused the planning call (`mission`, `orchestrate`, `mission-start`) |
 
 Once a local run is under way, a governor refusal (before a cycle or before a single model call)
@@ -49,11 +50,21 @@ unreachable server or unknown workflow id ends in a traceback with exit `1`.
 | `--no-default-checks` | off | drop the default checks; requires at least one non-empty `--check` |
 | `--sandbox TEXT` | `LHA_SANDBOX`, else `docker` | `docker`, `e2b` or `local` (not on `mission-start`) |
 | `--unsafe-local` | off | allow the `local` sandbox (no isolation) (not on `mission-start`) |
+| `--reference TEXT` | none | a workspace-relative path of vendored reference material, recited to the agent every cycle; repeatable (see [`vendor`](#lha-vendor)) |
+| `--approve-interactive` | off | ask on this terminal (`allow? [y/N]`) before any irreversible command (`git push`, publish, uploads); without it they are refused (not on `mission-start`, where the workflow asks) |
+
+`run-local`, `mission` and `mission-start` also take `--checklist FILE`: seed the mission with a
+`.json` checklist or a `.md` roadmap instead of planning (format in
+[06-mission-anchor.md](06-mission-anchor.md#importing-a-checklist)). The file's title,
+description and references are used unless given on the command line; `--reference` paths are
+merged with the file's.
 
 The default checks are `uv run ruff check .`, `uv run ty check` and `uv run pytest -q`, run inside
-the sandbox. An item is never marked done without at least one passing gating check. The default
-Docker image, `python:3.12-slim`, does not include `uv`; with the Docker sandbox, pass
-`--no-default-checks` and `--check` commands that the image can run.
+the sandbox. An item is never marked done without at least one passing gating check, and an
+item's witnesses must pass too. The default Docker image
+(`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`) has `uv` but no ruff, ty or pytest, and no
+network unless `LHA_SANDBOX_EGRESS` allows the package index; choose checks the image can run, or
+set `LHA_SANDBOX_IMAGE` to an image that has them.
 
 Choosing `local` without `--unsafe-local` (or `LHA_ALLOW_UNSAFE_LOCAL=true`) fails before any
 model call or workspace write. `e2b` requires the `e2b-code-interpreter` package and an E2B
@@ -75,12 +86,31 @@ Applies pending migrations to the database at `LHA_POSTGRES_DSN`.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--migrations-dir TEXT` | `db/migrations` | directory of `*.sql` files, relative to the current directory |
+| `--migrations-dir TEXT` | `db/migrations`, else `../db/migrations` | directory of `*.sql` files |
 
-The default is relative to the repository root. From `python/`, pass
-`--migrations-dir ../db/migrations`. Prints `migrations applied: [...]` with the versions applied by
+Without the option, the command uses `db/migrations` in the current directory if it exists,
+otherwise `../db/migrations`, so it works from the repository root and from `python/`; if neither
+exists it exits `2`. Prints `migrations applied: [...]` with the versions applied by
 this run (`[]` when up to date). Exits `2` if `LHA_POSTGRES_DSN` is unset or `psycopg` is missing
 (`uv sync --extra postgres`). Details in [19-wire-contract.md](19-wire-contract.md#postgres-schema).
+
+## `lha vendor`
+
+```
+lha vendor URL... [--into DIR]
+```
+
+Downloads each URL into `DIR` (default `reference`, relative to the current directory) and
+writes `DIR/MANIFEST.json` with each file's URL, path, SHA-256, size, content type and fetch time
+(a re-vendored URL replaces its entry). Files are stored under `<host>/<path>`; HTML pages also
+get a `.txt` rendering. It prints `<url> -> <path> (<bytes> bytes, sha256 <prefix>)` per file,
+then the manifest path.
+
+Fetching uses the egress policy: http(s) only, no credentials in the URL, public addresses only,
+at most 5 redirects, each of which must stay on one of the hosts in the given URLs, and at most
+10,000,000 bytes per page. A refused or failed URL exits `2`. Run it inside the mission workspace
+(or point `--into` there), then pass the paths to a mission with `--reference`. See
+[06-mission-anchor.md](06-mission-anchor.md#references).
 
 ## `lha run-local`
 
@@ -88,10 +118,13 @@ Runs a mission from an explicit checklist, in this process, without Temporal.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--title TEXT` | required | mission title |
-| `--item TEXT` | required, repeatable | one checklist item; ids are `01`, `02`, ... in order |
+| `--title TEXT` | the checklist file's title, else `mission` | mission title |
+| `--item TEXT` | repeatable | one checklist item; ids are `01`, `02`, ... in order |
+| `--checklist FILE` | none | import the checklist from a file instead of `--item` |
 | `--workdir TEXT` | `.lha/workspaces/local` | workspace; initialized as a git repo |
 | `--description TEXT` | `""` | mission description |
+
+Give exactly one of `--item` (one or more) and `--checklist`.
 
 Plus the shared options. It initializes the anchor, then runs cycles until the checklist is
 complete, deadlocked, refused by the governor, a loop is detected, or `LHA_MAX_CYCLES` is reached.
@@ -110,12 +143,14 @@ planner and the lead share one budget.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--task TEXT` | required | mission description; the Planner decomposes it |
-| `--title TEXT` | `mission` | mission title |
+| `--task TEXT` | `""` | mission description; the Planner decomposes it |
+| `--title TEXT` | `mission` (or the checklist file's title) | mission title |
+| `--checklist FILE` | none | import the checklist instead of planning |
 | `--workdir TEXT` | `.lha/workspaces/mission` | workspace |
 
-If the planner's reply cannot be parsed, the plan falls back to one item built from the
-description.
+One of `--task` and `--checklist` is required. With `--checklist`, the Planner is not called and
+`--task`, if given, becomes the mission description. If the planner's reply cannot be parsed, the
+plan falls back to one item built from the description.
 
 ## `lha orchestrate`
 
@@ -130,29 +165,37 @@ role uses its tier's model ([13-models.md](13-models.md#per-role-routing-lha-orc
 | `--title TEXT` | `mission` | mission title |
 | `--workdir TEXT` | `.lha/workspaces/org` | workspace |
 
-Output and exit codes as for `run-local`.
+`orchestrate` has no `--checklist` option; it always plans. Output and exit codes as for
+`run-local`.
 
 ## `lha worker`
 
 Connects to `LHA_TEMPORAL_ADDRESS` / `LHA_TEMPORAL_NAMESPACE` and serves `MissionWorkflow` and
-`SubAgentWorkflow` on `LHA_TASK_QUEUE` until interrupted. No options. The model, sandbox and
-budget used by durable missions come from this process's settings. See
+`SubAgentWorkflow` on `LHA_TASK_QUEUE` until interrupted. No options. The model, sandbox, egress,
+trusted checks, protected paths, replanning limits and budget used by durable missions come from
+this process's settings. See
 [14-running-on-temporal.md](14-running-on-temporal.md).
 
 ## `lha mission-start`
 
-Plans the task, initializes the anchor at `--workdir`, and starts `MissionWorkflow` with workflow
-id `mission:<mission_id>`. Prints `started mission <mission_id> (workflow id:
-mission:<mission_id>)` and returns without waiting.
+Plans the task (or imports `--checklist`), initializes the anchor at `--workdir`, and starts
+`MissionWorkflow` with workflow id `mission:<mission_id>`. Prints `started mission <mission_id>
+(workflow id: mission:<mission_id>)` and returns without waiting.
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--task TEXT` | required | mission description |
-| `--title TEXT` | `mission` | mission title |
-| `--workdir TEXT` | `.lha/workspaces/durable` | workspace; passed to the worker as given, so use an absolute path |
+| `--task TEXT` | `""` | mission description; the Planner decomposes it |
+| `--title TEXT` | `mission` (or the checklist file's title) | mission title |
+| `--checklist FILE` | none | import the checklist instead of planning |
+| `--workdir TEXT` | `.lha/workspaces/durable` | workspace; resolved to an absolute path here before it is sent to the worker |
+| `--deadlock-gate-hours FLOAT` | `24.0` | on deadlock, wait this long for `retry` or `abort` (`0` ends the mission immediately) |
+| `--approval-timeout-hours FLOAT` | `LHA_APPROVAL_TIMEOUT_S` (24h) | how long an irreversible action waits for approval before it is rejected |
+| `--max-cycles INTEGER` | `LHA_MAX_CYCLES` | cycle ceiling |
 
-Plus `--check` and `--no-default-checks`. The check commands travel in the workflow input; the
-defaults are resolved by this command, not by the worker.
+One of `--task` and `--checklist` is required. Plus `--check`, `--no-default-checks` and
+`--reference`. The check commands travel in the workflow input; the defaults are resolved by this
+command, not by the worker. Irreversible actions are approved with
+[`mission-approve`](#lha-mission-approve).
 
 ## `lha mission-status`
 
@@ -160,24 +203,26 @@ defaults are resolved by this command, not by the worker.
 lha mission-status MISSION_ID
 ```
 
-Queries `status_v1` and `cycles_done` on workflow `mission:MISSION_ID` and prints
-`status=<status> cycles=<n>`. Works while running and after the workflow has closed; a worker
-must be running to answer the queries.
+Queries `status_v1`, `cycles_done` and `open_question` on workflow `mission:MISSION_ID` and
+prints `status=<status> cycles=<n>`, followed by `waiting on: <question> [<options>]` when a human
+gate is open. Works while running and after the workflow has closed; a worker must be running to
+answer the queries.
 
 ## `lha mission-approve`
 
 ```
-lha mission-approve MISSION_ID [--decision TEXT]
+lha mission-approve MISSION_ID --decision approve|reject|retry|abort
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--decision TEXT` | `approve` | the decision string to signal |
+| `--decision TEXT` | required | `approve` or `reject` for an irreversible-action gate; `retry` or `abort` for a deadlock gate |
 
-Sends signal `human_decision_v1` and prints `sent decision '<decision>' to mission <id>`. The only
-gate in `MissionWorkflow` is the deadlock gate, whose options are `retry` and `abort`; other
-values, including the default `approve`, are recorded as rejected and ignored. Missions started by
-`mission-start` never open that gate. See [15-operations-runbook.md](15-operations-runbook.md).
+The value is lower-cased; anything else exits `2`. Sends signal `human_decision_v1` and prints
+`sent decision '<decision>' to mission <id>`. A decision that does not match the open gate's
+options is recorded in `rejected_decisions` and ignored, so check `mission-status` first. See
+[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-and-abort) and
+[15-operations-runbook.md](15-operations-runbook.md).
 
 ## `lha mission-abort`
 

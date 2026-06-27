@@ -11,10 +11,11 @@ All Python tests live in [`python/tests/`](../python/tests/) and run with `pytes
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| `tests/unit/` | every module in isolation: safety classifier and egress, sandboxes (with fakes), tools, dispatcher, model backends over mocked HTTP, pricing and retry, governor and metering, anchor, verifier, agent loop, planner, reviewer, orchestrator, memory, coordination, CLI wiring, redaction, `spec/` conformance | nothing |
-| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions, ClaimCheck, object store, saga, reconcile, history replay | the Temporal test server (downloaded automatically) |
+| `tests/unit/` | every module in isolation: safety classifier and egress, sandboxes (with fakes), the egress proxy (`test_egress_proxy.py`), tools, dispatcher, model backends over mocked HTTP, pricing and retry, governor and metering, anchor, checklist import (`test_checklist_import.py`), verifier, witnesses (`test_witnesses.py`), trusted runner (`test_trusted_runner.py`), agent loop, planner, reviewer, orchestrator, memory, coordination, CLI wiring, redaction, `spec/` conformance | nothing |
+| `tests/unit/test_large_missions.py` | the large-mission features through the real loop, dispatcher, verifier, `local` sandbox and git anchor with a scripted model: witnesses, trusted checks, protected paths, replanning of blocked items (and its budget and depth limits), approval gates and fingerprints, `fetch_url` registration, references and `lha vendor` | nothing |
+| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions, durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again), ClaimCheck, object store, saga, reconcile, history replay | the Temporal test server (downloaded automatically) |
 | `tests/load/` | `test_long_run.py`: many cycles with Continue-As-New firing repeatedly; history stays bounded and every item completes once | the Temporal test server |
-| `tests/integration/` | real Postgres + pgvector (migrations, schema, cost ledger, mission repo, semantic index) and the real Docker sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network) | opt-in, see below |
+| `tests/integration/` | real Postgres + pgvector (migrations, schema, cost ledger, mission repo, semantic index); the real Docker sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network); the egress proxy against real Docker and the internet (`test_docker_egress.py`); and one mission that uses every large-mission feature together (`test_large_mission_e2e.py`) | opt-in, see below |
 
 ```bash
 uv run pytest -q tests/unit
@@ -65,7 +66,20 @@ committed file is portable. See [15-operations-runbook.md](15-operations-runbook
 | Variable | Enables |
 |---|---|
 | `LHA_IT_POSTGRES_DSN` | Postgres tests. An admin DSN for a server with the `vector` extension; each test creates a uniquely named database and drops it afterwards |
-| `LHA_IT_DOCKER=1` | Docker sandbox tests against the local daemon; pulls `python:3.12-slim` on first use |
+| `LHA_IT_DOCKER=1` | Docker sandbox tests against the local daemon; they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine` (the egress proxy) on first use. `test_docker_egress.py` needs internet access to `pypi.org` |
+| `LHA_IT_SANDBOX_IMAGE` | the image `test_large_mission_e2e.py` runs the lead in (default `lha-sandbox:dev`); build it from [`sandbox/Dockerfile`](../sandbox/Dockerfile) |
+
+`test_large_mission_e2e.py` drives a small Go project from a Markdown roadmap with a scripted
+model: the lead works in the polyglot image with egress limited to the Go module proxy, a
+`go:TestHello` witness gates one item, a `trusted:e2e` check runs on the host against the
+candidate commit, a too-coarse item is split, a vendored reference is recited, and a `git push` is
+routed to a (simulated) approver. It needs `LHA_IT_DOCKER=1`, the sandbox image, a local `go` and
+network access:
+
+```bash
+docker build -t lha-sandbox:dev sandbox/          # from the repository root
+cd python && LHA_IT_DOCKER=1 uv run pytest -q tests/integration/test_large_mission_e2e.py
+```
 
 With a throwaway pgvector container on a free port:
 
@@ -117,7 +131,7 @@ On every push to `main` and every pull request:
 | Job | Steps |
 |---|---|
 | `python-check` | `uv sync --locked`; `ruff check`; `ruff format --check`; `ty check`; `pytest tests/unit` with coverage; `pytest tests/durability tests/load` with coverage appended (12-minute timeout); `coverage report` (fails under 90%) |
-| `python-services-integration` | a `pgvector/pgvector:pg16` service container; `uv sync --locked --extra postgres --extra sandbox`; `pytest tests/integration` with `LHA_IT_POSTGRES_DSN` and `LHA_IT_DOCKER=1` set (10-minute timeout) |
+| `python-services-integration` | a `pgvector/pgvector:pg16` service container; `uv sync --locked --extra postgres --extra sandbox`; Go 1.26 (for the trusted `go run` check); `docker build -t lha-sandbox:dev sandbox/`; `pytest tests/integration` with `LHA_IT_POSTGRES_DSN` and `LHA_IT_DOCKER=1` set (20-minute timeout) |
 
 A separate workflow, [`docs-site.yml`](../.github/workflows/docs-site.yml), builds this
 documentation site on changes to `docs/` or `website/`.
@@ -134,8 +148,16 @@ cd python && uv run pytest -q tests/unit/test_spec_conformance.py
 cd go && go test ./internal/spec/
 ```
 
-Python runs all nine files. Go runs six; `obs/redact.json`, `coordination/decision_chain.json` and
-`coordination/shared_paths.json` wait for the Go packages that implement them.
+Python runs all nine files. Go runs seven; `coordination/decision_chain.json` and
+`coordination/shared_paths.json` wait for the Go package that implements them.
+
+The spec files live outside the Go module (`spec/` is next to `go/`), so Go's test cache does not
+see them change. After regenerating `spec/` (or editing it), run the Go conformance tests with
+`-count=1`, or a cached pass hides the change:
+
+```bash
+cd go && go test -count=1 ./internal/spec/
+```
 
 ## Go tests
 
@@ -148,8 +170,8 @@ go test ./...
 go test -short ./...   # skips the slow cross-implementation anchor tests
 ```
 
-Packages with tests: `config`, `contracts`, `governor`, `model`, `safety`, `spec`, `state`,
-`verify`. `internal/state/crossimpl_test.go` writes a mission anchor with Go and reads it with the
+Packages with tests: `config`, `contracts`, `governor`, `model`, `obs`, `safety`, `spec`,
+`state`, `verify`. `internal/state/crossimpl_test.go` writes a mission anchor with Go and reads it with the
 Python implementation (via `uv run --project ../python`), and the reverse; it skips when `uv` is
 not on `PATH` or under `-short`. `internal/safety/zz_pydiff_test.go` compares Go egress host,
 URL and address handling against JSON dumps from Python in the directory named by `LHA_PYDIFF`;

@@ -141,7 +141,8 @@ With the `claude` backend, `lha orchestrate` builds each role's model from its t
 | Sonnet | `claude-sonnet-4-6` | tester, integrator, auditor, librarian, implementer |
 | Haiku | `claude-haiku-4-5-20251001` | researcher |
 
-The planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the router. Explicit
+The replanner, which splits a blocked item, uses the lead's model on every run path. The
+planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the router. Explicit
 `LHA_CLAUDE_PRICE_*` values apply only to calls whose model is `LHA_MODEL_NAME`; routed roles are
 priced from the table. With any other backend every role uses `LHA_MODEL_NAME`.
 

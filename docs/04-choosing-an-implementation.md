@@ -25,7 +25,7 @@ The Temporal names the Python worker registers are:
 | Workflows | `MissionWorkflow`, `SubAgentWorkflow` |
 | Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `run_subagent` |
 | Signals | `human_decision_v1`, `steer_v1` |
-| Queries | `status_v1`, `cycles_done`, `last_item`, `park_reason`, `rejected_decisions` |
+| Queries | `status_v1`, `cycles_done`, `last_item`, `park_reason`, `open_question`, `rejected_decisions` |
 | Task queue / workflow id | `LHA_TASK_QUEUE` (default `lha-mission`) / `mission:<mission_id>` |
 
 Payloads are the dataclasses in [`python/src/lha/durable/types.py`](../python/src/lha/durable/types.py),
@@ -55,19 +55,19 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 
 | Package | Mirrors | State |
 |---|---|---|
-| `contracts` | `lha.contracts` | Committed |
-| `config` | `lha.config` | Committed |
-| `spec` | conformance harness | Committed (contracts cases); cases for model, safety and state in progress |
-| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, failover, retry, pricing) | In progress |
-| `state` | `lha.state` (git ops, mission anchor, schema migrations) | In progress |
-| `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine) | In progress |
-| `governor` | `lha.governor` (cost ledger, budget governor, metering) | In progress |
-| `safety` | `lha.safety` (command classifier, egress policy) | In progress |
-| `obs`, `execution` (sandboxes), `agent` (loop), durable worker, `cmd/lha` | | Not started |
+| `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
+| `config` | `lha.config` | Committed, including `sandbox_image`, `sandbox_egress`, `web_allow_hosts`, `trusted_checks`, `harness_paths`, `max_replans`, `max_split_depth` and `approval_timeout_s` |
+| `spec` | conformance harness | Committed: contracts (check names, checklist transitions and splits), model, safety, state and obs cases |
+| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, failover, retry, pricing) | Committed |
+| `safety` | `lha.safety` (command classifier, egress policy) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
+| `obs` | `lha.obs` (events, redaction) | Committed |
+| `state` | `lha.state` (git ops, mission anchor, schema migrations) | Committed; no checklist import or `vendor` |
+| `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine) | Committed; no witnesses, trusted runner or extra protected paths |
+| `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
+| `execution` (sandboxes, egress proxy), `agent` (loop, replanner), `hitl` approvals, durable worker, `cmd/lha` | | Not started |
 
-"In progress" means the package exists in the working tree with tests, but is not yet
-committed. The Go suite does not yet run the `obs/redact.json` or `coordination/*.json` spec
-cases.
+The Go config reads the new settings but nothing in Go uses them yet. The Go suite does not yet
+run the `coordination/*.json` spec cases.
 
 Consequences today:
 
