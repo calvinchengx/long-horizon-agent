@@ -52,6 +52,19 @@ class DeterministicVerifier:
 
     async def _run_one(self, session: SandboxSession, check: Check) -> CheckResult:
         started = time.monotonic()
+        if check.where == "trusted":
+            # Never run an operator's trusted check inside the agent's sandbox (it would not have
+            # what it needs, and passing it here would be meaningless): fail it loudly instead.
+            return CheckResult(
+                name=check.name,
+                passed=False,
+                exit_code=-1,
+                gating=check.gating,
+                output_tail=(
+                    "[verifier] trusted check needs a trusted runner, and none is configured "
+                    "for this run (see lha.verify.trusted)"
+                ),
+            )
         try:
             outcome = await session.exec(check.command, timeout_s=check.timeout_s or self._timeout)
         except Exception as exc:  # a sandbox failure is a failed check, never a pass
