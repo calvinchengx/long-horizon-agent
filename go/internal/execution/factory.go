@@ -56,6 +56,11 @@ type SandboxOptions struct {
 	EgressHosts []string
 	// Image is the docker image (default DefaultDockerImage).
 	Image string
+	// Memory, CPUs and TmpSize (docker only) are the container's limits and its /tmp tmpfs
+	// size; zero values keep the defaults.
+	Memory  string
+	CPUs    float64
+	TmpSize string
 	// Template is the E2B template (unused: E2B is not supported in Go).
 	Template string
 	// DockerCLI overrides the docker command runner (tests).
@@ -80,7 +85,8 @@ func BuildSandbox(kind string, opts SandboxOptions) (contracts.Sandbox, error) {
 			image = DefaultDockerImage
 		}
 		return NewDockerSandbox(DockerOptions{Image: image, Network: opts.Network,
-			EgressHosts: opts.EgressHosts, CLI: opts.DockerCLI})
+			EgressHosts: opts.EgressHosts, MemLimit: opts.Memory, CPUs: opts.CPUs,
+			TmpSize: opts.TmpSize, CLI: opts.DockerCLI})
 	case "e2b":
 		return nil, E2BUnsupportedError{}
 	}

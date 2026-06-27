@@ -110,9 +110,16 @@ class Settings(BaseSettings):
     # and uv; see sandbox/Dockerfile for a Go + uv + Node/pnpm image).
     sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
     # Comma-separated hosts the SANDBOX may reach (package registries, e.g.
-    # "proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org"). Empty = no network.
+    # "proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org"). Empty = no network.
     # Enforced by an egress proxy on an internal Docker network, not by the agent's goodwill.
     sandbox_egress: str = ""
+    # Docker sandbox resource limits (memory incl. swap, in Docker's notation; CPUs). A large
+    # build needs more than the default: Go compiling a big dependency is OOM-killed at 2g.
+    sandbox_memory: str = "2g"
+    sandbox_cpus: float = Field(default=2.0, gt=0)
+    # Size of the sandbox's /tmp tmpfs, which holds toolchain caches (Go's module and build
+    # cache, uv's cache). It counts against ``sandbox_memory``.
+    sandbox_tmp_size: str = "1g"
     # Comma-separated hosts the lead's fetch_url tool may read (reference docs). Empty = no web.
     web_allow_hosts: str = ""
     # Operator-defined checks that run OUTSIDE the sandbox (e.g. e2e suites needing Docker), as a

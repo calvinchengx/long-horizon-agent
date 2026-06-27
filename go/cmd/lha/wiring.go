@@ -50,6 +50,9 @@ var openToolbox agent.ToolboxOpener = func(ctx context.Context, req agent.Toolbo
 		AllowUnsafeLocal: settings.AllowUnsafeLocal,
 		Image:            settings.SandboxImage,
 		EgressHosts:      settings.SandboxEgressHosts(),
+		Memory:           settings.SandboxMemory,
+		CPUs:             settings.SandboxCPUs,
+		TmpSize:          settings.SandboxTmpSize,
 	})
 	if err != nil {
 		return nil, err

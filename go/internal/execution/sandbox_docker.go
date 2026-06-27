@@ -79,6 +79,7 @@ type DockerOptions struct {
 	MemLimit       string  // default "2g"
 	PidsLimit      int     // default 512
 	CPUs           float64 // default 2.0
+	TmpSize        string  // size of the /tmp tmpfs (toolchain caches); default "1g"
 	User           string  // default the host uid:gid (POSIX) or 65534:65534
 	WritableRoot   bool    // default false: a read-only root filesystem
 	MaxOutputBytes int     // default DefaultMaxOutputBytes
@@ -137,6 +138,9 @@ func NewDockerSandbox(opts DockerOptions) (*DockerSandbox, error) {
 	}
 	if opts.CPUs == 0 {
 		opts.CPUs = 2.0
+	}
+	if opts.TmpSize == "" {
+		opts.TmpSize = "1g"
 	}
 	if opts.User == "" {
 		opts.User = defaultDockerUser()
@@ -205,8 +209,8 @@ func (s *DockerSandbox) RunArgs(image, workdir, egressNetwork string, proxyEnv m
 	}
 	// exec: Docker mounts tmpfs noexec by default, which breaks every toolchain that builds then
 	// runs a binary there (go test). Code already runs from /workspace, so this adds nothing an
-	// agent could not do anyway. Go/uv/pnpm caches live here too.
-	args = append(args, "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size=1g")
+	// agent could not do anyway. Go/uv/pnpm caches live here too; the size counts against --memory.
+	args = append(args, "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size="+s.opts.TmpSize)
 	return append(args, image, "sleep", "infinity")
 }
 

@@ -145,7 +145,10 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 | `LHA_SANDBOX` | `docker` \| `e2b` \| `local` | `docker` | where tool calls and checks run; `--sandbox` overrides it for local commands |
 | `LHA_ALLOW_UNSAFE_LOCAL` | bool | `false` | required for `local`, which runs commands on the host with no isolation |
 | `LHA_SANDBOX_IMAGE` | string | `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` | Docker image the sandbox runs; it must contain the tools the checks and witnesses call ([`sandbox/Dockerfile`](../sandbox/Dockerfile) builds a Go + uv + Node/pnpm image) |
-| `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org`; `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. Empty: no network |
+| `LHA_SANDBOX_MEMORY` | Docker memory size | `2g` | the Docker sandbox's memory limit (swap included); a Go build of a large dependency is killed at the default |
+| `LHA_SANDBOX_CPUS` | float (> 0) | `2.0` | CPUs the Docker sandbox may use |
+| `LHA_SANDBOX_TMP_SIZE` | Docker size | `1g` | size of the sandbox's `/tmp` tmpfs, which holds toolchain caches (Go modules and build cache, uv); it counts against `LHA_SANDBOX_MEMORY` |
+| `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org`; `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. Empty: no network |
 | `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the web tools may read; see [Web tools](#web-tools) |
 | `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
 | `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
@@ -160,7 +163,7 @@ Example for a Go project whose end-to-end suite needs Docker on the host:
 
 ```bash
 export LHA_SANDBOX_IMAGE=lha-sandbox:latest
-export LHA_SANDBOX_EGRESS=proxy.golang.org,sum.golang.org
+export LHA_SANDBOX_EGRESS=proxy.golang.org,sum.golang.org,storage.googleapis.com
 export LHA_TRUSTED_CHECKS='{"e2e": ["make", "e2e"]}'
 export LHA_HARNESS_PATHS='Makefile,e2e/**'
 ```

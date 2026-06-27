@@ -341,3 +341,18 @@ def test_factory_passes_image_and_egress_hosts(monkeypatch: pytest.MonkeyPatch) 
         {"network": False, "egress_hosts": ()},
     )
     assert built[1] == ("custom:1", {"network": False, "egress_hosts": ("pypi.org",)})
+
+
+def test_docker_resource_limits_are_configurable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docker = pytest.importorskip("docker")
+    monkeypatch.setattr(docker, "from_env", lambda: object())  # no daemon needed to build options
+    default = build_sandbox("docker").run_kwargs(str(tmp_path))  # type: ignore[attr-defined]
+    assert default["mem_limit"] == "2g" and default["nano_cpus"] == 2_000_000_000
+    assert default["tmpfs"]["/tmp"].endswith("size=1g")
+    sized = build_sandbox("docker", memory="8g", cpus=6.0, tmp_size="4g")
+    options = sized.run_kwargs(str(tmp_path))  # type: ignore[attr-defined]
+    assert options["mem_limit"] == options["memswap_limit"] == "8g"
+    assert options["nano_cpus"] == 6_000_000_000
+    assert options["tmpfs"]["/tmp"] == "rw,exec,nosuid,nodev,size=4g"

@@ -91,10 +91,15 @@ type Settings struct {
 	AllowUnsafeLocal bool   `env:"allow_unsafe_local" default:"false"`
 	SandboxImage     string `env:"sandbox_image" default:"ghcr.io/astral-sh/uv:python3.12-bookworm-slim"`
 	SandboxEgress    string `env:"sandbox_egress" default:""`
-	WebAllowHosts    string `env:"web_allow_hosts" default:""`
-	TrustedChecks    string `env:"trusted_checks" default:""`
-	HarnessPaths     string `env:"harness_paths" default:""`
-	FlakyRetries     int    `env:"flaky_retries" default:"1" ge:"0" le:"5"`
+	// Docker sandbox limits (memory incl. swap; CPUs) and the /tmp tmpfs size, which holds the
+	// toolchain caches and counts against the memory limit.
+	SandboxMemory  string  `env:"sandbox_memory" default:"2g"`
+	SandboxCPUs    float64 `env:"sandbox_cpus" default:"2.0" gt:"0"`
+	SandboxTmpSize string  `env:"sandbox_tmp_size" default:"1g"`
+	WebAllowHosts  string  `env:"web_allow_hosts" default:""`
+	TrustedChecks  string  `env:"trusted_checks" default:""`
+	HarnessPaths   string  `env:"harness_paths" default:""`
+	FlakyRetries   int     `env:"flaky_retries" default:"1" ge:"0" le:"5"`
 
 	// --- Multi-agent coordination
 	MaxParallelImplementers int `env:"max_parallel_implementers" default:"3"`

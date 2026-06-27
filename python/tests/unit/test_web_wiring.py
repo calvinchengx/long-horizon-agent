@@ -495,7 +495,7 @@ async def test_subagent_activity_registers_web_tools_for_egress_roles(
 ) -> None:
     settings = _settings(web_allow_hosts="docs.test")
     monkeypatch.setattr(agent_activities, "get_settings", lambda: settings)
-    monkeypatch.setattr(agent_activities, "open_sandbox", _local_session)
+    monkeypatch.setattr("lha.agent.assembly.open_sandbox", _local_session)
     monkeypatch.setattr(
         agent_activities,
         "build_provider",

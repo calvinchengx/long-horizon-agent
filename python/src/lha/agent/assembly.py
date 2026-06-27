@@ -46,6 +46,9 @@ async def open_lead_sandbox(settings: Settings, workdir: str) -> SandboxSession:
         allow_unsafe_local=settings.allow_unsafe_local,
         image=settings.sandbox_image,
         egress_hosts=settings.sandbox_egress_hosts(),
+        memory=settings.sandbox_memory,
+        cpus=settings.sandbox_cpus,
+        tmp_size=settings.sandbox_tmp_size,
     )
 
 

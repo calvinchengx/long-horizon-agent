@@ -113,7 +113,7 @@ By default the sandbox has no network. To let package managers reach specific re
 the hosts:
 
 ```bash
-export LHA_SANDBOX_EGRESS="proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org,registry.npmjs.org"
+export LHA_SANDBOX_EGRESS="proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org,registry.npmjs.org"
 ```
 
 Each sandbox session then gets its own `--internal` Docker network (no route out) and a proxy
