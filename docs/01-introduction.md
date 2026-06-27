@@ -1,0 +1,98 @@
+# Introduction
+
+LHA (Long-Horizon Agent) runs software missions that are expected to take days: a task is
+planned into a checklist, and an agent works through it one item per cycle, committing each
+cycle to git. The goal is that a mission survives process crashes, reboots, provider outages and
+context-window limits without losing track of what it was doing or claiming work it did not do.
+
+The repository contains a Python implementation ([`python/`](../python/)), an in-progress Go port
+([`go/`](../go/)), language-neutral conformance cases shared by both ([`spec/`](../spec/)), the
+Postgres schema ([`db/migrations/`](../db/migrations/)) and a local service stack
+([`docker-compose.yml`](../docker-compose.yml)).
+
+## The problem
+
+A single LLM loop is a poor unit for multi-day work:
+
+- Its state lives in the context window, which is lost on restart and degraded by compaction.
+- A crash or API error mid-run ends the run.
+- The model's own statement that a step is done is not evidence that it is done, and small
+  per-step errors compound over many steps.
+
+LHA treats these as system-design problems. The model is used in short bursts (one checklist
+item per cycle); everything that has to persist lives outside it.
+
+## Core ideas
+
+### Truth outside the model: the mission anchor
+
+Each mission's workspace is a git repository with a `.lha/` directory holding the mission spec,
+the checklist, a progress log, a decision log and an event log. Every cycle starts by reading
+this anchor from the committed `HEAD`, not from the model's memory, and ends by committing it
+together with the code changes. The mission spec is recited at the top of every cycle's prompt.
+Because every cycle re-reads the anchor, a restart is handled the same way as a normal cycle
+start ("assume interruption"). See [the mission anchor](06-mission-anchor.md).
+
+### Durable execution
+
+On the durable path, a mission is a Temporal workflow (`MissionWorkflow`). The workflow body is
+a deterministic scheduler; each agent cycle runs as one `run_agent_cycle` activity whose result
+Temporal journals. After a worker crash, completed cycles are replayed from history rather than
+re-run; a cycle that was in flight is retried from a clean checkout. Transient failures park the
+mission (`DEGRADED_PARK`) with a durable, backed-off sleep instead of failing it. See
+[architecture](05-architecture.md).
+
+The unit of journaling is the cycle, not the individual model call: model calls made by an
+attempt that crashed are made again (and paid for again) by the retry.
+
+### Deterministic verification
+
+An item becomes `done` only when the deterministic verifier returns a `passed` verdict: at
+least one gating check (an argv such as `uv run pytest -q`) ran in the sandbox and every gating
+check exited 0. A model saying "done" only ends its turn loop. Zero gating checks is `unverified`,
+never a pass. Pre-existing tests and test configuration are hashed at cycle start so the agent
+cannot pass the gate by weakening it. See [verification](07-verification.md).
+
+### Guardrails
+
+- **Sandboxed execution.** Tool calls and checks run in a sandbox: `docker` (default), `e2b`, or
+  `local`. `local` has no isolation and is refused unless explicitly enabled.
+- **Tool dispatcher.** Every tool call passes an allow-list, JSON-schema argument validation,
+  workspace path containment, and write protection for `.lha/` and `.git/`.
+- **Human gate on irreversible commands.** Shell commands classified as irreversible or
+  outward-facing (for example `git push`) are sent to a human gate; with no gate configured,
+  which is the case for the built-in run paths, they are denied.
+- **Default-deny egress.** Web tools are not in the default tool set, and the Docker sandbox runs
+  with no network by default.
+- **Budget governor.** Each model call is authorized before it runs against a USD ceiling
+  (`LHA_BUDGET_USD_CEILING`, default 10.0). Calls whose cost cannot be computed are refused
+  unless `LHA_ALLOW_UNPRICED_MODELS=true`.
+
+### Honesty policy
+
+Numbers reported by LHA (tokens, cost) come from the provider responses. The `stub` model is a
+deterministic test double; its model name is prefixed `stub:` and it is never presented as a real
+agent run. Predicted outputs (in [`predicted-runs/`](predicted-runs/)) are labeled as predictions.
+Anything shown as a real run uses real model output or a labeled recorded replay.
+
+## Current status
+
+The project is early and under active development.
+
+| Area | State |
+|---|---|
+| Python single-agent spine (`lha mission`, `lha run-local`) | Implemented and tested |
+| Python durable spine (`lha worker`, `lha mission-start`) | Implemented; durability and replay tests run against the Temporal test server in CI |
+| Python local multi-agent flow (`lha orchestrate`: researchers, lead, reviewer) | Implemented; runs locally only, not on Temporal |
+| Memory (episodic/semantic/skills), Postgres persistence, Langfuse export | Library code with tests; not wired into the mission run paths |
+| Go port | Library packages in progress; no CLI or Temporal worker yet |
+| Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
+
+## Where to go next
+
+- [Quickstart](02-quickstart.md): run a first mission.
+- [Installation](03-installation.md): Python, Go, Docker images and the compose stack.
+- [Choosing an implementation](04-choosing-an-implementation.md): Python versus Go today.
+- [Architecture](05-architecture.md): the planes, the organization and the cycle.
+- [The mission anchor](06-mission-anchor.md): the `.lha/` files and item lifecycle.
+- [Verification](07-verification.md): what "done" means.
