@@ -164,3 +164,179 @@ async def test_docker_file_io_is_contained() -> None:
     container.realpath = "/etc/shadow"  # a symlink inside the workspace pointing out
     with pytest.raises(PathEscapeError):
         await session.read_file("innocent_link")
+
+
+# --- egress allow-list (proxy + internal network), with a fake docker client ----------------
+
+
+@dataclass
+class _FakeNetwork:
+    name: str
+    kwargs: dict[str, Any]
+    connected: list[str] = field(default_factory=list)
+    removed: bool = False
+
+    def connect(self, container: Any) -> None:
+        self.connected.append(container.name)
+
+    def remove(self) -> None:
+        self.removed = True
+
+
+@dataclass
+class _FakeProxy:
+    name: str
+    log: bytes = b"INFO lha-egress-proxy listening on 0.0.0.0:3128\n"
+    status: str = "running"
+    removed: bool = False
+
+    def logs(self) -> bytes:
+        return self.log
+
+    def reload(self) -> None:
+        pass
+
+    def remove(self, *, force: bool) -> None:
+        self.removed = True
+
+
+@dataclass
+class _FakeNetworks:
+    created: list[_FakeNetwork] = field(default_factory=list)
+
+    def create(self, name: str, **kwargs: Any) -> _FakeNetwork:
+        network = _FakeNetwork(name, kwargs)
+        self.created.append(network)
+        return network
+
+    def get(self, name: str) -> _FakeNetwork:
+        return next(n for n in self.created if n.name == name)
+
+
+@dataclass
+class _EgressContainers:
+    started: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    proxies: list[_FakeProxy] = field(default_factory=list)
+    sandboxes: list[_FakeContainer] = field(default_factory=list)
+    proxy_log: bytes = _FakeProxy("").log
+    proxy_status: str = "running"
+    fail_sandbox: bool = False
+
+    def run(self, image: str, **kwargs: Any) -> Any:
+        self.started.append((image, kwargs))
+        if "name" in kwargs:  # the proxy container
+            proxy = _FakeProxy(kwargs["name"], log=self.proxy_log, status=self.proxy_status)
+            self.proxies.append(proxy)
+            return proxy
+        if self.fail_sandbox:
+            raise RuntimeError("image not found")
+        container = _StoppableContainer()
+        self.sandboxes.append(container)
+        return container
+
+    def get(self, name: str) -> _FakeProxy:
+        return next(p for p in self.proxies if p.name == name)
+
+
+@dataclass
+class _StoppableContainer(_FakeContainer):
+    removed: bool = False
+
+    def stop(self, *, timeout: int) -> None:
+        pass
+
+    def remove(self, *, force: bool) -> None:
+        self.removed = True
+
+
+@dataclass
+class _EgressClient:
+    containers: _EgressContainers = field(default_factory=_EgressContainers)
+    networks: _FakeNetworks = field(default_factory=_FakeNetworks)
+
+
+@pytest.mark.asyncio
+async def test_egress_hosts_route_the_sandbox_through_an_allow_list_proxy(tmp_path: Path) -> None:
+    client = _EgressClient()
+    sandbox = DockerSandbox("my/sandbox:1", client=client, egress_hosts=["pypi.org", ".golang.org"])
+    session = await sandbox.open(workdir=str(tmp_path))
+
+    [network] = client.networks.created
+    assert network.name.startswith("lha-egress-") and network.kwargs["internal"] is True
+    (proxy_image, proxy_kwargs), (image, kwargs) = client.containers.started
+    [proxy] = client.containers.proxies
+
+    # The proxy: the stdlib-only proxy source, the allow-list, on the bridge AND the internal net.
+    assert proxy_image == "python:3.12-alpine"
+    assert proxy_kwargs["command"][:2] == ["python", "-c"]
+    assert "class EgressProxy" in proxy_kwargs["command"][2]
+    assert proxy_kwargs["environment"]["LHA_PROXY_ALLOW"] == "pypi.org,.golang.org"
+    assert proxy_kwargs["network"] == "bridge" and network.connected == [proxy.name]
+    assert proxy_kwargs["cap_drop"] == ["ALL"] and proxy_kwargs["read_only"] is True
+
+    # The sandbox: the configured image, ONLY the internal network, proxy env, still hardened.
+    assert image == "my/sandbox:1"
+    assert kwargs["network"] == network.name and "network_mode" not in kwargs
+    env = kwargs["environment"]
+    proxy_url = f"http://{proxy.name}:3128"
+    for var in ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"):
+        assert env[var] == proxy_url
+    assert env["NO_PROXY"] == "localhost,127.0.0.1" and "GOPROXY" not in env
+    assert kwargs["cap_drop"] == ["ALL"] and kwargs["read_only"] is True
+
+    await session.close()
+    assert client.containers.sandboxes[0].removed and proxy.removed and network.removed
+
+
+@pytest.mark.asyncio
+async def test_empty_egress_list_keeps_network_none(tmp_path: Path) -> None:
+    client = _EgressClient()
+    await DockerSandbox(client=client, egress_hosts=["", " "]).open(workdir=str(tmp_path))
+    assert client.networks.created == []
+    [(_, kwargs)] = client.containers.started
+    assert kwargs["network_mode"] == "none" and "network" not in kwargs
+    assert not any("PROXY" in key.upper() for key in kwargs["environment"])
+
+
+def test_egress_hosts_are_validated_and_exclusive_with_full_network() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        DockerSandbox(client=_EgressClient(), network=True, egress_hosts=["pypi.org"])
+    with pytest.raises(ValueError, match="invalid egress allow-list entry"):
+        DockerSandbox(client=_EgressClient(), egress_hosts=["10.0.0.1"])
+
+
+@pytest.mark.asyncio
+async def test_failed_open_tears_down_the_proxy_and_network(tmp_path: Path) -> None:
+    client = _EgressClient()
+    client.containers.fail_sandbox = True
+    with pytest.raises(RuntimeError, match="image not found"):
+        await DockerSandbox(client=client, egress_hosts=["pypi.org"]).open(workdir=str(tmp_path))
+    assert client.containers.proxies[0].removed and client.networks.created[0].removed
+
+
+@pytest.mark.asyncio
+async def test_proxy_that_dies_at_startup_fails_open_and_cleans_up(tmp_path: Path) -> None:
+    client = _EgressClient()
+    client.containers.proxy_log = b"SyntaxError: boom"
+    client.containers.proxy_status = "exited"
+    with pytest.raises(RuntimeError, match="egress proxy exited during startup"):
+        await DockerSandbox(client=client, egress_hosts=["pypi.org"]).open(workdir=str(tmp_path))
+    assert client.containers.proxies[0].removed and client.networks.created[0].removed
+    assert client.containers.sandboxes == []
+
+
+def test_factory_passes_image_and_egress_hosts(monkeypatch: pytest.MonkeyPatch) -> None:
+    built: list[tuple[str, dict[str, Any]]] = []
+
+    class _Recorder:
+        def __init__(self, image: str, **kwargs: Any) -> None:
+            built.append((image, kwargs))
+
+    monkeypatch.setattr(sandbox_docker, "DockerSandbox", _Recorder)
+    build_sandbox("docker")
+    build_sandbox("docker", image="custom:1", egress_hosts=["pypi.org"])
+    assert built[0] == (
+        "ghcr.io/astral-sh/uv:python3.12-bookworm-slim",
+        {"network": False, "egress_hosts": ()},
+    )
+    assert built[1] == ("custom:1", {"network": False, "egress_hosts": ("pypi.org",)})

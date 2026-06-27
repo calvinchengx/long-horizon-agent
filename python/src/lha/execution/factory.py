@@ -7,12 +7,15 @@ entry points). ``docker`` and ``e2b`` import their optional extras lazily.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal
 
 from lha.contracts.sandbox import Sandbox, SandboxSession
 
 SandboxKind = Literal["local", "docker", "e2b"]
 SANDBOX_KINDS: tuple[str, ...] = ("local", "docker", "e2b")
+# Matches ``Settings.sandbox_image``'s default: Python 3.12 + uv (see sandbox/Dockerfile for Go/Node).
+DEFAULT_DOCKER_IMAGE = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
 
 
 class UnsafeSandboxError(RuntimeError):
@@ -26,14 +29,18 @@ def build_sandbox(
     network: bool = False,
     image: str | None = None,
     template: str | None = None,
+    egress_hosts: Sequence[str] = (),
 ) -> Sandbox:
     """Return the ``Sandbox`` for ``kind`` (``"local"`` | ``"docker"`` | ``"e2b"``).
 
     - ``allow_unsafe_local``: required to get ``local``; otherwise ``UnsafeSandboxError``.
     - ``network``: docker only; ``False`` (default) runs containers with ``network_mode="none"``.
-    - ``image`` / ``template``: docker image / E2B template overrides.
+    - ``egress_hosts``: docker only; a non-empty allow-list routes the sandbox's egress through a
+      per-session proxy that reaches only those hosts (``.example.org`` = domain + subdomains).
+      Empty (default) keeps ``network_mode="none"``. Mutually exclusive with ``network=True``.
+    - ``image`` / ``template``: docker image (default ``DEFAULT_DOCKER_IMAGE``) / E2B template.
 
-    Raises ``ValueError`` for an unknown kind.
+    Raises ``ValueError`` for an unknown kind, or for ``network=True`` with ``egress_hosts``.
     """
     normalized = kind.strip().lower()
     if normalized == "local":
@@ -49,7 +56,9 @@ def build_sandbox(
     if normalized == "docker":
         from lha.execution.sandbox_docker import DockerSandbox
 
-        return DockerSandbox(image or "python:3.12-slim", network=network)
+        return DockerSandbox(
+            image or DEFAULT_DOCKER_IMAGE, network=network, egress_hosts=tuple(egress_hosts)
+        )
     if normalized == "e2b":
         from lha.execution.sandbox_e2b import E2BSandbox
 
@@ -66,6 +75,7 @@ async def open_sandbox(
     network: bool = False,
     image: str | None = None,
     template: str | None = None,
+    egress_hosts: Sequence[str] = (),
 ) -> SandboxSession:
     """``build_sandbox(...)`` then ``open(workdir=..., snapshot_id=...)`` in one call."""
     sandbox = build_sandbox(
@@ -74,5 +84,6 @@ async def open_sandbox(
         network=network,
         image=image,
         template=template,
+        egress_hosts=egress_hosts,
     )
     return await sandbox.open(workdir=workdir, snapshot_id=snapshot_id)
