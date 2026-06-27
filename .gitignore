@@ -31,3 +31,6 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Claude Code local state (agent worktrees, launch configs)
+.claude/
