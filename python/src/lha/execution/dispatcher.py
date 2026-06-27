@@ -22,6 +22,7 @@ from pathlib import Path
 
 from lha.contracts.hitl import GateDecision, GateRequest, GateResolution, HITLGate, RiskTier
 from lha.contracts.model import ToolCall
+from lha.contracts.sandbox import host_root
 from lha.contracts.state import EventRecord
 from lha.contracts.tools import Tool, ToolContext, ToolResult, ToolSpec
 from lha.execution.paths import PathEscapeError, is_protected, is_protected_resolved
@@ -245,7 +246,7 @@ class AllowListDispatcher:
 
 def _check_paths(spec: ToolSpec, arguments: dict[str, object], ctx: ToolContext) -> str | None:
     """Containment for every path arg; mutating tools may not touch ``.lha/`` or ``.git/``."""
-    local_root = Path(ctx.session.workdir)
+    local_root = Path(host_root(ctx.session))
     host_local = local_root.is_dir()
     for name in spec.path_args:
         value = arguments.get(name)

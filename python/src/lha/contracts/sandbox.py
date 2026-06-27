@@ -64,6 +64,19 @@ class SandboxSession(Protocol):
         ...
 
 
+def host_root(session: SandboxSession) -> str:
+    """The workspace as a path on THIS machine, for code that reads it without the sandbox.
+
+    ``workdir`` is where the agent's commands see the workspace, which for Docker is the mount
+    point inside the container (``/workspace``). Host-side readers (harness integrity, the
+    ``list_files`` / ``grep`` tools, path checks, a Claude Code session's cwd) need the host
+    directory instead: a session that mounts one sets ``host_workdir``; otherwise ``workdir`` is
+    already a host path (the local sandbox, and test doubles).
+    """
+    host = getattr(session, "host_workdir", None)
+    return host if isinstance(host, str) and host else session.workdir
+
+
 @runtime_checkable
 class Sandbox(Protocol):
     """Factory for sandbox sessions. Implementations live in ``src/lha/execution/``."""
