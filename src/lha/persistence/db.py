@@ -17,6 +17,7 @@ already migrated.
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -51,16 +52,10 @@ class _Cursor(Protocol):
     async def fetchall(self) -> list[tuple[Any, ...]]: ...
 
 
-class _Transaction(Protocol):
-    async def __aenter__(self) -> Any: ...
-
-    async def __aexit__(self, *exc: object) -> Any: ...
-
-
 class _Conn(Protocol):
     async def execute(self, query: Any, params: Any = ...) -> Any: ...
 
-    def transaction(self) -> _Transaction: ...
+    def transaction(self) -> AbstractAsyncContextManager[Any]: ...
 
 
 async def apply_pending(conn: _Conn, migrations: list[Migration]) -> list[str]:
