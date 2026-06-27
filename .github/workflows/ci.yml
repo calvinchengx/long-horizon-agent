@@ -6,8 +6,11 @@ on:
   pull_request:
 
 jobs:
-  check:
+  python-check:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
     steps:
       - uses: actions/checkout@v4
 
@@ -16,6 +19,7 @@ jobs:
         with:
           version: "0.11.8"
           enable-cache: true
+          cache-dependency-glob: python/uv.lock
 
       - name: Sync (core + dev)
         run: uv sync --locked
@@ -43,10 +47,13 @@ jobs:
       - name: Coverage (floor)
         run: uv run coverage report
 
-  services-integration:
+  python-services-integration:
     # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker
     # sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network).
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -67,6 +74,7 @@ jobs:
         with:
           version: "0.11.8"
           enable-cache: true
+          cache-dependency-glob: python/uv.lock
 
       - name: Sync (core + dev + postgres + sandbox)
         run: uv sync --locked --extra postgres --extra sandbox

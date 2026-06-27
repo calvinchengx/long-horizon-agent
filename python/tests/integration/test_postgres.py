@@ -15,7 +15,7 @@ pytestmark = [pytest.mark.integration, requires_postgres]
 psycopg = pytest.importorskip("psycopg")
 pytest.importorskip("pgvector")
 
-MIGRATIONS = Path(__file__).resolve().parents[2] / "db" / "migrations"
+MIGRATIONS = Path(__file__).resolve().parents[3] / "db" / "migrations"
 ALL_VERSIONS = sorted(p.stem for p in MIGRATIONS.glob("*.sql"))
 
 

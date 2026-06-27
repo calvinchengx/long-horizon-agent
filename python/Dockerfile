@@ -1,5 +1,5 @@
-# Worker image for the durable spine. Build: docker build -t lha-worker .
-# Run (against a Temporal server): docker run --rm -e LHA_TEMPORAL_ADDRESS=host:7233 lha-worker
+# Python worker image for the durable spine. Build (from the repo root): docker build -t lha:python python
+# Run (against a Temporal server): docker run --rm -e LHA_TEMPORAL_ADDRESS=host:7233 lha:python
 #
 # The worker executes agent tool calls through the configured sandbox (LHA_SANDBOX, default
 # "docker"). Point it at a Docker daemon with DOCKER_HOST, or use LHA_SANDBOX=e2b. Never mount

@@ -5,7 +5,11 @@ stub or Ollama — no API key required.
 
 ## 1. Install
 
+The commands below use the Python implementation; run them from `python/`. The Go
+implementation (`go/`) accepts the same commands once its phase has landed.
+
 ```bash
+cd python
 uv sync
 uv run lha version
 uv run lha config        # resolved settings (secrets redacted)
