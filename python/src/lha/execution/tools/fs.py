@@ -16,6 +16,7 @@ import asyncio
 import re
 from pathlib import Path
 
+from lha.contracts.sandbox import host_root
 from lha.contracts.tools import ToolContext, ToolResult, ToolSpec
 from lha.execution.paths import resolve_within
 from lha.execution.tools.limits import MAX_TOOL_OUTPUT
@@ -136,7 +137,7 @@ class ListFilesTool:
         subdir = str(arguments.get("subdir", "") or "")
 
         def _walk() -> list[str]:
-            root = Path(ctx.session.workdir).resolve()
+            root = Path(host_root(ctx.session)).resolve()
             start = resolve_within(root, subdir)
             return [str(p.relative_to(root)) for p in _contained_files(root, start)]
 
@@ -175,7 +176,7 @@ class GrepTool:
             return ToolResult.failure(str(exc))
 
         def _search() -> list[str]:
-            root = Path(ctx.session.workdir).resolve()
+            root = Path(host_root(ctx.session)).resolve()
             start = resolve_within(root, subdir)
             hits: list[str] = []
             for path in _contained_files(root, start):

@@ -233,7 +233,7 @@ class AgentLoop:
         witness_checks, witness_errors = self._witness_checks(item)
         gate = ensure_unique_check_names([*(checks or []), *witness_checks])
 
-        workdir = ctx.session.workdir
+        workdir = str(self._anchor.workdir)  # the host checkout (in Docker, not /workspace)
         harness_before: HarnessSnapshot | None = None
         tampered: list[str] = []  # sticky for the whole cycle, even after files are reverted
         if not item.allow_harness_edits:
@@ -453,7 +453,7 @@ class AgentLoop:
 
         run = await engine.run(
             messages=messages,
-            cwd=ctx.session.workdir,
+            cwd=str(self._anchor.workdir),
             cycle_id=cycle_id,
             specs=self._dispatcher.specs(),
             dispatch=dispatch,
@@ -550,7 +550,9 @@ class AgentLoop:
         """Add a failing ``harness_integrity`` result if pre-existing harness files changed."""
         if harness_before is None:
             return verification
-        after = await asyncio.to_thread(snapshot_harness, ctx.session.workdir, self._harness_globs)
+        after = await asyncio.to_thread(
+            snapshot_harness, str(self._anchor.workdir), self._harness_globs
+        )
         violations = harness_violations(harness_before, after)
         if violations:
             # Revert the tampering so it is never committed (nor the next cycle's baseline).

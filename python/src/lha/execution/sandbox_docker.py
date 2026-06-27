@@ -80,9 +80,12 @@ class DockerSandboxSession(SandboxSession):
         *,
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
         on_close: Callable[[], None] | None = None,
+        host_workdir: str | None = None,
     ) -> None:
         self._container = container
         self.workdir = workdir
+        # The host directory bind-mounted at ``workdir`` (see ``contracts.sandbox.host_root``).
+        self.host_workdir = host_workdir
         self._max_output = max_output_bytes
         self._on_close = on_close  # tears down per-session egress resources (proxy + network)
 
@@ -411,6 +414,7 @@ class DockerSandbox(Sandbox):
     async def open(self, *, workdir: str, snapshot_id: str | None = None) -> SandboxSession:
         image = snapshot_id or self._image
         await asyncio.to_thread(lambda: Path(workdir).mkdir(parents=True, exist_ok=True))
+        host = str(Path(workdir).resolve())
         if not self._egress_hosts:
             kwargs = self.run_kwargs(workdir)
 
@@ -418,7 +422,9 @@ class DockerSandbox(Sandbox):
                 return self._client.containers.run(image, **kwargs)
 
             container = await asyncio.to_thread(_start)
-            return DockerSandboxSession(container, max_output_bytes=self._max_output)
+            return DockerSandboxSession(
+                container, max_output_bytes=self._max_output, host_workdir=host
+            )
 
         gate = _EgressGate(self._client, secrets.token_hex(6))
 
@@ -435,7 +441,7 @@ class DockerSandbox(Sandbox):
 
         container = await asyncio.to_thread(_start_gated)
         return DockerSandboxSession(
-            container, max_output_bytes=self._max_output, on_close=gate.teardown
+            container, max_output_bytes=self._max_output, on_close=gate.teardown, host_workdir=host
         )
 
     async def snapshot(self, session: SandboxSession) -> Snapshot:
