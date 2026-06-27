@@ -384,10 +384,10 @@ func TestReasons(t *testing.T) {
 		{[]string{"git", "branch", "--delete", "x"}, ""},
 		{[]string{"sh", "-c", "if true; then git push; fi"}, "git push (outward-facing / rewrites history)"},
 		{[]string{"sh", "-c", "cat <> .lha/x"}, "redirection writes a harness-owned path ('.lha/x')"},
-		// shlex splits ">|" into ">" and "|" (a separator), so the reference does not see this
-		// clobbering redirection; reproduced for parity (see the port's report).
-		{[]string{"sh", "-c", "echo >| .git/y"}, ""},
-		{[]string{"sh", "-c", "echo >|.git/y"}, ""},
+		// shlex splits ">|" into ">" and "|" (a separator), so the clobbering redirection is
+		// caught on the raw script text instead.
+		{[]string{"sh", "-c", "echo >| .git/y"}, "redirection writes a harness-owned path ('.git/y')"},
+		{[]string{"sh", "-c", "echo >|.git/y"}, "redirection writes a harness-owned path ('.git/y')"},
 		{[]string{"sh", "-c", "cat <(git push)"}, "git push (outward-facing / rewrites history)"},
 		{[]string{"sh", "-c", "echo `echo \\` ; git push`"}, "git push (outward-facing / rewrites history)"},
 		{[]string{"sh", "-c", `echo "\"$(git push)"`}, "git push (outward-facing / rewrites history)"},

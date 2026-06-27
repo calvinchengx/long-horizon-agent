@@ -148,6 +148,8 @@ def is_public_address(address: str) -> bool:
             ip = embedded
         elif ip.teredo is not None:
             ip = ip.teredo[1]
+    if isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local:
+        return False  # fec0::/10: deprecated site-local, still routed internally by some networks
     return not (
         ip.is_private
         or ip.is_loopback

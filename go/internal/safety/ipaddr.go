@@ -380,6 +380,9 @@ func IsPublicAddress(address string) bool {
 	case a.hi>>32 == 0x20010000: // teredo: (server, client); the client is ~ip & 0xFFFFFFFF
 		return v4Public(^uint32(a.lo))
 	}
+	if a.hi>>54 == 0x3FB { // fec0::/10, deprecated site-local (python: is_site_local)
+		return false
+	}
 	return v6Public(a)
 }
 

@@ -196,6 +196,7 @@ func TestNonPublicAddresses(t *testing.T) {
 		"fe80::1%eth0", "::", "ff02::1", "2001:db8::1", "240.0.0.1", "255.255.255.255", "192.0.0.1",
 		"", "not-an-ip", "1.2.3", "01.2.3.4", "::1%", "12345::",
 		"1:2:3:4:5:6:7:8:9", "1::2::3", "::ffff:1.2.3.04",
+		"fec0::1", // deprecated site-local (fec0::/10), still routed internally by some networks
 	} {
 		if IsPublicAddress(addr) {
 			t.Errorf("IsPublicAddress(%q) = true", addr)
@@ -204,7 +205,6 @@ func TestNonPublicAddresses(t *testing.T) {
 	for _, addr := range []string{
 		publicIP, "8.8.8.8", "2606:4700:4700::1111", "::ffff:8.8.8.8", "2002:808:808::1",
 		"192.0.0.9", "2001:4:112::1", "2001:0:1:2:3:4:f7f7:f7f7", "2606:4700::1%lo0",
-		"fec0::1",   // site-local is not in CPython's reserved or private lists
 		"1.2.3.4%x", // the "%zone" suffix is dropped before parsing
 	} {
 		if !IsPublicAddress(addr) {

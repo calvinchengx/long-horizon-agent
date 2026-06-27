@@ -378,6 +378,12 @@ _GIT_CONFIG_READS = frozenset(
 _GIT_CONFIG_ENV = re.compile(
     r"^GIT_CONFIG(?:_PARAMETERS|_COUNT|_KEY_\d+|_VALUE_\d+|_GLOBAL|_SYSTEM)?=", re.IGNORECASE
 )
+# A redirection and its target in RAW script text. The tokenizer splits ``>|`` into ``>`` and a
+# pipe, so ``echo x >| .git/y`` is also checked here, before tokenizing (quoted ``>`` in a string
+# may match too: that fails closed only when the "target" is a harness-owned path).
+_SCRIPT_REDIRECT = re.compile(
+    r"""(?:[0-9]+|&)?(?:>>?\|?|<>)[ \t]*("[^"]*"|'[^']*'|[^ \t\n\r\f\v;&|()<>]+)"""
+)
 # Shell redirection operators inside a word: ``>``, ``>>``, ``>|``, ``&>``, ``2>``, ``<>``.
 _REDIRECT = re.compile(r"(?:\d*|&)(?:>>?\|?|<>)")
 # httpie request items that send a body: ``k=v``, ``k:=json``, ``k@file``, ``k=@file``.
@@ -886,6 +892,10 @@ def _classify_script(script: str, depth: int) -> str | None:
         tokens = list(lexer)
     except ValueError:
         return "unparseable shell script"
+    for match in _SCRIPT_REDIRECT.finditer(script):
+        target = match.group(1).strip("'\"")
+        if target and _touches_protected(target):
+            return f"redirection writes a harness-owned path ({target!r})"
     for body in nested:
         reason = _classify_script(body, depth + 1)
         if reason:
