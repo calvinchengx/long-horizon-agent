@@ -6,7 +6,7 @@ gets redacted, how checklists move, what bytes a hash chain covers, what a model
 JSON files here pin that behaviour, and **both** test suites run every case:
 
 - Python: `python/tests/unit/test_spec_conformance.py`
-- Go: `go/internal/spec/conformance_test.go`
+- Go: `go/internal/spec/conformance_*_test.go`
 
 | File | Pins |
 |---|---|
