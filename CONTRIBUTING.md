@@ -5,12 +5,22 @@ software missions. This guide gets you productive fast.
 
 ## Dev setup
 
+The repo holds two implementations of the same CLI: `python/` and `go/`. Shared, language-neutral
+assets live at the root: `db/migrations/`, `spec/` (conformance cases both test suites run),
+`docs/` and `docker-compose.yml`. A behaviour change must land in both implementations, with a
+`spec/` case that pins it.
+
+Python (run from `python/`):
+
 ```bash
+cd python
 uv sync                 # Python 3.12 + core + dev deps (provisions the interpreter)
 uv run lha --help
 ```
 
 ## The checks (must be green before a PR)
+
+Python (from `python/`):
 
 ```bash
 uv run ruff check .         # lint
@@ -42,7 +52,7 @@ LHA_IT_POSTGRES_DSN=postgresql://lha:lha@127.0.0.1:55432/lha LHA_IT_DOCKER=1 uv 
 ## Conventions
 
 - **Typed.** All of `src/` passes `ty check` (warnings are errors). Public functions are fully annotated.
-- **Contracts first.** Cross-plane interfaces live in `src/lha/contracts/` as `Protocol`s. Depend
+- **Contracts first.** Cross-plane interfaces live in `python/src/lha/contracts/` as `Protocol`s. Depend
   on the Protocol, not a concrete implementation, so backends stay swappable.
 - **Honesty policy.** Anything presented as a real agent run uses genuine model output or a
   clearly-labeled recorded replay — never fabricated text. `StubModel` is for tests only.

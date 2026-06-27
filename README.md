@@ -85,9 +85,30 @@ output or a clearly-labeled recorded replay — never fabricated text dressed up
   reliability). LHA's claim is that the **system** runs for weeks (sleeps, survives, resumes) while
   the **model** drives it in verified bursts, with human gates on irreversible actions.
 
+## Two implementations: Python and Go
+
+LHA ships as two interchangeable implementations of the same `lha` CLI and worker. Pick
+whichever fits your deployment; they are **wire-compatible**:
+
+| | [`python/`](python/) | [`go/`](go/) |
+|---|---|---|
+| Install | `uv sync` (Python 3.12) | `go build ./cmd/lha` (one static binary) |
+| Commands, flags, `LHA_*` settings | identical | identical |
+| Mission anchor (`.lha/`), Postgres schema | shared | shared |
+| Temporal workflows, activities, payloads | same names and JSON shapes | same names and JSON shapes |
+
+Wire compatibility means Python and Go workers can serve the **same** task queue and even the
+same running mission. Shared behaviour is pinned by the language-neutral cases in
+[`spec/`](spec/), which both test suites run.
+
+> The Go implementation is being built in phases (spine first: safety, sandboxes, git anchor,
+> verifier, model backends, the agent loop and CLI; then Temporal; then the multi-agent org,
+> memory and Postgres). Until a phase lands, use the Python implementation for that feature.
+
 ## Quickstart
 
 ```bash
+cd python
 uv sync                 # install (provisions Python 3.12)
 uv run lha version
 uv run lha config       # show resolved config (secrets redacted)

@@ -11,7 +11,7 @@ import pytest
 
 from lha.persistence.db import MIGRATION_LOCK_KEY, apply_pending, discover_migrations
 
-REPO_MIGRATIONS = Path(__file__).resolve().parents[2] / "db" / "migrations"
+REPO_MIGRATIONS = Path(__file__).resolve().parents[3] / "db" / "migrations"
 
 
 class _Cursor:

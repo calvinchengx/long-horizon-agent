@@ -18,7 +18,7 @@ from lha.obs.redact import REDACTED, is_secret_key, redact_mapping, redact_text
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.verify.harness_integrity import harness_violations, snapshot_harness
 
-MIGRATIONS = Path(__file__).resolve().parents[2] / "db" / "migrations"
+MIGRATIONS = Path(__file__).resolve().parents[3] / "db" / "migrations"
 
 
 # --- redaction -----------------------------------------------------------------------------
