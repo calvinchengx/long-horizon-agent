@@ -46,7 +46,7 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
 | `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) and no `retry` from a human within the deadlock gate (24 h by default) |
 | `budget_exhausted` | `ABORTED` | the governor refused a model call (`BudgetExceeded`, non-retryable) |
 | `max_cycles` | `ABORTED` | `cycles_done >= max_cycles` (`--max-cycles`, default `LHA_MAX_CYCLES`, 1000) |
-| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, malformed `LHA_TRUSTED_CHECKS` or `LHA_SANDBOX_EGRESS` |
+| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, malformed `LHA_TRUSTED_CHECKS`, `LHA_SANDBOX_EGRESS` or web settings (`LHA_WEB_CREDENTIALS`, `LHA_WEB_ALLOW_PORTS`, `LHA_WEB_SEARCH_ENDPOINT`), or a Rule-of-Two violation (web tools with `LHA_SANDBOX=local` or `LHA_PRIVATE_DATA=true`) |
 
 An unpriced `openai_compat` model without `LHA_ALLOW_UNPRICED_MODELS=true` is refused by the
 governor on the first call, so the mission ends as `budget_exhausted`. Invalid `MissionInput`
@@ -103,7 +103,11 @@ the workflow closes.
 - `LHA_SANDBOX_EGRESS`: hosts the sandbox's commands may reach through the egress proxy (package
   registries). A host alone allows ports 80 and 443; `.example.org` allows the domain and its
   subdomains; `host:port` allows another port.
-- `LHA_WEB_ALLOW_HOSTS`: hosts the lead's `fetch_url` may read. Empty means no `fetch_url`.
+- `LHA_WEB_ALLOW_HOSTS`: hosts the web tools may read (`fetch_url`, and `web_search` when
+  `LHA_WEB_SEARCH_PROVIDER` and `LHA_WEB_SEARCH_API_KEY` are set). Empty means no web tools. Local
+  commands add hosts per run with `--allow-host`. A run with web tools is refused (Rule of Two) if
+  the sandbox is `local` or `LHA_PRIVATE_DATA=true`; see
+  [09-safety-model.md](09-safety-model.md#web-tools).
 
 For reference material that does not change, prefer `lha vendor` once over opening the network
 to every cycle.
@@ -134,7 +138,7 @@ What actually happens, by failure:
 
 | Failure | Behaviour |
 |---|---|
-| Model API transient error (429, 5xx, timeout) | the provider retries 3 times with backoff; then the cycle attempt fails and Temporal retries it (5 attempts); then the mission parks |
+| Model API transient error (429, 5xx, timeout) | the provider retries 3 times with backoff (with `LHA_FALLBACK_MODELS`: once, then the next model in the chain serves the turn); when every model fails, the cycle attempt fails and Temporal retries it (5 attempts); then the mission parks |
 | Model API 400/401/403 | not retried by the provider; the attempt fails and Temporal retries it like any other error; after 5 attempts the mission parks |
 | Model misconfigured (missing key or base URL, unpriced Claude model) | `MissionConfigError`, non-retryable: the workflow fails |
 | Sandbox cannot be opened (Docker down) | configuration-type errors (`UnsafeSandboxError`, `ValueError`) fail the workflow; other errors are retried, then park |
@@ -144,18 +148,21 @@ While parked, the workflow sleeps 60 s, doubling to at most 3600 s, and after ea
 `check_mission_health` (one attempt, 2-minute timeout). The probe checks:
 
 - `git`: the workdir is a repository with at least one commit;
-- `model`: `build_provider` succeeds (configuration only; no request is sent to the model);
+- `model`: the provider is built and contacted with a cheap, token-free request under
+  `LHA_MODEL_PROBE_TIMEOUT_S` (Ollama `/api/tags` with the model pulled, OpenAI-compatible
+  `/models`, Claude `/v1/models/<model>`; with a fallback chain, any healthy member counts). See
+  [13-models.md](13-models.md#health-probe);
 - `sandbox`: a sandbox session can be opened and closed.
 
-The mission resumes when no critical dependency is DOWN. Because the model probe does not contact
-the provider, an API outage passes the probe; the mission then resumes, and if the outage persists
-it fails 5 more attempts and parks again with the delay reset to 60 s. The probe never reports
-the optional dependencies, so the optional rows of the table have no runtime effect.
+The mission resumes when no critical dependency is DOWN. A model outage, a revoked key (401/403)
+or an unpulled Ollama model keeps the probe DOWN, so the mission stays parked and keeps backing
+off; the reason is in the `park_reason` query. The probe never reports the optional dependencies,
+so the optional rows of the table have no runtime effect.
 
 **Not implemented** (claimed by earlier docs): falling back to lexical search when pgvector is
-down (no runtime path uses pgvector), buffering spans when Langfuse is down (nothing is sent), a
-`fallback_model` setting (see `FailoverModel` in [13-models.md](13-models.md), library-only), and
-alerts on park.
+down (no runtime path uses pgvector), buffering spans when Langfuse is down (nothing is sent), and
+alerts on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` (see
+[13-models.md](13-models.md#retries-and-failover)).
 
 ## Stuck items and gates
 

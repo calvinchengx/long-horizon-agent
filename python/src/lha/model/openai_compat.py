@@ -20,6 +20,7 @@ from types import TracebackType
 import httpx
 
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall, TurnResult, Usage
+from lha.model.health import ModelHealth, http_failure
 from lha.model.pricing import ModelPrice, require_price
 from lha.model.retry import Sleep, with_retries
 
@@ -76,6 +77,7 @@ class OpenAICompatModel(ModelProvider):
         if (price_in_per_mtok is None) != (price_out_per_mtok is None):
             raise ValueError("configure both price_in_per_mtok and price_out_per_mtok, or neither")
         self.name = f"{label}:{model_name}"
+        self._label = label
         self._base_url = base_url.rstrip("/")
         self._model = model_name
         self._api_key = api_key
@@ -148,6 +150,33 @@ class OpenAICompatModel(ModelProvider):
     def estimate_cost_usd(self, usage: Usage) -> float:
         """Cost at the configured endpoint prices; raises ``UnknownPriceError`` if unpriced."""
         return require_price(self._price, usage.model or self._model, self.name).cost(usage)
+
+    async def health_check(self, *, timeout_s: float) -> ModelHealth:
+        """Contact the endpoint without spending tokens.
+
+        Ollama: ``GET <root>/api/tags`` and the configured model must be pulled. Any other
+        OpenAI-compatible endpoint: ``GET <base>/models`` with the bearer key.
+        """
+        try:
+            if self._label == "ollama":
+                root = self._base_url.removesuffix("/v1")
+                resp = await self._client.get(f"{root}/api/tags", timeout=timeout_s)
+                resp.raise_for_status()
+                tags = resp.json().get("models", [])
+                names = {str(t.get("name", "")) for t in tags if isinstance(t, dict)}
+                wanted = {self._model, f"{self._model}:latest"}
+                if not names & wanted:
+                    return ModelHealth(False, f"{self.name}: model {self._model!r} is not pulled")
+                return ModelHealth(True, f"{self.name}: reachable")
+            headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
+            resp = await self._client.get(
+                f"{self._base_url}/models", headers=headers, timeout=timeout_s
+            )
+            resp.raise_for_status()
+        except (httpx.HTTPError, ValueError, AttributeError) as exc:
+            failure = http_failure(exc)
+            return ModelHealth(False, f"{self.name}: {failure.detail}")
+        return ModelHealth(True, f"{self.name}: reachable")
 
     async def aclose(self) -> None:
         """Close the HTTP client if this instance created it."""

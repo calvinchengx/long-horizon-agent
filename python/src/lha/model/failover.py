@@ -21,6 +21,7 @@ from lha.contracts.model import (
     UnknownPriceError,
     Usage,
 )
+from lha.model.health import ModelHealth, probe_provider
 from lha.model.retry import Sleep, backoff_delay, is_retryable
 
 
@@ -96,6 +97,14 @@ class FailoverModel(ModelProvider):
             # Pre-call worst-case estimate: the most expensive provider bounds it.
             return max(p.estimate_cost_usd(usage) for p in self._providers)
         return self._provider_for(usage).estimate_cost_usd(usage)
+
+    async def health_check(self, *, timeout_s: float) -> ModelHealth:
+        """Healthy if ANY member can serve (failover routes around the others)."""
+        results = await asyncio.gather(
+            *(probe_provider(p, timeout_s=timeout_s) for p in self._providers)
+        )
+        detail = "; ".join(r.detail for r in results if r.detail)
+        return ModelHealth(any(r.ok for r in results), detail)
 
     async def aclose(self) -> None:
         """Close every wrapped provider that owns resources."""

@@ -18,6 +18,7 @@ from types import TracebackType
 import httpx
 
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall, TurnResult, Usage
+from lha.model.health import ModelHealth, http_failure
 from lha.model.pricing import ModelPrice, lookup_claude_price, require_price
 from lha.model.retry import Sleep, with_retries
 
@@ -74,6 +75,7 @@ class ClaudeModel(ModelProvider):
     """A ``ModelProvider`` backed by Anthropic's Messages API."""
 
     ENDPOINT = "https://api.anthropic.com/v1/messages"
+    MODELS_ENDPOINT = "https://api.anthropic.com/v1/models"
     API_VERSION = "2023-06-01"
 
     def __init__(
@@ -183,6 +185,20 @@ class ClaudeModel(ModelProvider):
         explicit = self._price if model == self._model else None
         price = explicit or lookup_claude_price(model) or self._price
         return require_price(price, model, self.name).cost(usage)
+
+    async def health_check(self, *, timeout_s: float) -> ModelHealth:
+        """``GET /v1/models/<model>``: proves the API is up, the key works and the model exists,
+        without spending tokens."""
+        try:
+            resp = await self._client.get(
+                f"{self.MODELS_ENDPOINT}/{self._model}",
+                headers={"x-api-key": self._api_key, "anthropic-version": self.API_VERSION},
+                timeout=timeout_s,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            return ModelHealth(False, f"{self.name}: {http_failure(exc).detail}")
+        return ModelHealth(True, f"{self.name}: reachable")
 
     async def aclose(self) -> None:
         """Close the HTTP client if this instance created it."""

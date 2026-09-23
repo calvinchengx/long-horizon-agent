@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 
 from lha.contracts.model import ModelMessage, ModelProvider, TurnResult, Usage
+from lha.model.health import ModelHealth
 
 
 class StubModel(ModelProvider):
@@ -55,3 +56,7 @@ class StubModel(ModelProvider):
     def estimate_cost_usd(self, usage: Usage) -> float:
         # A stub is free, by definition.
         return 0.0
+
+    async def health_check(self, *, timeout_s: float) -> ModelHealth:
+        """In-process: always healthy."""
+        return ModelHealth(True, f"{self.name}: in-process stub")
