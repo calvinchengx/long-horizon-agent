@@ -107,6 +107,24 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
 
+    # --- Web tools (fetch_url / web_search; allow-list is ``web_allow_hosts`` above) -----
+    # Extra ports fetch_url may use beyond 80/443 (comma-separated).
+    web_allow_ports: str = ""
+    # Brokered credentials for fetch_url: a JSON object mapping a placeholder the agent may use
+    # in headers to ``{"value": "<secret>", "hosts": ["api.example.com", ...]}``. The secret is
+    # substituted only into requests to its bound hosts (each must be in ``web_allow_hosts``).
+    web_credentials: SecretStr | None = None
+    # web_search backend; registered only with a provider AND a key (and a non-empty
+    # ``web_allow_hosts``). The endpoint defaults to the provider's public API.
+    web_search_provider: Literal["tavily", "exa"] | None = None
+    web_search_api_key: SecretStr | None = None
+    web_search_endpoint: str | None = None
+    web_timeout_s: float = Field(default=30.0, gt=0)
+    web_max_response_bytes: int = Field(default=2_000_000, gt=0)
+    # Declare that the workspace/sandbox exposes secrets or customer data (Rule of Two: a run
+    # with web tools may not also hold private data). ``sandbox=local`` always counts as private.
+    private_data: bool = False
+
     # --- Model resilience -------------------------------------------------------------
     # Ordered fallback chain tried on transient model errors, comma-separated
     # ``backend:model[@in/out]`` (USD per 1M tokens), e.g.
@@ -121,6 +139,13 @@ class Settings(BaseSettings):
 
     def web_hosts(self) -> list[str]:
         return _csv(self.web_allow_hosts)
+
+    def web_ports(self) -> list[int]:
+        """``web_allow_ports`` parsed (raises ``ValueError`` on a non-integer entry)."""
+        try:
+            return [int(port) for port in _csv(self.web_allow_ports)]
+        except ValueError as exc:
+            raise ValueError(f"LHA_WEB_ALLOW_PORTS must be integers: {exc}") from None
 
     def fallback_model_entries(self) -> list[str]:
         return _csv(self.fallback_models)

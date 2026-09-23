@@ -348,7 +348,9 @@ async def _execute_cycle(
                 loop = build_lead_loop(
                     settings, model=model, anchor=anchor, workdir=inp.workdir, gate=gate
                 )
-            except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
+            except ValueError as exc:
+                # e.g. malformed LHA_TRUSTED_CHECKS / LHA_WEB_CREDENTIALS, or a lethal-trifecta
+                # run (RuleOfTwoViolation: web tools + local sandbox or private data).
                 raise _config_error(f"invalid configuration: {exc}", exc) from exc
             outcome = await _with_heartbeat(
                 loop.run_cycle(

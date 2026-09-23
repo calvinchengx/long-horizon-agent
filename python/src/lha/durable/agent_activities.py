@@ -12,8 +12,7 @@ from lha.contracts.tools import ToolContext
 from lha.durable.activities import _with_heartbeat
 from lha.durable.types import ERROR_BUDGET_EXCEEDED, ERROR_CONFIG, SubAgentInput, SubAgentOutput
 from lha.execution import UnsafeSandboxError, open_sandbox
-from lha.execution.dispatcher import AllowListDispatcher
-from lha.execution.tools import default_local_tools
+from lha.execution.tools.toolset import build_run_dispatcher
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import BudgetExceeded, CostMeter
@@ -37,6 +36,16 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
             allow_unknown_cost=settings.allow_unpriced_models,
         ),
     )
+    try:  # web tools iff LHA_EGRESS_ALLOW_HOSTS and the role + input allow egress
+        dispatcher = build_run_dispatcher(
+            settings,
+            allow_mutating=role.allow_mutating,
+            allow_egress=None if role.allow_egress and inp.allow_egress else False,
+        )
+    except ValueError as exc:  # RuleOfTwoViolation / WebConfigError: fail closed
+        raise ApplicationError(
+            f"cannot assemble the sub-agent's tools: {exc}", type=ERROR_CONFIG, non_retryable=True
+        ) from exc
     try:
         model = meter.wrap(build_provider(settings), role=inp.role_name)
         session = await open_sandbox(
@@ -46,11 +55,6 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         raise ApplicationError(
             f"cannot start sub-agent: {exc}", type=ERROR_CONFIG, non_retryable=True
         ) from exc
-    dispatcher = AllowListDispatcher.for_tools(
-        default_local_tools(),
-        allow_mutating=role.allow_mutating,
-        allow_egress=role.allow_egress and inp.allow_egress,
-    )
     agent = SubAgent(role=role, model=model, dispatcher=dispatcher)
     try:
         result = await _with_heartbeat(
