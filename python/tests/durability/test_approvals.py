@@ -19,7 +19,12 @@ from temporalio.worker import Worker
 from lha.durable.signals import QUERY_STATUS, SIGNAL_HUMAN_DECISION, STATUS_WAITING_ON_HUMAN
 from lha.durable.types import CycleInput, CycleResult, MissionInput, PendingApproval
 from lha.durable.workflows import MissionWorkflow
-from tests.durability.test_durable_spine import _healthy, _snapshot_activity, _unblock_activity
+from tests.durability.test_durable_spine import (
+    GATE_ACTIVITIES,
+    _healthy,
+    _snapshot_activity,
+    _unblock_activity,
+)
 
 PUSH = PendingApproval(
     fingerprint="fp-push", tool="run_command", reason="git push", arguments="['git', 'push']"
@@ -69,6 +74,7 @@ async def _run(tmp_path: Path, *, decision: str) -> tuple[list[CycleInput], str,
                 _healthy,
                 _unblock_activity,
                 _snapshot_activity,
+                *GATE_ACTIVITIES,
             ],
         ),
     ):

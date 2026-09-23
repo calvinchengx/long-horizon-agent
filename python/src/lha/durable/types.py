@@ -21,6 +21,8 @@ OUTCOME_DEADLOCKED = "deadlocked"
 OUTCOME_BUDGET_EXHAUSTED = "budget_exhausted"
 OUTCOME_MAX_CYCLES = "max_cycles"
 OUTCOME_ABORTED = "aborted"
+# A human (or the deadlock gate's default) declared the remaining work impossible.
+OUTCOME_IMPOSSIBLE = "impossible"
 
 # ApplicationError ``type`` values raised (non-retryable) by the cycle activity.
 ERROR_BUDGET_EXCEEDED = "BudgetExceeded"
@@ -46,6 +48,57 @@ class ApprovedAction:
 
 
 @dataclass
+class GateView:
+    """The open human gate (``gate`` query; ``lha mission-status``)."""
+
+    gate_id: str
+    kind: str  # "tool_call" | "deadlock"
+    question: str
+    options: list[str]
+    default_action: str
+    opened_at: str = ""
+    deadline: str = ""
+    escalations_sent: int = 0
+    next_escalation_at: str = ""
+    recommended: str = ""
+    request: PendingApproval | None = None
+
+
+@dataclass
+class GateNotice:
+    """Input of the ``notify_gate`` activity: one gate event (anchor event + optional webhook)."""
+
+    mission_id: str
+    workdir: str
+    gate_id: str
+    kind: str
+    event: str  # "opened" | "reminder" | "resolved" | "defaulted"
+    question: str = ""
+    options: list[str] = field(default_factory=list)
+    default_action: str = ""
+    decision: str = ""
+    step: int = 0
+    deadline: str = ""
+    request: PendingApproval | None = None
+
+
+@dataclass
+class NoticeResult:
+    recorded: bool
+    webhook: str = "off"  # "off" | "sent" | "failed: <reason>"
+
+
+@dataclass
+class FinalizeInput:
+    """Final checkpoint of a mission declared impossible."""
+
+    mission_id: str
+    workdir: str
+    cycle_id: str
+    reason: str = ""
+
+
+@dataclass
 class MissionState:
     """State carried across Continue-As-New (pointers + small counters only — never history)."""
 
@@ -67,6 +120,15 @@ class MissionState:
     # Human-approved irreversible actions not yet used, and fingerprints a human rejected.
     approved_actions: list[ApprovedAction] = field(default_factory=list)
     rejected_actions: list[str] = field(default_factory=list)
+    # Consecutive non-passing cycles on ``fail_item`` (drives the "declare impossible?" advice).
+    fail_item: str | None = None
+    fail_streak: int = 0
+    # Durable sleep: no cycle starts before this epoch time (``snooze`` signal, scheduled start,
+    # pause between cycles); 0 = none.
+    resume_at: float = 0.0
+    # Escalation ladder: reminders sent over the mission's life + a bounded gate/sleep event log.
+    escalations: int = 0
+    gate_log: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -93,6 +155,17 @@ class MissionInput:
     deadlock_gate_seconds: int = 0
     # How long to wait for a human to approve/reject an irreversible action before rejecting it.
     approval_timeout_seconds: int = 86_400
+    # Escalation ladder for every gate: reminder offsets in seconds after the gate opens.
+    gate_escalation_seconds: list[int] = field(default_factory=lambda: [900, 2700, 14_400, 43_200])
+    # Deadlock gate decision on timeout: "abort" | "impossible" (never "retry").
+    deadlock_gate_default: str = "abort"
+    # The deadlock gate recommends "impossible" after this many consecutive failed cycles on one
+    # item (``ops.lifecycle.should_declare_impossible``).
+    impossible_after_failures: int = 3
+    # Durable pause between cycles (status SLEEPING); 0 = none.
+    cycle_pause_seconds: int = 0
+    # Scheduled start: sleep (status SLEEPING) until this epoch time; 0 = start now.
+    resume_at: float = 0.0
     # Carried across Continue-As-New; ``None`` on the first run.
     state: MissionState | None = None
 

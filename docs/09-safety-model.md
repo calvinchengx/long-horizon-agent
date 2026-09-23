@@ -98,6 +98,17 @@ Which gate the dispatcher gets depends on the run path
 | Local without `--approve-interactive` | none | Denied |
 
 See [durable execution](08-durable-execution.md#approving-irreversible-actions).
+<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
+   classified. A gated command is sent to the configured `HITLGate`. With no gate configured it is
+   denied. Every answer (approve, reject, queued, gate error, no gate) is kept as a
+   `tool_approval` event and committed with the cycle's checkpoint.
+
+The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
+`list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). `web_search`
+and `fetch_url` exist but no run path registers them. Which gate the Lead's dispatcher gets depends
+on the run path; see [Human gates on tool calls](#human-gates-on-tool-calls) below. `SubAgent` applies
+its role's mutating and egress policy a second time, hiding and refusing tools the role may not
+use, even when the dispatcher would allow them.
 
 ## 3. Command classifier and human gates
 
@@ -142,10 +153,28 @@ It has 206 cases of argv mapped to an exact reason, 64 of which are allowed (`nu
 run it. The Python code is the reference. To change behaviour, change Python, regenerate with
 `scripts/export_spec.py`, then make Go pass ([spec/README.md](../spec/README.md)).
 
-Gate implementations are in [hitl/gate.py](../python/src/lha/hitl/gate.py). `AutoPolicyGate`
+### Human gates on tool calls
+
+The dispatcher's requests are `IRREVERSIBLE` with default `reject`. They carry the tool, its
+arguments, the exact argv (for `run_command`), the classifier's reason and a fingerprint of the
+tool and its exact arguments. The gate depends on the run path
+([hitl/approvals.py](../python/src/lha/hitl/approvals.py)):
+
+| Run path | Gate | Behaviour |
+|---|---|---|
+| `lha run-local` / `mission` / `orchestrate` without `--approve-interactive` | none | every flagged command is denied |
+| same, with `--approve-interactive` | `TerminalApprover` (`console_gate()`) | Prints the tool, the exact argv (shell-quoted), the reason and the timeout, then asks `Allow this exact call? [y/N]`. Only `y`/`yes` approves; any other answer, end of input, or no answer within `LHA_CONSOLE_APPROVAL_TIMEOUT_S` (default 3600) rejects. Reminders at `LHA_GATE_ESCALATION_SECONDS` are printed, recorded as `gate_reminder` events and sent to the optional webhook. When stdin is not a TTY it rejects without asking. One prompt at a time. |
+| durable mission (Temporal) | `DeferredApprovalGate` | Never blocks: an unapproved call is refused for now and queued; after the cycle the workflow opens a gate (status `WAITING_ON_HUMAN`, default **reject**, escalation ladder). An approval allows that exact fingerprint once in a later cycle; a rejection is remembered and never asked again. See [Durable execution](08-durable-execution.md#irreversible-tool-calls). |
+
+A gate can only let through a call the classifier flagged and a human explicitly approved; every
+timeout, error, missing terminal and unanswerable prompt rejects. Decisions are committed to
+`.lha/events.ndjson` as `tool_approval` events (tool, arguments with secrets redacted, reason,
+fingerprint, `decision`, `approved`, `resolved_by`, `defaulted`).
+
+The generic policies are in [hitl/gate.py](../python/src/lha/hitl/gate.py). `AutoPolicyGate`
 auto-approves reversible requests and applies the default to irreversible ones. `CallbackGate`
 asks an async resolver, and falls back to the default on `None`, on an exception, or on an answer
-outside the offered options. The dispatcher's requests are `IRREVERSIBLE` with default `reject`.
+outside the offered options. No CLI run path uses them.
 
 ## 4. Egress policy
 

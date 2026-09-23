@@ -10,15 +10,25 @@ from __future__ import annotations
 # Signals / queries / updates (versioned).
 SIGNAL_HUMAN_DECISION = "human_decision_v1"
 SIGNAL_STEER = "steer_v1"
+SIGNAL_SNOOZE = "snooze_v1"
 QUERY_STATUS = "status_v1"
 QUERY_CYCLES = "cycles_done"
+QUERY_GATE = "gate_v1"
+QUERY_GATE_LOG = "gate_log_v1"
 UPDATE_VERIFY_VERDICT = "verify_verdict_v1"
 
 # Mission status values (mirror the `missions.status` DB enum).
 STATUS_RUNNING = "RUNNING"
-STATUS_SLEEPING = "SLEEPING"
-STATUS_WAITING_ON_HUMAN = "WAITING_ON_HUMAN"
-STATUS_DEGRADED_PARK = "DEGRADED_PARK"
+STATUS_SLEEPING = "SLEEPING"  # on a durable timer by design (pause / scheduled start / snooze)
+STATUS_WAITING_ON_HUMAN = "WAITING_ON_HUMAN"  # a gate is open
+STATUS_DEGRADED_PARK = "DEGRADED_PARK"  # a critical dependency is down
 STATUS_DONE = "DONE"
 STATUS_ABORTED = "ABORTED"
 STATUS_IMPOSSIBLE = "IMPOSSIBLE"
+
+# Gate kinds + options.
+GATE_TOOL_CALL = "tool_call"
+GATE_DEADLOCK = "deadlock"
+APPROVAL_OPTIONS = ("approve", "reject")
+DEADLOCK_OPTIONS = ("retry", "abort", "impossible")
+DEADLOCK_DEFAULTS = ("abort", "impossible")  # "retry" is never an unattended default
