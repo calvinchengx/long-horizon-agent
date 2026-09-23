@@ -102,6 +102,12 @@ class Settings(BaseSettings):
     # files harness integrity always protects, e.g. "Makefile,e2e/**,.github/**".
     harness_paths: str = ""
 
+    # --- Multi-agent coordination (lha orchestrate) ---------------------------------
+    # Most checklist items one parallel wave runs at once, each by its own implementer in its
+    # own git worktree (items need disjoint, Planner-assigned write-sets). 1 disables parallel
+    # waves: every item is then worked serially by the Lead.
+    max_parallel_implementers: int = 3
+
     # --- Observability ---------------------------------------------------------------
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None

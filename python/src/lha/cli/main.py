@@ -375,17 +375,18 @@ def orchestrate(
         planner_model = build_provider(settings)
         try:
             planner = Planner(meter.wrap(planner_model, role="planner"))
-            checklist = await planner.plan(title=title, description=task)
+            plan = await planner.plan_mission(title=title, description=task)
         finally:
             await aclose_provider(planner_model)
         return await Orchestrator(settings, meter=meter).run_mission(
             workdir=workdir,
             title=title,
             description=task,
-            checklist=checklist,
+            checklist=plan.checklist,
             checks=checks,
             gate=_gate(approve_interactive),
             references=list(reference),
+            ownership=plan.ownership,
         )
 
     _report(_run(_mission()))
