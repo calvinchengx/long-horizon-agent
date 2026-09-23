@@ -41,6 +41,13 @@ from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check, checks_from_commands
+from lha.durable.signals import (
+    STATUS_ABORTED,
+    STATUS_DONE,
+    STATUS_IMPOSSIBLE,
+    STATUS_RUNNING,
+    STATUS_WAITING_ON_HUMAN,
+)
 from lha.durable.types import (
     ERROR_BUDGET_EXCEEDED,
     ERROR_CONFIG,
@@ -59,6 +66,8 @@ from lha.hitl.approvals import DeferredApprovalGate
 from lha.ids import idempotency_key
 from lha.model import build_provider
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
+from lha.persistence.services import open_run_services
+from lha.persistence.store import StoreUnavailableError
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
 from lha.verify.verifier import default_python_checks
@@ -341,40 +350,78 @@ async def _execute_cycle(
             await model.aclose()
             raise _config_error(f"cannot open the sandbox: {exc}", exc) from exc
 
-        gate = DeferredApprovalGate(approved=[a.fingerprint for a in inp.approved_actions])
+        # Persistence + memory (activity-side only; the workflow never touches a database).
+        # Ledger keys carry the attempt, so a retried attempt's re-spent calls are new rows
+        # while a replayed write of the same call is a no-op. The seeded "(prior)" entries are
+        # already in the ledger from earlier attempts: no backfill.
         try:
-            try:
-                loop = build_lead_loop(
-                    settings, model=model, anchor=anchor, workdir=inp.workdir, gate=gate
-                )
-            except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
-                raise _config_error(f"invalid configuration: {exc}", exc) from exc
-            outcome = await _with_heartbeat(
-                loop.run_cycle(
-                    ctx=ToolContext(mission_id=inp.mission_id, session=session),
-                    mission_id=inp.mission_id,
-                    cycle_id=inp.cycle_id,
-                    anchor_text=_anchor_text(snapshot, inp),
-                    checks=checks,
-                ),
-                inp.cycle_id,
+            services = await open_run_services(
+                settings,
+                mission_id=inp.mission_id,
+                workdir=inp.workdir,
+                meter=meter,
+                title=snapshot.mission.title if snapshot.mission else "",
+                description=snapshot.mission.description if snapshot.mission else "",
+                model=meter.wrap(model.inner, role="librarian"),
+                key_prefix=f"{inp.cycle_id}@{attempt}",
+                backfill=False,
+                workflow_id=activity.info().workflow_id if activity.in_activity() else None,
             )
-        except BudgetExceeded as exc:
-            raise ApplicationError(
-                str(exc), type=ERROR_BUDGET_EXCEEDED, non_retryable=True
-            ) from exc
-        finally:
+        except BaseException as exc:
             await session.close()
             await model.aclose()
-            await asyncio.to_thread(
-                record_spend,
-                inp.workdir,
-                key=idempotency_key(inp.mission_id, inp.cycle_id, attempt),
-                cycle_id=inp.cycle_id,
-                ledger=meter.ledger,
-            )
+            if not isinstance(exc, StoreUnavailableError):
+                raise  # e.g. an unwritable SQLite path: retryable
+            raise _config_error(f"cannot open the mission store: {exc}", exc) from exc
 
-        after = await anchor.read_situational_awareness()
+        gate = DeferredApprovalGate(approved=[a.fingerprint for a in inp.approved_actions])
+        try:
+            await services.tracker.running(head_sha=snapshot.head_sha)
+            try:
+                try:
+                    loop = build_lead_loop(
+                        settings,
+                        model=model,
+                        anchor=anchor,
+                        workdir=inp.workdir,
+                        gate=gate,
+                        memory=services.memory,
+                    )
+                except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
+                    raise _config_error(f"invalid configuration: {exc}", exc) from exc
+                outcome = await _with_heartbeat(
+                    loop.run_cycle(
+                        ctx=ToolContext(mission_id=inp.mission_id, session=session),
+                        mission_id=inp.mission_id,
+                        cycle_id=inp.cycle_id,
+                        anchor_text=_anchor_text(snapshot, inp),
+                        checks=checks,
+                    ),
+                    inp.cycle_id,
+                )
+            except BudgetExceeded as exc:
+                await services.tracker.set_status(STATUS_ABORTED)
+                raise ApplicationError(
+                    str(exc), type=ERROR_BUDGET_EXCEEDED, non_retryable=True
+                ) from exc
+            finally:
+                await session.close()
+                await model.aclose()
+                await asyncio.to_thread(
+                    record_spend,
+                    inp.workdir,
+                    key=idempotency_key(inp.mission_id, inp.cycle_id, attempt),
+                    cycle_id=inp.cycle_id,
+                    ledger=meter.ledger,
+                )
+
+            after = await anchor.read_situational_awareness()
+            await services.tracker.set_status(
+                cycle_status(after, awaiting_approval=bool(gate.pending)),
+                head_sha=after.head_sha,
+            )
+        finally:
+            await services.close()
         return _result_from_snapshot(
             after,
             item_id=outcome.item_id,
@@ -388,6 +435,23 @@ async def _execute_cycle(
             pending_approvals=[PendingApproval(**p) for p in gate.pending],
             used_approvals=list(gate.used),
         )
+
+
+def cycle_status(after: SituationSnapshot, *, awaiting_approval: bool = False) -> str:
+    """``missions.status`` after a cycle, from the committed truth (activity-side).
+
+    complete → DONE; the cycle asked for approval of an irreversible action → WAITING_ON_HUMAN
+    (the workflow now asks a human); deadlocked → IMPOSSIBLE (a human "retry" makes the next cycle
+    RUNNING again); otherwise (including an item split by the replanner) → RUNNING. The
+    workflow's own parks are not visible here.
+    """
+    if after.is_complete:
+        return STATUS_DONE
+    if awaiting_approval:
+        return STATUS_WAITING_ON_HUMAN
+    if after.is_deadlocked:
+        return STATUS_IMPOSSIBLE
+    return STATUS_RUNNING
 
 
 def make_cycle_activity(

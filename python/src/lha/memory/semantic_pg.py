@@ -12,10 +12,14 @@ Rows are keyed by ``MemoryRecord.id`` (so a dense hit maps back to the same reco
 stored, e.g. for hybrid fusion), and re-adding an id upserts rather than duplicating. The
 embedder's ``dim`` must equal the ``vector(N)`` column width; a mismatch is rejected at
 construction instead of surfacing as an opaque database error (or silently wrong scores).
+
+With ``mission_id`` set, the index is scoped to one mission: added rows are stamped with it and
+queries only see that mission's rows. Rows carry their ``kind`` and ``metadata`` (migration 0004).
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from lha.contracts.memory import Embedder, MemoryRecord, RetrievalHit
@@ -38,6 +42,7 @@ class PgSemanticIndex:
         embedder: Embedder,
         column_dim: int = DEFAULT_COLUMN_DIM,
         pool: Any | None = None,
+        mission_id: str | None = None,
     ) -> None:
         if embedder.dim != column_dim:
             raise EmbeddingDimensionError(
@@ -48,6 +53,7 @@ class PgSemanticIndex:
         self._embedder = embedder
         self._column_dim = column_dim
         self._pool: Any | None = pool  # injectable (tests / shared pools)
+        self._mission_id = mission_id
 
     async def _ensure_pool(self) -> Any:
         if self._pool is None:
@@ -75,17 +81,20 @@ class PgSemanticIndex:
         async with pool.connection() as conn:
             for record, vector in zip(records, vectors, strict=True):
                 await conn.execute(
-                    "INSERT INTO semantic_memory "
-                    "(id, mission_id, text, embedding, embedding_model, embedding_version, valid) "
-                    "VALUES (%s, %s, %s, %s::vector, %s, %s, %s) "
+                    "INSERT INTO semantic_memory (id, mission_id, kind, text, metadata, "
+                    "embedding, embedding_model, embedding_version, valid) "
+                    "VALUES (%s, %s, %s, %s, %s::jsonb, %s::vector, %s, %s, %s) "
                     "ON CONFLICT (id) DO UPDATE SET mission_id = EXCLUDED.mission_id, "
-                    "text = EXCLUDED.text, embedding = EXCLUDED.embedding, "
+                    "kind = EXCLUDED.kind, text = EXCLUDED.text, metadata = EXCLUDED.metadata, "
+                    "embedding = EXCLUDED.embedding, "
                     "embedding_model = EXCLUDED.embedding_model, "
                     "embedding_version = EXCLUDED.embedding_version, valid = EXCLUDED.valid",
                     (
                         record.id,
-                        record.metadata.get("mission_id"),
+                        self._mission_id or record.metadata.get("mission_id"),
+                        record.kind,
                         record.text,
+                        json.dumps(record.metadata, sort_keys=True),
                         vector,
                         self._embedder.name,
                         self._embedder.version,
@@ -98,28 +107,29 @@ class PgSemanticIndex:
         self._check_vector(query_vec)
         pool = await self._ensure_pool()
         async with pool.connection() as conn:
+            scope = " AND mission_id = %s" if self._mission_id is not None else ""
+            params: tuple[Any, ...] = (query_vec, self._embedder.name, self._embedder.version)
+            if self._mission_id is not None:
+                params = (*params, self._mission_id)
             cursor = await conn.execute(
                 "SELECT id, text, embedding_model, embedding_version, valid, "
-                "1 - (embedding <=> %s::vector) AS score "
+                "1 - (embedding <=> %s::vector) AS score, kind, metadata "
                 "FROM semantic_memory "
-                "WHERE valid AND embedding_model = %s AND embedding_version = %s "
-                "ORDER BY embedding <=> %s::vector LIMIT %s",
-                (
-                    query_vec,
-                    self._embedder.name,
-                    self._embedder.version,
-                    query_vec,
-                    k,
-                ),
+                "WHERE valid AND embedding IS NOT NULL "
+                "AND embedding_model = %s AND embedding_version = %s"
+                f"{scope} ORDER BY embedding <=> %s::vector LIMIT %s",
+                (*params, query_vec, k),
             )
             rows = await cursor.fetchall()
 
         hits: list[RetrievalHit] = []
         for row in rows:
+            extra = row[6:] if len(row) > 6 else ("semantic", {})
             record = MemoryRecord(
                 id=str(row[0]),
-                kind="semantic",
+                kind=str(extra[0] or "semantic"),
                 text=str(row[1]),
+                metadata={str(k): str(v) for k, v in dict(extra[1] or {}).items()},
                 embedding_model=str(row[2]),
                 embedding_version=str(row[3]),
                 valid=bool(row[4]),

@@ -4,13 +4,18 @@
   semantic; it exists so the memory subsystem runs and is testable with no network/key. It is
   explicitly named ``hash`` so it's never mistaken for a real embedding model.
 - ``VoyageEmbedder``: the real, paid semantic embedder (Voyage AI), via httpx.
+- ``SentenceTransformerEmbedder``: a real local semantic embedder; needs the ``embeddings`` extra
+  (``sentence-transformers``). Constructing it without the extra raises ``ModuleNotFoundError``,
+  which the memory service turns into lexical-only retrieval.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import math
 import re
+from typing import Any
 
 import httpx
 
@@ -67,3 +72,19 @@ class VoyageEmbedder:
         data = resp.json()
         items = sorted(data["data"], key=lambda d: d["index"])
         return [list(item["embedding"]) for item in items]
+
+
+class SentenceTransformerEmbedder:
+    """A local semantic embedder via sentence-transformers (the ``embeddings`` extra)."""
+
+    def __init__(self, model_name: str = "BAAI/bge-m3") -> None:
+        from sentence_transformers import SentenceTransformer
+
+        self._model: Any = SentenceTransformer(model_name)
+        self.name = f"st:{model_name}"
+        self.version = model_name
+        self.dim = int(self._model.get_sentence_embedding_dimension() or 0)
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        vectors = await asyncio.to_thread(self._model.encode, texts, normalize_embeddings=True)
+        return [[float(x) for x in vector] for vector in vectors]

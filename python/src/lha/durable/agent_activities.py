@@ -1,4 +1,9 @@
-"""Activity that runs a sub-agent (the non-deterministic body of a sub-agent child workflow)."""
+"""Activity that runs a sub-agent (the non-deterministic body of a sub-agent child workflow).
+
+Every metered call of the sub-agent is also written to the persistent cost ledger (SQLite or
+Postgres, ``lha.persistence``) under the parent mission id, keyed by workflow/activity/attempt so a
+retried attempt's calls are new rows and a replayed write is a no-op.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +23,8 @@ from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.model import build_provider
+from lha.persistence.store import StoreUnavailableError, open_store
+from lha.persistence.tracking import LedgerSink
 
 
 @activity.defn
@@ -46,6 +53,23 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         raise ApplicationError(
             f"cannot start sub-agent: {exc}", type=ERROR_CONFIG, non_retryable=True
         ) from exc
+    meter.cycle_id = f"subagent:{inp.role_name}"
+    try:
+        store = await open_store(settings, workdir=inp.workdir)
+    except BaseException as exc:
+        await session.close()
+        await model.aclose()
+        if not isinstance(exc, StoreUnavailableError):
+            raise  # e.g. an unwritable SQLite path: retryable
+        raise ApplicationError(
+            f"cannot open the mission store: {exc}", type=ERROR_CONFIG, non_retryable=True
+        ) from exc
+    if activity.in_activity():
+        info = activity.info()
+        prefix = f"sub:{info.workflow_id}:{info.activity_id}@{info.attempt}"
+    else:
+        prefix = f"sub:{inp.role_name}"
+    LedgerSink(store, inp.mission_id, key_prefix=prefix).attach(meter)
     dispatcher = AllowListDispatcher.for_tools(
         default_local_tools(),
         allow_mutating=role.allow_mutating,
@@ -63,8 +87,12 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
     except BudgetExceeded as exc:
         raise ApplicationError(str(exc), type=ERROR_BUDGET_EXCEEDED, non_retryable=True) from exc
     finally:
-        await session.close()
-        await model.aclose()
+        try:
+            await session.close()
+            await model.aclose()
+        finally:
+            meter.on_record = None
+            await store.close()
     return SubAgentOutput(
         role=result.role, brief=result.brief, tool_calls=result.tool_calls, turns=result.turns
     )
