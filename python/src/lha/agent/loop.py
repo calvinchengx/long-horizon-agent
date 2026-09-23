@@ -431,6 +431,7 @@ class AgentLoop:
                 progress_summary=f"- {cycle_id} [{item.id}] {item.description}: {note}",
                 checklist=checklist,
                 events=[
+                    *self._gate_events(cycle_id),
                     EventRecord(
                         kind="cycle",
                         cycle_id=cycle_id,
@@ -452,7 +453,7 @@ class AgentLoop:
                                 for r in verification.results
                             ],
                         },
-                    )
+                    ),
                 ],
                 commit_message=f"lha: {verb} {item.id} ({item.description})",
             )
@@ -472,6 +473,14 @@ class AgentLoop:
         if len(drafts) < 2:
             return []
         return [child.id for child in checklist.split(item.id, drafts)]
+
+    def _gate_events(self, cycle_id: str) -> list[EventRecord]:
+        """Human-gate answers/reminders the dispatcher kept this cycle (committed with it)."""
+        drain = getattr(self._dispatcher, "drain_events", None)
+        if not callable(drain):
+            return []
+        events: list[EventRecord] = drain()
+        return [e if e.cycle_id else e.model_copy(update={"cycle_id": cycle_id}) for e in events]
 
     def _emit(self, kind: str, mission_id: str, cycle_id: str, **data: object) -> None:
         if self._recorder is not None:

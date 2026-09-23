@@ -4,8 +4,10 @@ A deterministic scheduler — NO LLM/tool/IO in this body. It repeatedly dispatc
 ``run_agent_cycle`` activity and ends with an explicit outcome:
 
   * ``completed``         — every checklist item verified done;
-  * ``deadlocked``        — items remain but none is actionable (blocked / unsatisfiable deps),
-                            optionally after a human "retry"/"abort" gate;
+  * ``deadlocked``        — items remain but none is actionable (blocked / unsatisfiable deps)
+                            and no deadlock gate is configured (or "retry" unblocked nothing);
+  * ``aborted``           — "abort" at the deadlock gate (by a human or its default);
+  * ``impossible``        — "impossible" at the deadlock gate: a final checkpoint records it;
   * ``budget_exhausted``  — the per-call budget governor refused a model call;
   * ``max_cycles``        — the iteration ceiling was hit.
 
@@ -17,12 +19,29 @@ cycle keeps failing with retryable errors (an outage), the mission does not fail
 dependency health until they recover, then resumes. Non-retryable errors (budget, configuration)
 end or fail the mission immediately. Continue-As-New keeps the history bounded; everything the
 workflow needs rides in ``MissionInput.state``.
+
+Human gates (status ``WAITING_ON_HUMAN``): an irreversible tool call a cycle queued (approve /
+reject, default reject) and, when ``deadlock_gate_seconds > 0``, a deadlock (retry / abort /
+impossible, default ``deadlock_gate_default``). Every gate has a timeout, a default action and an
+escalation ladder: reminders at ``gate_escalation_seconds`` after it opens, each recorded in the
+anchor and sent to the optional webhook by the ``notify_gate`` activity (never from workflow
+code), then the default. ``ops.lifecycle.should_declare_impossible`` drives the deadlock gate's
+"impossible" recommendation.
+
+``SLEEPING`` is the status while the workflow waits on a durable timer by design: a scheduled
+start (``MissionInput.resume_at``), the pause between cycles (``cycle_pause_seconds``) or an
+operator ``snooze``. It is distinct from ``DEGRADED_PARK`` (a dependency is down) and
+``WAITING_ON_HUMAN`` (a gate is open).
+
+Determinism: behaviour added after histories were recorded is guarded by ``workflow.patched``
+(``PATCH_*`` below), so a history recorded by an older build replays down its old code path.
 """
 
 from __future__ import annotations
 
 import dataclasses
-from datetime import timedelta
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -33,20 +52,31 @@ from temporalio.exceptions import ActivityError, ApplicationError
 with workflow.unsafe.imports_passed_through():
     from lha.durable.activities import (
         check_mission_health,
+        declare_impossible,
+        notify_gate,
         read_mission_snapshot,
         run_agent_cycle,
         unblock_items,
     )
+    from lha.hitl.escalation import escalation_schedule, next_rung
+    from lha.ops.lifecycle import should_declare_impossible
 
 from lha.durable.signals import (
+    DEADLOCK_DEFAULTS,
+    GATE_DEADLOCK,
+    GATE_TOOL_CALL,
+    QUERY_GATE,
+    QUERY_GATE_LOG,
     QUERY_STATUS,
     SIGNAL_HUMAN_DECISION,
+    SIGNAL_SNOOZE,
     SIGNAL_STEER,
     STATUS_ABORTED,
     STATUS_DEGRADED_PARK,
     STATUS_DONE,
     STATUS_IMPOSSIBLE,
     STATUS_RUNNING,
+    STATUS_SLEEPING,
     STATUS_WAITING_ON_HUMAN,
 )
 from lha.durable.types import (
@@ -56,10 +86,14 @@ from lha.durable.types import (
     OUTCOME_BUDGET_EXHAUSTED,
     OUTCOME_COMPLETED,
     OUTCOME_DEADLOCKED,
+    OUTCOME_IMPOSSIBLE,
     OUTCOME_MAX_CYCLES,
     ApprovedAction,
     CycleInput,
     CycleResult,
+    FinalizeInput,
+    GateNotice,
+    GateView,
     HealthInput,
     MissionInput,
     MissionResult,
@@ -81,12 +115,21 @@ _SHORT_RETRY = RetryPolicy(maximum_attempts=3)
 
 MAX_STEER_NOTES = 20
 MAX_STEER_CHARS = 2000
+# The pre-ladder deadlock gate's options (kept so histories recorded before it replay).
 DEADLOCK_OPTIONS = ("retry", "abort")
+LADDER_DEADLOCK_OPTIONS = ("retry", "abort", "impossible")
 APPROVAL_OPTIONS = ("approve", "reject")
+MAX_GATE_LOG = 50
+_NOTIFY_TIMEOUT = timedelta(minutes=3)
+
+# ``workflow.patched`` ids for behaviour added after histories were recorded.
+PATCH_GATE_LADDER = "lha-gate-escalation-v1"
+PATCH_SLEEPING = "lha-sleeping-v1"
 
 _TERMINAL_STATUS = {
     OUTCOME_COMPLETED: STATUS_DONE,
     OUTCOME_DEADLOCKED: STATUS_IMPOSSIBLE,
+    OUTCOME_IMPOSSIBLE: STATUS_IMPOSSIBLE,
     OUTCOME_BUDGET_EXHAUSTED: STATUS_ABORTED,
     OUTCOME_MAX_CYCLES: STATUS_ABORTED,
     OUTCOME_ABORTED: STATUS_ABORTED,
@@ -102,6 +145,10 @@ def _config_failure(message: str) -> ApplicationError:
     return ApplicationError(message, type=ERROR_CONFIG, non_retryable=True)
 
 
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(UTC).isoformat(timespec="seconds")
+
+
 @workflow.defn
 class MissionWorkflow:
     """Long-lived orchestrator for one mission."""
@@ -113,6 +160,7 @@ class MissionWorkflow:
         self._park_reason = ""
         self._rejected_decisions: list[str] = []
         self._open_question = ""
+        self._gate: GateView | None = None
 
     @workflow.run
     async def run(self, inp: MissionInput) -> MissionResult:
@@ -121,6 +169,10 @@ class MissionWorkflow:
         if early.pending_decision is not None:
             state.pending_decision = early.pending_decision
         state.steer_notes = [*state.steer_notes, *early.steer_notes][-MAX_STEER_NOTES:]
+        if inp.state is None:
+            state.resume_at = max(inp.resume_at, early.resume_at)
+        elif early.resume_at:
+            state.resume_at = early.resume_at
         self._state = state
 
         if inp.check_commands is not None and not any(inp.check_commands):
@@ -137,6 +189,7 @@ class MissionWorkflow:
             if state.cycles_done >= inp.max_cycles:
                 return await self._terminal(inp, OUTCOME_MAX_CYCLES, "iteration ceiling reached")
 
+            await self._sleep_until_resume()
             state.status = STATUS_RUNNING
             try:
                 result = await workflow.execute_activity(
@@ -173,17 +226,20 @@ class MissionWorkflow:
 
             state.cycles_done += 1
             self._absorb(result)
+            self._track_failures(result)
             await self._resolve_approvals(inp, result)
 
             if result.is_complete:
                 return await self._terminal(inp, OUTCOME_COMPLETED)
             if result.is_deadlocked:
-                if await self._resolve_deadlock(inp, result):
+                ending = await self._on_deadlock(inp, result)
+                if ending is None:
                     continue
-                return await self._terminal(
-                    inp, OUTCOME_DEADLOCKED, result.reason or "no actionable item"
-                )
+                return await self._terminal(inp, *ending)
 
+            if inp.cycle_pause_seconds > 0 and workflow.patched(PATCH_SLEEPING):
+                wake = workflow.now().timestamp() + inp.cycle_pause_seconds
+                state.resume_at = max(state.resume_at, wake)
             if state.cycles_done % inp.cycles_before_can == 0:
                 workflow.continue_as_new(dataclasses.replace(inp, state=state))
             self._maybe_continue_as_new(inp)
@@ -213,15 +269,30 @@ class MissionWorkflow:
                 continue
             known.add(req.fingerprint)
             summary = f"{req.tool} {req.arguments}".strip()
-            decision = await self.await_human_gate(
-                question=(
-                    f"Mission {inp.mission_id} wants to run an irreversible action: {summary} "
-                    f"({req.reason}). Approve or reject?"
-                ),
-                options=list(APPROVAL_OPTIONS),
-                default_action="reject",
-                timeout_seconds=inp.approval_timeout_seconds,
+            question = (
+                f"Mission {inp.mission_id} wants to run an irreversible action: {summary} "
+                f"({req.reason}). Approve or reject?"
             )
+            if workflow.patched(PATCH_GATE_LADDER):
+                decision, _defaulted = await self._run_gate(
+                    inp,
+                    GateView(
+                        gate_id=f"approval-{req.fingerprint[:12]}",
+                        kind=GATE_TOOL_CALL,
+                        question=question,
+                        options=list(APPROVAL_OPTIONS),
+                        default_action="reject",
+                        request=req,
+                    ),
+                    timeout_seconds=inp.approval_timeout_seconds,
+                )
+            else:
+                decision = await self.await_human_gate(
+                    question=question,
+                    options=list(APPROVAL_OPTIONS),
+                    default_action="reject",
+                    timeout_seconds=inp.approval_timeout_seconds,
+                )
             if decision == "approve":
                 state.approved_actions.append(ApprovedAction(req.fingerprint, summary[:500]))
             else:
@@ -258,18 +329,205 @@ class MissionWorkflow:
         state.status = STATUS_RUNNING
         self._park_reason = ""
 
-    async def _resolve_deadlock(self, inp: MissionInput, result: CycleResult) -> bool:
-        """Optionally ask a human; True if blocked items were reset and the mission continues."""
+    def _track_failures(self, result: CycleResult) -> None:
+        """Consecutive non-passing verified attempts on the same item (pure state, no commands)."""
+        state = self._state
+        if not result.advanced or result.item_id is None:
+            return
+        if result.verdict == "passed":
+            state.fail_item, state.fail_streak = None, 0
+        elif result.item_id == state.fail_item:
+            state.fail_streak += 1
+        else:
+            state.fail_item, state.fail_streak = result.item_id, 1
+
+    def _log(self, line: str) -> None:
+        state = self._state
+        state.gate_log = [*state.gate_log, f"{_iso(workflow.now())} {line}"][-MAX_GATE_LOG:]
+
+    async def _sleep_until_resume(self) -> None:
+        """SLEEPING: a durable timer until ``resume_at`` (a ``snooze`` can move or end it)."""
+        state = self._state
+        if state.resume_at <= workflow.now().timestamp() or not workflow.patched(PATCH_SLEEPING):
+            return
+        state.status = STATUS_SLEEPING
+        self._log(f"sleeping until {_iso(datetime.fromtimestamp(state.resume_at, UTC))}")
+        while True:
+            target = state.resume_at
+            remaining = target - workflow.now().timestamp()
+            if remaining <= 0:
+                break
+            try:
+                await workflow.wait_condition(
+                    lambda target=target: state.resume_at != target,
+                    timeout=timedelta(seconds=remaining),
+                )
+            except TimeoutError:
+                break
+        state.resume_at = 0.0
+        state.status = STATUS_RUNNING
+        self._log("woke up")
+
+    async def _notify(
+        self, inp: MissionInput, view: GateView, event: str, *, decision: str = "", step: int = 0
+    ) -> None:
+        """Record a gate event in the anchor + webhook (an activity); never fails the gate."""
+        try:
+            await workflow.execute_activity(
+                notify_gate,
+                GateNotice(
+                    mission_id=inp.mission_id,
+                    workdir=inp.workdir,
+                    gate_id=view.gate_id,
+                    kind=view.kind,
+                    event=event,
+                    question=view.question,
+                    options=list(view.options),
+                    default_action=view.default_action,
+                    decision=decision,
+                    step=step,
+                    deadline=view.deadline,
+                    request=view.request,
+                ),
+                start_to_close_timeout=_NOTIFY_TIMEOUT,
+                retry_policy=_SHORT_RETRY,
+            )
+        except ActivityError as err:
+            self._log(f"gate {view.gate_id}: notification failed: {err.cause or err}")
+
+    def _take_decision(self, options: list[str]) -> str | None:
+        """Consume the held ``human_decision``; invalid ones are recorded and discarded."""
+        allowed = {opt.strip().lower(): opt for opt in options}
+        state = self._state
+        while state.pending_decision is not None:
+            pending = state.pending_decision
+            state.pending_decision = None  # consumed
+            choice = allowed.get(pending.strip().lower())
+            if choice is not None:
+                return choice
+            self._rejected_decisions.append(pending)
+        return None
+
+    async def _run_gate(
+        self, inp: MissionInput, view: GateView, *, timeout_seconds: int
+    ) -> tuple[str, bool]:
+        """Open ``view`` (WAITING_ON_HUMAN) and walk the escalation ladder until a decision.
+
+        Returns ``(decision, defaulted)``: a valid ``human_decision`` (held decisions count), or
+        the default after reminders at each ``gate_escalation_seconds`` offset inside the timeout.
+        """
+        state = self._state
+        previous = state.status
+        state.status = STATUS_WAITING_ON_HUMAN
+        timeout = max(1, timeout_seconds)
+        opened = workflow.now()
+        schedule = escalation_schedule(timeout, inp.gate_escalation_seconds)
+        view.opened_at = _iso(opened)
+        view.deadline = _iso(opened + timedelta(seconds=timeout))
+        view.next_escalation_at = _iso(opened + timedelta(seconds=schedule[0])) if schedule else ""
+        self._gate = view
+        self._open_question = f"{view.question} [{' / '.join(view.options)}]"
+        ready: Callable[[], bool] = lambda: state.pending_decision is not None  # noqa: E731
+        self._log(f"{view.kind} gate {view.gate_id} opened (default {view.default_action})")
+        await self._notify(inp, view, "opened")
+        sent = 0
+        try:
+            while True:
+                choice = self._take_decision(view.options)
+                if choice is not None:
+                    self._log(f"{view.kind} gate {view.gate_id} resolved: {choice}")
+                    await self._notify(inp, view, "resolved", decision=choice)
+                    return choice, False
+                elapsed = (workflow.now() - opened).total_seconds()
+                rung = next_rung(elapsed, timeout, schedule, sent)
+                if rung.wait_seconds > 0:
+                    try:
+                        await workflow.wait_condition(
+                            ready, timeout=timedelta(seconds=rung.wait_seconds)
+                        )
+                        continue  # a decision arrived: validate it at the top
+                    except TimeoutError:
+                        pass
+                if rung.step == 0:
+                    default = view.default_action
+                    self._log(f"{view.kind} gate {view.gate_id} timed out: default {default}")
+                    await self._notify(inp, view, "defaulted", decision=default)
+                    return default, True
+                sent = rung.step
+                state.escalations += 1
+                view.escalations_sent = sent
+                view.next_escalation_at = (
+                    _iso(opened + timedelta(seconds=schedule[sent])) if sent < len(schedule) else ""
+                )
+                self._log(f"{view.kind} gate {view.gate_id}: reminder {sent} (escalation)")
+                await self._notify(inp, view, "reminder", step=sent)
+        finally:
+            state.status = previous
+            self._gate = None
+            self._open_question = ""
+
+    async def _on_deadlock(self, inp: MissionInput, result: CycleResult) -> tuple[str, str] | None:
+        """``None`` to keep going (blocked items were retried), else ``(outcome, reason)``."""
+        reason = result.reason or "no actionable item"
         if inp.deadlock_gate_seconds <= 0:
-            return False
-        decision = await self.await_human_gate(
-            question=f"Mission {inp.mission_id} is deadlocked ({result.reason}). Retry or abort?",
-            options=list(DEADLOCK_OPTIONS),
-            default_action="abort",
+            return OUTCOME_DEADLOCKED, reason
+        if not workflow.patched(PATCH_GATE_LADDER):
+            if await self._resolve_deadlock(inp, result):
+                return None
+            return OUTCOME_DEADLOCKED, reason
+
+        state = self._state
+        recommended = ""
+        if should_declare_impossible(
+            consecutive_failures=state.fail_streak, threshold=inp.impossible_after_failures
+        ):
+            recommended = "impossible"
+        default = inp.deadlock_gate_default.strip().lower()
+        if default not in DEADLOCK_DEFAULTS:
+            default = "abort"
+        advice = (
+            f" Recommended: impossible (item {state.fail_item} failed {state.fail_streak} times "
+            "in a row)."
+            if recommended
+            else ""
+        )
+        decision, defaulted = await self._run_gate(
+            inp,
+            GateView(
+                gate_id=f"deadlock-{state.cycles_done}",
+                kind=GATE_DEADLOCK,
+                question=(
+                    f"Mission {inp.mission_id} is deadlocked ({reason}). Retry the blocked items, "
+                    f"abort, or declare the mission impossible?{advice}"
+                ),
+                options=list(LADDER_DEADLOCK_OPTIONS),
+                default_action=default,
+                recommended=recommended,
+            ),
             timeout_seconds=inp.deadlock_gate_seconds,
         )
-        if decision != "retry":
-            return False
+        how = "by default (no human answered)" if defaulted else "by a human"
+        if decision == "retry":
+            if await self._unblock(inp):
+                return None
+            return OUTCOME_DEADLOCKED, reason
+        if decision == "impossible":
+            final = await workflow.execute_activity(
+                declare_impossible,
+                FinalizeInput(
+                    mission_id=inp.mission_id,
+                    workdir=inp.workdir,
+                    cycle_id=f"impossible-{state.cycles_done}",
+                    reason=f"declared impossible {how}: {reason}",
+                ),
+                start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=_SHORT_RETRY,
+            )
+            self._absorb(final)
+            return OUTCOME_IMPOSSIBLE, f"declared impossible {how}: {reason}"
+        return OUTCOME_ABORTED, f"aborted at the deadlock gate {how}: {reason}"
+
+    async def _unblock(self, inp: MissionInput) -> bool:
         state = self._state
         state.deadlock_retries += 1
         unblocked = await workflow.execute_activity(
@@ -283,7 +541,20 @@ class MissionWorkflow:
             retry_policy=_SHORT_RETRY,
         )
         self._absorb(unblocked)
+        state.fail_item, state.fail_streak = None, 0
         return unblocked.advanced
+
+    async def _resolve_deadlock(self, inp: MissionInput, result: CycleResult) -> bool:
+        """The pre-ladder deadlock gate (replays of older histories take this path)."""
+        decision = await self.await_human_gate(
+            question=f"Mission {inp.mission_id} is deadlocked ({result.reason}). Retry or abort?",
+            options=list(DEADLOCK_OPTIONS),
+            default_action="abort",
+            timeout_seconds=inp.deadlock_gate_seconds,
+        )
+        if decision != "retry":
+            return False
+        return await self._unblock(inp)
 
     async def _terminal(self, inp: MissionInput, outcome: str, reason: str = "") -> MissionResult:
         state = self._state
@@ -325,6 +596,21 @@ class MissionWorkflow:
         """Why the mission is parked ('' when not parked)."""
         return self._park_reason
 
+    @workflow.query(name=QUERY_GATE)
+    def gate(self) -> GateView | None:
+        """The open gate: question, options, default, deadline, escalations, pending request."""
+        return self._gate
+
+    @workflow.query(name=QUERY_GATE_LOG)
+    def gate_log(self) -> list[str]:
+        """Recent gate / sleep events (opened, reminders, resolutions, defaults), oldest first."""
+        return list(self._state.gate_log)
+
+    @workflow.query
+    def resume_at(self) -> float:
+        """Epoch time the mission sleeps until (0 when not sleeping)."""
+        return self._state.resume_at
+
     @workflow.query
     def open_question(self) -> str:
         """The question an open human gate is waiting on ('' when none is open)."""
@@ -346,6 +632,11 @@ class MissionWorkflow:
         """Deliver a human decision. It is held until a gate consumes it (early signals are kept,
         and survive Continue-As-New); a gate only accepts one of the options it offered."""
         self._state.pending_decision = decision.strip()
+
+    @workflow.signal(name=SIGNAL_SNOOZE)
+    def snooze(self, seconds: int) -> None:
+        """Sleep (SLEEPING) before the next cycle for ``seconds``; ``0`` wakes a sleeping mission."""
+        self._state.resume_at = workflow.now().timestamp() + seconds if seconds > 0 else 0.0
 
     @workflow.signal(name=SIGNAL_STEER)
     def steer(self, note: str) -> None:

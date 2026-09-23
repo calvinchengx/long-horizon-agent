@@ -15,7 +15,7 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ModelBackend = Literal["stub", "ollama", "openai_compat", "claude"]
@@ -106,6 +106,28 @@ class Settings(BaseSettings):
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
+
+    # --- Human gates: escalation ladder, webhook, deadlock gate, SLEEPING --------------
+    # (see src/lha/hitl/ and durable/workflows.py). Every default is the SAFE one: a gate nobody
+    # answers REJECTS the tool call, and the deadlock gate aborts.
+    # Local runs with --approve-interactive: how long the terminal prompt waits before rejecting.
+    # (Durable missions take their approval timeout from ``mission-start``.)
+    approval_timeout_seconds: int = Field(default=3600, ge=1)
+    # Escalation ladder for every gate: reminder offsets (seconds after the gate opens). Each
+    # reminder is recorded as an event and sent to the webhook; offsets at or past the gate's
+    # timeout are ignored, then the default applies. JSON list in the environment.
+    gate_escalation_seconds: list[int] = Field(default_factory=lambda: [900, 2700, 14_400, 43_200])
+    # Deadlock gate decision when nobody answers: "abort" or "impossible" (never "retry").
+    deadlock_gate_default: Literal["abort", "impossible"] = "abort"
+    # Consecutive failed cycles on one item after which the deadlock gate recommends
+    # "impossible" (``ops.lifecycle.should_declare_impossible``).
+    impossible_after_failures: int = Field(default=3, ge=1)
+    # Durable pause between cycles (status SLEEPING); 0 = none.
+    cycle_pause_seconds: int = Field(default=0, ge=0)
+    # Optional webhook receiving every gate event (opened / reminder / resolved / defaulted) as a
+    # JSON POST. Off by default. A secret: chat webhook URLs embed their credential.
+    gate_webhook_url: SecretStr | None = None
+    gate_webhook_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
     def sandbox_egress_hosts(self) -> list[str]:
         return _csv(self.sandbox_egress)
