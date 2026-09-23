@@ -12,12 +12,20 @@ WORST-CASE cost (conservative input-token estimate + the full ``max_tokens`` of 
 worst case of calls already in flight (so a parallel fan-out cannot collectively overshoot). A
 refusal raises ``BudgetExceeded``. After the call the ACTUAL cost is computed by the provider from
 the reported usage and recorded; an unpriced model is recorded with ``cost_known=False``.
+
+Persistence hook: set ``meter.on_record`` to an async callable (e.g.
+``lha.persistence.tracking.LedgerSink``) and every recorded entry is also handed to it, so EVERY
+metered call reaches the persistent ``cost_ledger``. A failing hook is logged, never raised: the
+model call already happened and its spend is already in the in-memory ledger.
 """
 
 from __future__ import annotations
 
 import json
 import math
+from collections.abc import Awaitable, Callable
+
+import structlog
 
 from lha.contracts.model import (
     ModelMessage,
@@ -26,7 +34,7 @@ from lha.contracts.model import (
     UnknownPriceError,
     Usage,
 )
-from lha.governor.cost import CostLedger
+from lha.governor.cost import CostEntry, CostLedger
 from lha.governor.governor import BudgetGovernor, GovernorDecision
 
 # Conservative chars-per-token for the pre-call input estimate (real text averages ~4; code and
@@ -75,6 +83,8 @@ class CostMeter:
         self.cycle_id = "c0"
         self.assumed_max_output_tokens = assumed_max_output_tokens
         self._reserved_usd = 0.0
+        # Called with every recorded entry (the persistent ledger); see the module docstring.
+        self.on_record: Callable[[CostEntry], Awaitable[None]] | None = None
 
     @property
     def reserved_usd(self) -> float:
@@ -151,7 +161,16 @@ class MeteredModel(ModelProvider):
             usd: float | None = self._provider.estimate_cost_usd(result.usage)
         except UnknownPriceError:
             usd = None
-        meter.ledger.record(cycle_id=meter.cycle_id, usage=result.usage, usd=usd, role=self.role)
+        entry = meter.ledger.record(
+            cycle_id=meter.cycle_id, usage=result.usage, usd=usd, role=self.role
+        )
+        if meter.on_record is not None:
+            try:
+                await meter.on_record(entry)
+            except Exception as exc:  # persistence must never fail a completed call
+                structlog.get_logger("lha.governor").warning(
+                    "cost_hook_failed", error=f"{type(exc).__name__}: {exc}"
+                )
         return result
 
     def estimate_cost_usd(self, usage: Usage) -> float:

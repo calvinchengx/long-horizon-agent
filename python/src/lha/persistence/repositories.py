@@ -2,7 +2,8 @@
 
 Persist mission state + the cost ledger to the tables in ``db/migrations/`` (0001-0003) so a
 mission's status/spend is queryable with plain SQL and survives independently of git. Imported
-only when Postgres is configured — not at package import.
+only when Postgres is configured — not at package import. The run paths use
+``lha.persistence.postgres.PostgresStore`` (same tables, same ledger insert + idempotency key).
 """
 
 from __future__ import annotations
@@ -11,14 +12,9 @@ import psycopg
 
 from lha.governor.cost import CostEntry
 from lha.ids import idempotency_key
+from lha.persistence.postgres import INSERT_COST_SQL
 
-_INSERT_COST = (
-    "INSERT INTO cost_ledger "
-    "(mission_id, cycle_id, model, input_tokens, output_tokens, usd, role, cost_known, "
-    "idempotency_key) "
-    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
-    "ON CONFLICT (idempotency_key) DO NOTHING"
-)
+_INSERT_COST = INSERT_COST_SQL
 
 
 class CostLedgerRepo:

@@ -7,6 +7,11 @@ through ONE ``CostMeter`` so a single ledger/governor sees all spend. The sandbo
 ``settings.sandbox`` via ``open_sandbox`` (``local`` requires ``settings.allow_unsafe_local``). This is the simplest way to run a real mission end-to-end at
 $0 (stub/Ollama) on one machine — no Temporal server required. The durable spine runs the same
 loop inside an activity; this runner is for dev, demos, and CI.
+
+Persistence + memory (``lha.persistence.services``): the mission row is upserted RUNNING at start
+and to its terminal status at the end, every metered call (including a Planner call made before
+the mission id existed) is written to the persistent cost ledger, and the lead gets tiered memory
+(``settings.memory_enabled``).
 """
 
 from __future__ import annotations
@@ -29,6 +34,7 @@ from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import new_id
 from lha.model import build_provider
 from lha.obs.events import TraceRecorder, configure_logging
+from lha.persistence.services import RunServices, open_run_services
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.verifier import default_python_checks
 
@@ -115,9 +121,23 @@ async def run_mission_local(
     stopped = "max_cycles"
     # A provider built here owns its HTTP client and is closed here; a caller's ``model`` is not.
     owned_model: ModelProvider | None = None
+    services: RunServices | None = None
     try:
         if model is None:
             model = owned_model = build_provider(settings)
+        # Persistence + memory: mission row, persistent cost ledger (incl. a Planner call made
+        # before the mission id existed), tiered memory for the lead.
+        services = await open_run_services(
+            settings,
+            mission_id=mission_id,
+            workdir=workdir,
+            meter=meter,
+            title=title,
+            description=description,
+            model=meter.wrap(model, role="librarian"),
+            recorder=recorder,
+        )
+        await services.tracker.running()
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(
             title=title, description=description, items=checklist, references=references
@@ -133,6 +153,7 @@ async def run_mission_local(
             workdir=workdir,
             gate=gate,
             recorder=recorder,
+            memory=services.memory,
         )
         ctx = ToolContext(mission_id=mission_id, session=session)
 
@@ -177,11 +198,21 @@ async def run_mission_local(
                 break
 
         final = await anchor.read_checklist()
+    except BaseException as exc:
+        stopped = f"error: {type(exc).__name__}"
+        raise
     finally:
         try:
-            await session.close()
+            if services is not None:
+                try:
+                    await services.finish(stopped, head_sha=last_head)
+                finally:
+                    await services.close()
         finally:
-            await aclose_provider(owned_model)
+            try:
+                await session.close()
+            finally:
+                await aclose_provider(owned_model)
     return MissionSummary(
         mission_id=mission_id,
         completed=final.is_complete,

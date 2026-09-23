@@ -107,6 +107,39 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
 
+    # ==================================================================================
+    # --- Persistence backend + tiered memory (lha.persistence.store, lha.memory.service)
+    # ==================================================================================
+    # With ``postgres_dsn`` unset, mission rows, the cost ledger, episodic events, semantic
+    # memory and skills go to a local SQLite file (WAL mode). A relative path resolves against
+    # the process's working directory; if it would land inside a mission's git checkout it is
+    # moved under that checkout's ``.git/lha/`` instead (never committed, survives resets).
+    sqlite_path: str = ".lha/lha.sqlite3"
+    # When ``postgres_dsn`` is set but Postgres is unreachable / unmigrated / psycopg is not
+    # installed: ``True`` = log a warning and use SQLite instead; ``False`` = fail the run.
+    postgres_fallback_to_sqlite: bool = True
+    # Tiered memory in the lead's prompt (episodic + semantic + skills, with consolidation).
+    memory_enabled: bool = True
+    # Hard cap (characters, ~4 chars/token) on the memory block added to each cycle's prompt.
+    memory_prompt_budget_chars: int = 4000
+    memory_episodic_k: int = 4  # past attempts/outcomes recalled per cycle
+    memory_semantic_k: int = 4  # repo chunks / facts / progress / decisions recalled per cycle
+    memory_skills_k: int = 2  # verified skills recalled per cycle
+    # Dense channel of hybrid retrieval. "hash" = the built-in offline HashEmbedder (lexical
+    # hashing, no extra needed); "sentence_transformers" needs the ``embeddings`` extra (falls
+    # back to lexical-only retrieval if missing); "none" = lexical-only (BM25 + git grep).
+    memory_embedder: Literal["hash", "sentence_transformers", "none"] = "hash"
+    memory_embedding_model: str = "BAAI/bge-m3"  # for memory_embedder=sentence_transformers
+    # Second-stage rerank: "none" keeps fusion order; "cross_encoder" needs the embeddings extra.
+    memory_rerank: Literal["none", "cross_encoder"] = "none"
+    # Consolidate episodic -> semantic every N recorded cycles (0 disables). "extractive" is
+    # deterministic and free; "model" asks the (metered) lead model to distill facts.
+    memory_consolidate_every: int = 5
+    memory_consolidation: Literal["extractive", "model"] = "extractive"
+    # Index the checkout's tracked text files (bounded) as semantic-retrieval candidates.
+    memory_index_repo_files: bool = True
+    memory_max_repo_files: int = 400
+
     def sandbox_egress_hosts(self) -> list[str]:
         return _csv(self.sandbox_egress)
 

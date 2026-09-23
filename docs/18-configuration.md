@@ -57,12 +57,48 @@ See [13-models.md](13-models.md).
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_POSTGRES_DSN` | secret | unset | Postgres DSN; used only by `lha db migrate` |
+| `LHA_POSTGRES_DSN` | secret | unset | Postgres DSN for `lha db migrate` and the mission store; unset: the SQLite store |
+| `LHA_SQLITE_PATH` | string | `.lha/lha.sqlite3` | the SQLite mission store (WAL mode), relative to the working directory; if it would fall inside a mission's checkout it is moved to `<checkout>/.git/lha/` |
+| `LHA_POSTGRES_FALLBACK_TO_SQLITE` | bool | `true` | if `LHA_POSTGRES_DSN` is set but unusable (unreachable, not migrated, `psycopg` missing): `true` warns and uses SQLite, `false` fails the run |
 | `LHA_WORKSPACE_ROOT` | string | `.lha/workspaces` | declared but not read by any code; each command's `--workdir` default is hard-coded |
 | `LHA_OBJECT_STORE_ROOT` | string | `.lha/objects` | ClaimCheck blob directory (resolved to an absolute path); client, workers and replay must share it |
 
-The config comment says local SQLite is used when `LHA_POSTGRES_DSN` is unset; there is no SQLite
-code. Without Postgres, state lives in git (the anchor) and the filesystem object store.
+Every run path persists the mission row (status transitions), every metered model call (the cost
+ledger), episodic events, semantic memory and skills to the mission store: SQLite when
+`LHA_POSTGRES_DSN` is unset, Postgres (after `lha db migrate`) when it is set. The mission's
+checklist and progress still live in git (the anchor). `lha missions` and `lha costs` read the
+store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
+
+`missions.status` as the run paths write it:
+
+- local runs (`run-local`, `mission`, `orchestrate`): `RUNNING` at the start; at the end `DONE`
+  (complete), `IMPOSSIBLE` (deadlocked) or `ABORTED` (budget, max cycles, loop, or an error);
+- `mission-start`: `RUNNING`, with `workflow_id`;
+- each `run_agent_cycle` activity: `RUNNING` while it works, then from the committed checklist
+  `DONE` (complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval),
+  `IMPOSSIBLE` (deadlocked) or `RUNNING` (including an item split by the replanner); `ABORTED`
+  when the budget refuses a call. States only the workflow knows are not written:
+  `DEGRADED_PARK`, and the end of a mission by the cycle ceiling or `lha mission-abort` (the row
+  keeps the last cycle's status). `lha mission-status` queries the live status from Temporal.
+
+### Memory
+
+| Variable | Type | Default | Meaning |
+|---|---|---|---|
+| `LHA_MEMORY_ENABLED` | bool | `true` | tiered memory in the lead's prompt (all run paths) |
+| `LHA_MEMORY_PROMPT_BUDGET_CHARS` | int | `4000` | cap on the memory block per cycle (characters, ~4 per token) |
+| `LHA_MEMORY_EPISODIC_K` | int | `4` | past outcomes of the active item recalled per cycle |
+| `LHA_MEMORY_SEMANTIC_K` | int | `4` | facts / progress / decisions / repo chunks recalled per cycle |
+| `LHA_MEMORY_SKILLS_K` | int | `2` | verified skills recalled per cycle |
+| `LHA_MEMORY_EMBEDDER` | `hash` \| `sentence_transformers` \| `none` | `hash` | dense channel; `sentence_transformers` needs the `embeddings` extra (lexical-only without it), `none` is lexical-only |
+| `LHA_MEMORY_EMBEDDING_MODEL` | string | `BAAI/bge-m3` | model for `sentence_transformers` (1024-wide to use pgvector) |
+| `LHA_MEMORY_RERANK` | `none` \| `cross_encoder` | `none` | second-stage rerank; `cross_encoder` needs the `embeddings` extra |
+| `LHA_MEMORY_CONSOLIDATE_EVERY` | int | `5` | consolidate episodes into facts every N recorded cycles; `0` disables |
+| `LHA_MEMORY_CONSOLIDATION` | `extractive` \| `model` | `extractive` | `extractive` is deterministic and free; `model` asks the metered lead model |
+| `LHA_MEMORY_INDEX_REPO_FILES` | bool | `true` | index the checkout's tracked text files for retrieval |
+| `LHA_MEMORY_MAX_REPO_FILES` | int | `400` | cap on indexed files |
+
+See [12-memory.md](12-memory.md).
 
 ### Governor
 
