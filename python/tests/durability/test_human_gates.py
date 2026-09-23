@@ -68,7 +68,12 @@ from tests.durability._support import (
     working_model,
     write_turn,
 )
-from tests.durability.test_durable_spine import _healthy, _snapshot_activity, _unblock_activity
+from tests.durability.test_durable_spine import (
+    ROW_ACTIVITY,
+    _healthy,
+    _snapshot_activity,
+    _unblock_activity,
+)
 
 _TIMEOUT_S = 120
 _POLL_S = 0.05
@@ -140,6 +145,7 @@ def worker(
             _healthy,
             _unblock_activity,
             _snapshot_activity,
+            ROW_ACTIVITY,
         ],
     )
 

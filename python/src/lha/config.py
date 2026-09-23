@@ -117,10 +117,13 @@ class Settings(BaseSettings):
     # --- Persistence backend + tiered memory (lha.persistence.store, lha.memory.service)
     # ==================================================================================
     # With ``postgres_dsn`` unset, mission rows, the cost ledger, episodic events, semantic
-    # memory and skills go to a local SQLite file (WAL mode). A relative path resolves against
-    # the process's working directory; if it would land inside a mission's git checkout it is
-    # moved under that checkout's ``.git/lha/`` instead (never committed, survives resets).
-    sqlite_path: str = ".lha/lha.sqlite3"
+    # memory and skills go to a local SQLite file (WAL mode). Empty (the default) = one per-user
+    # file every process shares: $XDG_DATA_HOME/lha/lha.sqlite3, else ~/Library/Application
+    # Support/lha/lha.sqlite3 (macOS) or ~/.local/share/lha/lha.sqlite3
+    # (``persistence.store.default_sqlite_path``). A relative path resolves against the process's
+    # working directory (with a warning); if the path would land inside a mission's git checkout
+    # it is moved under that checkout's ``.git/lha/`` instead (never committed, survives resets).
+    sqlite_path: str = ""
     # When ``postgres_dsn`` is set but Postgres is unreachable / unmigrated / psycopg is not
     # installed: ``True`` = log a warning and use SQLite instead; ``False`` = fail the run.
     postgres_fallback_to_sqlite: bool = True

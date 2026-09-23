@@ -81,8 +81,8 @@ flowchart TB
 
 The Temporal server is the only component that must be running for durable missions; a local
 run needs nothing but git, a sandbox and a model. The mission store defaults to a SQLite file
-(`LHA_SQLITE_PATH`, default `.lha/lha.sqlite3`, moved under `.git/lha/` if it would land inside
-the mission checkout); with `LHA_POSTGRES_DSN` set it is Postgres, and if Postgres cannot be
+(`LHA_SQLITE_PATH`; unset, one per-user file such as `~/.local/share/lha/lha.sqlite3` that every
+process shares; moved under `.git/lha/` if it would land inside the mission checkout); with `LHA_POSTGRES_DSN` set it is Postgres, and if Postgres cannot be
 opened the run falls back to SQLite unless `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`. The
 workspace git repository is the mission's source of truth in both modes, so a mission
 initialized by one can be inspected with plain `git`.
@@ -174,10 +174,11 @@ exhausted or `max_cycles` is reached.
 
 The workflow itself never touches a database. The cycle activity writes the mission row:
 `RUNNING`, `DONE`, `IMPOSSIBLE` (the checklist is deadlocked), `WAITING_ON_HUMAN` (the cycle
-queued an approval) and `ABORTED` (budget). `DEGRADED_PARK`, `SLEEPING`, the deadlock gate's
-`WAITING_ON_HUMAN` and an outcome decided in the workflow after the last cycle (abort or
-impossible at the deadlock gate, `max_cycles`) are not written to the row; `lha mission-status`
-reads them from the workflow. Gates are not written to the `hitl_gates` table.
+queued an approval) and `ABORTED` (budget). The workflow writes the statuses only it decides
+through the best-effort `record_mission_status` activity: `DEGRADED_PARK`, `SLEEPING`, an open
+gate's `WAITING_ON_HUMAN`, and the final status of every ending (a deadlock-gate decision,
+`max_cycles`, a failure, a cancellation). `lha mission-status` reads the live status from the
+workflow. Gates are not written to the `hitl_gates` table.
 
 ### Memory and state
 

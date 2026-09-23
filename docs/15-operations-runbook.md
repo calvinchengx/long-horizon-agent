@@ -20,11 +20,12 @@ The durable `MissionWorkflow` exposes its status through the `status_v1` query
 | `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure | see below |
 
 The workflow's status lives in the workflow. The mission row in the store (`lha missions`; SQLite
-by default, Postgres with `LHA_POSTGRES_DSN`) is written by `mission-start` and the cycle
-activities: `RUNNING`, `WAITING_ON_HUMAN` (a cycle queued an approval), `DONE`, `IMPOSSIBLE`
-(deadlocked) and `ABORTED` (budget exhausted). `SLEEPING`, `DEGRADED_PARK`, the deadlock gate and
-the final outcome after a gate decision or `max_cycles` are not written to it; use
-`lha mission-status` for those.
+by default, Postgres with `LHA_POSTGRES_DSN`; `lha config` prints where) is written by
+`mission-start`, the cycle activities (`RUNNING`, `WAITING_ON_HUMAN` for a queued approval,
+`DONE`, `IMPOSSIBLE` when deadlocked, `ABORTED` on budget) and the workflow (`SLEEPING`,
+`DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending,
+including a gate decision, `max_cycles` and `mission-abort`). The workflow's writes are best
+effort; `lha mission-status` is the live source.
 
 Local runs (`run-local`, `mission`, `orchestrate`) have no status query. They print a summary and
 exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason>`,

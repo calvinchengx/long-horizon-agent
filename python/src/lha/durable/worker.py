@@ -18,6 +18,7 @@ from lha.durable.activities import (
     declare_impossible,
     notify_gate,
     read_mission_snapshot,
+    record_mission_status,
     run_agent_cycle,
     unblock_items,
 )
@@ -51,6 +52,7 @@ def build_worker(client: Client, task_queue: str) -> Worker:
             declare_impossible,
             unblock_items,
             read_mission_snapshot,
+            record_mission_status,
             run_subagent,
         ],
     )

@@ -399,3 +399,105 @@ def test_mission_start_records_the_mission_row_and_planner_spend(
         await store.close()
 
     asyncio.run(_check())
+
+
+def _fake_temporal(monkeypatch: pytest.MonkeyPatch, *, fail: bool = False) -> list[str]:
+    settings = Settings(model_backend="stub")
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr("lha.config.get_settings", lambda: settings)
+    started: list[str] = []
+
+    class _Client:
+        async def start_workflow(self, _run: object, inp: object, **kw: object) -> None:
+            started.append(str(kw["id"]))
+            if fail:
+                raise RuntimeError("temporal said no")
+
+    async def connect_client(_settings: Settings) -> _Client:
+        return _Client()
+
+    monkeypatch.setattr("lha.durable.worker.connect_client", connect_client)
+    return started
+
+
+def _row_status(path: Path, mission_id: str) -> str | None:
+    async def _read() -> str | None:
+        store = await _store(path)
+        try:
+            row = await store.get_mission(mission_id)
+            return row.status if row else None
+        finally:
+            await store.close()
+
+    return asyncio.run(_read())
+
+
+def test_mission_start_scheduled_later_records_sleeping(
+    tmp_path: Path, _isolated_mission_store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = _fake_temporal(monkeypatch)
+    result = runner.invoke(
+        cli.app,
+        ["mission-start", "--task", "t", "--workdir", str(tmp_path), "--start-in-seconds", "60"],
+    )
+    assert result.exit_code == 0, result.output
+    mission_id = started[0].removeprefix("mission:")
+    assert _row_status(_isolated_mission_store, mission_id) == "SLEEPING"
+
+
+def test_mission_start_that_cannot_start_the_workflow_records_aborted(
+    tmp_path: Path, _isolated_mission_store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = _fake_temporal(monkeypatch, fail=True)
+    result = runner.invoke(cli.app, ["mission-start", "--task", "t", "--workdir", str(tmp_path)])
+    assert result.exit_code != 0
+    mission_id = started[0].removeprefix("mission:")
+    assert _row_status(_isolated_mission_store, mission_id) == "ABORTED"
+
+
+def test_record_mission_status_upserts_and_keeps_the_title(
+    tmp_path: Path, _isolated_mission_store: Path
+) -> None:
+    from lha.durable.types import MissionStatusInput
+
+    async def _go() -> None:
+        store = await _store(_isolated_mission_store)
+        await store.upsert_mission(mission_id="m9", title="Kept", status="RUNNING", head_sha="a1")
+        await store.close()
+        inp = MissionStatusInput(
+            mission_id="m9", workdir=str(tmp_path), status="SLEEPING", reason="pause"
+        )
+        assert await acts._record_mission_status(inp) is True
+        assert await acts._record_mission_status(inp) is True  # idempotent
+        store = await _store(_isolated_mission_store)
+        row = await store.get_mission("m9")
+        await store.close()
+        assert row is not None and (row.status, row.title, row.head_sha) == (
+            "SLEEPING",
+            "Kept",
+            "a1",
+        )
+
+    asyncio.run(_go())
+
+
+def test_record_mission_status_on_an_unusable_store_is_a_config_error(tmp_path: Path) -> None:
+    from lha.durable.types import MissionStatusInput
+
+    settings = _settings(
+        postgres_dsn="postgresql://u:p@127.0.0.1:1/none?connect_timeout=1",
+        postgres_fallback_to_sqlite=False,
+    )
+    inp = MissionStatusInput(mission_id="m9", workdir=str(tmp_path), status="DONE")
+    with pytest.raises(ApplicationError) as info:
+        asyncio.run(acts._record_mission_status(inp, settings=settings))
+    assert info.value.non_retryable and "mission store" in info.value.message
+
+
+def test_cli_config_shows_the_resolved_store(
+    _isolated_mission_store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    get_settings.cache_clear()
+    result = runner.invoke(cli.app, ["config"])
+    assert result.exit_code == 0, result.output
+    assert f"mission store = sqlite {_isolated_mission_store.resolve()}" in result.output

@@ -1,9 +1,10 @@
 """Suite-wide fixtures.
 
 Run paths persist missions / spend / memory to a SQLite store. So tests never write into the
-developer's ``.lha/``: ``LHA_SQLITE_PATH`` points at a session temp dir from the moment this file
-is imported (before test modules build module-level ``Settings``), and every test then gets its
-own store file on top of that.
+developer's per-user store (``persistence.store.default_sqlite_path``, used when
+``LHA_SQLITE_PATH`` is unset): ``LHA_SQLITE_PATH`` points at a session temp dir from the moment
+this file is imported (before test modules build module-level ``Settings``), and every test then
+gets its own store file on top of that.
 """
 
 from __future__ import annotations

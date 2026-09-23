@@ -27,7 +27,7 @@ docker compose up -d
 
 `docker compose up` refuses to start until `LANGFUSE_NEXTAUTH_SECRET` and `LANGFUSE_SALT` are set.
 Only `temporal` (and its database) is required by the durable path. The workflow itself never
-touches a database; the cycle activities write mission rows, the cost ledger and tiered memory to
+touches a database; the activities write mission rows, the cost ledger and tiered memory to
 `appdb` only when the workers have `LHA_POSTGRES_DSN` set, and otherwise to a local SQLite file
 (see [18-configuration.md](18-configuration.md)). Nothing sends traces to Langfuse (see
 [16-observability.md](16-observability.md)). None of these
@@ -81,9 +81,11 @@ uv run lha mission-start --checklist roadmap.md --reference reference/api.md.txt
    is required.
 2. Initializes the git mission anchor at `--workdir`, including any `--reference` paths (see
    [06-mission-anchor.md](06-mission-anchor.md)).
-3. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing a
+3. Writes the mission row (status `RUNNING`, or `SLEEPING` with `--start-in-seconds`) and the
+   Planner's spend to the mission store; if the workflow then cannot be started, the row is set
+   to `ABORTED`.
+4. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing a
    `MissionInput` with the mission id, the workdir, the check commands and the values below.
-4. Writes the mission row (status `RUNNING`) and the Planner's spend to the mission store.
 
 It prints the id and returns; it does not wait for the mission.
 
@@ -152,10 +154,13 @@ Statuses the workflow sets:
 | `IMPOSSIBLE` | deadlocked with no deadlock gate, or declared impossible at the deadlock gate |
 | `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure |
 
-These are the workflow's `status_v1` values. The mission row that `lha missions` lists is written
-by the activities, not the workflow: it shows `RUNNING`, `WAITING_ON_HUMAN` (a cycle queued an
-approval), `DONE`, `IMPOSSIBLE` (deadlocked) and `ABORTED` (budget exhausted), but never
-`SLEEPING` or `DEGRADED_PARK`, and it is not updated by a deadlock-gate decision or `max_cycles`.
+These are the workflow's `status_v1` values. The mission row that `lha missions` lists follows
+them: the cycle activity writes what a cycle sees (`RUNNING`, `DONE`, `IMPOSSIBLE` when
+deadlocked, `WAITING_ON_HUMAN` for a queued approval, `ABORTED` on budget), and the workflow
+writes the rest through the `record_mission_status` activity: `SLEEPING`, `DEGRADED_PARK`,
+`WAITING_ON_HUMAN` when a gate opens, and the final status of every ending (a deadlock-gate
+decision, `max_cycles`, a failure, `mission-abort`). Those writes are best effort (30 s, three
+attempts); if the store is down the mission goes on and the row lags until the next write.
 
 The Temporal UI at <http://localhost:8080> shows each workflow's event history: every activity
 with its input, result, attempts and failures, the timers of a park, and each Continue-As-New.
@@ -203,9 +208,10 @@ as a `gate_opened` / `gate_reminder` / `gate_resolved` / `gate_defaulted` event,
 `SLEEPING`) before its next cycle; `--seconds 0` wakes it. A cycle already running finishes first.
 
 `mission-abort` requests cancellation of the workflow. Temporal delivers it to a running
-`run_agent_cycle` at its next heartbeat (every 5 s). The workflow does not catch it: it closes as
-*Cancelled*, and its `status` query keeps the last value it set (typically `RUNNING`). Work of the
-interrupted cycle is not committed; uncommitted files may remain in the working tree.
+`run_agent_cycle` at its next heartbeat (every 5 s); a cancelled cycle never parks the mission.
+The workflow sets its status to `ABORTED`, writes `ABORTED` to the mission row
+(`record_mission_status`) and closes as *Cancelled*. Work of the interrupted cycle is not
+committed; uncommitted files may remain in the working tree.
 
 The `steer_v1` signal appends an operator note (at most 2000 characters; the last 20 are kept)
 that every following cycle's prompt includes. No CLI command sends it; use `temporal workflow

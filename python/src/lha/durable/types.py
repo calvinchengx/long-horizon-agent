@@ -99,6 +99,17 @@ class FinalizeInput:
 
 
 @dataclass
+class MissionStatusInput:
+    """A ``missions`` row status the workflow decided (written by ``record_mission_status``)."""
+
+    mission_id: str
+    workdir: str
+    status: str
+    head_sha: str | None = None
+    reason: str = ""
+
+
+@dataclass
 class MissionState:
     """State carried across Continue-As-New (pointers + small counters only — never history)."""
 

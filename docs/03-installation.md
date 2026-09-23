@@ -169,10 +169,10 @@ Without `--migrations-dir`, the command uses `db/migrations` in the current dire
 
 With `LHA_POSTGRES_DSN` set (and the `postgres` extra installed), every run path writes its
 mission row, cost ledger and memory to `appdb`; without it, they go to a local SQLite file
-(`LHA_SQLITE_PATH`, default `.lha/lha.sqlite3` relative to the working directory). If Postgres is
+(`LHA_SQLITE_PATH`; unset: a per-user file every process shares: `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` on macOS or `~/.local/share/lha/lha.sqlite3` on Linux). If Postgres is
 set but unusable, runs fall back to SQLite with a warning unless
 `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`. `lha missions` and `lha costs` read the same store, so
-run them with the same settings and working directory as the run (for durable missions, as the
-worker and `mission-start`). Nothing is sent to Langfuse; its settings are read only by an
+run them with the same settings as the run (for durable missions, as the worker and
+`mission-start`); `lha config` prints the resolved location. Nothing is sent to Langfuse; its settings are read only by an
 optional client builder. Temporal is the only service the CLI's durable commands need. See
 [running on Temporal](14-running-on-temporal.md).

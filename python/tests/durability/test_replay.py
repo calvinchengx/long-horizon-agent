@@ -16,7 +16,11 @@ older histories keep replaying down their old code path. The committed histories
   code from BEFORE the escalation ladder (proving the ``lha-gate-escalation-v1`` guard: without it
   they fail replay with a nondeterminism error);
 * ``mission_approval_ladder.json`` — a real mission whose queued ``git push`` is approved at a
-  gate on the escalation ladder (the ``lha-gate-escalation-v1`` path).
+  gate on the escalation ladder (the ``lha-gate-escalation-v1`` path);
+* ``mission_row_gate_retry.json`` — a real mission that deadlocks, is retried by a human at the
+  deadlock gate and completes, writing the ``missions`` row from the workflow
+  (``record_mission_status``, the ``lha-mission-row-v1`` path). Every older history above
+  predates that patch and replays without those activities.
 """
 
 from __future__ import annotations
@@ -36,8 +40,10 @@ from lha.durable.activities import declare_impossible, make_cycle_activity, noti
 from lha.durable.replay_test_harness import build_replayer, replay_histories
 from lha.durable.signals import SIGNAL_HUMAN_DECISION
 from lha.durable.workflows import MissionWorkflow
+from tests.durability import test_durable_spine as spine
 from tests.durability._support import SETTINGS, init_mission, working_model
 from tests.durability.test_durable_spine import (
+    ROW_ACTIVITY,
     _healthy,
     _snapshot_activity,
     _unblock_activity,
@@ -47,6 +53,7 @@ from tests.durability.test_human_gates import gated_argv, gated_model
 HISTORIES = Path(__file__).parent / "histories"
 RECORDED = HISTORIES / "mission_three_items.json"
 RECORDED_LADDER = HISTORIES / "mission_approval_ladder.json"
+RECORDED_ROW = HISTORIES / "mission_row_gate_retry.json"
 
 
 def _sanitized(history_json: str, workdir: Path, *more: Path) -> str:
@@ -91,6 +98,7 @@ async def _record(tmp_path: Path) -> WorkflowHistory:
                 _healthy,
                 _unblock_activity,
                 _snapshot_activity,
+                ROW_ACTIVITY,
             ],
         ),
     ):
@@ -135,6 +143,7 @@ async def _record_approval_ladder(tmp_path: Path) -> WorkflowHistory:
                 _healthy,
                 _unblock_activity,
                 _snapshot_activity,
+                ROW_ACTIVITY,
             ],
         ),
     ):
@@ -161,6 +170,53 @@ async def test_fresh_approval_ladder_history_replays(tmp_path: Path) -> None:
     assert await replay_histories(str(out), object_store_root=tmp_path / "objects") == 1
 
 
+async def _record_mission_row(tmp_path: Path) -> WorkflowHistory:
+    """A real 1-item mission: three failed cycles block the item, the deadlock gate opens (the row
+    reads WAITING_ON_HUMAN), a human's early "retry" unblocks it, it completes (row DONE)."""
+    spine._gate["idle_cycles"] = 3
+    work = tmp_path / "work"
+    inp = await init_mission(work, n=1, deadlock_gate_seconds=3600)
+    task_queue = "lha-replay-row"
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(
+            env.client,
+            task_queue=task_queue,
+            workflows=[MissionWorkflow],
+            activities=[
+                make_cycle_activity(settings=SETTINGS, model_factory=spine._fails_three_times),
+                notify_gate,
+                declare_impossible,
+                _healthy,
+                _unblock_activity,
+                _snapshot_activity,
+                ROW_ACTIVITY,
+            ],
+        ),
+    ):
+        handle = await env.client.start_workflow(
+            MissionWorkflow.run, inp, id=f"mission:{inp.mission_id}", task_queue=task_queue
+        )
+        await handle.signal(SIGNAL_HUMAN_DECISION, "retry")
+        result = await handle.result()
+        assert result.completed and result.cycles == 4
+        return await handle.fetch_history()
+
+
+@pytest.mark.asyncio
+async def test_fresh_mission_row_history_replays(tmp_path: Path) -> None:
+    history = await _record_mission_row(tmp_path)
+    out = tmp_path / "histories"
+    out.mkdir()
+    (out / "fresh.json").write_text(history.to_json(), encoding="utf-8")
+    if os.environ.get("LHA_RECORD_HISTORY") == "1":
+        HISTORIES.mkdir(exist_ok=True)
+        RECORDED_ROW.write_text(
+            _sanitized(history.to_json(), tmp_path / "work", tmp_path), encoding="utf-8"
+        )
+    assert await replay_histories(str(out), object_store_root=tmp_path / "objects") == 1
+
+
 @pytest.mark.asyncio
 async def test_recorded_histories_still_replay(tmp_path: Path) -> None:
     assert RECORDED.exists(), "record one with LHA_RECORD_HISTORY=1 (see module docstring)"
@@ -170,6 +226,7 @@ async def test_recorded_histories_still_replay(tmp_path: Path) -> None:
         "mission_deadlock_gate_legacy.json",
         "mission_approval_gate_legacy.json",
         "mission_approval_ladder.json",
+        "mission_row_gate_retry.json",
     } <= names
     replayed = await replay_histories(str(HISTORIES), object_store_root=tmp_path / "objects")
     assert replayed == len(names)
@@ -198,7 +255,8 @@ def _patches(path: Path) -> list[str]:
 
 
 def test_committed_histories_cover_what_they_claim() -> None:
-    """The legacy histories predate the ladder; the ladder history really went through it."""
+    """The legacy histories predate the ladder; the ladder history really went through it; only
+    the mission-row history went through ``record_mission_status``."""
     legacy_deadlock = HISTORIES / "mission_deadlock_gate_legacy.json"
     legacy_approval = HISTORIES / "mission_approval_gate_legacy.json"
     assert _patches(legacy_deadlock) == [] and "unblock_items" in _scheduled(legacy_deadlock)
@@ -209,6 +267,21 @@ def test_committed_histories_cover_what_they_claim() -> None:
         "notify_gate",
         "notify_gate",
         "run_agent_cycle",
+    ]
+    for older in (RECORDED, legacy_deadlock, legacy_approval, RECORDED_LADDER):
+        assert "lha-mission-row-v1" not in _patches(older)
+        assert "record_mission_status" not in _scheduled(older)
+    assert _patches(RECORDED_ROW) == ["lha-gate-escalation-v1", "lha-mission-row-v1"]
+    assert _scheduled(RECORDED_ROW) == [
+        "run_agent_cycle",
+        "run_agent_cycle",
+        "run_agent_cycle",
+        "record_mission_status",  # WAITING_ON_HUMAN: the deadlock gate opened
+        "notify_gate",
+        "notify_gate",
+        "unblock_items",
+        "run_agent_cycle",
+        "record_mission_status",  # DONE
     ]
 
 

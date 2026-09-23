@@ -108,7 +108,7 @@ cases are pinned in
   (`_refuse_tampered_chain` in [`durable/activities.py`](../python/src/lha/durable/activities.py)),
   so it is not retried and the workflow does not park: it sets status `ABORTED` and fails with a
   non-retryable `ApplicationError` `mission <id> failed: decision log failed verification: ...`.
-  The workflow does not write the mission row, so the row keeps its last status. `lha decisions
+  The workflow writes `ABORTED` to the mission row (`record_mission_status`). `lha decisions
   --verify` prints the verdict ([CLI](17-cli.md#lha-decisions)).
 - **Writing.** The agent records a decision with the `record_decision` tool (arguments
   `decision`, `rationale`, optional `alternatives_rejected` and `affected`).

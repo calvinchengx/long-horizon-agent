@@ -8,7 +8,7 @@ What LHA records about a mission, where it goes, and what is only a hook. The co
 | Structured events (`TraceRecorder`) | yes, printed via structlog | no (memory events are logged via structlog in the worker) |
 | Git history + `.lha/` anchor | yes | yes, plus `gate_*` events for human gates |
 | Temporal event history | n/a | yes |
-| Mission row (`missions`) | yes | yes, written by `mission-start` and each cycle activity |
+| Mission row (`missions`) | yes | yes, written by `mission-start`, each cycle activity and the workflow (`record_mission_status`) |
 | Cost ledger (`cost_ledger`) | every metered call | every metered call, plus `.git/lha/spend.ndjson` |
 | Gate webhook (`LHA_GATE_WEBHOOK_URL`) | gate events from `--approve-interactive` | every gate event |
 | OpenTelemetry spans | `orchestrate` only, if a tracer provider is installed | no |
@@ -155,7 +155,7 @@ model, input/output tokens, cache read/write tokens, role, USD, and `cost_known`
   ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)) on the cost meter, so
   every metered call (planner, lead, sub-agents, memory consolidation) is written to
   `cost_ledger` under an idempotency key; unknown cost is stored as `NULL`. The store is SQLite
-  (`LHA_SQLITE_PATH`, default `.lha/lha.sqlite3` relative to the working directory) unless
+  (`LHA_SQLITE_PATH`; unset: a per-user file every process shares: `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` on macOS or `~/.local/share/lha/lha.sqlite3` on Linux) unless
   `LHA_POSTGRES_DSN` is set. `lha costs <mission_id>` prints a mission's calls and totals, and
   `lha missions` lists missions with their status and known spend. See
   [10-cost-and-budget.md](10-cost-and-budget.md).

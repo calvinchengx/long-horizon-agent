@@ -21,6 +21,8 @@ from lha.persistence.store import (
     BACKEND_SQLITE,
     MissionStore,
     StoreUnavailableError,
+    default_sqlite_path,
+    describe_store,
     open_store,
     resolve_sqlite_path,
 )
@@ -192,6 +194,75 @@ def test_sqlite_path_is_relocated_out_of_the_mission_checkout(tmp_path: Path) ->
     assert resolve_sqlite_path(inside, workdir=ws) == ws.resolve() / ".git" / "lha" / "lha.sqlite3"
     outside = Settings(_env_file=None, sqlite_path=str(tmp_path / "x.sqlite3"))  # type: ignore[call-arg]
     assert resolve_sqlite_path(outside, workdir=ws) == (tmp_path / "x.sqlite3").resolve()
+
+
+def test_default_sqlite_path_is_per_user_and_shared(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import lha.persistence.store as store_mod
+
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path / "home"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    assert default_sqlite_path() == tmp_path / "xdg" / "lha" / "lha.sqlite3"
+    monkeypatch.setenv("XDG_DATA_HOME", "relative/ignored")  # XDG says: ignore relative
+    monkeypatch.setattr(store_mod.sys, "platform", "darwin")
+    assert default_sqlite_path() == (
+        tmp_path / "home" / "Library" / "Application Support" / "lha" / "lha.sqlite3"
+    )
+    monkeypatch.delenv("XDG_DATA_HOME")
+    monkeypatch.setattr(store_mod.sys, "platform", "linux")
+    assert default_sqlite_path() == tmp_path / "home" / ".local" / "share" / "lha" / "lha.sqlite3"
+    monkeypatch.setattr(store_mod.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "appdata"))
+    assert default_sqlite_path() == tmp_path / "appdata" / "lha" / "lha.sqlite3"
+
+
+def test_unset_sqlite_path_uses_the_default_wherever_the_process_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    monkeypatch.delenv("LHA_SQLITE_PATH")
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    assert settings.sqlite_path == ""
+    expected = tmp_path / "xdg" / "lha" / "lha.sqlite3"
+    for cwd in (tmp_path, tmp_path / "elsewhere"):
+        cwd.mkdir(exist_ok=True)
+        monkeypatch.chdir(cwd)
+        assert resolve_sqlite_path(settings) == expected
+    assert describe_store(settings) == f"sqlite {expected}"
+
+
+def test_relative_sqlite_path_resolves_against_cwd_and_warns_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import lha.persistence.store as store_mod
+
+    warnings: list[dict[str, object]] = []
+
+    class _Log:
+        def warning(self, event: str, **kw: object) -> None:
+            warnings.append({"event": event, **kw})
+
+    monkeypatch.setattr(store_mod, "get_logger", lambda _name: _Log())
+    monkeypatch.setattr(store_mod, "_warned_relative", set())
+    monkeypatch.chdir(tmp_path)
+    settings = Settings(_env_file=None, sqlite_path="rel/x.sqlite3")  # type: ignore[call-arg]
+    assert resolve_sqlite_path(settings) == (tmp_path / "rel" / "x.sqlite3").resolve()
+    assert resolve_sqlite_path(settings) == (tmp_path / "rel" / "x.sqlite3").resolve()
+    assert [w["event"] for w in warnings] == ["sqlite_path_relative"]
+    # A relative path inside a mission checkout is still moved under .git/lha/.
+    ws = tmp_path / "rel"
+    assert resolve_sqlite_path(settings, workdir=ws) == ws.resolve() / ".git" / "lha" / "x.sqlite3"
+
+
+def test_describe_store_names_postgres_and_its_fallback(tmp_path: Path) -> None:
+    dsn = SecretStr("postgresql://u:p@h/db")
+    path = tmp_path / "f.sqlite3"
+    on = Settings(_env_file=None, postgres_dsn=dsn, sqlite_path=str(path))  # type: ignore[call-arg]
+    assert describe_store(on) == f"postgres (LHA_POSTGRES_DSN) (falls back to SQLite at {path})"
+    off = on.model_copy(update={"postgres_fallback_to_sqlite": False})
+    assert describe_store(off) == "postgres (LHA_POSTGRES_DSN)"
+    assert "u:p" not in describe_store(on)
 
 
 async def test_open_store_defaults_to_sqlite(tmp_path: Path) -> None:

@@ -96,7 +96,9 @@ Prints `lha <version>` (currently `lha 0.1.0`). No options.
 Prints every setting as `name = value`, one per line, in declaration order. `SecretStr` settings
 (`openai_api_key`, `anthropic_api_key`, `postgres_dsn`, `langfuse_secret_key`,
 `web_credentials`, `web_search_api_key`, `gate_webhook_url`) print `***` when set and `None` when
-unset. No options.
+unset. The last line, `mission store = ...`, is where `lha missions` and `lha costs` read:
+`sqlite <absolute path>` (the resolved `LHA_SQLITE_PATH` or the per-user default), or
+`postgres (LHA_POSTGRES_DSN)` with its SQLite fallback. No options.
 
 ## `lha db migrate`
 
@@ -230,16 +232,18 @@ Prints `no missions recorded` when the store is empty.
 | `--limit INTEGER` (>= 1) | `20` | how many missions |
 
 The store is Postgres when `LHA_POSTGRES_DSN` is set, otherwise the SQLite file at
-`LHA_SQLITE_PATH` (default `.lha/lha.sqlite3`, relative to the current directory). Run it from
-the directory the missions were run from, or set `LHA_SQLITE_PATH` to an absolute path everywhere.
-A run whose SQLite path would fall inside its own workspace keeps its database in
+`LHA_SQLITE_PATH`; unset, that is a per-user file every process shares: `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` on macOS or `~/.local/share/lha/lha.sqlite3` on Linux, so `mission-start`, the worker and this command
+meet in the same store wherever they run from (`lha config` prints the resolved location as
+`mission store = ...`). A relative `LHA_SQLITE_PATH` resolves against the current directory and
+logs a warning. A run whose SQLite path would fall inside its own workspace keeps its database in
 `<workdir>/.git/lha/` instead, which this command does not read unless `LHA_SQLITE_PATH` points
 there. If Postgres is configured but unusable, it warns on stderr and reads SQLite (or exits `2`
 with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`).
 
-The status is the mission row's, written by the run paths; for a durable mission it does not show
-`SLEEPING`, `DEGRADED_PARK` or the outcome of a gate decision (use
-[`mission-status`](#lha-mission-status)).
+The status is the mission row's, written by the run paths; for a durable mission the workflow
+also writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and the final
+outcome. Those writes are best effort, so [`mission-status`](#lha-mission-status) is the live
+source.
 
 ## `lha costs`
 
@@ -288,8 +292,9 @@ Plans the task (or imports `--checklist`), initializes the anchor at `--workdir`
 
 Plus `--check` and `--no-default-checks`. The check commands and the gate / sleep settings travel
 in the workflow input (with `LHA_GATE_ESCALATION_SECONDS` and `LHA_IMPOSSIBLE_AFTER_FAILURES`);
-they are resolved by this command, not by the worker. After starting the workflow it writes the
-mission row (`RUNNING`) and the Planner's spend to the mission store. Irreversible actions are
+they are resolved by this command, not by the worker. Before starting the workflow it writes the
+mission row (`RUNNING`, or `SLEEPING` with `--start-in-seconds`; `ABORTED` if the start fails)
+and the Planner's spend to the mission store. Irreversible actions are
 approved with [`mission-approve`](#lha-mission-approve).
 
 ## `lha mission-status`
@@ -342,4 +347,5 @@ lha mission-abort MISSION_ID
 ```
 
 Requests cancellation of workflow `mission:MISSION_ID` and prints `cancelled mission <id>`. The
-workflow closes as Cancelled; the interrupted cycle is not committed.
+workflow writes `ABORTED` to the mission row and closes as Cancelled; the interrupted cycle is
+not committed.

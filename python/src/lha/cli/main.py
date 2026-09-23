@@ -198,9 +198,13 @@ def version() -> None:
 
 @app.command()
 def config() -> None:
-    """Show the resolved runtime configuration (secrets redacted)."""
-    for key, value in get_settings().redacted().items():
+    """Show the resolved runtime configuration (secrets redacted), and where the store is."""
+    from lha.persistence.store import describe_store
+
+    settings = get_settings()
+    for key, value in settings.redacted().items():
         typer.echo(f"{key} = {value}")
+    typer.echo(f"mission store = {describe_store(settings)}")
 
 
 @db_app.command()
@@ -277,7 +281,12 @@ def _usd(value: float | None) -> str:
 def missions(
     limit: int = typer.Option(20, min=1, help="How many missions (most recently updated first)."),
 ) -> None:
-    """List persisted missions with their status and recorded spend."""
+    """List persisted missions with their status and recorded spend.
+
+    Reads the mission store: Postgres when LHA_POSTGRES_DSN is set, else the SQLite file at
+    LHA_SQLITE_PATH (default: one per-user file, e.g. ~/.local/share/lha/lha.sqlite3 or
+    ~/Library/Application Support/lha/lha.sqlite3). `lha config` prints the resolved location.
+    """
     from lha.persistence.store import CostSummary, MissionRow
 
     async def _read(store: MissionStore) -> list[tuple[MissionRow, CostSummary]]:
@@ -302,7 +311,10 @@ def costs(
     mission_id: str = typer.Argument(..., help="Mission id."),
     limit: int = typer.Option(50, min=0, help="Show the most recent N calls (0 = summary only)."),
 ) -> None:
-    """Show a mission's persisted cost ledger: every metered model call, plus totals."""
+    """Show a mission's persisted cost ledger: every metered model call, plus totals.
+
+    Reads the same mission store as `lha missions` (see `lha config` for its location).
+    """
     from lha.persistence.store import CostRow, CostSummary
 
     async def _read(store: MissionStore) -> tuple[CostSummary, list[CostRow]]:
@@ -595,7 +607,12 @@ def mission_start(
     from lha.agent.runner import aclose_provider, build_meter
     from lha.agents.planner import Planner
     from lha.config import get_settings
-    from lha.durable.signals import DEADLOCK_DEFAULTS
+    from lha.durable.signals import (
+        DEADLOCK_DEFAULTS,
+        STATUS_ABORTED,
+        STATUS_RUNNING,
+        STATUS_SLEEPING,
+    )
     from lha.durable.types import MissionInput
     from lha.durable.worker import connect_client
     from lha.durable.workflows import MissionWorkflow
@@ -645,39 +662,46 @@ def mission_start(
         )
         client = await connect_client(settings)
         mission_id = new_id("mission")
-        await client.start_workflow(
-            MissionWorkflow.run,
-            MissionInput(
-                mission_id=mission_id,
-                workdir=workdir,
-                check_commands=check_commands,
-                max_cycles=max_cycles if max_cycles is not None else settings.max_cycles,
-                deadlock_gate_seconds=int(deadlock_gate_hours * 3600),
-                approval_timeout_seconds=(
-                    int(approval_timeout_hours * 3600)
-                    if approval_timeout_hours is not None
-                    else settings.approval_timeout_s
-                ),
-                gate_escalation_seconds=list(settings.gate_escalation_seconds),
-                deadlock_gate_default=default_choice,
-                impossible_after_failures=settings.impossible_after_failures,
-                cycle_pause_seconds=pause,
-                resume_at=resume_at,
-            ),
-            id=f"mission:{mission_id}",
-            task_queue=settings.task_queue,
-        )
-        # The mission row + the Planner's spend (the cycle activities record the rest).
+        # The mission row + the Planner's spend, written BEFORE the workflow starts so a status
+        # the workflow records right away (e.g. SLEEPING for a scheduled start) is never
+        # overwritten by this one. The cycle activities and the workflow record the rest.
         store = await open_store(settings, workdir=workdir)
         try:
             await LedgerSink(store, mission_id, key_prefix="planner").backfill(planner_spend)
-            await MissionTracker(
+            tracker = MissionTracker(
                 store,
                 mission_id,
                 title=mission_title,
                 description=description,
                 workflow_id=f"mission:{mission_id}",
-            ).running()
+            )
+            await tracker.set_status(STATUS_SLEEPING if resume_at else STATUS_RUNNING)
+            try:
+                await client.start_workflow(
+                    MissionWorkflow.run,
+                    MissionInput(
+                        mission_id=mission_id,
+                        workdir=workdir,
+                        check_commands=check_commands,
+                        max_cycles=max_cycles if max_cycles is not None else settings.max_cycles,
+                        deadlock_gate_seconds=int(deadlock_gate_hours * 3600),
+                        approval_timeout_seconds=(
+                            int(approval_timeout_hours * 3600)
+                            if approval_timeout_hours is not None
+                            else settings.approval_timeout_s
+                        ),
+                        gate_escalation_seconds=list(settings.gate_escalation_seconds),
+                        deadlock_gate_default=default_choice,
+                        impossible_after_failures=settings.impossible_after_failures,
+                        cycle_pause_seconds=pause,
+                        resume_at=resume_at,
+                    ),
+                    id=f"mission:{mission_id}",
+                    task_queue=settings.task_queue,
+                )
+            except BaseException:
+                await tracker.set_status(STATUS_ABORTED)
+                raise
         finally:
             await store.close()
         return mission_id

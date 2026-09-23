@@ -59,6 +59,7 @@ from lha.durable.types import (
     GateNotice,
     HealthInput,
     HealthReport,
+    MissionStatusInput,
     NoticeResult,
     PendingApproval,
     UnblockInput,
@@ -72,10 +73,11 @@ from lha.hitl.notify import post_webhook
 from lha.ids import idempotency_key
 from lha.model import build_provider
 from lha.model.health import probe_model
+from lha.obs.events import get_logger
 from lha.obs.redact import redact_text
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.persistence.services import open_run_services
-from lha.persistence.store import StoreUnavailableError
+from lha.persistence.store import StoreUnavailableError, open_store
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
 from lha.verify.verifier import default_python_checks
@@ -451,7 +453,8 @@ def cycle_status(after: SituationSnapshot, *, awaiting_approval: bool = False) -
     complete → DONE; the cycle asked for approval of an irreversible action → WAITING_ON_HUMAN
     (the workflow now asks a human); deadlocked → IMPOSSIBLE (a human "retry" makes the next cycle
     RUNNING again); otherwise (including an item split by the replanner) → RUNNING. The
-    workflow's own parks are not visible here.
+    statuses the workflow owns (SLEEPING, DEGRADED_PARK, an open deadlock gate, the final outcome)
+    are written by ``record_mission_status``.
     """
     if after.is_complete:
         return STATUS_DONE
@@ -723,3 +726,56 @@ async def _read_snapshot(inp: HealthInput) -> CycleResult:
 async def read_mission_snapshot(inp: HealthInput) -> CycleResult:
     """Activity: the committed checklist counts + HEAD sha (read-only, no reset)."""
     return await _read_snapshot(inp)
+
+
+# --- the missions row, for the statuses the workflow owns ---------------------------------
+async def _record_mission_status(
+    inp: MissionStatusInput, *, settings: Settings | None = None
+) -> bool:
+    """Upsert the ``missions`` row's status (idempotent: the same input writes the same row).
+
+    Opens the store exactly as the cycle activity does (``open_store(settings, workdir=...)``).
+    Empty title/description keep the stored ones. A store that cannot be used at all is a
+    non-retryable ``ERROR_CONFIG``; other errors are retried by the workflow's short policy. The
+    workflow never lets a failure here fail or block the mission.
+    """
+    settings = settings or get_settings()
+    try:
+        store = await open_store(settings, workdir=inp.workdir)
+    except StoreUnavailableError as exc:
+        raise _config_error(f"cannot open the mission store: {exc}", exc) from exc
+    try:
+        await store.upsert_mission(
+            mission_id=inp.mission_id,
+            title="",
+            status=inp.status,
+            head_sha=inp.head_sha or None,
+            workflow_id=activity.info().workflow_id if activity.in_activity() else None,
+        )
+    finally:
+        await store.close()
+    get_logger("lha.persistence").info(
+        "mission_status_recorded",
+        mission_id=inp.mission_id,
+        status=inp.status,
+        reason=inp.reason,
+    )
+    return True
+
+
+def make_record_status_activity(
+    *, settings: Settings | None = None
+) -> Callable[[MissionStatusInput], Awaitable[bool]]:
+    """A ``record_mission_status`` activity bound to explicit settings (tests, embeds)."""
+
+    @activity.defn(name="record_mission_status")
+    async def record_mission_status_bound(inp: MissionStatusInput) -> bool:
+        return await _record_mission_status(inp, settings=settings)
+
+    return record_mission_status_bound
+
+
+@activity.defn
+async def record_mission_status(inp: MissionStatusInput) -> bool:
+    """Activity: write a status the workflow decided to the ``missions`` row (best effort)."""
+    return await _record_mission_status(inp)
