@@ -121,15 +121,20 @@ tree. The files are force-added so a `.gitignore` cannot exclude them.
 | `mission.json` | `MissionSpec` as JSON, 2-space indent: `title`, `description`, `acceptance` (`""`), `references` (`[]`, workspace-relative paths), `schema_version` (1) |
 | `checklist.json` | `Checklist` as JSON, 2-space indent: `items`, `schema_version`. Each item: `id`, `description`, `status` (`todo`\|`in_progress`\|`blocked`\|`done`\|`split`), `verified_by`, `depends_on`, `attempts`, `consecutive_failures`, `last_failure`, `allow_harness_edits`, `witnesses` (`[]`), `notes`, `schema_version` |
 | `progress.md` | `# Mission: <title>`, the description, `## Progress`, then one `- <cycle_id> [<item>] <description>: <note>` line per checkpoint; trimmed oldest-first to 16 000 characters with a `- _(older entries trimmed)_` marker |
-| `decisions.ndjson` | one `DecisionRecord` per line: `decision`, `rationale`, `alternatives_rejected`, `affected`, `cycle_id` |
+| `decisions.ndjson` | SHA-256 hash chain of `DecisionRecord`s (`decision`, `rationale`, `alternatives_rejected`, `affected`, `cycle_id`), one `\n`-terminated line each; format below |
 | `events.ndjson` | one `EventRecord` per line: `kind`, `cycle_id`, `payload`, `payload_ref` |
+| `ownership.json` | optional; `FileOwnershipMap` as JSON, 2-space indent: `owners` (normalized, case-folded repo-relative path -> writer id `implementer-<item id>`); absent means an empty map |
 
 A cycle checkpoint writes an event with `kind: "cycle"` and payload `item_id`, `verified`,
 `verdict`, `status`, `tool_calls`, `split_into` (child ids, `[]` unless split), `checks` (each
-`name`, `passed`, `gating`, `exit_code`, `duration_s`). The exactly-once check looks for this
-event among the last 64 lines of `events.ndjson` at `HEAD`. Commit messages:
-`lha: initialize mission anchor`, `lha: complete|attempt|block|split <id> (<description>)`,
-`lha: unblock <ids> (human retry)`.
+`name`, `passed`, `gating`, `exit_code`, `duration_s`). An `orchestrate` integration
+checkpoint's `cycle` event adds `writer` and `branch`, and it is followed by a `kind: "ticket"`
+event (`ticket_id`, `item_id`, `role`, `write_set`, `branch`, `status`, `history` (list of
+`{status, note}`), `ownership_violations`). The exactly-once check looks for the `cycle` event
+among the last 64 lines of `events.ndjson` at `HEAD`. Commit messages:
+`lha: initialize mission anchor`, `lha: complete|attempt|block|split <id> (<description>)`
+(orchestrate appends ` [merged <branch>]` to an integration commit, which is a two-parent merge
+commit), `lha: review reopened <id>`, `lha: unblock <ids> (human retry)`.
 
 Fields added since the first release (`references`, `witnesses`, status `split`) have empty
 defaults, so older anchors still load. The Go `contracts` package reads and writes them (and
@@ -137,6 +142,29 @@ implements `Checklist.Split`).
 
 The `Check` shape in `contracts/verify.py` also gained `where` (`"sandbox"` default, or
 `"trusted"`); Go validates the same two values.
+
+`decisions.ndjson` line format
+([`coordination/decision_log.py`](../python/src/lha/coordination/decision_log.py); cases in
+`spec/coordination/decision_chain.json`, key `log`):
+
+- A chained line is the JSON object `{"prev": P, "hash": H, "record": R}`. `R` is the full
+  `DecisionRecord` (all five fields). `H` is the lowercase hex of
+  `sha256(P + "\n" + canonical(R))`, where `canonical` is `R` re-serialized with keys sorted,
+  separators `,` and `:` with no spaces, and non-ASCII characters (including U+2028/U+2029) left
+  unescaped. Python writes the envelope with `json.dumps` default separators (`", "`, `": "`) and
+  keys in the order `prev`, `hash`, `record`. Readers must not depend on the envelope's
+  whitespace or key order: the hash covers only `canonical(R)` as parsed.
+- The first line's `P` is 64 `0`s. Each later chained line's `P` is the previous line's running
+  hash.
+- A legacy line is a bare `DecisionRecord` object (no `hash`/`record` keys), as written before
+  the chain existed. Legacy lines may only form a leading prefix. Each one advances the running
+  hash to `sha256(running + "\n" + canonical(line))`, so the first chained line's `P` is the
+  running hash after the prefix. A legacy line after a chained line is invalid.
+- Verification fails on an unparseable line, a `P` that is not the running hash, an `H` that
+  does not match, a legacy line after a chained one, or (for the anchor) a final line without
+  its `\n`. Split lines on `\n` only.
+- Appending: parse and verify the committed file, then write committed content + new envelope
+  lines chained from the last running hash. Never rewrite existing lines.
 
 Two files under `.git/` (outside the worktree, so a reset keeps them) are shared between attempts:
 
@@ -146,7 +174,11 @@ Two files under `.git/` (outside the worktree, so a reset keeps them) are shared
 | `.git/lha/spend.ndjson` | one line per attempt: `key`, `cycle_id`, `usd`, `unknown`, `calls`; readers keep the last row per `key` |
 
 `go/internal/state/crossimpl_test.go` writes an anchor in Go and reads it with Python, and the
-reverse, and requires identical results.
+reverse, and requires identical results. For `decisions.ndjson` that includes the bytes: Go
+re-encodes every Python-written link to the same line and hash, and each implementation verifies
+the other's chain. The Go chain code is `go/internal/state/decision_chain.go`, and the Go anchor
+verifies and appends through it just as the Python anchor does. The Go anchor carries
+`ownership.json` along (restore, force-add), but nothing in Go reads it.
 
 ## Postgres schema
 
@@ -199,14 +231,14 @@ JSON files exported from the Python implementation by
 | `obs/redact.json` | secret redaction | yes | yes |
 | `contracts/check_names.json` | check names from argv, de-duplication | yes | yes |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, transitions, `split` (child ids, dependencies and witnesses) | yes | yes |
-| `coordination/decision_chain.json` | canonical JSON bytes and SHA-256 chain of the decision log | yes | not yet |
+| `coordination/decision_chain.json` | canonical JSON bytes and SHA-256 chain of the decision log; `log`: an anchor `decisions.ndjson` with a legacy prefix, its running hashes, and verification verdicts for tampered variants | yes | yes |
 | `coordination/shared_paths.json` | files only the lead engineer may write | yes | not yet |
 | `verify/harness_files.json` | test/harness files the agent may not weaken | yes | yes |
 | `model/pricing.json` | Claude price table and per-call cost | yes | yes |
 
 Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit/test_spec_conformance.py),
-Go in `go/internal/spec/conformance_*_test.go`. The two "not yet" files wait for the Go
-`coordination` package.
+Go in `go/internal/spec/conformance_*_test.go`. `shared_paths.json` waits for a Go port of the
+ownership map.
 
 The Go port has no Temporal worker, so the payload types, queries and fingerprints above have no
 Go implementation yet; the Go `config` package already reads the new settings
