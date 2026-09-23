@@ -7,7 +7,8 @@ Enforces (in code, below the model — never via a system prompt that can be pro
 - workspace path containment for ``path_args``, and no mutation of the harness-owned ``.lha/`` and
   ``.git/`` directories;
 - human gates: commands classified irreversible/outward-facing (``lha.safety.commands``) are sent
-  to the configured ``HITLGate``; with no gate they are DENIED (fail closed);
+  to the configured ``HITLGate``; with no gate they are DENIED (fail closed). Every answer is kept
+  as a ``tool_approval`` event (``drain_events``) that the agent loop commits with the checkpoint;
 - Meta's Rule of Two: the dispatcher derives its capability set from its config and refuses to be
   built holding the full trifecta unless a gate is present (then every egress call is gated);
 and guarantees the agent loop never crashes on a tool error (failures return as ``ToolResult``).
@@ -15,14 +16,17 @@ and guarantees the agent loop never crashes on a tool error (failures return as 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from pathlib import Path
 
-from lha.contracts.hitl import GateDecision, GateRequest, HITLGate, RiskTier
+from lha.contracts.hitl import GateDecision, GateRequest, GateResolution, HITLGate, RiskTier
 from lha.contracts.model import ToolCall
+from lha.contracts.state import EventRecord
 from lha.contracts.tools import Tool, ToolContext, ToolResult, ToolSpec
 from lha.execution.paths import PathEscapeError, is_protected, is_protected_resolved
 from lha.hitl.approvals import PENDING, action_fingerprint
+from lha.obs.redact import redact_text
 from lha.safety.commands import classify_command
 from lha.safety.rule_of_two import Capability, check_rule_of_two, permits
 
@@ -63,6 +67,7 @@ class AllowListDispatcher:
         self._allow_mutating = allow_mutating
         self._allow_egress = allow_egress
         self._gate = gate
+        self._events: list[EventRecord] = []
         self.capabilities: frozenset[Capability] = frozenset(
             {*capabilities, *self._derived_capabilities()}
         )
@@ -112,6 +117,17 @@ class AllowListDispatcher:
             and (self._allow_mutating or not spec.mutating)
             and (self._allow_egress or not spec.egress)
         )
+
+    def drain_events(self) -> list[EventRecord]:
+        """Gate events since the last drain (decisions + the gate's own reminders), oldest first.
+
+        The agent loop commits them with the cycle's checkpoint (``.lha/events.ndjson``).
+        """
+        events, self._events = self._events, []
+        drain = getattr(self._gate, "drain_events", None)
+        if callable(drain):
+            events.extend(drain())
+        return events
 
     def specs(self) -> list[ToolSpec]:
         return [tool.spec for name, tool in self._tools.items() if self._permitted(name)]
@@ -163,24 +179,32 @@ class AllowListDispatcher:
 
     async def _ask_gate(self, call: ToolCall, ctx: ToolContext, reason: str) -> str | None:
         """Return ``None`` if a human approved, else the denial message (fail closed)."""
-        if self._gate is None:
-            return f"irreversible action denied (no human gate configured): {reason}"
+        context = {
+            "tool": call.name,
+            "arguments": repr(call.arguments)[:2000],
+            "reason": reason,
+            "fingerprint": action_fingerprint(call.name, call.arguments),
+        }
+        spec = self._tools[call.name].spec
+        argv = call.arguments.get(spec.command_arg) if spec.command_arg else None
+        if isinstance(argv, list):  # the exact command, for a human to read
+            context["argv"] = json.dumps([str(token) for token in argv])
         request = GateRequest(
             gate_id=f"{ctx.mission_id}:tool:{call.id or call.name}",
             question=f"Allow {call.name!r}? {reason}",
             risk=RiskTier.IRREVERSIBLE,
             default_action=GateDecision.REJECT,
-            context={
-                "tool": call.name,
-                "arguments": repr(call.arguments)[:2000],
-                "reason": reason,
-                "fingerprint": action_fingerprint(call.name, call.arguments),
-            },
+            context=context,
         )
+        if self._gate is None:
+            self._record(request, None, "no human gate configured")
+            return f"irreversible action denied (no human gate configured): {reason}"
         try:
             resolution = await self._gate.request(request)
         except Exception as exc:
+            self._record(request, None, f"gate error: {type(exc).__name__}")
             return f"irreversible action denied (gate error: {type(exc).__name__}): {reason}"
+        self._record(request, resolution, "")
         if resolution.resolved_by == PENDING:
             return (
                 f"queued for human approval: {reason}. It is NOT done. An operator will be asked; "
@@ -191,6 +215,32 @@ class AllowListDispatcher:
             how = "by default" if resolution.defaulted else f"by {resolution.resolved_by or 'gate'}"
             return f"irreversible action denied ({resolution.decision.value} {how}): {reason}"
         return None
+
+    def _record(
+        self, request: GateRequest, resolution: GateResolution | None, failure: str
+    ) -> None:
+        """Keep the gate's answer as a ``tool_approval`` event (secrets redacted)."""
+        if resolution is not None and resolution.resolved_by == PENDING:
+            decision = "pending"
+        elif resolution is not None:
+            decision = resolution.decision.value
+        else:
+            decision = GateDecision.REJECT.value
+        self._events.append(
+            EventRecord(
+                kind="tool_approval",
+                payload={
+                    "tool": request.context["tool"],
+                    "arguments": redact_text(request.context["arguments"]),
+                    "reason": request.context["reason"],
+                    "fingerprint": request.context["fingerprint"],
+                    "decision": decision,
+                    "approved": decision == GateDecision.APPROVE.value,
+                    "resolved_by": resolution.resolved_by if resolution else failure,
+                    "defaulted": resolution.defaulted if resolution else True,
+                },
+            )
+        )
 
 
 def _check_paths(spec: ToolSpec, arguments: dict[str, object], ctx: ToolContext) -> str | None:

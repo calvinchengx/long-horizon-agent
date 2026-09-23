@@ -32,6 +32,7 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
+import httpx
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
@@ -46,8 +47,11 @@ from lha.durable.types import (
     ERROR_CONFIG,
     CycleInput,
     CycleResult,
+    FinalizeInput,
+    GateNotice,
     HealthInput,
     HealthReport,
+    NoticeResult,
     PendingApproval,
     UnblockInput,
 )
@@ -56,8 +60,10 @@ from lha.governor.cost import CostEntry, CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.hitl.approvals import DeferredApprovalGate
+from lha.hitl.notify import post_webhook
 from lha.ids import idempotency_key
 from lha.model import build_provider
+from lha.obs.redact import redact_text
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
@@ -454,6 +460,144 @@ async def probe_health(inp: HealthInput, *, settings: Settings | None = None) ->
 async def check_mission_health(inp: HealthInput) -> HealthReport:
     """Activity: are the mission's critical dependencies up again?"""
     return await probe_health(inp)
+
+
+# --- human gates: anchor events + webhook, final "impossible" checkpoint -------------------
+def gate_notice_payload(notice: GateNotice) -> dict[str, object]:
+    """The JSON a gate event is recorded / POSTed as (secrets in argv/question redacted)."""
+    payload: dict[str, object] = {
+        "source": "lha",
+        "mission_id": notice.mission_id,
+        "gate_id": notice.gate_id,
+        "kind": notice.kind,
+        "event": notice.event,
+        "question": redact_text(notice.question),
+        "options": list(notice.options),
+        "default_action": notice.default_action,
+        "deadline": notice.deadline,
+    }
+    if notice.decision:
+        payload["decision"] = notice.decision
+    if notice.step:
+        payload["step"] = notice.step
+    if notice.request is not None:
+        payload["request"] = {
+            "fingerprint": notice.request.fingerprint,
+            "tool": notice.request.tool,
+            "arguments": redact_text(notice.request.arguments),
+            "reason": notice.request.reason,
+        }
+    return payload
+
+
+async def _record_gate_event(notice: GateNotice, payload: dict[str, object]) -> bool:
+    """Commit the gate event to the anchor's event log (no cycle runs while a gate is open, and
+    the reset only discards the partial work of a cycle that ended waiting for approval)."""
+    try:
+        async with workdir_lock(notice.workdir, wait_s=60.0):
+            await asyncio.to_thread(git_ops.reset_to_head, notice.workdir)
+            anchor = GitMissionAnchor(notice.workdir)
+            checklist = await anchor.read_checklist()
+            await anchor.commit_checkpoint(
+                Checkpoint(
+                    cycle_id=f"gate:{notice.gate_id}",
+                    progress_summary="",
+                    checklist=checklist,
+                    events=[
+                        EventRecord(
+                            kind=f"gate_{notice.event}",
+                            cycle_id=f"gate:{notice.gate_id}",
+                            payload=payload,
+                        )
+                    ],
+                    commit_message=f"lha: gate {notice.event} ({notice.kind} {notice.gate_id})",
+                )
+            )
+        return True
+    except (WorkdirBusyError, git_ops.GitError, OSError, ValueError):
+        return False
+
+
+async def _notify_gate(
+    notice: GateNotice,
+    *,
+    settings: Settings | None = None,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> NoticeResult:
+    settings = settings or get_settings()
+    payload = gate_notice_payload(notice)
+    recorded = await _record_gate_event(notice, payload)
+    url = settings.gate_webhook_url.get_secret_value() if settings.gate_webhook_url else None
+    webhook = await post_webhook(
+        url, payload, timeout=settings.gate_webhook_timeout_seconds, transport=transport
+    )
+    return NoticeResult(recorded=recorded, webhook=webhook)
+
+
+def make_notify_activity(
+    *, settings: Settings | None = None, transport: httpx.AsyncBaseTransport | None = None
+) -> Callable[[GateNotice], Awaitable[NoticeResult]]:
+    """A ``notify_gate`` activity bound to explicit settings / HTTP transport (tests, embeds)."""
+
+    @activity.defn(name="notify_gate")
+    async def notify_gate_bound(notice: GateNotice) -> NoticeResult:
+        return await _notify_gate(notice, settings=settings, transport=transport)
+
+    return notify_gate_bound
+
+
+@activity.defn
+async def notify_gate(notice: GateNotice) -> NoticeResult:
+    """Activity: record a gate event in the anchor + POST it to the optional webhook.
+
+    A notification problem never fails the gate: both outcomes are reported instead.
+    """
+    return await _notify_gate(notice)
+
+
+async def _declare_impossible(inp: FinalizeInput) -> CycleResult:
+    async with workdir_lock(inp.workdir):
+        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        anchor = GitMissionAnchor(inp.workdir)
+        checklist = await anchor.read_checklist()
+        blocked = [item.id for item in checklist.blocked_items]
+        if await asyncio.to_thread(committed_cycle_event, inp.workdir, inp.cycle_id) is None:
+            await anchor.commit_checkpoint(
+                Checkpoint(
+                    cycle_id=inp.cycle_id,
+                    progress_summary=f"- {inp.cycle_id} mission declared IMPOSSIBLE: {inp.reason}",
+                    checklist=checklist,
+                    events=[
+                        EventRecord(
+                            kind="mission_impossible",
+                            cycle_id=inp.cycle_id,
+                            payload={
+                                "reason": inp.reason,
+                                "blocked": blocked,
+                                "items_done": checklist.items_done,
+                                "items_total": len(checklist.items),
+                            },
+                        ),
+                        # Marks the final checkpoint as done for this id (a retry is a no-op).
+                        EventRecord(
+                            kind="cycle",
+                            cycle_id=inp.cycle_id,
+                            payload={"outcome": "impossible", "blocked": blocked},
+                        ),
+                    ],
+                    commit_message="lha: mission declared impossible",
+                )
+            )
+        snapshot = await anchor.read_situational_awareness()
+        return _result_from_snapshot(
+            snapshot, item_id=None, advanced=False, note="declared impossible", reason=inp.reason
+        )
+
+
+@activity.defn
+async def declare_impossible(inp: FinalizeInput) -> CycleResult:
+    """Activity: the final checkpoint of a mission declared impossible (idempotent per id)."""
+    return await _declare_impossible(inp)
 
 
 # --- human-approved retry of blocked items ------------------------------------------------

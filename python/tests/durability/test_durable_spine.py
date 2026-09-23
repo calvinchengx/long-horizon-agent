@@ -37,15 +37,19 @@ from lha.durable.activities import (
     _execute_cycle,
     _read_snapshot,
     _unblock,
+    declare_impossible,
     make_cycle_activity,
+    notify_gate,
 )
 from lha.durable.signals import (
     QUERY_STATUS,
     SIGNAL_HUMAN_DECISION,
+    STATUS_ABORTED,
     STATUS_DONE,
     STATUS_IMPOSSIBLE,
 )
 from lha.durable.types import (
+    OUTCOME_ABORTED,
     OUTCOME_BUDGET_EXHAUSTED,
     OUTCOME_COMPLETED,
     OUTCOME_DEADLOCKED,
@@ -88,6 +92,10 @@ async def _snapshot_activity(inp: HealthInput) -> CycleResult:
     return await _read_snapshot(inp)
 
 
+# The gate activities (anchor events + optional webhook, final "impossible" checkpoint).
+GATE_ACTIVITIES = [notify_gate, declare_impossible]
+
+
 async def _run(
     env: WorkflowEnvironment,
     inp: MissionInput,
@@ -100,7 +108,13 @@ async def _run(
         env.client,
         task_queue=task_queue,
         workflows=[MissionWorkflow],
-        activities=[cycle_activity, health, _unblock_activity, _snapshot_activity],  # type: ignore[list-item]
+        activities=[
+            cycle_activity,
+            health,
+            _unblock_activity,
+            _snapshot_activity,
+            *GATE_ACTIVITIES,
+        ],  # type: ignore[list-item]
     ):
         return await asyncio.wait_for(
             env.client.execute_workflow(
@@ -358,6 +372,7 @@ async def _run_with_signal(
             _healthy,
             _unblock_activity,
             _snapshot_activity,
+            *GATE_ACTIVITIES,
         ],
     ):
         handle = await env.client.start_workflow(
@@ -387,5 +402,7 @@ async def test_invalid_decision_is_rejected_and_default_applies(tmp_path: Path) 
     inp = await init_mission(tmp_path, n=1, deadlock_gate_seconds=600)
     async with await WorkflowEnvironment.start_time_skipping() as env:
         result, rejected = await _run_with_signal(env, inp, "maybe later", _fails_three_times)
-    assert result.outcome == OUTCOME_DEADLOCKED  # default "abort" after the timeout
+    # The default "abort" after the timeout ends the mission ABORTED (not IMPOSSIBLE).
+    assert result.outcome == OUTCOME_ABORTED and result.status == STATUS_ABORTED
+    assert "by default" in result.reason
     assert rejected == ["maybe later"]
