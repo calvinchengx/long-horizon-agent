@@ -15,7 +15,7 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ModelBackend = Literal["stub", "ollama", "openai_compat", "claude"]
@@ -107,11 +107,21 @@ class Settings(BaseSettings):
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None
 
+    # --- Model resilience -------------------------------------------------------------
+    # Ordered fallback chain tried on transient model errors, comma-separated
+    # ``backend:model[@in/out]`` (USD per 1M tokens), e.g.
+    # ``claude:claude-haiku-4-5,openai_compat:llama-3.3-70b@0.59/0.79,ollama:qwen3:8b``.
+    fallback_models: str = ""
+    fallback_max_rounds: int = Field(default=2, ge=1)
+
     def sandbox_egress_hosts(self) -> list[str]:
         return _csv(self.sandbox_egress)
 
     def web_hosts(self) -> list[str]:
         return _csv(self.web_allow_hosts)
+
+    def fallback_model_entries(self) -> list[str]:
+        return _csv(self.fallback_models)
 
     def harness_globs(self) -> list[str]:
         return _csv(self.harness_paths)
