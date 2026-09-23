@@ -192,20 +192,34 @@ func TestCrossImplPythonWritesGoReads(t *testing.T) {
 	}
 	checkBytes(".lha/checklist.json", &contracts.Checklist{}, true)
 	checkBytes(".lha/mission.json", &contracts.MissionSpec{}, true)
-	for _, name := range []string{DecisionsFile, EventsFile} {
-		text := must(ShowAtHead(ctx, dir, ".lha/"+name))
-		for _, ln := range strings.Split(text, "\n") {
-			var v any = &contracts.DecisionRecord{}
-			if name == EventsFile {
-				v = &contracts.EventRecord{}
-			}
-			if err := json.Unmarshal([]byte(ln), v); err != nil {
-				t.Fatal(err)
-			}
-			if got := must(pydanticJSON(v, false)); string(got) != ln {
-				t.Errorf("%s line: Go re-serialization differs\n go:     %q\n python: %q", name, got, ln)
-			}
+	for _, ln := range strings.Split(must(ShowAtHead(ctx, dir, ".lha/"+EventsFile)), "\n") {
+		var v contracts.EventRecord
+		if err := json.Unmarshal([]byte(ln), &v); err != nil {
+			t.Fatal(err)
 		}
+		if got := must(pydanticJSON(v, false)); string(got) != ln {
+			t.Errorf("events line: Go re-serialization differs\n go:     %q\n python: %q", got, ln)
+		}
+	}
+	// The decision chain: Go re-encodes every Python-written link to the same bytes and hash.
+	chain := must(ParseDecisionChain(must(ShowAtHeadRaw(ctx, dir, ".lha/"+DecisionsFile))))
+	prev := GenesisHash
+	lines := strings.Split(strings.TrimSuffix(must(ShowAtHead(ctx, dir, ".lha/"+DecisionsFile)), "\n"), "\n")
+	if len(lines) != len(chain.Records) || chain.Legacy != 0 {
+		t.Fatalf("python wrote %d decision lines, %d parsed (%d legacy)", len(lines), len(chain.Records), chain.Legacy)
+	}
+	for i, d := range chain.Records {
+		line, digest, err := EncodeDecisionLink(prev, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line != lines[i] {
+			t.Errorf("decision line: Go encoding differs\n go:     %q\n python: %q", line, lines[i])
+		}
+		prev = digest
+	}
+	if prev != chain.LastHash {
+		t.Errorf("chain hash: go %s, python %s", prev, chain.LastHash)
 	}
 
 	// Go continues the Python mission; the pending/committed logs stay exactly-once.
