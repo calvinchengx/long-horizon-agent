@@ -15,11 +15,11 @@ from lha.config import Settings
 from lha.contracts.hitl import HITLGate
 from lha.contracts.model import ModelProvider
 from lha.contracts.sandbox import SandboxSession
-from lha.contracts.tools import Tool
+from lha.contracts.tools import Tool, ToolDispatcher
 from lha.contracts.verify import Verifier
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.factory import open_sandbox
-from lha.execution.tools import FetchUrlTool, default_local_tools
+from lha.execution.tools import FetchUrlTool, default_local_tools, with_decision_tool
 from lha.obs.events import TraceRecorder
 from lha.safety.egress import EgressPolicy
 from lha.state.mission_anchor import GitMissionAnchor
@@ -70,11 +70,18 @@ def build_lead_loop(
     workdir: str,
     gate: HITLGate | None = None,
     recorder: TraceRecorder | None = None,
+    dispatcher: ToolDispatcher | None = None,
 ) -> AgentLoop:
-    """The lead's ``AgentLoop`` with every large-mission capability wired from settings."""
+    """The lead's ``AgentLoop`` with every large-mission capability wired from settings.
+
+    The lead's tools include ``record_decision``, bound to ``anchor``: decisions are queued there
+    and chained into ``.lha/decisions.ndjson`` by the cycle's checkpoint commit. ``dispatcher``
+    replaces ``lead_dispatcher(settings, gate)`` (the orchestrator passes that dispatcher wrapped
+    in an ownership guard); ``record_decision`` is added to it either way.
+    """
     return AgentLoop(
         model=model,
-        dispatcher=lead_dispatcher(settings, gate),
+        dispatcher=with_decision_tool(dispatcher or lead_dispatcher(settings, gate), anchor),
         verifier=lead_verifier(workdir),
         anchor=anchor,
         recorder=recorder,

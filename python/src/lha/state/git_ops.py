@@ -151,6 +151,26 @@ def show_at_head(cwd: str | Path, relpath: str) -> str:
     return run_git(cwd, "show", f"HEAD:./{relpath}")
 
 
+def show_at_head_bytes(cwd: str | Path, relpath: str) -> bytes:
+    """The exact bytes of ``relpath`` at ``HEAD`` — unlike ``show_at_head``, nothing is stripped
+    (a hash-chained log's trailing newline is significant). Raises ``GitError``."""
+    try:
+        proc = subprocess.run(
+            ["git", "show", f"HEAD:./{relpath}"],
+            cwd=str(cwd),
+            capture_output=True,
+            env=_git_env(),
+            timeout=GIT_TIMEOUT_S,
+            stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise GitError(f"git show HEAD:./{relpath} timed out after {exc.timeout}s") from exc
+    if proc.returncode != 0:
+        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
+        raise GitError(f"git show HEAD:./{relpath} failed ({proc.returncode}): {stderr}")
+    return proc.stdout
+
+
 def git_dir(cwd: str | Path) -> Path:
     """Absolute path of the repository's ``.git`` directory."""
     return Path(run_git(cwd, "rev-parse", "--absolute-git-dir"))

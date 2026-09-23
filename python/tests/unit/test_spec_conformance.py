@@ -11,7 +11,7 @@ import pytest
 from lha.contracts.model import Usage
 from lha.contracts.state import Checklist, ChecklistItem
 from lha.contracts.verify import checks_from_commands, derive_check_name
-from lha.coordination.decision_log import _canonical, _chain_hash
+from lha.coordination.decision_log import _canonical, _chain_hash, parse_chain, verify_chain
 from lha.coordination.ownership import is_shared
 from lha.model.pricing import lookup_claude_price
 from lha.obs.redact import is_secret_key, redact_text
@@ -125,6 +125,24 @@ def test_decision_chain() -> None:
         assert link["prev"] == prev
         assert _chain_hash(prev, link["record"]) == link["hash"]
         prev = link["hash"]
+
+    # The .lha/decisions.ndjson line format: a legacy prefix folded into the chain, then envelopes.
+    log = spec["log"]
+    data = "".join(f"{line}\n" for line in log["lines"]).encode()
+    assert parse_chain(data).last_hash == log["last_hash"]
+    prefix = b""
+    for line, link in zip(log["lines"], log["links"], strict=True):
+        prefix += f"{line}\n".encode()
+        assert parse_chain(prefix).last_hash == link["running_hash"], link
+        assert ("prev" in json.loads(line)) == (link["kind"] == "chained")
+    for case in log["verify"]:
+        check = verify_chain("".join(f"{ln}\n" for ln in case["lines"]).encode())
+        assert (check.ok, check.checked, check.legacy, check.problem) == (
+            case["ok"],
+            case["checked"],
+            case["legacy"],
+            case["problem"],
+        ), case["name"]
 
 
 def test_shared_paths_and_harness_files() -> None:

@@ -21,9 +21,14 @@ SPEC = ROOT / "spec"
 sys.path.insert(0, str(ROOT / "python"))  # so ``tests.unit.*`` corpora import
 
 from lha.contracts.model import Usage  # noqa: E402
-from lha.contracts.state import Checklist, ChecklistItem  # noqa: E402
+from lha.contracts.state import Checklist, ChecklistItem, DecisionRecord  # noqa: E402
 from lha.contracts.verify import checks_from_commands, derive_check_name  # noqa: E402
-from lha.coordination.decision_log import _canonical, _chain_hash  # noqa: E402
+from lha.coordination.decision_log import (  # noqa: E402
+    _canonical,
+    _chain_hash,
+    encode_link,
+    verify_chain,
+)
 from lha.coordination.ownership import is_shared  # noqa: E402
 from lha.model.pricing import CLAUDE_PRICES, lookup_claude_price  # noqa: E402
 from lha.obs.redact import is_secret_key, redact_text  # noqa: E402
@@ -395,7 +400,73 @@ def export_decision_chain() -> None:
         hashlib.sha256(f"{GENESIS}\n{chain[0]['canonical']}".encode()).hexdigest()
         == chain[0]["hash"]
     )
-    _write("coordination/decision_chain.json", {"genesis": GENESIS, "chain": chain})
+    _write(
+        "coordination/decision_chain.json",
+        {"genesis": GENESIS, "chain": chain, "log": _decision_log_cases()},
+    )
+
+
+def _decision_log_cases() -> dict[str, Any]:
+    """The ``.lha/decisions.ndjson`` line format: a legacy prefix, then chained envelopes.
+
+    ``lines`` is a log exactly as ``GitMissionAnchor`` leaves it after a pre-chain anchor gets its
+    first chained records; ``links`` gives, per line, its kind and the running hash after it;
+    ``verify`` gives whole logs (each line ``\\n``-terminated) and the expected verdict.
+    """
+    legacy = [
+        DecisionRecord(decision="Use SQLite", rationale="single node", cycle_id="c1"),
+        DecisionRecord(decision="Ünï ✓ <&>", rationale="a\u2028b", affected=["x.py"]),
+    ]
+    chained = [
+        DecisionRecord(
+            decision="Store dates as UTC",
+            rationale="one format",
+            alternatives_rejected="epoch ints",
+            affected=["models.py", "api.py"],
+            cycle_id="c3",
+        ),
+        DecisionRecord(decision="Pin httpx", rationale="API churn", cycle_id="c4"),
+    ]
+    lines: list[str] = []
+    links: list[dict[str, Any]] = []
+    running = GENESIS
+    for record in legacy:
+        line = record.model_dump_json()
+        running = _chain_hash(running, json.loads(line))
+        lines.append(line)
+        links.append({"kind": "legacy", "running_hash": running})
+    for record in chained:
+        line, running = encode_link(running, record)
+        lines.append(line)
+        links.append({"kind": "chained", "running_hash": running})
+
+    def case(name: str, body: list[str]) -> dict[str, Any]:
+        check = verify_chain(("".join(f"{ln}\n" for ln in body)).encode())
+        return {
+            "name": name,
+            "lines": body,
+            "ok": check.ok,
+            "checked": check.checked,
+            "legacy": check.legacy,
+            "problem": check.problem,
+        }
+
+    tampered = json.loads(lines[2])
+    tampered["record"]["decision"] = "Store dates as local time"
+    return {
+        "lines": lines,
+        "links": links,
+        "last_hash": running,
+        "verify": [
+            case("legacy prefix + chain", lines),
+            case("legacy only (unprotected)", lines[:2]),
+            case("chain only", [encode_link(GENESIS, chained[0])[0]]),
+            case("edited legacy line", [lines[1], lines[1], *lines[2:]]),
+            case("edited chained record", [*lines[:2], json.dumps(tampered), lines[3]]),
+            case("deleted chained record", [*lines[:2], lines[3]]),
+            case("legacy line after the chain", [*lines, lines[0]]),
+        ],
+    }
 
 
 # --- coordination/ownership shared files ------------------------------------------------------
