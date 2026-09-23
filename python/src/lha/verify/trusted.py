@@ -67,7 +67,7 @@ def _git_with_env(cwd: str | Path, args: list[str], extra_env: dict[str, str]) -
     return proc.stdout.strip()
 
 
-def candidate_commit(workdir: str | Path) -> str:
+def candidate_commit(workdir: str | Path, *, message: str = CANDIDATE_MESSAGE) -> str:
     """Commit the CURRENT working tree of ``workdir``'s repo without touching HEAD/index/tree.
 
     Stages everything (tracked edits, deletions, untracked non-ignored files) into a TEMPORARY
@@ -85,7 +85,7 @@ def candidate_commit(workdir: str | Path) -> str:
             _git_with_env(root, ["read-tree", "HEAD"], env)
         _git_with_env(root, ["add", "-A"], env)
         tree = _git_with_env(root, ["write-tree"], env)
-        args = ["commit-tree", "--no-gpg-sign", tree, "-m", CANDIDATE_MESSAGE]
+        args = ["commit-tree", "--no-gpg-sign", tree, "-m", message]
         if parent:
             args[1:1] = ["-p", "HEAD"]
         return _git_with_env(root, args, env)

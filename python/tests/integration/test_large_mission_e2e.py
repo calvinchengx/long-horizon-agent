@@ -96,7 +96,9 @@ SCRIPT = [
     _tool("write_file", path="greet/greet.go", content=GREET),  # c4: 01.1
     _tool("write_file", path="greet/greet_test.go", content=GREET_TEST),  # c5: 01.2 + witness
     _tool("write_file", path="main.go", content=MAIN),  # c6: 02 fails: module not downloaded
-    _tool("run_command", argv=["go", "mod", "tidy"]),  # c7: 02 via the egress proxy
+    # c7: the failed attempt was rolled back, so write main.go again and fetch the module
+    # through the egress proxy in one step.
+    _tool("run_command", argv=["sh", "-c", f"cat > main.go <<'GO'\n{MAIN}GO\ngo mod tidy"]),
     _tool("run_command", argv=PUBLISH),  # c8: 03, gated -> approved -> runs
 ]
 
@@ -170,6 +172,12 @@ async def test_a_large_mission_uses_every_capability(workspace: Path, tmp_path: 
     assert "go:TestHello@./greet/..." in by_id["01.2"]["verified_by"]  # witness moved + proven
     assert "trusted:e2e" in by_id["02"]["verified_by"]  # ran outside the sandbox, with Docker
     assert by_id["02"]["attempts"] == 2  # failed until go mod tidy went through the proxy
+    # Failed attempts never reach the branch: c6's main.go was rolled back and kept on a ref.
+    attempts = git_ops.run_git(
+        workspace, "for-each-ref", "--format=%(refname)", "refs/lha/attempts"
+    )
+    c6 = next(ref for ref in attempts.splitlines() if ref.endswith("/c6"))
+    assert "cases.Upper" in git_ops.run_git(workspace, "show", f"{c6}:main.go")
     assert len(asked) == 1 and "git push" in asked[0].context["reason"]  # the approval
     assert (workspace / "PUBLISHED").exists()
     mission = json.loads((workspace / ".lha" / "mission.json").read_text())

@@ -355,3 +355,68 @@ async def test_vendor_refuses_private_addresses(tmp_path: Path) -> None:
 
     with pytest.raises(VendorError):
         await vendor_urls(["https://intranet.example/a"], tmp_path / "ref", resolver=private)
+
+
+# --- failed attempts are rolled back ----------------------------------------------------------
+
+
+def _write_turn(path: str, content: str) -> TurnResult:
+    return TurnResult(
+        tool_calls=[
+            ToolCall(id="w", name="write_file", arguments={"path": path, "content": content})
+        ],
+        stop_reason="tool_use",
+    )
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_is_rolled_back_and_kept_on_a_ref(tmp_path: Path) -> None:
+    (tmp_path / "lib.py").write_text("GOOD = 1\n")
+    (tmp_path / ".gitignore").write_text("cache/\n")
+    items = [ChecklistItem(id="01", description="x", witnesses=["cmd:exit 1"])]
+    anchor, ctx = await _setup(tmp_path, items)
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / "keep.bin").write_text("ignored build output")
+    script = [_write_turn("lib.py", "BROKEN = (\n"), _write_turn("new.py", "x = 1\n")]
+    loop = _loop(StubModel(script=script), anchor)  # max_turns=2: both edits, then verify
+    outcome = await loop.run_cycle(ctx=ctx, mission_id="m1", cycle_id="c1", checks=[PASS])
+
+    assert not outcome.verified
+    # The checkout is back at the last verified state...
+    assert (tmp_path / "lib.py").read_text() == "GOOD = 1\n"
+    assert not (tmp_path / "new.py").exists()
+    assert (tmp_path / "cache" / "keep.bin").exists()  # ignored files are left alone
+    # ...the failed work is kept on a ref, not on the branch...
+    ref = "refs/lha/attempts/m1/c1"
+    assert git_ops.run_git(tmp_path, "show", f"{ref}:lib.py") == "BROKEN = ("
+    assert "lib.py" not in git_ops.run_git(tmp_path, "show", "--name-only", "--format=", "HEAD")
+    # ...and the next attempt is told what happened.
+    item = (await anchor.read_checklist()).get("01")
+    assert item is not None and f"rolled back to the last verified state (kept at {ref})" in (
+        item.last_failure
+    )
+    assert "lib.py, new.py" in item.last_failure
+
+
+@pytest.mark.asyncio
+async def test_passing_attempt_is_committed_not_rolled_back(tmp_path: Path) -> None:
+    items = [ChecklistItem(id="01", description="x", witnesses=["cmd:test -f new.py"])]
+    anchor, ctx = await _setup(tmp_path, items)
+    loop = _loop(StubModel(script=[_write_turn("new.py", "x = 1\n"), DONE]), anchor)
+    outcome = await loop.run_cycle(ctx=ctx, mission_id="m1", cycle_id="c1", checks=[PASS])
+    assert outcome.verified and (tmp_path / "new.py").exists()
+    assert "new.py" in git_ops.run_git(tmp_path, "show", "--name-only", "--format=", "HEAD")
+    assert git_ops.run_git(tmp_path, "for-each-ref", "refs/lha/attempts") == ""
+
+
+@pytest.mark.asyncio
+async def test_failed_attempt_without_code_changes_creates_no_ref(tmp_path: Path) -> None:
+    items = [ChecklistItem(id="01", description="x", witnesses=["cmd:exit 1"])]
+    anchor, ctx = await _setup(tmp_path, items)
+    outcome = await _loop(StubModel(script=[DONE, DONE]), anchor).run_cycle(
+        ctx=ctx, mission_id="m1", cycle_id="c1", checks=[PASS]
+    )
+    assert not outcome.verified
+    assert git_ops.run_git(tmp_path, "for-each-ref", "refs/lha/attempts") == ""
+    item = (await anchor.read_checklist()).get("01")
+    assert item is not None and "rolled back" not in item.last_failure
