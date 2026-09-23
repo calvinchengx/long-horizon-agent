@@ -168,9 +168,10 @@ CLI command or activity uses them yet. See [memory](12-memory.md).
   the durable path queues them for `lha mission-approve`, local runs ask on the terminal with
   `--approve-interactive`, and with no gate they are denied. It also enforces the "rule of two".
 - **Tools** ([`execution/tools/`](../python/src/lha/execution/tools/)): the default set is
-  `read_file`, `write_file`, `list_files`, `grep` and `run_command`. `fetch_url` is added, limited
-  to those hosts, when `LHA_WEB_ALLOW_HOSTS` is set. `web_search` exists but no run path
-  registers it.
+  `read_file`, `write_file`, `list_files`, `grep` and `run_command`. When `LHA_WEB_ALLOW_HOSTS` is
+  set, `fetch_url` (limited to those hosts) and, if configured, `web_search` are added; their
+  output is fenced as untrusted, and such a run is refused with a `local` sandbox or
+  `LHA_PRIVATE_DATA=true` (Rule of Two).
 
 See [the safety model](09-safety-model.md).
 
@@ -236,7 +237,8 @@ from `LHA_MODEL_BACKEND`:
 
 Cost is computed from the token usage in each provider response. Under the `claude` backend,
 `lha orchestrate` routes roles to model tiers (planner, lead and reviewer to Opus, researchers
-to Haiku). `FailoverModel` exists but `build_provider` does not use it. See [models](13-models.md).
+to Haiku). With `LHA_FALLBACK_MODELS` set, `build_provider` returns a `FailoverModel` over the
+primary and the fallbacks. See [models](13-models.md).
 
 ## The cycle
 
