@@ -266,6 +266,21 @@ func ShowAtHead(ctx context.Context, cwd, relpath string) (string, error) {
 	return RunGit(ctx, cwd, "show", "HEAD:./"+relpath)
 }
 
+// ShowAtHeadRaw returns the content of relpath at HEAD without stripping it (a hash-chained log's
+// trailing newline is significant); line endings are normalized like ShowAtHead's.
+func ShowAtHeadRaw(ctx context.Context, cwd, relpath string) ([]byte, error) {
+	args := []string{"show", "HEAD:./" + relpath}
+	res, err := runRaw(ctx, cwd, args, 0)
+	if err != nil {
+		return nil, err
+	}
+	if res.ReturnCode != 0 {
+		return nil, &GitError{fmt.Sprintf("git %s failed (%d): %s",
+			strings.Join(args, " "), res.ReturnCode, pyStrip(res.Stderr))}
+	}
+	return []byte(res.Stdout), nil
+}
+
 // GitDir returns the absolute path of the repository's .git directory.
 func GitDir(ctx context.Context, cwd string) (string, error) {
 	return RunGit(ctx, cwd, "rev-parse", "--absolute-git-dir")

@@ -19,6 +19,7 @@ ported. Today `go/cmd/lha` is empty and no Go binary can be built; see [23-roadm
 | [`run-local`](#lha-run-local) | run a given or imported checklist locally | a sandbox |
 | [`mission`](#lha-mission) | plan a task (or import a checklist), then run it locally | a sandbox |
 | [`orchestrate`](#lha-orchestrate) | plan, then run the multi-agent org locally | a sandbox |
+| [`decisions`](#lha-decisions) | print or verify a mission's decision log | a mission workspace |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycle count and any open question | Temporal |
@@ -143,7 +144,8 @@ Runs a mission from an explicit checklist, in this process, without Temporal.
 Give exactly one of `--item` (one or more) and `--checklist`.
 
 Plus the shared options. It initializes the anchor, then runs cycles until the checklist is
-complete, deadlocked, refused by the governor, a loop is detected, or `LHA_MAX_CYCLES` is reached.
+complete, deadlocked, refused by the governor, a loop is detected, the decision log fails
+verification, or `LHA_MAX_CYCLES` is reached.
 It prints:
 
 ```
@@ -171,7 +173,10 @@ plan falls back to one item built from the description.
 ## `lha orchestrate`
 
 Plans, then runs the multi-agent organization locally: per item, read-only researchers, the Lead
-Engineer loop, reflection on failure, and an independent reviewer that can reopen an item (see
+Engineer loop, reflection on failure, and an independent reviewer that can reopen an item. Items
+the Planner gave disjoint file write-sets run in parallel waves: one implementer per item in its
+own git worktree, then an integrator merges the verified branches (up to
+`LHA_MAX_PARALLEL_IMPLEMENTERS` items per wave; see
 [11-multi-agent-organization.md](11-multi-agent-organization.md)). With the `claude` backend each
 role uses its tier's model ([13-models.md](13-models.md#per-role-routing-lha-orchestrate)).
 
@@ -183,6 +188,31 @@ role uses its tier's model ([13-models.md](13-models.md#per-role-routing-lha-orc
 
 `orchestrate` has no `--checklist` option; it always plans. Output and exit codes as for
 `run-local`.
+
+## `lha decisions`
+
+Prints the design decisions committed in a mission workspace's `.lha/decisions.ndjson`, read from
+`HEAD`, or verifies their hash chain ([mission anchor](06-mission-anchor.md#decisionsndjson)).
+Needs no model, sandbox or server.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--workdir TEXT` | `.` | the mission workspace (the git repository holding `.lha/`) |
+| `--verify` | off | verify the chain instead of printing the records |
+| `--limit INTEGER` | `0` | print only the newest N records (`0`: all) |
+
+Without `--verify`, the chain is verified first. Then each record prints as
+`<n>. [<cycle_id>] <decision>`, followed by `why:`, and `rejected:` and `affects:` lines when
+those fields are set. `<n>` counts from the oldest record. `(no decisions recorded)` is printed
+for an empty log.
+
+With `--verify`, it prints `decision chain OK: <n> record(s), <m> chained`. If the log has
+legacy (pre-chain) records, a second line gives how many, and whether a chained record seals
+them. If the chain fails, it prints `decision chain BROKEN: <problem>` (for example
+`line 3: hash mismatch`).
+
+Exit codes: `0` when the chain verifies; `1` when it does not (with or without `--verify`; without
+it the message goes to stderr as `error: ...`); `2` when `--workdir` has no `.lha/` directory.
 
 ## `lha worker`
 

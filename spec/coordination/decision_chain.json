@@ -54,5 +54,120 @@
    "prev": "bc1041cd02dd5c3aa1b1bc460dcc01fd957c2217a24a274ca6037e76f6969d60",
    "hash": "304a5bd124bd9281e4095b286cb0aaa594ab1e6b02646d22764e849c48d1f167"
   }
- ]
+ ],
+ "log": {
+  "lines": [
+   "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}",
+   "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+   "{\"prev\": \"3bcd9004befafc0522400aaf78ca3938800d783c510a1a52329622348784d970\", \"hash\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"record\": {\"decision\": \"Store dates as UTC\", \"rationale\": \"one format\", \"alternatives_rejected\": \"epoch ints\", \"affected\": [\"models.py\", \"api.py\"], \"cycle_id\": \"c3\"}}",
+   "{\"prev\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"hash\": \"0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612\", \"record\": {\"decision\": \"Pin httpx\", \"rationale\": \"API churn\", \"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c4\"}}"
+  ],
+  "links": [
+   {
+    "kind": "legacy",
+    "running_hash": "126ca510310fd900c5e129174f0a68908bddf00ebc257de5ba73f92d9a54142f"
+   },
+   {
+    "kind": "legacy",
+    "running_hash": "3bcd9004befafc0522400aaf78ca3938800d783c510a1a52329622348784d970"
+   },
+   {
+    "kind": "chained",
+    "running_hash": "0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414"
+   },
+   {
+    "kind": "chained",
+    "running_hash": "0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612"
+   }
+  ],
+  "last_hash": "0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612",
+  "verify": [
+   {
+    "name": "legacy prefix + chain",
+    "lines": [
+     "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}",
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+     "{\"prev\": \"3bcd9004befafc0522400aaf78ca3938800d783c510a1a52329622348784d970\", \"hash\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"record\": {\"decision\": \"Store dates as UTC\", \"rationale\": \"one format\", \"alternatives_rejected\": \"epoch ints\", \"affected\": [\"models.py\", \"api.py\"], \"cycle_id\": \"c3\"}}",
+     "{\"prev\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"hash\": \"0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612\", \"record\": {\"decision\": \"Pin httpx\", \"rationale\": \"API churn\", \"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c4\"}}"
+    ],
+    "ok": true,
+    "checked": 4,
+    "legacy": 2,
+    "problem": ""
+   },
+   {
+    "name": "legacy only (unprotected)",
+    "lines": [
+     "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}",
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}"
+    ],
+    "ok": true,
+    "checked": 2,
+    "legacy": 2,
+    "problem": ""
+   },
+   {
+    "name": "chain only",
+    "lines": [
+     "{\"prev\": \"0000000000000000000000000000000000000000000000000000000000000000\", \"hash\": \"375239cb5ef614aa495933a632292b0ababf93b9638cf02edce24ea944bb4baf\", \"record\": {\"decision\": \"Store dates as UTC\", \"rationale\": \"one format\", \"alternatives_rejected\": \"epoch ints\", \"affected\": [\"models.py\", \"api.py\"], \"cycle_id\": \"c3\"}}"
+    ],
+    "ok": true,
+    "checked": 1,
+    "legacy": 0,
+    "problem": ""
+   },
+   {
+    "name": "edited legacy line",
+    "lines": [
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+     "{\"prev\": \"3bcd9004befafc0522400aaf78ca3938800d783c510a1a52329622348784d970\", \"hash\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"record\": {\"decision\": \"Store dates as UTC\", \"rationale\": \"one format\", \"alternatives_rejected\": \"epoch ints\", \"affected\": [\"models.py\", \"api.py\"], \"cycle_id\": \"c3\"}}",
+     "{\"prev\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"hash\": \"0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612\", \"record\": {\"decision\": \"Pin httpx\", \"rationale\": \"API churn\", \"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c4\"}}"
+    ],
+    "ok": false,
+    "checked": 2,
+    "legacy": 2,
+    "problem": "line 3: prev-hash mismatch"
+   },
+   {
+    "name": "edited chained record",
+    "lines": [
+     "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}",
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+     "{\"prev\": \"3bcd9004befafc0522400aaf78ca3938800d783c510a1a52329622348784d970\", \"hash\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"record\": {\"decision\": \"Store dates as local time\", \"rationale\": \"one format\", \"alternatives_rejected\": \"epoch ints\", \"affected\": [\"models.py\", \"api.py\"], \"cycle_id\": \"c3\"}}",
+     "{\"prev\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"hash\": \"0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612\", \"record\": {\"decision\": \"Pin httpx\", \"rationale\": \"API churn\", \"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c4\"}}"
+    ],
+    "ok": false,
+    "checked": 2,
+    "legacy": 2,
+    "problem": "line 3: hash mismatch"
+   },
+   {
+    "name": "deleted chained record",
+    "lines": [
+     "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}",
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+     "{\"prev\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"hash\": \"0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612\", \"record\": {\"decision\": \"Pin httpx\", \"rationale\": \"API churn\", \"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c4\"}}"
+    ],
+    "ok": false,
+    "checked": 2,
+    "legacy": 2,
+    "problem": "line 3: prev-hash mismatch"
+   },
+   {
+    "name": "legacy line after the chain",
+    "lines": [
+     "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}",
+     "{\"decision\":\"Ünï ✓ <&>\",\"rationale\":\"a b\",\"alternatives_rejected\":\"\",\"affected\":[\"x.py\"],\"cycle_id\":\"\"}",
+     "{\"prev\": \"3bcd9004befafc0522400aaf78ca3938800d783c510a1a52329622348784d970\", \"hash\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"record\": {\"decision\": \"Store dates as UTC\", \"rationale\": \"one format\", \"alternatives_rejected\": \"epoch ints\", \"affected\": [\"models.py\", \"api.py\"], \"cycle_id\": \"c3\"}}",
+     "{\"prev\": \"0df7b0755b4c6338730cb35d8b944dd600464681e73b8f8e9b8d24c4ae5ae414\", \"hash\": \"0f79a13bbda5938ea8871b86080e4b6f2f9876d03b9007d86b48cf671fd8c612\", \"record\": {\"decision\": \"Pin httpx\", \"rationale\": \"API churn\", \"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c4\"}}",
+     "{\"decision\":\"Use SQLite\",\"rationale\":\"single node\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"c1\"}"
+    ],
+    "ok": false,
+    "checked": 4,
+    "legacy": 2,
+    "problem": "line 5: unchained record after the chain began"
+   }
+  ]
+ }
 }

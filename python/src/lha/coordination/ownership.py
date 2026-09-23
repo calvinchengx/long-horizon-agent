@@ -10,6 +10,7 @@ corrupting a parallel slice; a writer that discovers it needs a foreign file fil
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import PurePosixPath
 
 from pydantic import BaseModel, Field
@@ -171,14 +172,50 @@ class FileOwnershipMap(BaseModel):
             return writer == LEAD  # unassigned space belongs to the serial lead
         return writer == owner
 
+    def permits_any(self, *, writers: Iterable[str], path: str) -> bool:
+        """Whether any of ``writers`` (one agent acting under several identities) may write."""
+        return any(self.permits(writer=w, path=path) for w in writers)
+
     def violations(self, *, writer: str, paths: list[str]) -> list[OwnershipViolation]:
         """Return ownership violations for a set of changed ``paths`` by ``writer``."""
+        return self.violations_any(writers=(writer,), paths=paths)
+
+    def violations_any(
+        self, *, writers: Iterable[str], paths: list[str]
+    ) -> list[OwnershipViolation]:
+        """Violations for ``paths`` changed by an agent acting as any of ``writers``."""
+        identities = tuple(writers)
         out: list[OwnershipViolation] = []
         for path in paths:
-            if not self.permits(writer=writer, path=path):
+            if not self.permits_any(writers=identities, path=path):
                 try:
                     shown = _normalize(path)
                 except InvalidPathError:
                     shown = path
-                out.append(OwnershipViolation(path=shown, writer=writer, owner=self.owner_of(path)))
+                out.append(
+                    OwnershipViolation(
+                        path=shown, writer="+".join(identities), owner=self.owner_of(path)
+                    )
+                )
         return out
+
+    def write_set(self, writer: str) -> list[str]:
+        """The (normalized, case-folded) paths ``writer`` owns, sorted."""
+        return sorted(key for key, owner in self.owners.items() if owner == writer)
+
+    def release(self, writer: str) -> list[str]:
+        """Explicitly return every file ``writer`` owns to the lead's unassigned space.
+
+        Used when a writer's slice is finished (its item is verified done): the files are no
+        longer leased, so later work — including the serial lead — may touch them. Returns the
+        released keys. This is an explicit transfer, never a silent one.
+        """
+        released = self.write_set(writer)
+        for key in released:
+            del self.owners[key]
+        return released
+
+
+def writer_for_item(item_id: str) -> str:
+    """The writer id of the implementer that owns checklist item ``item_id``'s write-set."""
+    return f"implementer-{item_id}"
