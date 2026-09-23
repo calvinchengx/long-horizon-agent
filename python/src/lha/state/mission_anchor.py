@@ -14,8 +14,16 @@ Layout (inside the worked repo):
     .lha/mission.json       — the immutable MissionSpec (title/description), written at init
     .lha/checklist.json     — the machine-readable Checklist
     .lha/progress.md        — human-readable progress narrative (appended, size-bounded)
-    .lha/decisions.ndjson   — append-only DecisionRecord log (never compacted)
+    .lha/decisions.ndjson   — append-only, SHA-256 hash-chained DecisionRecord log (never
+                              compacted; line format in ``lha.coordination.decision_log``)
     .lha/events.ndjson      — append-only EventRecord (episodic) log
+    .lha/ownership.json     — the FileOwnershipMap (only when the mission declared one)
+
+Decision-chain integrity: the committed ``decisions.ndjson`` is verified on every snapshot read
+and before every checkpoint appends to it; a log whose chain does not verify raises
+``DecisionChainError`` and the run paths stop the mission rather than build on a rewritten
+history. Anchors written before the chain existed (bare ``DecisionRecord`` lines) still load:
+those lines form a legacy prefix that the first chained record seals.
 """
 
 from __future__ import annotations
@@ -31,6 +39,15 @@ from lha.contracts.state import (
     MissionSpec,
     SituationSnapshot,
 )
+from lha.coordination.decision_log import (
+    ChainVerification,
+    DecisionChainError,
+    DecisionLogContents,
+    encode_link,
+    parse_chain,
+    verify_chain,
+)
+from lha.coordination.ownership import FileOwnershipMap
 from lha.state import git_ops
 
 ANCHOR_DIR = ".lha"
@@ -39,14 +56,24 @@ CHECKLIST_FILE = "checklist.json"
 PROGRESS_FILE = "progress.md"
 DECISIONS_FILE = "decisions.ndjson"
 EVENTS_FILE = "events.ndjson"
-# The harness-owned anchor files. They are force-added on every commit so a target repo whose
-# ``.gitignore`` excludes ``.lha/`` still gets them committed (otherwise reads would silently fall
-# back to the agent-editable working tree).
-ANCHOR_FILES = (MISSION_FILE, CHECKLIST_FILE, PROGRESS_FILE, DECISIONS_FILE, EVENTS_FILE)
+OWNERSHIP_FILE = "ownership.json"
+# The harness-owned anchor files. They are force-added on every commit (when present) so a target
+# repo whose ``.gitignore`` excludes ``.lha/`` still gets them committed (otherwise reads would
+# silently fall back to the agent-editable working tree).
+ANCHOR_FILES = (
+    MISSION_FILE,
+    CHECKLIST_FILE,
+    PROGRESS_FILE,
+    DECISIONS_FILE,
+    EVENTS_FILE,
+    OWNERSHIP_FILE,
+)
 
 # progress.md is appended every cycle; keep it bounded (oldest entries are trimmed first).
 MAX_PROGRESS_CHARS = 16_000
 _PROGRESS_MARKER = "## Progress\n\n"
+# How many of the newest decisions the situational snapshot (and so the prompt) carries.
+RECENT_DECISIONS = 5
 
 
 class GitMissionAnchor:
@@ -61,6 +88,11 @@ class GitMissionAnchor:
         # Events appended (uncommitted) via ``append_event``; re-applied after the ``.lha``
         # restore in ``commit_checkpoint`` so they are not lost.
         self._pending_events: list[EventRecord] = []
+        # Decisions recorded mid-cycle (the ``record_decision`` tool) and an ownership map staged
+        # by the orchestrator. Both are held in memory — never in the agent-editable working
+        # tree — and written by the next ``commit_checkpoint``.
+        self._pending_decisions: list[DecisionRecord] = []
+        self._pending_ownership: FileOwnershipMap | None = None
 
     # --- paths -----------------------------------------------------------------------
     def _path(self, name: str) -> Path:
@@ -75,8 +107,13 @@ class GitMissionAnchor:
         items: Checklist,
         acceptance: str = "",
         references: list[str] | None = None,
+        ownership: FileOwnershipMap | None = None,
     ) -> str:
-        """Write the immutable mission spec + initial anchor and commit; reject broken plans."""
+        """Write the immutable mission spec + initial anchor and commit; reject broken plans.
+
+        ``ownership``: the Planner's file-ownership map, persisted as ``.lha/ownership.json``
+        (``None`` => no ownership file; ``read_ownership`` then returns an empty map).
+        """
         errors = items.dependency_errors()
         if errors:
             raise ValueError("invalid checklist: " + "; ".join(errors))
@@ -86,7 +123,7 @@ class GitMissionAnchor:
             acceptance=acceptance,
             references=list(references or []),
         )
-        return await asyncio.to_thread(self._initialize_sync, spec, items)
+        return await asyncio.to_thread(self._initialize_sync, spec, items, ownership)
 
     async def read_situational_awareness(self) -> SituationSnapshot:
         return await asyncio.to_thread(self._read_sync)
@@ -109,12 +146,50 @@ class GitMissionAnchor:
         """Restore tracked ``relpaths`` to their ``HEAD`` content; return the ones restored."""
         return await asyncio.to_thread(self._restore_sync, relpaths)
 
+    # --- decisions -------------------------------------------------------------------
+    def record_decision(self, record: DecisionRecord) -> int:
+        """Queue ``record`` for the next checkpoint (in memory); return how many are queued.
+
+        The ``record_decision`` tool calls this mid-cycle. The next ``commit_checkpoint`` chains
+        the record onto ``decisions.ndjson`` — stamped with the checkpoint's ``cycle_id`` if it
+        has none — so it is committed together with the cycle's work.
+        """
+        self._pending_decisions.append(record)
+        return len(self._pending_decisions)
+
+    @property
+    def pending_decisions(self) -> list[DecisionRecord]:
+        return list(self._pending_decisions)
+
+    async def read_decisions(self) -> list[DecisionRecord]:
+        """Every committed decision, oldest first (verified first: ``DecisionChainError``)."""
+        return await asyncio.to_thread(lambda: self._load_decisions().records)
+
+    async def verify_decisions(self) -> ChainVerification:
+        """Verify the committed decision chain (never raises; see ``ChainVerification``)."""
+        return await asyncio.to_thread(self._verify_decisions)
+
+    # --- ownership -------------------------------------------------------------------
+    async def read_ownership(self) -> FileOwnershipMap:
+        """The committed file-ownership map (empty if the mission never declared one)."""
+        return await asyncio.to_thread(self._read_ownership)
+
+    def stage_ownership(self, ownership: FileOwnershipMap) -> None:
+        """Write ``ownership`` to ``.lha/ownership.json`` with the next checkpoint."""
+        self._pending_ownership = ownership.model_copy(deep=True)
+
     # --- sync implementations (run in a thread) --------------------------------------
-    def _initialize_sync(self, spec: MissionSpec, items: Checklist) -> str:
+    def _initialize_sync(
+        self, spec: MissionSpec, items: Checklist, ownership: FileOwnershipMap | None
+    ) -> str:
         git_ops.init_repo(self.workdir)
         self.anchor.mkdir(parents=True, exist_ok=True)
         self._path(MISSION_FILE).write_text(spec.model_dump_json(indent=2), encoding="utf-8")
         self._write_checklist(items)
+        if ownership is not None:
+            self._write_ownership(ownership)
+        else:  # re-initialized without a map: never inherit a stale one
+            self._path(OWNERSHIP_FILE).unlink(missing_ok=True)
         self._path(PROGRESS_FILE).write_text(
             f"# Mission: {spec.title}\n\n{spec.description}\n\n"
             f"{_PROGRESS_MARKER}- _initialized; no work yet._\n",
@@ -124,6 +199,8 @@ class GitMissionAnchor:
         self._path(DECISIONS_FILE).write_text("", encoding="utf-8")
         self._path(EVENTS_FILE).write_text("", encoding="utf-8")
         self._pending_events.clear()
+        self._pending_decisions.clear()
+        self._pending_ownership = None
         return self._commit_all("lha: initialize mission anchor")
 
     def _read_sync(self) -> SituationSnapshot:
@@ -134,7 +211,7 @@ class GitMissionAnchor:
             mission=self._read_mission(),
             progress_summary=self._read_anchor_file(PROGRESS_FILE) or "",
             open_items=[i for i in checklist.items if i.is_open],
-            last_decisions=self._read_recent_decisions(5),
+            last_decisions=self._load_decisions().records[-RECENT_DECISIONS:],
             active_item=checklist.next_actionable(),
             is_complete=checklist.is_complete,
             is_deadlocked=checklist.is_deadlocked,
@@ -150,21 +227,32 @@ class GitMissionAnchor:
         self._pending_events.append(event)
 
     def _commit_sync(self, checkpoint: Checkpoint) -> str:
+        # Verify the committed decision chain BEFORE touching anything: an altered history is
+        # never extended (``DecisionChainError``).
+        chain = self._load_decisions()
         # Harness truth: discard whatever the agent did to .lha/ during the cycle.
         self._restore_anchor_dir()
         self.anchor.mkdir(parents=True, exist_ok=True)
         self._write_checklist(checkpoint.checklist)
         if checkpoint.progress_summary.strip():
             self._append_progress(checkpoint.progress_summary)
+        if self._pending_ownership is not None:
+            self._write_ownership(self._pending_ownership)
         # The append-only logs are REBUILT from their committed content + the new records, so
         # the write is idempotent: pending events already appended to the working tree (and not
         # discarded by the restore, e.g. when the file is not yet tracked) are never duplicated.
-        self._rebuild_log(DECISIONS_FILE, [d.model_dump_json() for d in checkpoint.decisions])
+        decisions = [
+            d if d.cycle_id else d.model_copy(update={"cycle_id": checkpoint.cycle_id})
+            for d in [*self._pending_decisions, *checkpoint.decisions]
+        ]
+        self._append_decisions(chain, decisions)
         events = [*self._pending_events, *checkpoint.events]
         self._rebuild_log(EVENTS_FILE, [e.model_dump_json() for e in events])
         message = checkpoint.commit_message or f"lha: checkpoint {checkpoint.cycle_id}"
         sha = self._commit_all(message)
         self._pending_events.clear()
+        self._pending_decisions.clear()
+        self._pending_ownership = None
         return sha
 
     def _commit_all(self, message: str) -> str:
@@ -182,6 +270,15 @@ class GitMissionAnchor:
         if base and not base.endswith("\n"):
             base += "\n"
         self._path(name).write_text(base + "".join(f"{ln}\n" for ln in new_lines), "utf-8")
+
+    def _append_decisions(self, chain: DecisionLogContents, records: list[DecisionRecord]) -> None:
+        """Rewrite ``decisions.ndjson`` as the committed chain + ``records`` chained onto it."""
+        prev = chain.last_hash
+        lines: list[str] = []
+        for record in records:
+            line, prev = encode_link(prev, record)
+            lines.append(line)
+        self._rebuild_log(DECISIONS_FILE, lines)
 
     def _restore_sync(self, relpaths: list[str]) -> list[str]:
         restored: list[str] = []
@@ -231,14 +328,46 @@ class GitMissionAnchor:
         raw = self._read_anchor_file(MISSION_FILE)
         return None if raw is None else MissionSpec.model_validate_json(raw)
 
-    def _read_recent_decisions(self, n: int) -> list[DecisionRecord]:
-        raw = self._read_anchor_file(DECISIONS_FILE)
-        if not raw:
-            return []
-        # Split ONLY on "\n": ``str.splitlines`` also breaks on U+2028/U+2029/\x85, which JSON
-        # serializers leave unescaped inside strings.
-        lines = [ln for ln in raw.split("\n") if ln.strip()]
-        return [DecisionRecord.model_validate_json(ln) for ln in lines[-n:]]
+    def _write_ownership(self, ownership: FileOwnershipMap) -> None:
+        self._path(OWNERSHIP_FILE).write_text(ownership.model_dump_json(indent=2), "utf-8")
+
+    def _read_ownership(self) -> FileOwnershipMap:
+        raw = self._read_anchor_file(OWNERSHIP_FILE)
+        return FileOwnershipMap() if raw is None else FileOwnershipMap.model_validate_json(raw)
+
+    def _decisions_bytes(self) -> bytes:
+        """The decision log's exact bytes: ``HEAD`` first, else the (never committed) file."""
+        rel = f"{ANCHOR_DIR}/{DECISIONS_FILE}"
+        if self._tracked_at_head(rel):
+            return git_ops.show_at_head_bytes(self.workdir, rel)
+        path = self._path(DECISIONS_FILE)
+        return path.read_bytes() if path.exists() else b""
+
+    def _verify_decisions(self) -> ChainVerification:
+        check = verify_chain(self._decisions_bytes(), source=f"{ANCHOR_DIR}/{DECISIONS_FILE}")
+        if check.ok and check.torn_tail:
+            # The harness writes the whole file before committing it, so an incomplete final
+            # line in the anchor is never a crash artefact: treat it as an altered log.
+            return ChainVerification(
+                ok=False,
+                checked=check.checked,
+                problem="the final line is incomplete (no trailing newline)",
+                torn_tail=True,
+                legacy=check.legacy,
+            )
+        return check
+
+    def _load_decisions(self) -> DecisionLogContents:
+        """Parse the committed decision chain, verifying it first (``DecisionChainError``)."""
+        check = self._verify_decisions()
+        if not check.ok:
+            raise DecisionChainError(
+                f"{ANCHOR_DIR}/{DECISIONS_FILE} in {self.workdir} failed hash-chain verification "
+                f"({check.problem}): the committed decision history was altered, so the mission "
+                "refuses to continue. Inspect it with `lha decisions --verify` and "
+                f"`git log -p -- {ANCHOR_DIR}/{DECISIONS_FILE}`."
+            )
+        return parse_chain(self._decisions_bytes(), source=f"{ANCHOR_DIR}/{DECISIONS_FILE}")
 
 
 def _bound_progress(text: str, limit: int) -> str:

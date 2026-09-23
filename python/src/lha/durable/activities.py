@@ -42,6 +42,7 @@ from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check, checks_from_commands
+from lha.coordination.decision_log import DecisionChainError
 from lha.durable.signals import (
     STATUS_ABORTED,
     STATUS_DONE,
@@ -468,7 +469,9 @@ def make_cycle_activity(
 
     @activity.defn(name="run_agent_cycle")
     async def run_agent_cycle_bound(inp: CycleInput) -> CycleResult:
-        return await _execute_cycle(inp, settings=settings, model_factory=model_factory)
+        return await _refuse_tampered_chain(
+            _execute_cycle(inp, settings=settings, model_factory=model_factory)
+        )
 
     return run_agent_cycle_bound
 
@@ -476,7 +479,17 @@ def make_cycle_activity(
 @activity.defn
 async def run_agent_cycle(inp: CycleInput) -> CycleResult:
     """Activity wrapper around one retry-safe agent cycle (worker settings, configured model)."""
-    return await _execute_cycle(inp)
+    return await _refuse_tampered_chain(_execute_cycle(inp))
+
+
+async def _refuse_tampered_chain(cycle: Awaitable[CycleResult]) -> CycleResult:
+    """An altered ``.lha/decisions.ndjson`` is not transient: retrying cannot fix it, so fail the
+    mission with a non-retryable ``ERROR_CONFIG`` (as the local runners stop) instead of retrying
+    and parking."""
+    try:
+        return await cycle
+    except DecisionChainError as exc:
+        raise _config_error(f"decision log failed verification: {exc}", exc) from exc
 
 
 # --- health probe (used while parked) -----------------------------------------------------

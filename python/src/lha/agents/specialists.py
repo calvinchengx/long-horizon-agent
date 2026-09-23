@@ -2,6 +2,11 @@
 
 Each wraps ``SubAgent`` with its role's prompt + a scoped dispatcher. They share one base so the
 org has a named, typed entry point per role even though the loop mechanics are identical.
+
+``Implementer`` is used by ``orchestrate``'s parallel waves (in its own worktree, behind an
+``OwnershipGuard``). The integration step itself is deterministic code
+(``lha.agents.integrator.BranchIntegrator``); the model-backed ``Integrator`` runner below is not
+used by any run path.
 """
 
 from __future__ import annotations
@@ -15,8 +20,12 @@ from lha.contracts.tools import ToolContext, ToolDispatcher
 class _RoleRunner:
     role_name: str
 
-    def __init__(self, model: ModelProvider, dispatcher: ToolDispatcher) -> None:
-        self._agent = SubAgent(role=ROLES[self.role_name], model=model, dispatcher=dispatcher)
+    def __init__(
+        self, model: ModelProvider, dispatcher: ToolDispatcher, *, max_turns: int | None = None
+    ) -> None:
+        self._agent = SubAgent(
+            role=ROLES[self.role_name], model=model, dispatcher=dispatcher, max_turns=max_turns
+        )
 
     async def run(
         self, *, objective: str, ctx: ToolContext, extra_context: str = ""

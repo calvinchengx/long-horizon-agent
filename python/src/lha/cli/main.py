@@ -467,20 +467,69 @@ def orchestrate(
         planner_model = build_provider(settings)
         try:
             planner = Planner(meter.wrap(planner_model, role="planner"))
-            checklist = await planner.plan(title=title, description=task)
+            plan = await planner.plan_mission(title=title, description=task)
         finally:
             await aclose_provider(planner_model)
         return await Orchestrator(settings, meter=meter).run_mission(
             workdir=workdir,
             title=title,
             description=task,
-            checklist=checklist,
+            checklist=plan.checklist,
             checks=checks,
             gate=_gate(approve_interactive, settings),
             references=list(reference),
+            ownership=plan.ownership,
         )
 
     _report(_run(_mission()))
+
+
+@app.command()
+def decisions(
+    workdir: str = typer.Option(".", help="The mission workspace (the git repo holding .lha/)."),
+    verify: bool = typer.Option(
+        False, "--verify", help="Verify the hash chain; exit 1 if it does not verify."
+    ),
+    limit: int = typer.Option(0, help="Print only the newest N decisions (0 = all)."),
+) -> None:
+    """Print the mission's committed design decisions (.lha/decisions.ndjson), or verify them."""
+    from pathlib import Path
+
+    from lha.state.mission_anchor import ANCHOR_DIR, DECISIONS_FILE, GitMissionAnchor
+
+    if not (Path(workdir) / ANCHOR_DIR).is_dir():
+        _fail(f"no mission anchor at {workdir!r} (expected a {ANCHOR_DIR}/ directory)")
+    anchor = GitMissionAnchor(workdir)
+    check = _run(anchor.verify_decisions())
+    if verify:
+        if not check.ok:
+            typer.echo(f"decision chain BROKEN: {check.problem}")
+            raise typer.Exit(1)
+        chained = check.checked - check.legacy
+        typer.echo(f"decision chain OK: {check.checked} record(s), {chained} chained")
+        if check.legacy:
+            sealed = "sealed by the chain" if chained else "NOT protected until one is chained"
+            typer.echo(f"  {check.legacy} legacy (pre-chain) record(s), {sealed}")
+        return
+    if not check.ok:
+        _fail(
+            f"{ANCHOR_DIR}/{DECISIONS_FILE} failed verification ({check.problem}); "
+            "run `lha decisions --verify`",
+            code=1,
+        )
+    records = _run(anchor.read_decisions())
+    shown = records[-limit:] if limit > 0 else records
+    if not shown:
+        typer.echo("(no decisions recorded)")
+    first = len(records) - len(shown) + 1
+    for number, record in enumerate(shown, start=first):
+        cycle = f" [{record.cycle_id}]" if record.cycle_id else ""
+        typer.echo(f"{number}.{cycle} {record.decision}")
+        typer.echo(f"   why: {record.rationale}")
+        if record.alternatives_rejected:
+            typer.echo(f"   rejected: {record.alternatives_rejected}")
+        if record.affected:
+            typer.echo(f"   affects: {', '.join(record.affected)}")
 
 
 @app.command()

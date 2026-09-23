@@ -443,10 +443,19 @@ func TestAnchorReadsDecisionsWithUnicodeLineSeparators(t *testing.T) {
 		Decisions: []contracts.DecisionRecord{{Decision: separators + " <&>", Rationale: "r"}},
 	}))
 	raw := readText(t, filepath.Join(dir, AnchorDir, DecisionsFile))
-	// pydantic writes these raw (no \u escapes): the file bytes match the Python implementation.
-	want := "{\"decision\":\"" + separators + " <&>\",\"rationale\":\"r\",\"alternatives_rejected\":\"\",\"affected\":[],\"cycle_id\":\"\"}\n"
-	if raw != want {
-		t.Fatalf("decisions.ndjson = %q, want %q", raw, want)
+	// Python's json.dumps(ensure_ascii=False) writes these raw (no \u escapes); the record gets
+	// the checkpoint's cycle id and is chained from the genesis hash.
+	line, _, err := EncodeDecisionLink(GenesisHash, contracts.DecisionRecord{
+		Decision: separators + " <&>", Rationale: "r", Affected: []string{}, CycleID: "c1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPrefix := "{\"prev\": \"" + GenesisHash + "\", \"hash\": \""
+	wantSuffix := "\", \"record\": {\"decision\": \"" + separators + " <&>\", \"rationale\": \"r\", " +
+		"\"alternatives_rejected\": \"\", \"affected\": [], \"cycle_id\": \"c1\"}}\n"
+	if raw != line+"\n" || !strings.HasPrefix(raw, wantPrefix) || !strings.HasSuffix(raw, wantSuffix) {
+		t.Fatalf("decisions.ndjson = %q", raw)
 	}
 	snap := must(NewGitMissionAnchor(dir).ReadSituationalAwareness(ctx))
 	if len(snap.LastDecisions) != 1 || snap.LastDecisions[0].Decision != separators+" <&>" {

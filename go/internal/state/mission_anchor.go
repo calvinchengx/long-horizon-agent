@@ -18,8 +18,15 @@ import (
 //	.lha/mission.json       — the immutable MissionSpec, written at init
 //	.lha/checklist.json     — the machine-readable Checklist
 //	.lha/progress.md        — human-readable progress narrative (appended, size-bounded)
-//	.lha/decisions.ndjson   — append-only DecisionRecord log (never compacted)
+//	.lha/decisions.ndjson   — append-only, SHA-256 hash-chained DecisionRecord log (never
+//	                          compacted; format in decision_chain.go)
 //	.lha/events.ndjson      — append-only EventRecord (episodic) log
+//	.lha/ownership.json     — the file-ownership map, when the mission declared one (written by
+//	                          the Python orchestrator; carried along here)
+//
+// The committed decisions.ndjson is verified on every snapshot read and before every checkpoint
+// appends to it: a chain that does not verify is a *DecisionChainError and nothing is committed
+// on top of it. Bare (pre-chain) DecisionRecord lines still load as a legacy prefix.
 const (
 	AnchorDir     = ".lha"
 	MissionFile   = "mission.json"
@@ -27,11 +34,12 @@ const (
 	ProgressFile  = "progress.md"
 	DecisionsFile = "decisions.ndjson"
 	EventsFile    = "events.ndjson"
+	OwnershipFile = "ownership.json"
 )
 
-// AnchorFiles are the harness-owned anchor files. They are force-added on every commit so a
-// target repo whose .gitignore excludes .lha/ still gets them committed.
-var AnchorFiles = []string{MissionFile, ChecklistFile, ProgressFile, DecisionsFile, EventsFile}
+// AnchorFiles are the harness-owned anchor files. They are force-added on every commit (when
+// present) so a target repo whose .gitignore excludes .lha/ still gets them committed.
+var AnchorFiles = []string{MissionFile, ChecklistFile, ProgressFile, DecisionsFile, EventsFile, OwnershipFile}
 
 // MaxProgressChars bounds progress.md (oldest entries are trimmed first), in characters.
 const MaxProgressChars = 16_000
@@ -158,8 +166,13 @@ func (a *GitMissionAnchor) ReadSituationalAwareness(ctx context.Context) (contra
 			snap.OpenItems = append(snap.OpenItems, it)
 		}
 	}
-	if snap.LastDecisions, err = a.readRecentDecisions(ctx, 5); err != nil {
+	chain, err := a.loadDecisions(ctx)
+	if err != nil {
 		return snap, err
+	}
+	snap.LastDecisions = chain.Records
+	if n := len(snap.LastDecisions); n > RecentDecisions {
+		snap.LastDecisions = snap.LastDecisions[n-RecentDecisions:]
 	}
 	if next := checklist.NextActionable(); next != nil {
 		item := *next
@@ -234,6 +247,12 @@ func (a *GitMissionAnchor) AppendEvent(_ context.Context, event contracts.EventR
 func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Checkpoint) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	// Verify the committed decision chain BEFORE touching anything: an altered history is never
+	// extended.
+	chain, err := a.loadDecisions(ctx)
+	if err != nil {
+		return "", err
+	}
 	// Harness truth: discard whatever the agent did to .lha/ during the cycle.
 	if !a.skipRestore {
 		if err := a.restoreAnchorDir(ctx); err != nil {
@@ -253,12 +272,22 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 	}
 	// The append-only logs are REBUILT from their committed content + the new records, so the
 	// write is idempotent: pending events already appended to the working tree are never
-	// duplicated.
-	decisions := make([]any, 0, len(cp.Decisions))
+	// duplicated. Decisions are chained onto the verified committed chain; a record without a
+	// cycle id gets the checkpoint's.
+	prev := chain.LastHash
+	lines := make([]string, 0, len(cp.Decisions))
 	for _, d := range cp.Decisions {
-		decisions = append(decisions, d)
+		if d.CycleID == "" {
+			d.CycleID = cp.CycleID
+		}
+		line, digest, err := EncodeDecisionLink(prev, d)
+		if err != nil {
+			return "", err
+		}
+		lines = append(lines, line)
+		prev = digest
 	}
-	if err := a.rebuildLog(ctx, DecisionsFile, decisions); err != nil {
+	if err := a.rebuildLines(ctx, DecisionsFile, lines); err != nil {
 		return "", err
 	}
 	events := make([]any, 0, len(a.pendingEvents)+len(cp.Events))
@@ -335,6 +364,19 @@ func (a *GitMissionAnchor) committedText(ctx context.Context, name string) (stri
 
 // rebuildLog rewrites an append-only log as committed content + records (idempotent).
 func (a *GitMissionAnchor) rebuildLog(ctx context.Context, name string, records []any) error {
+	lines := make([]string, 0, len(records))
+	for _, rec := range records {
+		line, err := pydanticJSON(rec, false)
+		if err != nil {
+			return err
+		}
+		lines = append(lines, string(line))
+	}
+	return a.rebuildLines(ctx, name, lines)
+}
+
+// rebuildLines rewrites an append-only log as committed content + lines (idempotent).
+func (a *GitMissionAnchor) rebuildLines(ctx context.Context, name string, lines []string) error {
 	base, err := a.committedText(ctx, name)
 	if err != nil {
 		return err
@@ -344,12 +386,8 @@ func (a *GitMissionAnchor) rebuildLog(ctx context.Context, name string, records 
 	}
 	var b strings.Builder
 	b.WriteString(base)
-	for _, rec := range records {
-		line, err := pydanticJSON(rec, false)
-		if err != nil {
-			return err
-		}
-		b.Write(line)
+	for _, line := range lines {
+		b.WriteString(line)
 		b.WriteByte('\n')
 	}
 	return a.writeFile(name, b.String())
@@ -406,36 +444,65 @@ func (a *GitMissionAnchor) appendProgress(ctx context.Context, entry string) err
 	return a.writeFile(ProgressFile, boundProgress(current, a.maxProgress))
 }
 
-func (a *GitMissionAnchor) readRecentDecisions(ctx context.Context, n int) ([]contracts.DecisionRecord, error) {
-	raw, _, err := a.readAnchorFile(ctx, DecisionsFile)
+// RecentDecisions is how many of the newest decisions the situational snapshot carries.
+const RecentDecisions = 5
+
+// ReadDecisions returns every committed decision, oldest first (the chain is verified first).
+func (a *GitMissionAnchor) ReadDecisions(ctx context.Context) ([]contracts.DecisionRecord, error) {
+	chain, err := a.loadDecisions(ctx)
+	return chain.Records, err
+}
+
+// VerifyDecisions verifies the committed decision chain (a failed check is not an error).
+func (a *GitMissionAnchor) VerifyDecisions(ctx context.Context) (ChainVerification, error) {
+	data, err := a.decisionsBytes(ctx)
+	if err != nil {
+		return ChainVerification{}, err
+	}
+	check := VerifyDecisionChain(data)
+	if check.OK && check.TornTail {
+		// The harness writes the whole file before committing it, so an incomplete final line in
+		// the anchor is never a crash artefact: treat it as an altered log.
+		check.OK = false
+		check.Problem = "the final line is incomplete (no trailing newline)"
+	}
+	return check, nil
+}
+
+// decisionsBytes is the decision log's exact content: HEAD first (not stripped: the trailing
+// newline is significant), else the never-committed working-tree file.
+func (a *GitMissionAnchor) decisionsBytes(ctx context.Context) ([]byte, error) {
+	rel := AnchorDir + "/" + DecisionsFile
+	tracked, err := ExistsAtHead(ctx, a.workdir, rel)
 	if err != nil {
 		return nil, err
 	}
-	out := []contracts.DecisionRecord{}
-	if raw == "" {
-		return out, nil
+	if tracked {
+		return ShowAtHeadRaw(ctx, a.workdir, rel)
 	}
-	// Split ONLY on "\n": U+2028/U+2029/\x85 are left unescaped inside JSON strings.
-	var lines []string
-	for _, ln := range strings.Split(raw, "\n") {
-		if pyStrip(ln) != "" {
-			lines = append(lines, ln)
-		}
+	data, err := os.ReadFile(a.path(DecisionsFile))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
 	}
-	if len(lines) > n {
-		lines = lines[len(lines)-n:]
+	return data, err
+}
+
+// loadDecisions parses the committed decision chain after verifying it (*DecisionChainError).
+func (a *GitMissionAnchor) loadDecisions(ctx context.Context) (DecisionChain, error) {
+	check, err := a.VerifyDecisions(ctx)
+	if err != nil {
+		return DecisionChain{}, err
 	}
-	for _, ln := range lines {
-		var d contracts.DecisionRecord
-		if err := json.Unmarshal([]byte(ln), &d); err != nil {
-			return nil, err
-		}
-		if d.Affected == nil {
-			d.Affected = []string{}
-		}
-		out = append(out, d)
+	if !check.OK {
+		return DecisionChain{}, &DecisionChainError{Msg: AnchorDir + "/" + DecisionsFile + " in " +
+			a.workdir + " failed hash-chain verification (" + check.Problem + "): the committed " +
+			"decision history was altered, so the mission refuses to continue"}
 	}
-	return out, nil
+	data, err := a.decisionsBytes(ctx)
+	if err != nil {
+		return DecisionChain{}, err
+	}
+	return ParseDecisionChain(data)
 }
 
 // boundProgress trims the OLDEST progress entries so text fits in limit characters (the header
