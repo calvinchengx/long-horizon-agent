@@ -57,7 +57,8 @@ _REFERENCE_HELP = (
 _APPROVE_HELP = (
     "Ask on this terminal (y/N, default reject) before any irreversible command (git push, "
     "publish, uploads); rejected without asking when stdin is not a TTY, and after "
-    "LHA_APPROVAL_TIMEOUT_SECONDS without an answer. Without this flag such commands are refused."
+    "LHA_CONSOLE_APPROVAL_TIMEOUT_S (default 1h) without an answer. Without this flag such "
+    "commands are refused."
 )
 
 
@@ -452,7 +453,7 @@ def orchestrate(
     unsafe_local: bool = typer.Option(False, "--unsafe-local", help=_UNSAFE_LOCAL_HELP),
     allow_host: list[str] = typer.Option([], "--allow-host", help=_ALLOW_HOST_HELP),
 ) -> None:
-    """Plan, then run the FULL multi-agent org (research fan-out + Lead + review) locally."""
+    """Plan, then run the FULL multi-agent org (research, Lead or parallel waves, review) locally."""
     from lha.agent.runner import MissionSummary, aclose_provider, build_meter
     from lha.agents.orchestrator import Orchestrator
     from lha.agents.planner import Planner
@@ -560,7 +561,8 @@ def mission_start(
     ),
     deadlock_gate_hours: float = typer.Option(
         24.0,
-        help="On deadlock, wait this long for a human 'retry' or 'abort' (0 = end immediately).",
+        help="On deadlock, wait this long for a human 'retry', 'abort' or 'impossible' (0 = end "
+        "immediately).",
     ),
     approval_timeout_hours: float | None = typer.Option(
         None,

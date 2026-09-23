@@ -14,18 +14,22 @@ The durable `MissionWorkflow` exposes its status through the `status_v1` query
 | `RUNNING` | a cycle is being dispatched or is running | nothing |
 | `SLEEPING` | on a durable timer by design: scheduled start, pause between cycles, or a snooze | nothing; `lha mission-snooze <id> --seconds 0` wakes it |
 | `DEGRADED_PARK` | a cycle failed 5 attempts with retryable errors; the workflow sleeps and probes health | read the `park_reason` query; fix the dependency |
-| `WAITING_ON_HUMAN` | a human gate is open: an irreversible action awaits approval, or the mission is deadlocked | run `lha mission-status` to see the question, then `lha mission-approve` with `approve`/`reject` or `retry`/`abort` |
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-| `WAITING_ON_HUMAN` | a gate is open: an irreversible action waiting for approval, or the deadlock gate | `lha mission-status <id>` shows it; answer with `lha mission-approve` |
+| `WAITING_ON_HUMAN` | a gate is open: an irreversible action waiting for approval, or the deadlock gate | `lha mission-status <id>` shows the gate; answer with `lha mission-approve <id> --decision ...` (`approve`/`reject`, or `retry`/`abort`/`impossible`) |
 | `DONE` | every item verified done | nothing |
 | `IMPOSSIBLE` | deadlocked with no gate, or declared impossible at the deadlock gate | inspect blocked items; start a new mission |
 | `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure | see below |
 
-The `missions` table in Postgres is not written by the workflow; the status lives in the workflow.
+The workflow's status lives in the workflow. The mission row in the store (`lha missions`; SQLite
+by default, Postgres with `LHA_POSTGRES_DSN`) is written by `mission-start` and the cycle
+activities: `RUNNING`, `WAITING_ON_HUMAN` (a cycle queued an approval), `DONE`, `IMPOSSIBLE`
+(deadlocked) and `ABORTED` (budget exhausted). `SLEEPING`, `DEGRADED_PARK`, the deadlock gate and
+the final outcome after a gate decision or `max_cycles` are not written to it; use
+`lha mission-status` for those.
 
 Local runs (`run-local`, `mission`, `orchestrate`) have no status query. They print a summary and
 exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason>`,
-`loop on item <id>` or `max_cycles`.
+`loop on item <id>` or `max_cycles`. They write the mission row too: `DONE` for `complete`,
+`IMPOSSIBLE` for a deadlock, `ABORTED` for anything else.
 
 ## Observe a mission
 
@@ -34,17 +38,20 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
   `lha: attempt <id> (...)`, `lha: block <id> (...)` or `lha: split <id> (...)` (the item was
   blocked and replaced by children `<id>.1`, `<id>.2`, ...).
 - **Workflow**: the Temporal UI (<http://localhost:8080>) shows every activity, attempt, failure
-  and timer. `lha mission-status` returns status, cycle count and, when a gate is open, the
-  question it is waiting on.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
   and timer. `lha mission-status` returns status, cycle count, the open gate (with a queued
   action and its reason), the sleep deadline and the last gate events.
 - **Gate events**: `<workdir>/.lha/events.ndjson` holds `tool_approval` (every answer to a flagged
   command: `pending`, `approve`, `reject`, with who decided and whether it was a default),
   `gate_opened`, `gate_reminder`, `gate_resolved`, `gate_defaulted` and `mission_impossible`
   events. Set `LHA_GATE_WEBHOOK_URL` on the workers to receive the gate events as JSON POSTs.
-- **Spend**: `<workdir>/.git/lha/spend.ndjson` holds one row per cycle attempt (`usd`, `unknown`,
-  `calls`). Each `run_agent_cycle` result in the history carries `spent_usd` for that cycle.
+- **Spend**: `lha costs <mission id>` prints the persisted cost ledger (every metered call, plus
+  totals) and `lha missions` lists missions with their recorded spend. `<workdir>/.git/lha/spend.ndjson`
+  holds one row per cycle attempt (`usd`, `unknown`, `calls`), which seeds the budget of the next
+  attempt. Each `run_agent_cycle` result in the history carries `spent_usd` for that cycle.
+- **Decisions**: `lha decisions --workdir <workdir>` prints the design decisions the agents
+  recorded in `.lha/decisions.ndjson`; `--verify` checks the hash chain (exit 1 if it does not
+  verify). A durable cycle that finds the chain altered fails the mission with a non-retryable
+  `MissionConfigError`.
 - **Langfuse**: no LHA code sends data to Langfuse (see [16-observability.md](16-observability.md)).
 
 ## How a mission ends
@@ -52,15 +59,12 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
 | Outcome | Status | Cause |
 |---|---|---|
 | `completed` | `DONE` | every checklist item is `done` (split items count through their children) |
-| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) and no `retry` from a human within the deadlock gate (24 h by default) |
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-| `completed` | `DONE` | every checklist item is `done` |
-| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) and no deadlock gate |
+| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) and no deadlock gate, or a `retry` that unblocked nothing |
 | `impossible` | `IMPOSSIBLE` | "impossible" at the deadlock gate (human or default); final checkpoint `lha: mission declared impossible` |
 | `aborted` | `ABORTED` | "abort" at the deadlock gate (human or the default) |
 | `budget_exhausted` | `ABORTED` | the governor refused a model call (`BudgetExceeded`, non-retryable) |
 | `max_cycles` | `ABORTED` | `cycles_done >= max_cycles` (`--max-cycles`, default `LHA_MAX_CYCLES`, 1000) |
-| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, malformed `LHA_TRUSTED_CHECKS`, `LHA_SANDBOX_EGRESS` or web settings (`LHA_WEB_CREDENTIALS`, `LHA_WEB_ALLOW_PORTS`, `LHA_WEB_SEARCH_ENDPOINT`), or a Rule-of-Two violation (web tools with `LHA_SANDBOX=local` or `LHA_PRIVATE_DATA=true`) |
+| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, a `.lha/decisions.ndjson` that fails verification, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, malformed `LHA_TRUSTED_CHECKS`, `LHA_SANDBOX_EGRESS` or web settings (`LHA_WEB_CREDENTIALS`, `LHA_WEB_ALLOW_PORTS`, `LHA_WEB_SEARCH_ENDPOINT`), or a Rule-of-Two violation (web tools with `LHA_SANDBOX=local` or `LHA_PRIVATE_DATA=true`) |
 
 An unpriced `openai_compat` model without `LHA_ALLOW_UNPRICED_MODELS=true` is refused by the
 governor on the first call, so the mission ends as `budget_exhausted`. Invalid `MissionInput`
@@ -80,37 +84,28 @@ imports) and initializes a new anchor.
 
 **Approve or reject an irreversible action.** When the agent tries a gated command (for example
 `git push`, a publish, an upload), the durable cycle queues it and the workflow waits as
-`WAITING_ON_HUMAN`. `lha mission-status <id>` prints the tool, its exact arguments and the reason.
-Check what would be sent (for example `git -C <workdir> log origin/main..HEAD`), then run
-`lha mission-approve <id> --decision approve` or `--decision reject`. No cycles run while the
-gate is open. An approved call is allowed once, in the next cycles, only with the same arguments;
-if the agent changes them, it is asked again. A rejected call is not asked about again. With no
-answer within `--approval-timeout-hours` (default `LHA_APPROVAL_TIMEOUT_S`, 24h) the action is rejected. Several queued
-actions are asked one at a time.
-
-**Resolve the deadlock gate.** `lha mission-start` opens it for `--deadlock-gate-hours` (default
-24; `0` turns it off). While open, `lha mission-approve <id> --decision retry` runs
-`unblock_items` (every `blocked` item back to retryable, committed as
-`lha: unblock ... (human retry)`) and the mission continues; `abort`, or the timeout, ends it as
-`deadlocked`. Before retrying, read `last_failure` of the blocked items in
-`<workdir>/.lha/checklist.json`: if the check cannot pass as configured (a missing tool in the
-sandbox image, a host not in `LHA_SANDBOX_EGRESS`, an undefined `trusted:` check), fix the worker
-settings and restart the worker first, or the items block again.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-**Approve or reject an irreversible action.** `lha mission-status <id>` shows the queued action
-(tool, arguments, reason, fingerprint, deadline). `lha mission-approve <id> --decision approve`
-allows that exact action once in a later cycle; `reject`, or no answer before the approval timeout
-(`mission-start --approval-timeout-hours`, default 24), rejects it and it is never asked about
-again. In a local run with `--approve-interactive` the same question is asked on the terminal
-(`y/N`, default reject; rejected without asking when stdin is not a TTY).
+`WAITING_ON_HUMAN`; no cycles run while the gate is open. `lha mission-status <id>` shows the
+queued action (tool, exact arguments, reason, fingerprint, deadline). Check what would be sent
+(for example `git -C <workdir> log origin/main..HEAD`), then run
+`lha mission-approve <id> --decision approve` or `--decision reject`. An approved call is allowed
+once, in a later cycle, only with the same arguments; if the agent changes them, it is asked
+again. `reject`, or no answer before the approval timeout (`mission-start
+--approval-timeout-hours`, default `LHA_APPROVAL_TIMEOUT_S`, 24 h), rejects it and it is never
+asked about again. Several queued actions are asked one at a time. In a local run with
+`--approve-interactive` the same question is asked on the terminal (`y/N`, default reject;
+rejected without asking when stdin is not a TTY, and after `LHA_CONSOLE_APPROVAL_TIMEOUT_S`,
+default 1 h).
 
 **Resolve the deadlock gate.** The gate opens when the mission was started with
-`--deadlock-gate-hours` > 0 (the default is 24). While open,
+`--deadlock-gate-hours` > 0 (the default is 24; `0` turns it off). While open,
 `lha mission-approve <id> --decision retry` runs `unblock_items` (every `blocked` item back to
 retryable, committed as `lha: unblock ... (human retry)`) and the mission continues; `abort` ends
 it `ABORTED`; `impossible` writes a final checkpoint and ends it `IMPOSSIBLE`. On timeout the
 `--deadlock-default` applies (`abort`, or `impossible`). `mission-approve` refuses a decision the
-open gate does not offer.
+open gate does not offer. Before retrying, read `last_failure` of the blocked items in
+`<workdir>/.lha/checklist.json`: if the check cannot pass as configured (a missing tool in the
+sandbox image, a host not in `LHA_SANDBOX_EGRESS`, an undefined `trusted:` check), fix the worker
+settings and restart the worker first, or the items block again.
 
 **Snooze.** `lha mission-snooze <id> --seconds N` parks the mission (status `SLEEPING`) before its
 next cycle; `--seconds 0` wakes it. `--cycle-pause-seconds` and `--start-in-seconds` at
@@ -192,8 +187,11 @@ or an unpulled Ollama model keeps the probe DOWN, so the mission stays parked an
 off; the reason is in the `park_reason` query. The probe never reports the optional dependencies,
 so the optional rows of the table have no runtime effect.
 
-**Not implemented** (claimed by earlier docs): falling back to lexical search when pgvector is
-down (no runtime path uses pgvector), buffering spans when Langfuse is down (nothing is sent), and
+Memory degrades on its own: when the dense channel (pgvector with Postgres, or the SQLite vector
+index) fails, the memory service drops it for the rest of the run and retrieves lexically (BM25
+and `git grep`), recording a `memory_degraded` event; see [12-memory.md](12-memory.md).
+
+**Not implemented**: buffering spans when Langfuse is down (nothing is sent to Langfuse) and
 alerts on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` (see
 [13-models.md](13-models.md#retries-and-failover)).
 
@@ -203,13 +201,6 @@ alerts on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` 
   moves on. The local runners also stop when one item fails `LHA_STALL_LIMIT` consecutive times
   (`loop on item <id>`); with the default of 5 the item is blocked first, so this fires only when
   the limit is 3 or less. The durable workflow has no such detector.
-- `ops/lifecycle.py` (`should_declare_impossible`, `MissionOutcome`) and the
-  `AutoPolicyGate` class in `hitl/gate.py` are library code with no caller (`CallbackGate`
-  backs the local `--approve-interactive` prompt). **Planned**: a "declare impossible?" gate,
-  gates with an escalation ladder, and persisting gates to the `hitl_gates` table. Today the
-  durable gates are the action-approval gate (default `reject`) and the deadlock gate (default
-  `abort`), both with a timeout.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 - Every gate has a timeout, a default and an escalation ladder: reminders at
   `LHA_GATE_ESCALATION_SECONDS` (default 15 min, 45 min, 4 h and 12 h after it opens, skipping
   offsets past the timeout), each committed as a `gate_reminder` event, shown by `mission-status`
@@ -218,8 +209,8 @@ alerts on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` 
 - The deadlock gate recommends "impossible" when `ops.lifecycle.should_declare_impossible` says
   the blocked item failed `LHA_IMPOSSIBLE_AFTER_FAILURES` (3) cycles in a row.
 - `MissionOutcome` in `ops/lifecycle.py` and the `AutoPolicyGate` / `CallbackGate` classes in
-  `hitl/gate.py` have no caller in a run path. **Planned**: persisting gates to the `hitl_gates`
-  table.
+  `hitl/gate.py` have no caller in a run path. Gates are not persisted to the `hitl_gates` table
+  (**planned**); their record is the anchor events and the workflow history.
 
 ## Safe deploys during an in-flight mission
 
@@ -270,7 +261,9 @@ when it is back. Workers reconnect.
 [17-cli.md](17-cli.md#lha-db-migrate)). The durable path does not need Postgres.
 
 **Re-embedding memory.** **Planned.** Every `semantic_memory` row records `embedding_model` and
-`embedding_version`, but there is no re-embed command and no runtime path writes the table.
+`embedding_version`, and dense queries only compare vectors of the same model and version, but
+there is no re-embed command: after changing `LHA_MEMORY_EMBEDDER` or `LHA_MEMORY_EMBEDDING_MODEL`,
+older rows are not found by the dense channel.
 
 **Orphaned sub-agent branches.** `durable/reconcile.py` (`reconcile_in_flight`: adopt a ticket
 branch with commits, re-spawn one that is missing or empty) and `durable/saga.py` (LIFO

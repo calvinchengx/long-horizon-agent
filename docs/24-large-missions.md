@@ -3,9 +3,11 @@
 A mission the size of a real product (fabric-emulator is about 225k lines of Go and Python,
 built over roughly 1,000 commits) needs more than a task description and a unit-test gate. This
 guide shows how to set LHA up for that kind of work. Every step uses a feature that is implemented
-and tested; the end-to-end test
-[`test_large_mission_e2e.py`](../python/tests/integration/test_large_mission_e2e.py) runs all of them
-together in one mission on real Docker.
+and tested. The end-to-end test
+[`test_large_mission_e2e.py`](../python/tests/integration/test_large_mission_e2e.py) runs the first
+eight rows of the table below together in one local mission on real Docker (the approval goes
+to a simulated approver, not the durable gate); the durable gates, the escalation ladder, the
+webhook and the mission store have their own tests.
 
 | What a large project needs | LHA feature | Where it is set |
 |---|---|---|
@@ -17,6 +19,8 @@ together in one mission on real Docker.
 | Knowledge of an API the model has not memorized | Vendored references | `lha vendor`, `--reference` |
 | Coarse items that turn out too big | Replanning | `LHA_MAX_REPLANS`, `LHA_MAX_SPLIT_DEPTH` |
 | Pushes and releases stay a human decision | Durable approvals | `lha mission-approve` |
+| Someone notices when a gate is waiting | Escalation ladder and webhook | `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL` |
+| Spend and status you can query after the fact | Mission store | `lha missions`, `lha costs` |
 
 ## 1. Write the roadmap as a checklist
 
@@ -121,7 +125,10 @@ paths are recited to the agent every cycle. Protecting them with `LHA_HARNESS_PA
 stops the agent from editing its own sources.
 
 Alternatively, `LHA_WEB_ALLOW_HOSTS=learn.microsoft.com` gives the lead a `fetch_url` tool for live
-reads of those hosts only. Vendoring is the more reproducible choice.
+reads of those hosts only (and `web_search`, if `LHA_WEB_SEARCH_PROVIDER` and
+`LHA_WEB_SEARCH_API_KEY` are set). Fetched text is marked as untrusted data in the prompt. A run
+with web tools may not also hold private data: with `LHA_PRIVATE_DATA=true` or the `local`
+sandbox, LHA refuses to start it. Vendoring is the more reproducible choice.
 
 ## 6. Start the durable mission
 
@@ -132,6 +139,9 @@ lha mission-start --checklist roadmap.md --reference reference/fabric \
   --deadlock-gate-hours 24 --approval-timeout-hours 24
 ```
 
+`--start-in-seconds N` delays the first cycle and `--cycle-pause-seconds N` pauses between cycles;
+the mission reports `SLEEPING` while it waits.
+
 `--checklist` skips the Planner. Run `lha worker` with the same environment (the settings above,
 plus a model and a budget: `LHA_BUDGET_USD_CEILING` is $10 by default, far too low for a mission of
 this size). See [running on Temporal](14-running-on-temporal.md).
@@ -139,21 +149,28 @@ this size). See [running on Temporal](14-running-on-temporal.md).
 ## 7. Operate it
 
 ```bash
-lha mission-status <id>        # status, cycles, and the question an open gate is waiting on
-lha mission-approve <id> --decision approve   # or reject; retry | abort for a deadlock
+lha mission-status <id>        # status, cycles, sleep time, the open gate and recent gate events
+lha mission-approve <id> --decision approve   # or reject; retry | abort | impossible for a deadlock
+lha mission-snooze <id> --seconds 3600        # sleep before the next cycle; --seconds 0 wakes it
+lha costs <id>                 # every metered model call and the totals
+lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decisions, hash-chain checked
 ```
 
 - **Approvals.** A gated command (`git push`, a publish, an upload) is not refused and not run: it
   is queued. The workflow parks as `WAITING_ON_HUMAN` with the exact command in its question. An
   approval lets that exact call (matched by a fingerprint of the tool and its arguments) run once in
-  a later cycle; a rejection is remembered and not asked again. Unanswered requests are rejected
-  after `--approval-timeout-hours`.
+  a later cycle; a rejection is remembered and not asked again. While a gate is open, reminders
+  go out at the offsets in `LHA_GATE_ESCALATION_SECONDS` (default 15 min, 45 min, 4 h, 12 h),
+  each committed as a `gate_reminder` event and posted to `LHA_GATE_WEBHOOK_URL` if set.
+  Unanswered requests are rejected after `--approval-timeout-hours`.
 - **Replanning.** When an item fails verification three times in a row, the model splits it into
   2–6 smaller children (`03.1`, `03.2`, ...). The parent's witnesses move to the last child, so
   splitting can make work tractable but never makes it pass more easily. At most `LHA_MAX_REPLANS`
   splits per mission (default 20), nested at most `LHA_MAX_SPLIT_DEPTH` levels (default 2).
 - **Deadlock.** If nothing is actionable, the mission waits up to `--deadlock-gate-hours` for
-  `retry` (unblock and continue) or `abort`.
+  `retry` (unblock and continue), `abort`, or `impossible` (a final checkpoint records the mission
+  as impossible). Unanswered, it applies `--deadlock-default` (`LHA_DEADLOCK_GATE_DEFAULT`,
+  default `abort`).
 
 ## What this does not solve
 
@@ -164,6 +181,11 @@ lha mission-approve <id> --decision approve   # or reject; retry | abort for a d
   cycle costs around $1 on Claude Sonnet before caching, so a thousand-cycle mission is in the
   $1–2k range. Set the budget ceiling deliberately.
 - **Egress is by hostname.** TLS is not intercepted, so allowing a host allows everything on it.
+  `fetch_url` checks the resolved address before connecting, but the HTTP client resolves again,
+  so DNS rebinding between the two lookups remains possible.
+- **Status in the store lags the workflow.** `lha missions` shows what the last cycle wrote; it
+  does not show `SLEEPING`, `DEGRADED_PARK` or a waiting deadlock gate. Use `lha mission-status`
+  for the live state.
 - **Witness schemes.** fabric-emulator's own manifest also uses `sdk:`, `py:` and `boundary:`
   witnesses; LHA rejects them, so translate them to `pytest:`, `cmd:` or `trusted:` first.
 - **Skipped Go tests fail their witness**: a `--- SKIP` is not a `--- PASS`. Tests that only run in

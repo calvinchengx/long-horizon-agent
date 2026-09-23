@@ -102,11 +102,14 @@ cases are pinned in
   a bare line after the chain, or a final line without its `\n`) raises `DecisionChainError`.
   Nothing is committed on top of the altered log. `run-local`/`mission` and `orchestrate` stop
   with `stopped_reason` `decision log failed verification: <why>` and a `decision_chain_invalid`
-  trace event, and exit 1. On Temporal the cycle activity fails with the same error on every
-  attempt; after the cycle retry policy's 5 attempts the workflow parks as it does for any
-  exhausted transient failure, and no further cycle can succeed until the log is repaired (the
-  error is not yet mapped to a non-retryable activity error). `lha decisions --verify` prints the
-  verdict ([CLI](17-cli.md#lha-decisions)).
+  trace event, write status `ABORTED` to the mission row, and exit 1. On Temporal the cycle
+  activity turns `DecisionChainError` into a non-retryable `ApplicationError` of type
+  `MissionConfigError` with the message `decision log failed verification: <why>`
+  (`_refuse_tampered_chain` in [`durable/activities.py`](../python/src/lha/durable/activities.py)),
+  so it is not retried and the workflow does not park: it sets status `ABORTED` and fails with a
+  non-retryable `ApplicationError` `mission <id> failed: decision log failed verification: ...`.
+  The workflow does not write the mission row, so the row keeps its last status. `lha decisions
+  --verify` prints the verdict ([CLI](17-cli.md#lha-decisions)).
 - **Writing.** The agent records a decision with the `record_decision` tool (arguments
   `decision`, `rationale`, optional `alternatives_rejected` and `affected`).
   `build_lead_loop` ([`agent/assembly.py`](../python/src/lha/agent/assembly.py)) adds the tool
@@ -138,8 +141,22 @@ edit. See [file ownership](11-multi-agent-organization.md#file-ownership).
 `EventRecord`: `kind`, `cycle_id`, `payload` (object), `payload_ref` (object-store key for large
 payloads, or `null`). Every cycle checkpoint appends a `cycle` event whose payload records the
 item, the verdict, the resulting status, the tool-call count, `split_into` (child ids, empty
-unless the item was split) and each check's name, pass/fail, gating flag, exit code and duration. A human-approved retry after a deadlock appends an
-`unblock` event.
+unless the item was split) and each check's name, pass/fail, gating flag, exit code and
+duration. An `orchestrate` integration checkpoint adds `writer` and `branch` to its `cycle`
+event and appends a `ticket` event (the ticket's id, item, role, write set, branch, status,
+status history and ownership violations). A human-approved retry after a deadlock appends an
+`unblock` event. Every tool call that reached an approval gate appends a `tool_approval` event
+with the cycle's checkpoint (the tool, redacted arguments, reason, fingerprint, the decision
+`approve`, `reject` or `pending`, who resolved it and whether the default applied); the local
+terminal approver (`--approve-interactive`) also appends a `gate_reminder` event per reminder.
+
+On Temporal, human gates also commit to the anchor. Each gate event (opened, reminder, resolved,
+defaulted) is its own checkpoint with one event of kind `gate_opened`, `gate_reminder`,
+`gate_resolved` or `gate_defaulted`, cycle id `gate:<gate id>`, the redacted gate question,
+options, default, deadline and (for a tool-call gate) the pending action; the checklist is
+rewritten unchanged. A mission declared impossible gets a final checkpoint with a
+`mission_impossible` event (reason, blocked item ids, counts) and a `cycle` event. Exact payloads
+are in the [wire contract](19-wire-contract.md#mission-anchor-lha).
 
 ## Item lifecycle
 
@@ -175,7 +192,8 @@ stateDiagram-v2
   split, and the item stays `blocked`.
 - **Unblock.** `unblock` returns a `blocked` item to `todo` and resets `consecutive_failures`.
   On Temporal this happens when a human answers `retry` to the deadlock gate (activity
-  `unblock_items`); there is no CLI command for it.
+  `unblock_items`, sent with `lha mission-approve <id> --decision retry`); the local runners have
+  no unblock command.
 
 ## Complete versus deadlocked
 
@@ -189,8 +207,11 @@ The two terminal predicates are distinct, and "nothing to do" is never read as s
   `checklist has no items`, or open items waiting on dependencies that can never complete.
 
 Initialization rejects a checklist with dependency errors. The local runners report
-`deadlocked: <reason>` and exit 1; `MissionWorkflow` ends with outcome `deadlocked` and status
-`IMPOSSIBLE`.
+`deadlocked: <reason>` and exit 1. `MissionWorkflow` with no deadlock gate
+(`deadlock_gate_seconds` 0) ends with outcome `deadlocked` and status `IMPOSSIBLE`; with a gate,
+a human (or the gate's default on timeout) chooses `retry`, `abort` (outcome `aborted`, status
+`ABORTED`) or `impossible` (outcome `impossible`, status `IMPOSSIBLE`, after a final
+checkpoint). See [Running on Temporal](14-running-on-temporal.md#5-gates-sleep-and-abort).
 
 ## Checkpoints
 
@@ -213,7 +234,7 @@ A checkpoint is one commit containing both the code changes and the updated anch
    `orchestrate` integration), this commit is the merge commit.
 
 The agent is told not to edit `.lha/`, the dispatcher refuses tool writes to it, and the Docker
-sandbox mounts it read-only; the restore in step 1 covers anything that gets past those.
+sandbox mounts it read-only; the restore in step 2 covers anything that gets past those.
 
 Reads use the same rule: anchor files are read from `HEAD`, and fall back to the working tree
 only for a file that has never been committed.

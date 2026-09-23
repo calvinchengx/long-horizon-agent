@@ -2,8 +2,9 @@
 
 All runtime configuration is one `Settings` object in
 [`python/src/lha/config.py`](../python/src/lha/config.py) (pydantic-settings). Application code
-does not read `os.environ`; it calls `get_settings()`. The Go port reads the same names with the
-same defaults in [`go/internal/config/config.go`](../go/internal/config/config.go).
+does not read `os.environ`; it calls `get_settings()`. The Go port reads a subset of the same names,
+with the same defaults, in [`go/internal/config/config.go`](../go/internal/config/config.go) (see
+[Go port coverage](#go-port-coverage)).
 
 ## Sources and precedence
 
@@ -23,7 +24,7 @@ picks up changes only after a restart.
 
 List settings (`LHA_WEB_ALLOW_HOSTS`, `LHA_WEB_ALLOW_PORTS`, `LHA_FALLBACK_MODELS`,
 `LHA_SANDBOX_EGRESS`, `LHA_HARNESS_PATHS`) are comma-separated strings, not JSON; blank items are
-dropped.
+dropped. The exception is `LHA_GATE_ESCALATION_SECONDS`, a JSON list (`[900, 2700]`).
 
 Invalid values fail at startup with a pydantic validation error: an unknown `LHA_MODEL_BACKEND` or
 `LHA_SANDBOX`, a non-numeric number, or a boolean other than `1/0`, `true/false`, `yes/no`,
@@ -84,9 +85,9 @@ store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
 - each `run_agent_cycle` activity: `RUNNING` while it works, then from the committed checklist
   `DONE` (complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval),
   `IMPOSSIBLE` (deadlocked) or `RUNNING` (including an item split by the replanner); `ABORTED`
-  when the budget refuses a call. States only the workflow knows are not written:
-  `DEGRADED_PARK`, and the end of a mission by the cycle ceiling or `lha mission-abort` (the row
-  keeps the last cycle's status). `lha mission-status` queries the live status from Temporal.
+  when the budget refuses a call. States only the workflow knows are not written: `SLEEPING`,
+  `DEGRADED_PARK`, the deadlock gate being open, and the end of a mission by a deadlock-gate
+  decision, the cycle ceiling or `lha mission-abort` (the row keeps the last cycle's status). `lha mission-status` queries the live status from Temporal.
 
 ### Memory
 
@@ -117,7 +118,7 @@ See [12-memory.md](12-memory.md).
 | `LHA_STALL_LIMIT` | int | `5` | local runs stop when one item fails this many times in a row; unused by the durable workflow |
 | `LHA_MAX_REPLANS` | int | `20` | splits of blocked items allowed per mission (counted as items with status `split`); `0` disables the replanner |
 | `LHA_MAX_SPLIT_DEPTH` | int | `2` | how deeply splits may nest: an item whose id already has this many dots (`03.1.2`) is not split again |
-| `LHA_APPROVAL_TIMEOUT_S` | int | `86400` | how long a durable mission waits for a human to approve or reject an irreversible action before rejecting it; `lha mission-start --approval-timeout-hours` overrides it per mission (`MissionInput.approval_timeout_seconds`) |
+| `LHA_APPROVAL_TIMEOUT_S` | int | `86400` | durable missions: how long the workflow waits for a human to approve or reject an irreversible action before rejecting it; read by `lha mission-start`, whose `--approval-timeout-hours` overrides it per mission (`MissionInput.approval_timeout_seconds`). Local runs use `LHA_CONSOLE_APPROVAL_TIMEOUT_S` instead |
 
 Durable sub-agent activities (`run_subagent`) build their own governor from
 `LHA_BUDGET_USD_CEILING` and `LHA_MAX_CYCLES`. See [10-cost-and-budget.md](10-cost-and-budget.md).
@@ -167,9 +168,16 @@ refused before it starts. An invalid `LHA_WEB_CREDENTIALS` (bad JSON, a binding 
 outside the allow-list), `LHA_WEB_ALLOW_PORTS` or `LHA_WEB_SEARCH_ENDPOINT` is refused the same
 way. See [09-safety-model.md](09-safety-model.md#web-tools).
 
-The web settings above other than `LHA_WEB_ALLOW_HOSTS`, and `LHA_FALLBACK_MODELS`,
-`LHA_FALLBACK_MAX_ROUNDS` and `LHA_MODEL_PROBE_TIMEOUT_S`, are read by the Python implementation
-only; `go/internal/config` does not define them.
+The web settings above other than `LHA_WEB_ALLOW_HOSTS` are read by the Python implementation
+only; `go/internal/config` does not define them (see [Go port coverage](#go-port-coverage)).
+
+### Multi-agent coordination
+
+| Variable | Type | Default | Meaning |
+|---|---|---|---|
+| `LHA_MAX_PARALLEL_IMPLEMENTERS` | int | `3` | `lha orchestrate` only: the most checklist items one parallel wave runs at once, each by its own implementer in its own git worktree (items need disjoint write-sets assigned by the Planner); `1` (or less) disables parallel waves, so the Lead works every item serially |
+
+See [11-multi-agent-organization.md](11-multi-agent-organization.md).
 
 ### Observability
 
@@ -186,7 +194,7 @@ only; `go/internal/config` does not define them.
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_CONSOLE_APPROVAL_TIMEOUT_S` | int >= 1 | `3600` | local runs with `--approve-interactive`: how long the terminal prompt waits before rejecting (durable missions use `mission-start --approval-timeout-hours`) |
+| `LHA_CONSOLE_APPROVAL_TIMEOUT_S` | int >= 1 | `3600` | local runs with `--approve-interactive`: how long the terminal prompt waits before rejecting (durable missions use `LHA_APPROVAL_TIMEOUT_S` / `mission-start --approval-timeout-hours`) |
 | `LHA_GATE_ESCALATION_SECONDS` | JSON list of ints | `[900, 2700, 14400, 43200]` | reminder offsets after a gate opens (the escalation ladder); offsets at or past the gate's timeout are skipped |
 | `LHA_DEADLOCK_GATE_DEFAULT` | `abort` \| `impossible` | `abort` | the deadlock gate's decision on timeout (`retry` is refused) |
 | `LHA_IMPOSSIBLE_AFTER_FAILURES` | int >= 1 | `3` | the deadlock gate recommends `impossible` after this many consecutive failed cycles on one item |
@@ -201,14 +209,22 @@ so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` and its timeout are read b
 [09-safety-model.md](09-safety-model.md#human-gates-on-tool-calls) and
 [08-durable-execution.md](08-durable-execution.md#human-gates).
 
+## Go port coverage
+
+[`go/internal/config/config.go`](../go/internal/config/config.go) defines the model, Temporal,
+governor (including `LHA_APPROVAL_TIMEOUT_S`), sandbox (including `LHA_WEB_ALLOW_HOSTS`,
+`LHA_TRUSTED_CHECKS`, `LHA_HARNESS_PATHS`) and Langfuse settings, plus `LHA_POSTGRES_DSN`,
+`LHA_WORKSPACE_ROOT` and `LHA_OBJECT_STORE_ROOT`. It does not define `LHA_SQLITE_PATH`,
+`LHA_POSTGRES_FALLBACK_TO_SQLITE`, the `LHA_MEMORY_*` settings, the other web settings,
+`LHA_PRIVATE_DATA`, `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
+`LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS` or the human-gate settings.
+
 ## Secrets
 
-Six settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`, `LHA_POSTGRES_DSN`,
-`LHA_LANGFUSE_SECRET_KEY`, `LHA_WEB_CREDENTIALS` and `LHA_WEB_SEARCH_API_KEY`. Their `repr` never
-shows the value; code unwraps them with
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-These settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`, `LHA_POSTGRES_DSN`,
-`LHA_LANGFUSE_SECRET_KEY` and `LHA_GATE_WEBHOOK_URL` (chat webhook URLs embed their credential). Their `repr` never shows the value; code unwraps them with
+Seven settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`,
+`LHA_POSTGRES_DSN`, `LHA_LANGFUSE_SECRET_KEY`, `LHA_WEB_CREDENTIALS`, `LHA_WEB_SEARCH_API_KEY` and
+`LHA_GATE_WEBHOOK_URL` (chat webhook URLs embed their credential). Their `repr` never shows the
+value; code unwraps them with
 `get_secret_value()` only where the value is sent. `Settings.redacted()` masks every field whose
 value is a `SecretStr`, so a new secret field is masked as long as it is declared `SecretStr`.
 
@@ -235,9 +251,6 @@ keys do not reach agent-run commands. Keep `.env` out of version control (`.giti
 | `LHA_IT_POSTGRES_DSN` | `tests/integration/conftest.py` | admin DSN for a Postgres with `vector` available; each test creates and drops its own database. Unset: Postgres tests are skipped |
 | `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine`, and the egress tests need internet access). Otherwise skipped |
 | `LHA_IT_SANDBOX_IMAGE` | `tests/integration/test_large_mission_e2e.py` | the polyglot sandbox image built from `sandbox/Dockerfile` (default `lha-sandbox:dev`) |
-| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay history `tests/durability/histories/mission_three_items.json` |
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-| `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (pulls `python:3.12-slim`). Otherwise skipped |
 | `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json` and `mission_approval_ladder.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
 | `LHA_PYDIFF` | `go/internal/safety/zz_pydiff_test.go` | directory of Python egress dumps for the Go differential tests; unset: skipped |
 | `LHA_APPDB_PASSWORD` | `docker-compose.yml` | `appdb` password (default `lha`) |

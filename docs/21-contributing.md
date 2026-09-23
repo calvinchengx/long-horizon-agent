@@ -9,12 +9,12 @@ maintainer, do not open a public issue.
 | Path | Contents |
 |---|---|
 | [`python/`](../python/) | the reference implementation (`src/lha`), its tests, `pyproject.toml`, `Dockerfile` |
-| [`go/`](../go/) | the Go port, built in phases ([23-roadmap.md](23-roadmap.md)) |
+| [`go/`](../go/) | the Go port: library packages only, no CLI or Temporal worker yet, built in phases ([23-roadmap.md](23-roadmap.md)) |
 | [`spec/`](../spec/) | language-neutral conformance cases both test suites run |
 | [`db/migrations/`](../db/migrations/) | the Postgres schema, one SQL file per version |
 | [`docs/`](../docs/) | this documentation (`NN-slug.md`) and the predicted runs |
 | [`website/`](../website/) | the Starlight site that renders `docs/` |
-| [`docker-compose.yml`](../docker-compose.yml) | local Temporal, Postgres + pgvector, Langfuse |
+| [`docker-compose.yml`](../docker-compose.yml) | local Temporal, Postgres + pgvector (optional; the mission store defaults to SQLite), Langfuse (LHA does not configure an exporter to it) |
 
 A behaviour change that is observable (which commands need approval, which URLs may be fetched,
 what is redacted, how a checklist moves, what a call costs, what bytes the anchor holds) must land

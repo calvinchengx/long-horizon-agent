@@ -76,7 +76,9 @@ and never raises into the agent loop. Checks run in this order:
    `.git/` or `.lha/`, compared case-insensitively.
 6. **Command gate.** If the tool declares a `command_arg` (only `run_command` does), the argv is
    classified. A gated command is sent to the configured `HITLGate` with its tool, arguments,
-   reason and fingerprint. With no gate configured it is denied.
+   reason and fingerprint. With no gate configured it is denied. Every answer (approve, reject,
+   queued, gate error, no gate) is kept as a `tool_approval` event and committed with the cycle's
+   checkpoint.
 
 The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
 `list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). Every run path
@@ -88,27 +90,8 @@ egress for them (section 4). `SubAgent` applies its role's mutating and
 egress policy a second time, hiding and refusing tools the role may not use, even when the
 dispatcher would allow them.
 
-Which gate the dispatcher gets depends on the run path
-([hitl/approvals.py](../python/src/lha/hitl/approvals.py)):
-
-| Run path | Gate | A gated command |
-|---|---|---|
-| Durable (`run_agent_cycle`) | `DeferredApprovalGate` | Denied for now and queued; the workflow waits as `WAITING_ON_HUMAN` for `lha mission-approve --decision approve\|reject`. An approved call is allowed once, in a later cycle, only with exactly the same tool and arguments (matched by fingerprint) |
-| Local (`mission`, `run-local`, `orchestrate`) with `--approve-interactive` | console gate | Asks `allow? [y/N]` on the terminal; anything but `y`/`yes` rejects |
-| Local without `--approve-interactive` | none | Denied |
-
-See [durable execution](08-durable-execution.md#approving-irreversible-actions).
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-   classified. A gated command is sent to the configured `HITLGate`. With no gate configured it is
-   denied. Every answer (approve, reject, queued, gate error, no gate) is kept as a
-   `tool_approval` event and committed with the cycle's checkpoint.
-
-The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
-`list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). `web_search`
-and `fetch_url` exist but no run path registers them. Which gate the Lead's dispatcher gets depends
-on the run path; see [Human gates on tool calls](#human-gates-on-tool-calls) below. `SubAgent` applies
-its role's mutating and egress policy a second time, hiding and refusing tools the role may not
-use, even when the dispatcher would allow them.
+Which gate the Lead's dispatcher gets depends on the run path; see
+[Human gates on tool calls](#human-gates-on-tool-calls) below.
 
 ## 3. Command classifier and human gates
 

@@ -26,8 +26,11 @@ docker compose up -d
 | `langfuse`, `langfuse-db` | `langfuse/langfuse:2`, `postgres:16` | 3000 | Langfuse server |
 
 `docker compose up` refuses to start until `LANGFUSE_NEXTAUTH_SECRET` and `LANGFUSE_SALT` are set.
-Only `temporal` (and its database) is required by the durable path; the mission workflow does not
-read or write `appdb` or Langfuse (see [16-observability.md](16-observability.md)). None of these
+Only `temporal` (and its database) is required by the durable path. The workflow itself never
+touches a database; the cycle activities write mission rows, the cost ledger and tiered memory to
+`appdb` only when the workers have `LHA_POSTGRES_DSN` set, and otherwise to a local SQLite file
+(see [18-configuration.md](18-configuration.md)). Nothing sends traces to Langfuse (see
+[16-observability.md](16-observability.md)). None of these
 services has authentication fit for a network: anyone who can reach port 7233 can start workflows
 and send gate decisions.
 
@@ -44,7 +47,7 @@ ClaimCheck data converter over `LHA_OBJECT_STORE_ROOT`, and polls `LHA_TASK_QUEU
 | Kind | Names |
 |---|---|
 | Workflows | `MissionWorkflow`, `SubAgentWorkflow` |
-| Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `run_subagent` |
+| Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `notify_gate`, `declare_impossible`, `run_subagent` |
 
 It runs until interrupted. It has no options; everything comes from `LHA_*` settings of the worker
 process. The model backend, sandbox (`LHA_SANDBOX`, default `docker`), sandbox image and egress
@@ -78,38 +81,18 @@ uv run lha mission-start --checklist roadmap.md --reference reference/api.md.txt
    is required.
 2. Initializes the git mission anchor at `--workdir`, including any `--reference` paths (see
    [06-mission-anchor.md](06-mission-anchor.md)).
-3. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing
-   `MissionInput` with `mission_id`, `workdir`, `check_commands`, `max_cycles`,
-   `deadlock_gate_seconds` and `approval_timeout_seconds`.
-
-It prints the id and returns; it does not wait for the mission. Options that shape the workflow:
-
-| Option | Default | `MissionInput` field |
-|---|---|---|
-| `--max-cycles N` | `LHA_MAX_CYCLES` (1000) | `max_cycles` |
-| `--deadlock-gate-hours H` | 24 (`0` ends a deadlocked mission immediately) | `deadlock_gate_seconds` |
-| `--approval-timeout-hours H` | `LHA_APPROVAL_TIMEOUT_S` (24h) | `approval_timeout_seconds` |
-
-The other inputs keep their defaults: `cycles_before_can=200`, `budget_usd=None` (the worker's
-ceiling), `park_initial_seconds=60`, `park_max_seconds=3600`. There is no `--sandbox` option: the
-worker's `LHA_SANDBOX` applies.
-
-`--workdir` is resolved to an absolute path in the CLI process before it is sent, so a relative
-path means relative to where you ran `mission-start`. The worker must be able to reach the same
-filesystem path.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-1. Plans the task into a checklist with the configured model (one metered call against
-   `LHA_BUDGET_USD_CEILING` in this process).
-2. Initializes the git mission anchor at `--workdir` (see [06-mission-anchor.md](06-mission-anchor.md)).
 3. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing a
-   `MissionInput` with the mission id, the workdir, the check commands and the settings below.
+   `MissionInput` with the mission id, the workdir, the check commands and the values below.
+4. Writes the mission row (status `RUNNING`) and the Planner's spend to the mission store.
+
+It prints the id and returns; it does not wait for the mission.
 
 | `MissionInput` field | CLI option | Else setting (default) |
 |---|---|---|
 | `max_cycles` | `--max-cycles` | `LHA_MAX_CYCLES` (1000) |
 | `deadlock_gate_seconds` | `--deadlock-gate-hours` (x 3600) | 24 hours; `0` = no gate |
 | `deadlock_gate_default` | `--deadlock-default abort\|impossible` | `LHA_DEADLOCK_GATE_DEFAULT` (`abort`) |
-| `approval_timeout_seconds` | `--approval-timeout-hours` (x 3600) | 24 hours |
+| `approval_timeout_seconds` | `--approval-timeout-hours` (x 3600) | `LHA_APPROVAL_TIMEOUT_S` (86400) |
 | `cycle_pause_seconds` | `--cycle-pause-seconds` | `LHA_CYCLE_PAUSE_SECONDS` (0) |
 | `resume_at` | `--start-in-seconds N` (now + N) | 0 (start now) |
 | `gate_escalation_seconds` | none | `LHA_GATE_ESCALATION_SECONDS` (`[900, 2700, 14400, 43200]`) |
@@ -119,13 +102,13 @@ These values are read by the process that runs `mission-start` and travel in the
 so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` is different: the worker's `notify_gate`
 activity reads it, so set it on the workers.
 
-It prints the id and returns; it does not wait for the mission. The workflow's other inputs keep
-their defaults: `cycles_before_can=200`, `budget_usd=None` (the worker's ceiling),
-`park_initial_seconds=60`, `park_max_seconds=3600`. There is no `--sandbox` option: the worker's
-`LHA_SANDBOX` applies.
+The workflow's other inputs keep their defaults: `cycles_before_can=200`, `budget_usd=None` (the
+worker's ceiling), `park_initial_seconds=60`, `park_max_seconds=3600`. There is no `--sandbox` or
+`--allow-host` option: the worker's `LHA_SANDBOX` and `LHA_WEB_ALLOW_HOSTS` apply.
 
-`--workdir` is resolved to an absolute path before it is passed to the worker. The worker must be
-able to reach the same filesystem path.
+`--workdir` is resolved to an absolute path in the CLI process before it is sent, so a relative
+path means relative to where you ran `mission-start`. The worker must be able to reach the same
+filesystem path.
 
 ## 4. Watch it
 
@@ -134,16 +117,6 @@ uv run lha mission-status mission_3f9a1c0b2d4e
 # status=RUNNING cycles=3
 
 uv run lha mission-status mission_3f9a1c0b2d4e
-# status=WAITING_ON_HUMAN cycles=7
-# waiting on: Mission mission_3f9a1c0b2d4e wants to run an irreversible action: run_command {'argv': ['git', 'push', 'origin', 'main']} (git push (outward-facing / rewrites history)). Approve or reject? [approve / reject]
-```
-
-`mission-status` sends three queries, `status_v1`, `cycles_done` and `open_question`, and prints
-the question on a second line when a human gate is open. Queries work while the workflow runs and
-after it has closed, but a worker must be polling the task queue to answer them. The workflow also
-answers `last_item`, `park_reason` and `rejected_decisions`, which the CLI does not expose; use
-the Temporal UI or `temporal workflow query`.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 # status=WAITING_ON_HUMAN cycles=3
 # gate: tool_call approval-5d41402abc4b
 #   question: Mission mission_3f9a1c0b2d4e wants to run an irreversible action: ...
@@ -161,10 +134,11 @@ the Temporal UI or `temporal workflow query`.
 `mission-status` queries `status_v1` and `cycles_done`, then `gate_v1` (the open gate, with the
 pending action and its reason), `resume_at` (printed as "sleeping until ..." when set) and
 `gate_log_v1` (the last 8 gate / sleep events). For a workflow served by an older worker that
-does not answer `gate_v1`, it falls back to `open_question`. Queries work while the workflow runs
-and after it has closed, but a worker must be polling the task queue to answer them. The workflow
-also answers `last_item`, `park_reason` and `rejected_decisions`, which the CLI does not expose;
-use the Temporal UI or `temporal workflow query`.
+does not answer `gate_v1`, it falls back to `open_question` (printed as `waiting on: ...`).
+Queries work while the workflow runs and after it has closed, but a worker must be polling the
+task queue to answer them. The workflow also answers `last_item`, `park_reason` and
+`rejected_decisions`, which the CLI does not expose; use the Temporal UI or
+`temporal workflow query`.
 
 Statuses the workflow sets:
 
@@ -173,12 +147,15 @@ Statuses the workflow sets:
 | `RUNNING` | dispatching or running a cycle |
 | `SLEEPING` | on a durable timer by design: a scheduled start (`--start-in-seconds`), the pause between cycles (`--cycle-pause-seconds`) or `lha mission-snooze` |
 | `DEGRADED_PARK` | a cycle exhausted its retries; sleeping and probing health |
-| `WAITING_ON_HUMAN` | a human gate is open: an irreversible action awaits approval, or the mission is deadlocked and `deadlock_gate_seconds > 0` |
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-| `WAITING_ON_HUMAN` | a gate is open: an irreversible action waiting for approval, or the deadlock gate |
+| `WAITING_ON_HUMAN` | a gate is open: an irreversible action waiting for approval, or the deadlock gate (`deadlock_gate_seconds > 0`) |
 | `DONE` | every item verified done |
 | `IMPOSSIBLE` | deadlocked with no deadlock gate, or declared impossible at the deadlock gate |
 | `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure |
+
+These are the workflow's `status_v1` values. The mission row that `lha missions` lists is written
+by the activities, not the workflow: it shows `RUNNING`, `WAITING_ON_HUMAN` (a cycle queued an
+approval), `DONE`, `IMPOSSIBLE` (deadlocked) and `ABORTED` (budget exhausted), but never
+`SLEEPING` or `DEGRADED_PARK`, and it is not updated by a deadlock-gate decision or `max_cycles`.
 
 The Temporal UI at <http://localhost:8080> shows each workflow's event history: every activity
 with its input, result, attempts and failures, the timers of a park, and each Continue-As-New.
@@ -188,32 +165,14 @@ The committed work is in git: `git -C <workdir> log --oneline` and `<workdir>/.l
 ## 5. Gates, sleep and abort
 
 ```bash
-uv run lha mission-approve mission_3f9a1c0b2d4e --decision approve   # an action gate
-uv run lha mission-approve mission_3f9a1c0b2d4e --decision retry     # a deadlock gate
-uv run lha mission-abort   mission_3f9a1c0b2d4e
-```
-
-`mission-approve` sends the `human_decision_v1` signal. `--decision` is required and must be one
-of `approve`, `reject`, `retry` or `abort` (anything else fails in the CLI). The workflow stores it
-until a gate consumes it. `MissionWorkflow` opens two kinds of gate
-([08-durable-execution.md](08-durable-execution.md#human-gates)):
-
-| Gate | Opens when | Options | On timeout |
-|---|---|---|---|
-| Action approval | a cycle attempted an irreversible command (for example `git push`) | `approve`, `reject` | `reject` after `--approval-timeout-hours` |
-| Deadlock | no item is actionable and `--deadlock-gate-hours` is not 0 | `retry`, `abort` | `abort` after `--deadlock-gate-hours` |
-
-An approved action is allowed once, in a later cycle, for exactly the same command and arguments.
-A decision that does not match the open gate's options (compared case-insensitively) is
-discarded, recorded in `rejected_decisions`, and the gate keeps waiting, so run `mission-status`
-first to see which gate is open. With `--deadlock-gate-hours 0`, a deadlock ends the mission
-immediately with status `IMPOSSIBLE`.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 uv run lha mission-approve mission_3f9a1c0b2d4e --decision approve      # a queued action
 uv run lha mission-approve mission_3f9a1c0b2d4e --decision impossible   # the deadlock gate
 uv run lha mission-snooze  mission_3f9a1c0b2d4e --seconds 3600          # 0 wakes it
 uv run lha mission-abort   mission_3f9a1c0b2d4e
 ```
+
+`MissionWorkflow` opens two kinds of gate
+([08-durable-execution.md](08-durable-execution.md#human-gates)).
 
 **Irreversible actions.** When the agent runs a command the classifier flags (for example
 `git push`), it is refused for now and queued. After the cycle the workflow opens a `tool_call`
@@ -254,7 +213,8 @@ signal --name steer_v1`.
 
 ## How a cycle runs
 
-`MissionWorkflow` loops: run one `run_agent_cycle` activity, absorb its result, stop on a terminal
+`MissionWorkflow` loops: sleep while a scheduled start, pause or snooze is pending (`SLEEPING`),
+run one `run_agent_cycle` activity, absorb its result, open any human gates, stop on a terminal
 outcome, and Continue-As-New every 200 cycles or when Temporal suggests it.
 
 | Setting | Value |

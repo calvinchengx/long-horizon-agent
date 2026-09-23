@@ -11,11 +11,27 @@ All Python tests live in [`python/tests/`](../python/tests/) and run with `pytes
 
 | Directory | What it covers | Needs |
 |---|---|---|
-| `tests/unit/` | every module in isolation: safety classifier and egress, sandboxes (with fakes), the egress proxy (`test_egress_proxy.py`), tools, dispatcher, model backends over mocked HTTP, pricing and retry, governor and metering, anchor, checklist import (`test_checklist_import.py`), verifier, witnesses (`test_witnesses.py`), trusted runner (`test_trusted_runner.py`), agent loop, planner, reviewer, orchestrator, memory, coordination, CLI wiring, redaction, `spec/` conformance | nothing |
+| `tests/unit/` | every module in isolation: safety classifier and egress, sandboxes (with fakes), the egress proxy (`test_egress_proxy.py`), tools, dispatcher, model backends over mocked HTTP, pricing and retry, governor and metering, anchor, checklist import (`test_checklist_import.py`), verifier, witnesses (`test_witnesses.py`), trusted runner (`test_trusted_runner.py`), agent loop, planner, reviewer, orchestrator, memory, coordination, CLI wiring, redaction, `spec/` conformance; the feature files are listed below | nothing |
 | `tests/unit/test_large_missions.py` | the large-mission features through the real loop, dispatcher, verifier, `local` sandbox and git anchor with a scripted model: witnesses, trusted checks, protected paths, replanning of blocked items (and its budget and depth limits), approval gates and fingerprints, `fetch_url` registration, references and `lha vendor` | nothing |
-| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions, durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again), ClaimCheck, object store, saga, reconcile, history replay | the Temporal test server (downloaded automatically) |
+| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions (`test_durable_spine.py`); durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again); the escalation ladder, SLEEPING and the deadlock gate's `impossible` (`test_human_gates.py`); sub-agent fan-out (`test_subagent_fanout.py`); ClaimCheck, object store, saga and reconcile (`test_hardening.py`); history replay (`test_replay.py`) | the Temporal test server (downloaded automatically) |
 | `tests/load/` | `test_long_run.py`: many cycles with Continue-As-New firing repeatedly; history stays bounded and every item completes once | the Temporal test server |
-| `tests/integration/` | real Postgres + pgvector (migrations, schema, cost ledger, mission repo, semantic index); the real Docker sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network); the egress proxy against real Docker and the internet (`test_docker_egress.py`); and one mission that uses every large-mission feature together (`test_large_mission_e2e.py`) | opt-in, see below |
+| `tests/integration/` | real Postgres + pgvector: migrations, schema, cost ledger, mission upsert, semantic index (`test_postgres.py`), and `PostgresStore`, pgvector memory, the SQLite fallback for an unmigrated database and a `run-local` mission persisted to Postgres (`test_postgres_store.py`); the real Docker sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network); the egress proxy against real Docker and the internet (`test_docker_egress.py`); and one mission that uses every large-mission feature together (`test_large_mission_e2e.py`) | opt-in, see below |
+
+Unit test files for the human-in-the-loop, persistence, web, model, memory and coordination
+features (all run without services; HTTP, Postgres and the network are faked):
+
+| File | Covers |
+|---|---|
+| `test_hitl.py`, `test_hitl_ladder.py` | gate policies; the escalation schedule and rungs; `TerminalApprover` (`--approve-interactive`: shows argv and reason, default reject, no TTY or EOF rejects, reminders then reject on timeout); dispatcher `tool_approval` and `pending` events; the webhook outcomes; the redacted gate payload; the `notify_gate` and `declare_impossible` activities; `lha mission-status`, `mission-approve`, `mission-snooze` and the `mission-start` wiring of the ladder and SLEEPING |
+| `test_wrapper_gate_events.py` | dispatcher wrappers (`record_decision`, ownership guard) forward the gate's approval events; a tampered decision chain fails the cycle activity with a non-retryable `MissionConfigError` |
+| `test_decision_chain_wiring.py` | `.lha/decisions.ndjson` as a hash chain: legacy prefix folding, the `record_decision` tool, cycle-id stamping, the newest five in the snapshot, tamper detection on reads and checkpoints (a committed torn line counts), agent edits discarded, the local runner stopping on tampering, `lha decisions` and `--verify` |
+| `test_ownership_integration.py` | the Planner's disjoint write sets, `OwnershipGuard`, the git-layer ownership check, `.lha/ownership.json`, parallel waves in worktrees merged by `BranchIntegrator` with post-merge re-verification, failing implementers, review and reopen of parallel items, witnesses and splitting in a wave, the orchestrator stopping on a tampered chain |
+| `test_coordination.py`, `test_coord_fixes.py` | the ticket lifecycle and the ownership map |
+| `test_persist_db.py`, `test_persistence_postgres_fake.py`, `test_persistence_store.py` | the migration runner and repositories against fakes; `PostgresStore` against a fake connection (NULL for unknown cost, the migration check on open); `SqliteStore`, the store factory and its SQLite fallback, `LedgerSink` and `MissionTracker` |
+| `test_persistence_wiring.py` | every run path writes the mission row and every metered call: `run-local`, `mission` (with the Planner backfill), `orchestrate`, the cycle and sub-agent activities (including `WAITING_ON_HUMAN` for a queued approval, `ABORTED` on budget, and an unusable store without fallback as a config error), `mission-start`, and `lha missions` / `lha costs` |
+| `test_web_tools.py`, `test_web_wiring.py` | `fetch_url` and `web_search` error paths; the `LHA_WEB_ALLOW_HOSTS` allow-list and `--allow-host`, default-deny egress, private addresses and redirects, IDNA hosts, the size cap, host-bound credentials from the broker, untrusted wrapping, the Rule of Two preflight (refused before the workspace is touched, and a non-retryable config error in the activities), web tools in every run path |
+| `test_model_failover_health.py` | `LHA_FALLBACK_MODELS` parsing and chain order, pricing by the serving model, the health probe per backend (stub, OpenAI-compatible model list, Ollama pulled model, Claude model lookup, failover), the durable health probe reporting a model outage |
+| `test_memory_service.py`, `test_hybrid_memory.py`, `test_memory.py`, `test_mem_fixes.py` | tiered memory in the prompt (budget, determinism, episodic recall, skills admitted only after verification, consolidation), degradation to lexical retrieval when the embedder or dense index fails, Postgres memory needing pgvector and a 1024-wide embedder, hybrid retrieval and fusion |
 
 ```bash
 uv run pytest -q tests/unit
@@ -43,16 +59,34 @@ crashes and outages are simulated deterministically.
 determinism:
 
 - `test_fresh_history_replays` records a three-item mission and replays it.
+- `test_fresh_approval_ladder_history_replays` records a mission whose queued `git push` is
+  approved at a gate on the escalation ladder, and replays it.
 - `test_recorded_histories_still_replay` replays every history in
-  `tests/durability/histories/` (currently `mission_three_items.json`) against the current
-  `MissionWorkflow`. If a code change makes an in-flight mission non-deterministic, this fails.
+  `tests/durability/histories/` against the current `MissionWorkflow`, and requires at least
+  these four:
+  - `mission_three_items.json`: a plain three-item mission;
+  - `mission_deadlock_gate_legacy.json` and `mission_approval_gate_legacy.json`: a deadlock
+    gate answered `retry` and an approval gate answered `approve`, recorded with the workflow
+    code from before the escalation ladder. They replay only because the ladder is guarded by
+    `workflow.patched("lha-gate-escalation-v1")`;
+  - `mission_approval_ladder.json`: the ladder path.
+
+  If a code change makes an in-flight mission non-deterministic, this fails.
+- `test_committed_histories_cover_what_they_claim` checks that the legacy histories carry no
+  patch marker (and schedule `unblock_items`, or no `notify_gate`), and that the ladder history
+  carries the `lha-gate-escalation-v1` marker and schedules `run_agent_cycle`, `notify_gate`,
+  `notify_gate`, `run_agent_cycle`.
 - `test_replay_detects_a_changed_workflow` renames the activity in the recorded history and
   requires replay to fail with a non-determinism error.
 
-To re-record after an intentional incompatible change:
+No committed history covers the SLEEPING path (`lha-sleeping-v1`); `test_human_gates.py`
+exercises it live.
+
+Compatible changes are guarded with `workflow.patched` and do not re-record. After an
+intentional incompatible change (shipped under a new Build ID), re-record one history:
 
 ```bash
-LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py
+LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py -k <test>
 ```
 
 The recorder rewrites machine-specific paths in payloads (`/workspace/mission`, `python3`) so the
@@ -148,8 +182,8 @@ cd python && uv run pytest -q tests/unit/test_spec_conformance.py
 cd go && go test ./internal/spec/
 ```
 
-Python runs all nine files. Go runs seven; `coordination/decision_chain.json` and
-`coordination/shared_paths.json` wait for the Go package that implements them.
+Python runs all nine files. Go runs eight; `coordination/shared_paths.json` waits for a Go port
+of the ownership map.
 
 The spec files live outside the Go module (`spec/` is next to `go/`), so Go's test cache does not
 see them change. After regenerating `spec/` (or editing it), run the Go conformance tests with
@@ -170,9 +204,10 @@ go test ./...
 go test -short ./...   # skips the slow cross-implementation anchor tests
 ```
 
-Packages with tests: `config`, `contracts`, `governor`, `model`, `obs`, `safety`, `spec`,
-`state`, `verify`. `internal/state/crossimpl_test.go` writes a mission anchor with Go and reads it with the
-Python implementation (via `uv run --project ../python`), and the reverse; it skips when `uv` is
-not on `PATH` or under `-short`. `internal/safety/zz_pydiff_test.go` compares Go egress host,
-URL and address handling against JSON dumps from Python in the directory named by `LHA_PYDIFF`;
-it skips when that variable is unset.
+Packages with tests: `config`, `contracts`, `governor`, `model`, `obs`, `safety` (and
+`safety/pystr`), `spec`, `state`, `verify`. `internal/state/decision_chain_test.go` covers the
+Go decision chain. `internal/state/crossimpl_test.go` writes a mission anchor with Go and reads
+it with the Python implementation (via `uv run --project ../python`), and the reverse, including
+byte-identical `decisions.ndjson` links and each side verifying the other's chain; it skips
+when `uv` is not on `PATH` or under `-short`. There is no Go CLI or Temporal worker, so no Go
+test exercises a workflow or its replay.

@@ -5,8 +5,8 @@ Python implementation in `../python/` (same commands, `LHA_*` settings, `.lha/` 
 Postgres schema, and Temporal workflow/activity names and payloads). See the
 [project README](../README.md) and [`spec/`](../spec/) for the shared conformance cases.
 
-The Go port is landing in phases, and the `lha` command itself (`cmd/lha`) is not built yet;
-use the Python implementation to run missions today. See
+The Go port is landing in phases. There is no `lha` command (`cmd/lha` does not exist yet) and
+no Temporal worker, so use the Python implementation to run missions today. See
 [choosing an implementation](../docs/04-choosing-an-implementation.md) for what is ported.
 
 Tests, vet and formatting (from this directory):
@@ -15,9 +15,12 @@ Tests, vet and formatting (from this directory):
 gofmt -l . && go vet ./... && go test ./...
 ```
 
-Layout mirrors the Python packages: `internal/contracts` (shared types), `internal/config`
-(`LHA_*` settings) and `internal/spec` (the conformance runner) today; `internal/safety`,
-`internal/model`, `internal/state`, `internal/verify`, `internal/governor` and `internal/obs` as
-phase 1 lands, then `internal/execution`, `internal/agent` and `cmd/lha`.
+Layout mirrors the Python packages. Present today: `internal/contracts` (shared types),
+`internal/config` (`LHA_*` settings), `internal/spec` (the conformance runner),
+`internal/safety` (command classifier, egress policy, Rule of Two), `internal/model` (backends,
+pricing, retry, failover), `internal/state` (git ops, the mission anchor and the hash-chained
+decision log), `internal/verify`, `internal/governor` and `internal/obs`. Not started:
+`internal/execution`, `internal/agent`, the approval gates, memory, persistence, the durable
+worker and `cmd/lha`.
 
 Author: Calvin Cheng <calvin@calvinx.com>. MIT licensed.

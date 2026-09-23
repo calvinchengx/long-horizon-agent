@@ -17,7 +17,7 @@ QUERY_GATE = "gate_v1"
 QUERY_GATE_LOG = "gate_log_v1"
 UPDATE_VERIFY_VERDICT = "verify_verdict_v1"
 
-# Mission status values (mirror the `missions.status` DB enum).
+# Mission status values (the values of the text column `missions.status`).
 STATUS_RUNNING = "RUNNING"
 STATUS_SLEEPING = "SLEEPING"  # on a durable timer by design (pause / scheduled start / snooze)
 STATUS_WAITING_ON_HUMAN = "WAITING_ON_HUMAN"  # a gate is open

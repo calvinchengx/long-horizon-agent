@@ -21,9 +21,10 @@ its tests show.
    passes, and every one of the item's witnesses passes. The model's "done" only ends its turn
    (see [07-verification.md](07-verification.md)). Splitting a blocked item moves its witnesses to
    the last child, so replanning cannot lower the bar.
-5. **Docs describe the code as it is.** Designed-but-unwired features are labelled **planned**.
-   These pages were checked against the code; where they disagree with the code, the code wins
-   and the page is a bug.
+5. **Docs describe the code as it is.** Code that exists but that no command or workflow calls
+   is labelled **library**; designed features with no code are labelled **planned**. These pages
+   were checked against the code; where they disagree with the code, the code wins and the page
+   is a bug.
 
 ## Proven by tests
 
@@ -46,6 +47,13 @@ suites; see [20-testing.md](20-testing.md)):
 | Irreversible actions wait for a human on the durable path; an approval is used once, a rejection is not re-asked | `tests/durability/test_approvals.py`, `tests/unit/test_large_missions.py` |
 | The sandbox egress proxy allows only listed hosts, refuses private addresses, and leaves no containers or networks behind | `tests/unit/test_egress_proxy.py`, `tests/integration/test_docker_egress.py` |
 | Migrations, the idempotent cost ledger and the pgvector index work on real Postgres; the Docker sandbox enforces its limits; one mission exercises every large-mission feature together on real Docker | `tests/integration/` (CI job `python-services-integration`), including `test_large_mission_e2e.py` |
+| Human gates escalate with reminders and then apply their default; the deadlock gate accepts retry, abort and impossible; a scheduled start and the pause between cycles report `SLEEPING` | `tests/durability/test_human_gates.py`, `tests/unit/test_hitl_ladder.py` |
+| Web tools are registered only with an allow-list, deny other hosts and private addresses, bind brokered credentials to their hosts, fence their output as untrusted, and a run holding web tools plus private data is refused before it starts | `tests/unit/test_web_wiring.py`, `test_web_tools.py` |
+| The fallback chain fails over on transient errors only; the health probe contacts the configured provider | `tests/unit/test_model_failover_health.py` |
+| Every run path writes the mission row and every metered model call to the store; `lha missions` and `lha costs` read them back | `tests/unit/test_persistence_wiring.py`, `tests/integration/test_postgres_store.py` |
+| Recorded decisions are hash-chained, shown in the next cycle's prompt, and an altered log stops the run | `tests/unit/test_decision_chain_wiring.py` |
+| Parallel implementers cannot write files they do not own, and only verified, owned, conflict-free, re-verified branches are merged | `tests/unit/test_ownership_integration.py` |
+| Tiered memory is recalled into the prompt, survives activity retries, and degrades to lexical-only retrieval instead of failing a cycle | `tests/unit/test_memory_service.py`, `test_persistence_wiring.py` |
 
 These tests use the stub model (scripted, including the replanner's split and the approver's
 answer) and simulated failures. They prove that the system behaves correctly around the model;
@@ -58,17 +66,31 @@ a blocked item are.
   multi-day mission unattended. LHA's claim is narrower: the system can run for weeks (sleep,
   survive crashes, resume) while a model drives it in verified steps. Whether a given model makes
   useful progress over that span is an open question.
-- **The multi-agent organization helps.** `lha orchestrate` runs researchers, a lead and a
-  reviewer, and is unit-tested with scripted models. There is no measurement showing it beats the
-  single-agent loop on real tasks.
-- **Operational features that are built but not wired.** Langfuse export, OpenTelemetry export
-  from the CLI, the Postgres repositories (including the cost ledger), semantic and episodic
-  memory, file ownership, the hash-chained decision log, sub-agent fan-out inside the durable
-  workflow, saga compensation, orphan reconciliation, flaky-test quarantine, offline prompt
-  evolution and the eval harness exist as tested library code with no command or workflow
-  calling them (see [23-roadmap.md](23-roadmap.md)). The large-mission features (checklist
-  import, witnesses, trusted checks, protected paths, replanning, sandbox image and egress,
-  references, approvals) are wired into every Python run path.
+- **The multi-agent organization helps.** `lha orchestrate` runs researchers, a lead, parallel
+  implementers with a branch integrator, and a reviewer, and is unit-tested with scripted models.
+  There is no measurement showing it beats the single-agent loop on real tasks.
+- **Library code that no command or workflow calls.** Langfuse export (`build_langfuse` only
+  builds a client), an OpenTelemetry exporter (LHA installs no `TracerProvider`), sub-agent
+  fan-out inside the durable workflow (the worker registers `SubAgentWorkflow` and
+  `research_children` is tested, but `MissionWorkflow` never starts a child), saga compensation,
+  orphan-branch reconciliation, the durable ticket ledgers, flaky-test quarantine, mutation checks
+  and trust bootstrap, offline prompt evolution and the eval harness exist as tested library code
+  only (see [23-roadmap.md](23-roadmap.md)). These, by contrast, are wired into the run paths: the
+  large-mission features, human approval gates with the escalation ladder and webhook, the
+  `SLEEPING` status, web tools under the egress policy and the Rule of Two, the fallback model
+  chain and health probe, SQLite/Postgres persistence of mission rows and the cost ledger, tiered
+  memory in the prompt, the hash-chained decision log, and, in `lha orchestrate` only, file
+  ownership, tickets, the blackboard, parallel implementer waves and the branch integrator.
+- **Known gaps in wired features.** Gates are not written to the `hitl_gates` table; they live in
+  the workflow state and as `gate_*` events in the anchor. A durable mission's row never shows
+  `DEGRADED_PARK` or `SLEEPING`, nor `WAITING_ON_HUMAN` for the deadlock gate, nor the outcome
+  the workflow reaches after a gate decision or at `max_cycles`: it shows what the last cycle
+  activity wrote. A `LeaseRequest` for a foreign file is never granted. `lha orchestrate` does not
+  resume an earlier run. The default `hash` embedder is lexical, not semantic. Every
+  `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`.
+  `fetch_url` checks the resolved address before connecting, but the HTTP client resolves again,
+  so DNS rebinding between the two lookups is a residual risk. The Go port has no CLI and no
+  Temporal worker yet.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends are tested against mocked HTTP, not
   live endpoints.
@@ -88,7 +110,7 @@ parts of the current code and do not match it everywhere:
 
 - `phase0-durable-spine.md` names `test_crash_after_side_effect_is_idempotent` (now
   `test_crash_after_commit_is_idempotent`), predicts about 30 tests (the suite now collects over
-  600), and shows a `phase0-placeholder` check name (check names are now derived from the check
+  1,000), and shows a `phase0-placeholder` check name (check names are now derived from the check
   command).
 - `lsp-weeklong-run.txt` shows features the code does not have: a worker Build ID, a separate
   `lha-research` task queue, research fan-out inside the durable run, a `--task @file` argument

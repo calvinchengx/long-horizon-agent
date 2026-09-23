@@ -266,7 +266,7 @@ def console_gate(settings: Settings | None = None) -> TerminalApprover:
     """The terminal approver for attended local runs (``--approve-interactive``).
 
     Anything but ``y``/``yes`` rejects; no TTY rejects without asking; no answer within
-    ``LHA_APPROVAL_TIMEOUT_SECONDS`` rejects, after reminders at ``LHA_GATE_ESCALATION_SECONDS``.
+    ``LHA_CONSOLE_APPROVAL_TIMEOUT_S`` rejects, after reminders at ``LHA_GATE_ESCALATION_SECONDS``.
     """
     settings = settings or get_settings()
     return TerminalApprover(

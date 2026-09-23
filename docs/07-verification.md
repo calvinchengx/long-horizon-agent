@@ -7,8 +7,9 @@ finished only ends its turn loop; it has no effect on the item's status.
 Code: [`python/src/lha/contracts/verify.py`](../python/src/lha/contracts/verify.py) (types,
 verdict rules, check naming) and [`python/src/lha/verify/`](../python/src/lha/verify/)
 (`DeterministicVerifier`, witnesses, trusted checks, harness integrity, flaky quarantine). Go
-mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier and harness
-integrity but not yet witnesses, trusted checks or extra protected paths.
+mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier, harness
+integrity and the flaky quarantine but not yet witnesses, trusted checks or extra protected
+paths (the Go `Check` type does accept `where`).
 
 ## Checks
 
@@ -56,6 +57,14 @@ Within a cycle (see [architecture](05-architecture.md#the-cycle)):
 3. The final verdict decides the checkpoint: `passed` gives `record_success`; anything else gives
    `record_failure`, which blocks the item after 3 consecutive failures; a newly blocked item
    may then be split by the replanner ([item lifecycle](06-mission-anchor.md#item-lifecycle)).
+
+In an `lha orchestrate` parallel wave, each implementer's branch is verified in its own git
+worktree with the same checks and witnesses. The `BranchIntegrator` merges a verified branch
+into the mission branch only after checking that the branch changed no file its writer does
+not own, then runs the checks again on the merged result; the item becomes `done` only if that
+post-merge verification passes. The checkpoint's `cycle` event reports the post-merge results
+when a merge happened, otherwise the branch's own
+([multi-agent organization](11-multi-agent-organization.md)).
 
 ## Choosing checks
 
@@ -217,8 +226,9 @@ evidence: the check must have both passed and failed on the same revision (at le
 over at least 3 runs by default); `mark_flaky` otherwise raises `FlakeEvidenceError`. Even with
 every check quarantined, the verdict would be `unverified`, not `passed`.
 
-The quarantine is a tested library component but is not wired into any run path today: no CLI
-command or activity records check history or marks checks flaky.
+The quarantine (Python, and its Go port) is a tested library component but is not wired into
+any run path: no CLI command, local runner, orchestrator or activity records check history or
+marks checks flaky, so every configured check stays gating.
 
 The same applies to the verifier-trust helpers in
 [`verify/trust_bootstrap.py`](../python/src/lha/verify/trust_bootstrap.py) (coverage

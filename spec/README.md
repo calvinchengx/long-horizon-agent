@@ -3,8 +3,9 @@
 LHA has two implementations (`python/` and `go/`) that must behave identically wherever
 behaviour is observable: which commands a human must approve, which URLs may be fetched, what
 gets redacted, how checklists move, what bytes a hash chain covers, what a model call costs. The
-JSON files here pin that behaviour, and both test suites run them (Go gains each file's runner as
-the matching package is ported):
+JSON files here pin that behaviour, and both test suites run them. Go gains each file's runner as
+the matching package is ported; it runs every file below except
+`coordination/shared_paths.json`, because file ownership is not ported yet.
 
 - Python: `python/tests/unit/test_spec_conformance.py`
 - Go: `go/internal/spec/conformance_*_test.go`
