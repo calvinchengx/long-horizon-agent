@@ -66,7 +66,7 @@ See [13-models.md](13-models.md).
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
 | `LHA_POSTGRES_DSN` | secret | unset | Postgres DSN for `lha db migrate` and the mission store; unset: the SQLite store |
-| `LHA_SQLITE_PATH` | string | `.lha/lha.sqlite3` | the SQLite mission store (WAL mode), relative to the working directory; if it would fall inside a mission's checkout it is moved to `<checkout>/.git/lha/` |
+| `LHA_SQLITE_PATH` | string | unset | the SQLite mission store (WAL mode). Unset: one per-user file every process shares, `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` (macOS) or `~/.local/share/lha/lha.sqlite3`. A relative path resolves against the working directory, with a warning. If it would fall inside a mission's checkout it is moved to `<checkout>/.git/lha/`. `lha config` prints the resolved path |
 | `LHA_POSTGRES_FALLBACK_TO_SQLITE` | bool | `true` | if `LHA_POSTGRES_DSN` is set but unusable (unreachable, not migrated, `psycopg` missing): `true` warns and uses SQLite, `false` fails the run |
 | `LHA_WORKSPACE_ROOT` | string | `.lha/workspaces` | declared but not read by any code; each command's `--workdir` default is hard-coded |
 | `LHA_OBJECT_STORE_ROOT` | string | `.lha/objects` | ClaimCheck blob directory (resolved to an absolute path); client, workers and replay must share it |
@@ -81,13 +81,19 @@ store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
 
 - local runs (`run-local`, `mission`, `orchestrate`): `RUNNING` at the start; at the end `DONE`
   (complete), `IMPOSSIBLE` (deadlocked) or `ABORTED` (budget, max cycles, loop, or an error);
-- `mission-start`: `RUNNING`, with `workflow_id`;
+- `mission-start`: `RUNNING` (`SLEEPING` with `--start-in-seconds`), with `workflow_id`, before
+  it starts the workflow; `ABORTED` if the workflow cannot be started;
 - each `run_agent_cycle` activity: `RUNNING` while it works, then from the committed checklist
   `DONE` (complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval),
   `IMPOSSIBLE` (deadlocked) or `RUNNING` (including an item split by the replanner); `ABORTED`
-  when the budget refuses a call. States only the workflow knows are not written: `SLEEPING`,
-  `DEGRADED_PARK`, the deadlock gate being open, and the end of a mission by a deadlock-gate
-  decision, the cycle ceiling or `lha mission-abort` (the row keeps the last cycle's status). `lha mission-status` queries the live status from Temporal.
+  when the budget refuses a call;
+- the workflow, through the `record_mission_status` activity: `SLEEPING`, `DEGRADED_PARK`,
+  `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending (`DONE`,
+  `IMPOSSIBLE`, or `ABORTED` for a deadlock-gate abort, the cycle ceiling, the budget, a
+  non-retryable failure or `lha mission-abort`). Best effort: 30 s per attempt, three attempts,
+  then a logged warning; the mission never waits longer or fails because of it.
+
+`lha mission-status` queries the live status from Temporal.
 
 ### Memory
 
@@ -251,8 +257,7 @@ keys do not reach agent-run commands. Keep `.env` out of version control (`.giti
 | `LHA_IT_POSTGRES_DSN` | `tests/integration/conftest.py` | admin DSN for a Postgres with `vector` available; each test creates and drops its own database. Unset: Postgres tests are skipped |
 | `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine`, and the egress tests need internet access). Otherwise skipped |
 | `LHA_IT_SANDBOX_IMAGE` | `tests/integration/test_large_mission_e2e.py` | the polyglot sandbox image built from `sandbox/Dockerfile` (default `lha-sandbox:dev`) |
-| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json` and `mission_approval_ladder.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
-| `LHA_PYDIFF` | `go/internal/safety/zz_pydiff_test.go` | directory of Python egress dumps for the Go differential tests; unset: skipped |
+| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json`, `mission_approval_ladder.json` and `mission_row_gate_retry.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
 | `LHA_APPDB_PASSWORD` | `docker-compose.yml` | `appdb` password (default `lha`) |
 | `LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_SALT` | `docker-compose.yml` | required by the Langfuse service; compose refuses to start without them |
 

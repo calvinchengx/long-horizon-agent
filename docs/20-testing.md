@@ -13,7 +13,7 @@ All Python tests live in [`python/tests/`](../python/tests/) and run with `pytes
 |---|---|---|
 | `tests/unit/` | every module in isolation: safety classifier and egress, sandboxes (with fakes), the egress proxy (`test_egress_proxy.py`), tools, dispatcher, model backends over mocked HTTP, pricing and retry, governor and metering, anchor, checklist import (`test_checklist_import.py`), verifier, witnesses (`test_witnesses.py`), trusted runner (`test_trusted_runner.py`), agent loop, planner, reviewer, orchestrator, memory, coordination, CLI wiring, redaction, `spec/` conformance; the feature files are listed below | nothing |
 | `tests/unit/test_large_missions.py` | the large-mission features through the real loop, dispatcher, verifier, `local` sandbox and git anchor with a scripted model: witnesses, trusted checks, protected paths, replanning of blocked items (and its budget and depth limits), approval gates and fingerprints, `fetch_url` registration, references and `lha vendor` | nothing |
-| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions (`test_durable_spine.py`); durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again); the escalation ladder, SLEEPING and the deadlock gate's `impossible` (`test_human_gates.py`); sub-agent fan-out (`test_subagent_fanout.py`); ClaimCheck, object store, saga and reconcile (`test_hardening.py`); history replay (`test_replay.py`) | the Temporal test server (downloaded automatically) |
+| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions (`test_durable_spine.py`); durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again); the escalation ladder, SLEEPING and the deadlock gate's `impossible` (`test_human_gates.py`); the mission row the workflow writes: `SLEEPING` while sleeping, `WAITING_ON_HUMAN` while the deadlock gate is open, the final status after retry, abort, impossible and a cancellation (while sleeping, at a gate, mid-cycle, which never parks), and a failing row write that never fails the mission (`test_mission_row.py`); sub-agent fan-out (`test_subagent_fanout.py`); ClaimCheck, object store, saga and reconcile (`test_hardening.py`); history replay (`test_replay.py`) | the Temporal test server (downloaded automatically) |
 | `tests/load/` | `test_long_run.py`: many cycles with Continue-As-New firing repeatedly; history stays bounded and every item completes once | the Temporal test server |
 | `tests/integration/` | real Postgres + pgvector: migrations, schema, cost ledger, mission upsert, semantic index (`test_postgres.py`), and `PostgresStore`, pgvector memory, the SQLite fallback for an unmigrated database and a `run-local` mission persisted to Postgres (`test_postgres_store.py`); the real Docker sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network); the egress proxy against real Docker and the internet (`test_docker_egress.py`); and one mission that uses every large-mission feature together (`test_large_mission_e2e.py`) | opt-in, see below |
 
@@ -27,8 +27,8 @@ features (all run without services; HTTP, Postgres and the network are faked):
 | `test_decision_chain_wiring.py` | `.lha/decisions.ndjson` as a hash chain: legacy prefix folding, the `record_decision` tool, cycle-id stamping, the newest five in the snapshot, tamper detection on reads and checkpoints (a committed torn line counts), agent edits discarded, the local runner stopping on tampering, `lha decisions` and `--verify` |
 | `test_ownership_integration.py` | the Planner's disjoint write sets, `OwnershipGuard`, the git-layer ownership check, `.lha/ownership.json`, parallel waves in worktrees merged by `BranchIntegrator` with post-merge re-verification, failing implementers, review and reopen of parallel items, witnesses and splitting in a wave, the orchestrator stopping on a tampered chain |
 | `test_coordination.py`, `test_coord_fixes.py` | the ticket lifecycle and the ownership map |
-| `test_persist_db.py`, `test_persistence_postgres_fake.py`, `test_persistence_store.py` | the migration runner and repositories against fakes; `PostgresStore` against a fake connection (NULL for unknown cost, the migration check on open); `SqliteStore`, the store factory and its SQLite fallback, `LedgerSink` and `MissionTracker` |
-| `test_persistence_wiring.py` | every run path writes the mission row and every metered call: `run-local`, `mission` (with the Planner backfill), `orchestrate`, the cycle and sub-agent activities (including `WAITING_ON_HUMAN` for a queued approval, `ABORTED` on budget, and an unusable store without fallback as a config error), `mission-start`, and `lha missions` / `lha costs` |
+| `test_persist_db.py`, `test_persistence_postgres_fake.py`, `test_persistence_store.py` | the migration runner and repositories against fakes; `PostgresStore` against a fake connection (NULL for unknown cost, the migration check on open); `SqliteStore`, the store factory and its SQLite fallback, the SQLite path (the per-user default, a relative path's warning, the move out of a checkout), `LedgerSink` and `MissionTracker` |
+| `test_persistence_wiring.py` | every run path writes the mission row and every metered call: `run-local`, `mission` (with the Planner backfill), `orchestrate`, the cycle and sub-agent activities (including `WAITING_ON_HUMAN` for a queued approval, `ABORTED` on budget, and an unusable store without fallback as a config error), `mission-start` (the row before the workflow starts: `RUNNING`, `SLEEPING` for a scheduled start, `ABORTED` if the start fails), the `record_mission_status` activity, `lha config`'s `mission store` line, and `lha missions` / `lha costs` |
 | `test_web_tools.py`, `test_web_wiring.py` | `fetch_url` and `web_search` error paths; the `LHA_WEB_ALLOW_HOSTS` allow-list and `--allow-host`, default-deny egress, private addresses and redirects, IDNA hosts, the size cap, host-bound credentials from the broker, untrusted wrapping, the Rule of Two preflight (refused before the workspace is touched, and a non-retryable config error in the activities), web tools in every run path |
 | `test_model_failover_health.py` | `LHA_FALLBACK_MODELS` parsing and chain order, pricing by the serving model, the health probe per backend (stub, OpenAI-compatible model list, Ollama pulled model, Claude model lookup, failover), the durable health probe reporting a model outage |
 | `test_memory_service.py`, `test_hybrid_memory.py`, `test_memory.py`, `test_mem_fixes.py` | tiered memory in the prompt (budget, determinism, episodic recall, skills admitted only after verification, consolidation), degradation to lexical retrieval when the embedder or dense index fails, Postgres memory needing pgvector and a 1024-wide embedder, hybrid retrieval and fusion |
@@ -61,21 +61,27 @@ determinism:
 - `test_fresh_history_replays` records a three-item mission and replays it.
 - `test_fresh_approval_ladder_history_replays` records a mission whose queued `git push` is
   approved at a gate on the escalation ladder, and replays it.
+- `test_fresh_mission_row_history_replays` records a mission that deadlocks, is retried at the
+  deadlock gate and completes, with the workflow's mission-row writes, and replays it.
 - `test_recorded_histories_still_replay` replays every history in
   `tests/durability/histories/` against the current `MissionWorkflow`, and requires at least
-  these four:
+  these five:
   - `mission_three_items.json`: a plain three-item mission;
   - `mission_deadlock_gate_legacy.json` and `mission_approval_gate_legacy.json`: a deadlock
     gate answered `retry` and an approval gate answered `approve`, recorded with the workflow
     code from before the escalation ladder. They replay only because the ladder is guarded by
     `workflow.patched("lha-gate-escalation-v1")`;
-  - `mission_approval_ladder.json`: the ladder path.
+  - `mission_approval_ladder.json`: the ladder path;
+  - `mission_row_gate_retry.json`: the mission-row path (`lha-mission-row-v1`), a deadlock gate
+    answered `retry`, then done.
 
   If a code change makes an in-flight mission non-deterministic, this fails.
 - `test_committed_histories_cover_what_they_claim` checks that the legacy histories carry no
   patch marker (and schedule `unblock_items`, or no `notify_gate`), and that the ladder history
   carries the `lha-gate-escalation-v1` marker and schedules `run_agent_cycle`, `notify_gate`,
-  `notify_gate`, `run_agent_cycle`.
+  `notify_gate`, `run_agent_cycle`; that no older history carries `lha-mission-row-v1` or
+  schedules `record_mission_status`; and that the mission-row history carries both markers and
+  schedules `record_mission_status` when the deadlock gate opens and at the end.
 - `test_replay_detects_a_changed_workflow` renames the activity in the recorded history and
   requires replay to fail with a non-determinism error.
 

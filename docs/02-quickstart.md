@@ -63,8 +63,10 @@ cat ../.lha/workspaces/stub-demo/.lha/checklist.json   # "status": "blocked", "a
 git -C ../.lha/workspaces/stub-demo log --oneline        # initialize, attempt, attempt, block
 ```
 
-The run is also recorded in the mission store, a SQLite file at `.lha/lha.sqlite3` under the
-directory you ran from (`LHA_SQLITE_PATH`; Postgres when `LHA_POSTGRES_DSN` is set):
+The run is also recorded in the mission store, a per-user SQLite file
+(`~/.local/share/lha/lha.sqlite3` on Linux, `~/Library/Application Support/lha/lha.sqlite3` on
+macOS; `LHA_SQLITE_PATH` overrides it, Postgres when `LHA_POSTGRES_DSN` is set; `lha config`
+prints the location):
 
 ```bash
 uv run lha missions                 # the mission, status IMPOSSIBLE (deadlocked), known spend

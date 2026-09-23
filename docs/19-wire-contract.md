@@ -302,8 +302,9 @@ default), the run falls back to SQLite and the store's `degraded_reason` says wh
 fallback off, the durable cycle activity fails with a non-retryable `MissionConfigError`.
 
 `SqliteStore` ([`persistence/sqlite.py`](../python/src/lha/persistence/sqlite.py)) uses the
-file `LHA_SQLITE_PATH` (default `.lha/lha.sqlite3`, resolved against the current directory; a
-path inside the mission checkout is moved to `<workdir>/.git/lha/<name>`), WAL mode, and creates
+file `LHA_SQLITE_PATH` (unset: a per-user file every process shares: `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` on macOS or `~/.local/share/lha/lha.sqlite3` on Linux; a relative path resolves against the current
+directory, with a warning; a path inside the mission checkout is moved to
+`<workdir>/.git/lha/<name>`), WAL mode, and creates
 its schema on open from its own migration list (`sqlite_0001_init`, recorded in its own
 `schema_migrations`). It has the same `missions`, `cost_ledger`, `episodic_events`,
 `semantic_memory` and `skills` columns as Postgres after `0004`, with SQLite types: JSON as
@@ -315,21 +316,24 @@ What is written, and by whom:
 
 | Table | Written by |
 |---|---|
-| `missions` | `MissionTracker` ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)), an upsert on `mission_id` |
+| `missions` | `MissionTracker` ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)) and the `record_mission_status` activity, an upsert on `mission_id` (an empty title or description keeps the stored one) |
 | `cost_ledger` | `LedgerSink`, installed as `CostMeter.on_record`: one row per metered model call, keyed by an idempotency key derived from mission id, cycle id and `<key prefix>#<sequence number>`, so a repeated write is a no-op. Key prefixes: `<cycle id>@<attempt>` for a durable cycle (a retried attempt's calls are new rows), `sub:<workflow id>:<activity id>@<attempt>` for a durable sub-agent, `planner` for the Planner's calls in `lha mission-start`; a local runner uses an empty prefix and backfills the calls its meter recorded before the store opened |
 | `episodic_events`, `semantic_memory`, `skills` | the memory plane ([`memory/service.py`](../python/src/lha/memory/service.py)) when `LHA_MEMORY_ENABLED` is true |
 | `checklist_items`, `idempotency_keys`, `hitl_gates`, `snapshots` | nothing; the tables exist in Postgres only |
 
 Mission row statuses actually written: a local runner (`run-local`, `mission`, `orchestrate`)
 writes `RUNNING` at start and, at the end, `DONE` (complete), `IMPOSSIBLE` (deadlocked) or
-`ABORTED` (anything else). `lha mission-start` writes the row as `RUNNING` with the workflow id
-after starting the workflow. In a durable run the cycle activity writes `RUNNING` when a cycle
-starts, `ABORTED` when the budget is exceeded, and after the checkpoint `DONE` (checklist
-complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval),
-`IMPOSSIBLE` (deadlocked) or `RUNNING`. The workflow itself writes nothing, so `DEGRADED_PARK`,
-`SLEEPING`, the deadlock gate's `WAITING_ON_HUMAN`, and a final outcome decided in the workflow
-(abort or impossible at the deadlock gate, a human `retry`, `max_cycles`) never reach the row;
-`status_v1` is the live source for those. Gates are not written to `hitl_gates`; their history
+`ABORTED` (anything else). `lha mission-start` writes the row as `RUNNING` (`SLEEPING` with
+`--start-in-seconds`) with the workflow id before starting the workflow, and `ABORTED` if the
+start fails. In a durable run the cycle activity writes `RUNNING` when a cycle starts, `ABORTED`
+when the budget is exceeded, and after the checkpoint `DONE` (checklist complete),
+`WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval), `IMPOSSIBLE`
+(deadlocked) or `RUNNING`. The workflow writes the statuses only it decides through the
+`record_mission_status` activity (`MissionStatusInput`: `mission_id`, `workdir`, `status`,
+`head_sha`, `reason`; the reason is logged, not stored): `SLEEPING`, `DEGRADED_PARK`,
+`WAITING_ON_HUMAN` when a gate opens, and the final status of every ending (`DONE`,
+`IMPOSSIBLE`, `ABORTED` for abort at the deadlock gate, `max_cycles`, budget, a non-retryable
+failure or a cancellation). Those writes are best effort; `status_v1` stays the live source. Gates are not written to `hitl_gates`; their history
 is in the anchor's `gate_*` events and the `gate_log_v1` query.
 
 `lha missions` lists mission rows with their cost summary, and `lha costs <mission id>` prints a

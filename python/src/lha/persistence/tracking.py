@@ -7,7 +7,9 @@
 * ``MissionTracker`` upserts the ``missions`` row as the run moves RUNNING → DONE / ABORTED /
   IMPOSSIBLE (``status_for_stop`` maps a local runner's stop reason to the same terminal status
   the durable workflow reports); the durable cycle activity also writes WAITING_ON_HUMAN when a
-  cycle queued an approval (``durable.activities.cycle_status``).
+  cycle queued an approval (``durable.activities.cycle_status``), and the workflow writes the
+  statuses only it decides (SLEEPING, DEGRADED_PARK, an open gate, every final status) through
+  the ``record_mission_status`` activity.
 
 Persistence is an observer of the run, never a reason to fail it: store errors are logged and
 counted (``failures``), not raised into the agent loop.

@@ -11,13 +11,16 @@ Everything a run persists outside git goes through ``MissionStore``:
 
 ``open_store(settings)`` picks the backend: ``LHA_POSTGRES_DSN`` set → ``PostgresStore`` (tables
 from ``db/migrations``; run ``lha db migrate`` first), otherwise ``SqliteStore`` (stdlib
-``sqlite3``, WAL mode, schema created on open). If Postgres is configured but unusable, the run
+``sqlite3``, WAL mode, schema created on open) at ``resolve_sqlite_path``: ``LHA_SQLITE_PATH`` if
+set, else one per-user file (``default_sqlite_path``) that every process shares. If Postgres is configured but unusable, the run
 falls back to SQLite (``settings.postgres_fallback_to_sqlite``) and the store says so via
 ``degraded_reason``.
 """
 
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
@@ -186,11 +189,63 @@ def _is_within(path: Path, root: Path) -> bool:
     return True
 
 
+#: The SQLite file name inside the per-user data directory.
+SQLITE_FILE = "lha.sqlite3"
+_warned_relative: set[str] = set()
+
+
+def default_sqlite_path() -> Path:
+    """The per-user SQLite store used when ``LHA_SQLITE_PATH`` is unset.
+
+    ``$XDG_DATA_HOME/lha/lha.sqlite3`` when ``XDG_DATA_HOME`` is set (absolute), else
+    ``~/Library/Application Support/lha/lha.sqlite3`` on macOS,
+    ``%LOCALAPPDATA%/lha/lha.sqlite3`` on Windows and ``~/.local/share/lha/lha.sqlite3``
+    elsewhere. Every process of one user (the CLI,
+    the worker, ``lha missions``) therefore shares one store, wherever it was started from.
+    """
+    xdg = os.environ.get("XDG_DATA_HOME", "").strip()
+    if xdg and Path(xdg).is_absolute():
+        base = Path(xdg)
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    elif sys.platform == "win32" and os.environ.get("LOCALAPPDATA"):
+        base = Path(os.environ["LOCALAPPDATA"])
+    else:
+        base = Path.home() / ".local" / "share"
+    return base / "lha" / SQLITE_FILE
+
+
+def configured_sqlite_path(settings: Settings) -> Path:
+    """``settings.sqlite_path`` made absolute, or ``default_sqlite_path()`` when it is empty.
+
+    A relative ``LHA_SQLITE_PATH`` still resolves against this process's working directory, so
+    processes started from different directories would use different stores: a warning says so
+    (once per path and process).
+    """
+    configured = settings.sqlite_path.strip()
+    if not configured:
+        return default_sqlite_path()
+    raw = Path(configured).expanduser()
+    path = raw.resolve()
+    if not raw.is_absolute() and configured not in _warned_relative:
+        _warned_relative.add(configured)
+        get_logger("lha.persistence").warning(
+            "sqlite_path_relative",
+            configured=configured,
+            path=str(path),
+            reason=(
+                "LHA_SQLITE_PATH is relative: it resolves against the working directory, so "
+                "processes started elsewhere use another store; set an absolute path"
+            ),
+        )
+    return path
+
+
 def resolve_sqlite_path(settings: Settings, *, workdir: str | Path | None = None) -> Path:
-    """``settings.sqlite_path`` made absolute; relocated under ``.git/lha/`` if it would land
-    inside ``workdir`` (a mission checkout is reset/cleaned and committed — never put the DB
-    there)."""
-    path = Path(settings.sqlite_path).expanduser().resolve()
+    """The SQLite store's absolute path (``configured_sqlite_path``); relocated under
+    ``.git/lha/`` if it would land inside ``workdir`` (a mission checkout is reset/cleaned and
+    committed — never put the DB there)."""
+    path = configured_sqlite_path(settings)
     if workdir is not None:
         root = Path(workdir).expanduser().resolve()
         if _is_within(path, root):
@@ -203,6 +258,20 @@ def resolve_sqlite_path(settings: Settings, *, workdir: str | Path | None = None
             )
             return relocated
     return path
+
+
+def describe_store(settings: Settings) -> str:
+    """Where ``open_store(settings)`` (no workdir) reads and writes, for humans."""
+    from lha.model import secret_value
+
+    if secret_value(settings.postgres_dsn):
+        fallback = (
+            f" (falls back to SQLite at {resolve_sqlite_path(settings)})"
+            if settings.postgres_fallback_to_sqlite
+            else ""
+        )
+        return f"postgres (LHA_POSTGRES_DSN){fallback}"
+    return f"sqlite {resolve_sqlite_path(settings)}"
 
 
 async def open_store(settings: Settings, *, workdir: str | Path | None = None) -> MissionStore:

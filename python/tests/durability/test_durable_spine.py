@@ -39,6 +39,7 @@ from lha.durable.activities import (
     _unblock,
     declare_impossible,
     make_cycle_activity,
+    make_record_status_activity,
     notify_gate,
 )
 from lha.durable.signals import (
@@ -92,8 +93,10 @@ async def _snapshot_activity(inp: HealthInput) -> CycleResult:
     return await _read_snapshot(inp)
 
 
-# The gate activities (anchor events + optional webhook, final "impossible" checkpoint).
-GATE_ACTIVITIES = [notify_gate, declare_impossible]
+# Writes the statuses the workflow owns to the missions row (same store as the cycle activity).
+ROW_ACTIVITY = make_record_status_activity(settings=SETTINGS)
+# The gate activities (anchor events + optional webhook, final "impossible" checkpoint) + the row.
+GATE_ACTIVITIES = [notify_gate, declare_impossible, ROW_ACTIVITY]
 
 
 async def _run(
@@ -294,6 +297,7 @@ async def test_outage_parks_then_resumes(tmp_path: Path) -> None:
                 _recovering_health,
                 _unblock_activity,
                 _snapshot_activity,
+                ROW_ACTIVITY,
             ],
         ),
     ):

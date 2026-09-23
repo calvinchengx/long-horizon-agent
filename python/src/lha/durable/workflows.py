@@ -33,19 +33,32 @@ start (``MissionInput.resume_at``), the pause between cycles (``cycle_pause_seco
 operator ``snooze``. It is distinct from ``DEGRADED_PARK`` (a dependency is down) and
 ``WAITING_ON_HUMAN`` (a gate is open).
 
+The ``missions`` row (``lha missions``): the cycle activity writes what a cycle observes (RUNNING,
+DONE, IMPOSSIBLE when deadlocked, WAITING_ON_HUMAN for a queued approval); the workflow writes
+the statuses only it knows through the ``record_mission_status`` activity — SLEEPING,
+DEGRADED_PARK, WAITING_ON_HUMAN when a gate opens, and the final status of every ending
+(including a failure and a cancellation by ``lha mission-abort``). Those writes are best effort:
+a short timeout and retry, then the mission goes on.
+
 Determinism: behaviour added after histories were recorded is guarded by ``workflow.patched``
 (``PATCH_*`` below), so a history recorded by an older build replays down its old code path.
 """
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError, ApplicationError
+from temporalio.exceptions import (
+    ActivityError,
+    ApplicationError,
+    FailureError,
+    is_cancelled_exception,
+)
 
 # The activity module pulls in git/model/etc.; pass it through the workflow sandbox unchanged
 # rather than letting the sandbox re-import (and reject) its non-deterministic dependencies.
@@ -55,6 +68,7 @@ with workflow.unsafe.imports_passed_through():
         declare_impossible,
         notify_gate,
         read_mission_snapshot,
+        record_mission_status,
         run_agent_cycle,
         unblock_items,
     )
@@ -98,6 +112,7 @@ from lha.durable.types import (
     MissionInput,
     MissionResult,
     MissionState,
+    MissionStatusInput,
     UnblockInput,
 )
 
@@ -125,6 +140,18 @@ _NOTIFY_TIMEOUT = timedelta(minutes=3)
 # ``workflow.patched`` ids for behaviour added after histories were recorded.
 PATCH_GATE_LADDER = "lha-gate-escalation-v1"
 PATCH_SLEEPING = "lha-sleeping-v1"
+PATCH_MISSION_ROW = "lha-mission-row-v1"
+
+# ``record_mission_status`` is best effort: a short timeout and a few quick retries, then the
+# mission goes on without the row update (logged).
+_ROW_TIMEOUT = timedelta(seconds=30)
+_ROW_DEADLINE = timedelta(minutes=2)
+_ROW_RETRY = RetryPolicy(
+    initial_interval=timedelta(seconds=1),
+    maximum_interval=timedelta(seconds=5),
+    maximum_attempts=3,
+    non_retryable_error_types=[ERROR_CONFIG],
+)
 
 _TERMINAL_STATUS = {
     OUTCOME_COMPLETED: STATUS_DONE,
@@ -164,6 +191,22 @@ class MissionWorkflow:
 
     @workflow.run
     async def run(self, inp: MissionInput) -> MissionResult:
+        """Run the mission; the ``missions`` row gets the final status on every ending — also a
+        failure or a cancellation (``lha mission-abort``), from these handlers."""
+        try:
+            return await self._run_mission(inp)
+        except (asyncio.CancelledError, Exception) as err:  # never ContinueAsNewError
+            if is_cancelled_exception(err):
+                reason = "mission cancelled"
+            elif isinstance(err, FailureError):  # fails the workflow (not just a task)
+                reason = f"mission failed: {err.message}"
+            else:
+                raise
+            self._state.status = STATUS_ABORTED
+            await self._record_row(inp, STATUS_ABORTED, reason)
+            raise
+
+    async def _run_mission(self, inp: MissionInput) -> MissionResult:
         early = self._state
         state = dataclasses.replace(inp.state) if inp.state is not None else MissionState()
         if early.pending_decision is not None:
@@ -189,7 +232,7 @@ class MissionWorkflow:
             if state.cycles_done >= inp.max_cycles:
                 return await self._terminal(inp, OUTCOME_MAX_CYCLES, "iteration ceiling reached")
 
-            await self._sleep_until_resume()
+            await self._sleep_until_resume(inp)
             state.status = STATUS_RUNNING
             try:
                 result = await workflow.execute_activity(
@@ -209,6 +252,8 @@ class MissionWorkflow:
                     retry_policy=_CYCLE_RETRY,
                 )
             except ActivityError as err:
+                if is_cancelled_exception(err):
+                    raise  # the mission was cancelled: never park on it
                 app = _application_cause(err)
                 if app is not None and app.type == ERROR_BUDGET_EXCEEDED:
                     return await self._terminal(inp, OUTCOME_BUDGET_EXHAUSTED, app.message)
@@ -308,6 +353,7 @@ class MissionWorkflow:
         state.status = STATUS_DEGRADED_PARK
         state.parks += 1
         self._park_reason = reason
+        await self._record_row(inp, STATUS_DEGRADED_PARK, reason)
         cap = max(1, inp.park_max_seconds)
         delay = min(max(1, inp.park_initial_seconds), cap)
         while True:
@@ -323,6 +369,8 @@ class MissionWorkflow:
                     break
                 self._park_reason = report.reason
             except ActivityError as err:
+                if is_cancelled_exception(err):
+                    raise
                 self._park_reason = f"health check failed: {err.cause or err}"
             delay = min(delay * 2, cap)
             self._maybe_continue_as_new(inp)
@@ -345,13 +393,15 @@ class MissionWorkflow:
         state = self._state
         state.gate_log = [*state.gate_log, f"{_iso(workflow.now())} {line}"][-MAX_GATE_LOG:]
 
-    async def _sleep_until_resume(self) -> None:
+    async def _sleep_until_resume(self, inp: MissionInput) -> None:
         """SLEEPING: a durable timer until ``resume_at`` (a ``snooze`` can move or end it)."""
         state = self._state
         if state.resume_at <= workflow.now().timestamp() or not workflow.patched(PATCH_SLEEPING):
             return
         state.status = STATUS_SLEEPING
-        self._log(f"sleeping until {_iso(datetime.fromtimestamp(state.resume_at, UTC))}")
+        until = _iso(datetime.fromtimestamp(state.resume_at, UTC))
+        self._log(f"sleeping until {until}")
+        await self._record_row(inp, STATUS_SLEEPING, f"sleeping until {until}")
         while True:
             target = state.resume_at
             remaining = target - workflow.now().timestamp()
@@ -393,6 +443,8 @@ class MissionWorkflow:
                 retry_policy=_SHORT_RETRY,
             )
         except ActivityError as err:
+            if is_cancelled_exception(err):
+                raise
             self._log(f"gate {view.gate_id}: notification failed: {err.cause or err}")
 
     def _take_decision(self, options: list[str]) -> str | None:
@@ -429,6 +481,7 @@ class MissionWorkflow:
         self._open_question = f"{view.question} [{' / '.join(view.options)}]"
         ready: Callable[[], bool] = lambda: state.pending_decision is not None  # noqa: E731
         self._log(f"{view.kind} gate {view.gate_id} opened (default {view.default_action})")
+        await self._record_row(inp, STATUS_WAITING_ON_HUMAN, f"{view.kind} gate {view.gate_id}")
         await self._notify(inp, view, "opened")
         sent = 0
         try:
@@ -556,6 +609,33 @@ class MissionWorkflow:
             return False
         return await self._unblock(inp)
 
+    async def _record_row(self, inp: MissionInput, status: str, reason: str = "") -> None:
+        """Write a status the workflow owns to the ``missions`` row (an activity; best effort).
+
+        Never fails or blocks the mission beyond ``_ROW_DEADLINE``: an error is only logged.
+        Guarded by ``PATCH_MISSION_ROW`` so histories recorded before it still replay.
+        """
+        if not workflow.patched(PATCH_MISSION_ROW):
+            return
+        try:
+            await workflow.execute_activity(
+                record_mission_status,
+                MissionStatusInput(
+                    mission_id=inp.mission_id,
+                    workdir=inp.workdir,
+                    status=status,
+                    head_sha=self._state.head_sha or None,
+                    reason=reason[:500],
+                ),
+                start_to_close_timeout=_ROW_TIMEOUT,
+                schedule_to_close_timeout=_ROW_DEADLINE,
+                retry_policy=_ROW_RETRY,
+            )
+        except ActivityError as err:
+            if is_cancelled_exception(err):
+                raise
+            workflow.logger.warning("mission row not updated to %s: %s", status, err.cause or err)
+
     async def _terminal(self, inp: MissionInput, outcome: str, reason: str = "") -> MissionResult:
         state = self._state
         if not state.head_sha and not state.items_total:
@@ -568,6 +648,7 @@ class MissionWorkflow:
             )
             self._absorb(snap)
         state.status = _TERMINAL_STATUS[outcome]
+        await self._record_row(inp, state.status, f"{outcome}: {reason}" if reason else outcome)
         return MissionResult(
             mission_id=inp.mission_id,
             completed=outcome == OUTCOME_COMPLETED,

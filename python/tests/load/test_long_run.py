@@ -16,7 +16,7 @@ from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
 from lha.contracts.state import Checklist, ChecklistItem
-from lha.durable.activities import make_cycle_activity
+from lha.durable.activities import make_cycle_activity, make_record_status_activity
 from lha.durable.types import OUTCOME_COMPLETED, MissionInput
 from lha.durable.workflows import MissionWorkflow
 from lha.state import git_ops
@@ -49,7 +49,10 @@ async def test_long_run_bounded_history_with_continue_as_new(tmp_path: Path) -> 
             env.client,
             task_queue=tq,
             workflows=[MissionWorkflow],
-            activities=[make_cycle_activity(settings=SETTINGS, model_factory=working_model)],
+            activities=[
+                make_cycle_activity(settings=SETTINGS, model_factory=working_model),
+                make_record_status_activity(settings=SETTINGS),
+            ],
         ):
             result = await asyncio.wait_for(
                 env.client.execute_workflow(
