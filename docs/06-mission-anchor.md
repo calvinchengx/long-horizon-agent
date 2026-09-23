@@ -17,8 +17,9 @@ check that each implementation reads the other's anchor identically.
 │   ├── mission.json        immutable mission spec
 │   ├── checklist.json      the checklist: items, statuses, dependencies
 │   ├── progress.md         human-readable progress log, one line per cycle
-│   ├── decisions.ndjson    append-only design-decision log
-│   └── events.ndjson       append-only event log
+│   ├── decisions.ndjson    append-only, hash-chained design-decision log
+│   ├── events.ndjson       append-only event log
+│   └── ownership.json      file-ownership map (only when the mission declared one)
 └── ...                     the code being worked on
 ```
 
@@ -27,8 +28,9 @@ check that each implementation reads the other's anchor identically.
 | `mission.json` | Once, at initialization | JSON (`MissionSpec`), indented |
 | `checklist.json` | Every checkpoint (full rewrite) | JSON (`Checklist`), indented |
 | `progress.md` | Every checkpoint (one entry appended) | Markdown |
-| `decisions.ndjson` | Every checkpoint (records appended) | One `DecisionRecord` JSON object per line |
+| `decisions.ndjson` | Every checkpoint that has decisions (records chained on) | One chain envelope per line; older anchors may start with bare `DecisionRecord` lines |
 | `events.ndjson` | Every checkpoint (records appended) | One `EventRecord` JSON object per line |
+| `ownership.json` | At initialization, and by a checkpoint after the orchestrator staged a change | JSON (`FileOwnershipMap`), indented |
 
 ### `mission.json`
 
@@ -55,7 +57,7 @@ consult it instead of guessing)". See [references](#references).
 | `last_failure` | The verifier's failure report from the latest failed attempt; shown to the model next cycle |
 | `allow_harness_edits` | Opt-in for items that must modify existing tests or test config (see [verification](07-verification.md#harness-integrity)) |
 | `witnesses` | The item's own acceptance checks (`go:TestX`, `pytest:<node>`, `cmd:<shell>`, `trusted:<name>`), which must pass in addition to the mission's checks (see [verification](07-verification.md#witnesses)) |
-| `notes` | Free text, for example dependencies the Planner dropped as invalid, or `split from <id>` |
+| `notes` | Free text, for example dependencies the Planner dropped as invalid, `split from <id>`, or why the Planner kept an item serial (see [file ownership](11-multi-agent-organization.md#file-ownership)) |
 | `schema_version` | Format version |
 
 The agent never edits the checklist. The harness loads it from `HEAD` at cycle start, changes it
@@ -78,12 +80,58 @@ The header is kept.
 
 ### `decisions.ndjson`
 
-`DecisionRecord`: `decision`, `rationale`, `alternatives_rejected`, `affected` (list), `cycle_id`.
-The last 5 records are included in the situational snapshot. The file is never compacted.
-The checkpoint API accepts decision records, but no current run path produces them, so in
-practice this file stays empty. (A separate hash-chained decision log exists in
-[`coordination/decision_log.py`](../python/src/lha/coordination/decision_log.py); it does not
-write to this file.)
+The never-compacted record of design decisions (`DecisionRecord`: `decision`, `rationale`,
+`alternatives_rejected`, `affected` (list), `cycle_id`), stored as a SHA-256 hash chain. The
+format and the parsing/verification code are in
+[`coordination/decision_log.py`](../python/src/lha/coordination/decision_log.py); the byte-level
+cases are pinned in
+[`spec/coordination/decision_chain.json`](../spec/coordination/decision_chain.json).
+
+- **Line format.** Each line is `{"prev": <hex>, "hash": <hex>, "record": {...}}`, terminated
+  by `\n`. `hash = sha256(prev + "\n" + canonical(record))`, where `canonical` is JSON with
+  sorted keys, `(",", ":")` separators and non-ASCII characters left unescaped. The first
+  line's `prev` is 64 zeros.
+- **Legacy lines.** Anchors written before the chain existed hold bare `DecisionRecord` lines.
+  These still load, but only as a leading prefix. Each one is folded into the running hash as if
+  it were chained (`running = sha256(running + "\n" + canonical(line))`), so the first chained
+  line's `prev` covers the whole prefix, and editing, reordering or deleting a legacy line after
+  that breaks the chain. Until a chained line follows them, legacy lines have no integrity
+  protection. A bare line after a chained one counts as tampering.
+- **Verification.** The committed file is verified every time the situational snapshot is read
+  and before every checkpoint adds to it. A failure (unreadable line, `prev` or `hash` mismatch,
+  a bare line after the chain, or a final line without its `\n`) raises `DecisionChainError`.
+  Nothing is committed on top of the altered log. `run-local`/`mission` and `orchestrate` stop
+  with `stopped_reason` `decision log failed verification: <why>` and a `decision_chain_invalid`
+  trace event, and exit 1. On Temporal the cycle activity fails with the same error on every
+  attempt; after the cycle retry policy's 5 attempts the workflow parks as it does for any
+  exhausted transient failure, and no further cycle can succeed until the log is repaired (the
+  error is not yet mapped to a non-retryable activity error). `lha decisions --verify` prints the
+  verdict ([CLI](17-cli.md#lha-decisions)).
+- **Writing.** The agent records a decision with the `record_decision` tool (arguments
+  `decision`, `rationale`, optional `alternatives_rejected` and `affected`).
+  `build_lead_loop` ([`agent/assembly.py`](../python/src/lha/agent/assembly.py)) adds the tool
+  to the Lead's dispatcher, bound to the mission anchor. Every run path builds its Lead there
+  (`run-local`, `mission`, `orchestrate` and the Temporal cycle activity), so the Lead has the
+  tool in all of them. The anchor
+  keeps recorded decisions in memory (`record_decision`), not in the working tree. The cycle's
+  checkpoint chains them onto the committed log and gives any record without a `cycle_id` the
+  checkpoint's id, so the decisions land in the same commit as the work they describe. A cycle
+  that ends without a checkpoint (for example a budget stop) drops them. In `orchestrate`,
+  parallel implementers record into their own buffer, and their decisions are committed only if
+  the integrator merges their branch.
+- **Reading.** The newest 5 records go into the situational snapshot (`last_decisions`). The
+  Lead's prompt lists them under "Design decisions already recorded" on every cycle, and so do
+  the orchestrate implementers' prompts.
+
+### `ownership.json`
+
+The `FileOwnershipMap` for missions whose plan declares files (`lha orchestrate`): `owners` maps
+a normalized, case-folded path to its single writer (`implementer-<item id>`). Unlisted files
+belong to the lead. `initialize(ownership=...)` writes it. Without an ownership map no file is
+written (a re-initialization without a map deletes a stale one), and `read_ownership()` returns an
+empty map. The orchestrator stages changes with `stage_ownership()`. The next checkpoint writes
+them, after the `.lha/` restore, so agent edits to this file are discarded like any other anchor
+edit. See [file ownership](11-multi-agent-organization.md#file-ownership).
 
 ### `events.ndjson`
 
@@ -149,16 +197,20 @@ Initialization rejects a checklist with dependency errors. The local runners rep
 A checkpoint is one commit containing both the code changes and the updated anchor.
 `commit_checkpoint`:
 
-1. Restores `.lha/` to `HEAD` (`git checkout HEAD -- .lha` and `git clean` of `.lha`), discarding
+1. Verifies the committed decision chain (raises `DecisionChainError` if it fails).
+2. Restores `.lha/` to `HEAD` (`git checkout HEAD -- .lha` and `git clean` of `.lha`), discarding
    anything the agent wrote there during the cycle.
-2. Writes `checklist.json` from the harness's in-memory checklist and appends the progress entry
-   to the committed `progress.md`.
-3. Rebuilds `decisions.ndjson` and `events.ndjson` as the committed content plus the new records.
-   Because the logs are rebuilt from `HEAD` rather than appended to the working file, repeating a
-   checkpoint does not duplicate lines.
-4. Stages everything with `git add -A`, then force-adds the five anchor files with `git add -f`,
-   so they are committed even if the repository's `.gitignore` excludes `.lha/`.
-5. Commits, or returns the current `HEAD` if nothing changed.
+3. Writes `checklist.json` from the harness's in-memory checklist, appends the progress entry
+   to the committed `progress.md`, and writes `ownership.json` if a map was staged.
+4. Rebuilds `decisions.ndjson` as the committed chain plus the queued and checkpoint decisions,
+   chained on, and `events.ndjson` as the committed content plus the new records. Because the
+   logs are rebuilt from `HEAD` rather than appended to the working file, repeating a checkpoint
+   does not duplicate lines.
+5. Stages everything with `git add -A`, then force-adds whichever of the six anchor files exist
+   with `git add -f`, so they are committed even if the repository's `.gitignore` excludes
+   `.lha/`.
+6. Commits, or returns the current `HEAD` if nothing changed. If a merge is in progress (an
+   `orchestrate` integration), this commit is the merge commit.
 
 The agent is told not to edit `.lha/`, the dispatcher refuses tool writes to it, and the Docker
 sandbox mounts it read-only; the restore in step 1 covers anything that gets past those.
