@@ -23,7 +23,7 @@ import contextlib
 
 import httpx
 
-from lha.agent.assembly import build_lead_loop, lead_tools, open_lead_sandbox
+from lha.agent.assembly import build_lead_loop, open_lead_sandbox
 from lha.agent.runner import MissionSummary, build_meter
 from lha.agents.reflection import reflect_on_failure
 from lha.agents.reviewer import Reviewer, ReviewResult
@@ -35,7 +35,7 @@ from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checklist, Checkpoint
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check
-from lha.execution.dispatcher import AllowListDispatcher
+from lha.execution.tools.toolset import build_run_dispatcher, preflight_run_tools
 from lha.governor.governor import LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import new_id
@@ -88,7 +88,7 @@ class Orchestrator:
         description: str,
         checklist: Checklist,
         checks: list[Check] | None = None,
-        allow_egress: bool = False,
+        allow_egress: bool | None = None,
         gate: HITLGate | None = None,
         references: list[str] | None = None,
     ) -> MissionSummary:
@@ -96,8 +96,12 @@ class Orchestrator:
 
         ``checks``: gating verification checks (``None`` => ``default_python_checks()``).
         The sandbox comes from ``settings.sandbox`` (``local`` needs ``allow_unsafe_local``).
+        ``allow_egress``: ``None`` => the Lead and the Researchers get the web tools iff
+        ``LHA_WEB_ALLOW_HOSTS`` is set (the Reviewer's role hides them); ``False`` drops them. A
+        lethal-trifecta run raises ``RuleOfTwoViolation`` before it starts.
         """
         settings = self._settings
+        preflight_run_tools(settings)
         configure_logging()
         recorder = TraceRecorder()
         meter = self._meter or build_meter(settings)
@@ -123,9 +127,9 @@ class Orchestrator:
             review_model = meter.wrap(raw["reviewer"], role="reviewer")
             reflection_model = meter.wrap(raw["lead"], role="reflection")
 
-            web = bool(settings.web_hosts())
-            read_tools = AllowListDispatcher.for_tools(
-                lead_tools(settings), allow_mutating=False, allow_egress=allow_egress and web
+            # Researchers get the web tools with the lead (the Reviewer's role hides them).
+            read_tools = build_run_dispatcher(
+                settings, allow_mutating=False, allow_egress=allow_egress
             )
             lead = build_lead_loop(
                 settings,
@@ -134,6 +138,7 @@ class Orchestrator:
                 workdir=workdir,
                 gate=gate,
                 recorder=recorder,
+                allow_egress=allow_egress,
             )
             reviewer = Reviewer(review_model, read_tools)
 

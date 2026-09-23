@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lha.agent.assembly import build_lead_loop, open_lead_sandbox
+from lha.agent.assembly import build_lead_loop, lead_dispatcher, open_lead_sandbox
 from lha.agents.planner import Planner
 from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
@@ -22,7 +22,7 @@ from lha.contracts.state import Checklist
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check
 from lha.execution.dispatcher import AllowListDispatcher
-from lha.execution.tools import default_local_tools
+from lha.execution.tools.toolset import preflight_run_tools
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor, LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
@@ -70,12 +70,16 @@ async def aclose_provider(provider: object | None) -> None:
         await close()
 
 
-def full_access_dispatcher(*, allow_egress: bool = False) -> AllowListDispatcher:
-    """The Lead's dispatcher: every default tool, mutating allowed (explicit — the default is
-    fail-closed)."""
-    return AllowListDispatcher.for_tools(
-        default_local_tools(), allow_mutating=True, allow_egress=allow_egress
-    )
+def full_access_dispatcher(
+    settings: Settings | None = None,
+    *,
+    allow_egress: bool | None = None,
+    gate: HITLGate | None = None,
+) -> AllowListDispatcher:
+    """The Lead's dispatcher (``lha.agent.assembly.lead_dispatcher``): every default tool,
+    mutating allowed, plus the web tools when ``LHA_WEB_ALLOW_HOSTS`` is set (``allow_egress=
+    False`` drops them). Raises ``RuleOfTwoViolation`` for a lethal-trifecta run."""
+    return lead_dispatcher(settings or get_settings(), gate, allow_egress=allow_egress)
 
 
 async def run_mission_local(
@@ -87,7 +91,7 @@ async def run_mission_local(
     checks: list[Check] | None = None,
     settings: Settings | None = None,
     anchor_text: str | None = None,
-    allow_egress: bool = False,
+    allow_egress: bool | None = None,
     meter: CostMeter | None = None,
     model: ModelProvider | None = None,
     gate: HITLGate | None = None,
@@ -100,8 +104,11 @@ async def run_mission_local(
     with other callers (e.g. the Planner). ``model``: override the lead provider (it is wrapped
     with the meter either way). ``gate``: where irreversible commands go for a human decision
     (``None`` denies them). ``references``: vendored reference paths recited every cycle.
+    ``allow_egress``: ``None`` => web tools iff ``LHA_WEB_ALLOW_HOSTS`` is set; ``True`` requires
+    it; ``False`` drops them. A lethal-trifecta run raises ``RuleOfTwoViolation`` up front.
     """
     settings = settings or get_settings()
+    preflight_run_tools(settings)  # Rule of Two + web settings, before anything is opened
     configure_logging()
     recorder = TraceRecorder()
     meter = meter or build_meter(settings)
@@ -133,6 +140,7 @@ async def run_mission_local(
             workdir=workdir,
             gate=gate,
             recorder=recorder,
+            allow_egress=allow_egress,
         )
         ctx = ToolContext(mission_id=mission_id, session=session)
 
@@ -202,7 +210,7 @@ async def plan_and_run_local(
     task: str,
     checks: list[Check] | None = None,
     settings: Settings | None = None,
-    allow_egress: bool = False,
+    allow_egress: bool | None = None,
     meter: CostMeter | None = None,
     gate: HITLGate | None = None,
     references: list[str] | None = None,
@@ -213,6 +221,7 @@ async def plan_and_run_local(
     propagates (nothing has run yet).
     """
     settings = settings or get_settings()
+    preflight_run_tools(settings)  # fail before the planning call spends anything
     meter = meter or build_meter(settings)
     planner_model = build_provider(settings)
     try:
