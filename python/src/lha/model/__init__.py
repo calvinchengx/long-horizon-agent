@@ -8,7 +8,8 @@ backend from ``Settings.model_backend`` so the rest of the system never imports 
 - ``openai_compat``-> any OpenAI-compatible endpoint (Groq/Gemini/OpenRouter, ...)
 - ``claude``       -> the Anthropic Messages API
 
-``LHA_FALLBACK_MODELS`` turns the result into a ``FailoverModel`` (primary, then each fallback)."""
+``LHA_FALLBACK_MODELS`` turns the result into a ``FailoverModel`` (primary, then each fallback).
+``lha.model.health.probe_model`` contacts the configured provider(s) cheaply (health probe)."""
 
 from __future__ import annotations
 

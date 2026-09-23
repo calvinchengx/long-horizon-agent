@@ -58,6 +58,7 @@ from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.hitl.approvals import DeferredApprovalGate
 from lha.ids import idempotency_key
 from lha.model import build_provider
+from lha.model.health import probe_model
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
@@ -410,7 +411,7 @@ async def run_agent_cycle(inp: CycleInput) -> CycleResult:
 
 # --- health probe (used while parked) -----------------------------------------------------
 async def probe_health(inp: HealthInput, *, settings: Settings | None = None) -> HealthReport:
-    """Probe the critical dependencies (git checkout, model config, sandbox)."""
+    """Probe the critical dependencies (git checkout, a real model round trip, sandbox)."""
     settings = settings or get_settings()
     statuses: list[DependencyStatus] = []
 
@@ -426,14 +427,14 @@ async def probe_health(inp: HealthInput, *, settings: Settings | None = None) ->
             "git", Health.OK if ok_repo else Health.DOWN, "" if ok_repo else "no usable repo"
         )
     )
-    try:
-        provider = build_provider(settings)
-        close = getattr(provider, "aclose", None)
-        if close is not None:
-            await close()
-        statuses.append(DependencyStatus("model", Health.OK))
-    except Exception as exc:  # config problems surface here
-        statuses.append(DependencyStatus("model", Health.DOWN, f"{type(exc).__name__}: {exc}"))
+    # The model is CONTACTED (cheap list-models / tags request, tight timeout), not just built:
+    # an outage or a revoked key keeps the mission parked instead of resuming into failures.
+    model = await probe_model(settings)
+    statuses.append(
+        DependencyStatus(
+            "model", Health.OK if model.ok else Health.DOWN, "" if model.ok else model.detail
+        )
+    )
     try:
         session = await open_lead_sandbox(settings, inp.workdir)
         await session.close()

@@ -1,17 +1,22 @@
-"""Fallback chains from settings (``LHA_FALLBACK_MODELS``).
+"""Fallback chains from settings (``LHA_FALLBACK_MODELS``) and real model health probes.
 
 No real network: providers share an ``httpx.AsyncClient`` over a ``MockTransport``.
 """
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
 
 from lha.config import Settings
 from lha.contracts.model import ModelMessage, Usage
+from lha.durable import activities as acts
+from lha.durable.types import HealthInput
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import CostMeter
@@ -24,7 +29,9 @@ from lha.model import (
     build_provider,
     parse_fallback_entry,
 )
+from lha.model.health import ModelHealth, probe_model, probe_provider
 from lha.model.pricing import ModelPrice
+from lha.state import git_ops
 
 _MSG = [ModelMessage(role="user", content="hi")]
 
@@ -154,3 +161,195 @@ async def test_failover_serves_from_fallback_and_is_priced_by_the_serving_model(
     assert provider.estimate_cost_usd(
         Usage(input_tokens=1_000_000, provider="claude:claude-sonnet-4-6")
     ) == pytest.approx(3.0)
+
+
+# --- health probes ----------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stub_probe_is_healthy() -> None:
+    health = await probe_model(_settings())
+    assert health.ok and "stub" in health.detail
+
+
+@pytest.mark.asyncio
+async def test_openai_compat_probe_lists_models() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json={"data": []})
+
+    settings = _settings(
+        model_backend="openai_compat",
+        openai_base_url="https://api.groq.test/openai/v1",
+        openai_api_key="gsk-key",
+        model_name="m",
+    )
+    async with _client(handler) as client:
+        health = await probe_model(settings, client=client)
+    assert health.ok
+    assert str(seen[0].url) == "https://api.groq.test/openai/v1/models"
+    assert seen[0].method == "GET" and seen[0].headers["authorization"] == "Bearer gsk-key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler", "detail"),
+    [
+        (lambda r: httpx.Response(401), "HTTP 401"),
+        (lambda r: httpx.Response(503), "HTTP 503"),
+    ],
+)
+async def test_openai_compat_probe_reports_down(
+    handler: Callable[[httpx.Request], httpx.Response], detail: str
+) -> None:
+    settings = _settings(model_backend="openai_compat", openai_base_url="https://x.test/v1")
+    async with _client(handler) as client:
+        health = await probe_model(settings, client=client)
+    assert not health.ok and detail in health.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_reports_transport_errors_and_timeouts() -> None:
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("connection refused", request=request)
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    settings = _settings(model_backend="openai_compat", openai_base_url="https://x.test/v1")
+    async with _client(refuse) as client:
+        refused = await probe_model(settings, client=client)
+    assert not refused.ok and "connection refused" in refused.detail
+    async with _client(slow) as client:
+        timed_out = await probe_model(settings, client=client)
+    assert not timed_out.ok and "timed out" in timed_out.detail
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tags", "model", "ok"),
+    [
+        ([{"name": "qwen3:8b"}], "qwen3:8b", True),
+        ([{"name": "llama3:latest"}], "llama3", True),
+        ([{"name": "llama3:latest"}, "junk"], "qwen3:8b", False),
+    ],
+)
+async def test_ollama_probe_checks_the_model_is_pulled(
+    tags: list[Any], model: str, ok: bool
+) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"models": tags})
+
+    settings = _settings(
+        model_backend="ollama", model_name=model, ollama_base_url="http://ollama.test:11434/"
+    )
+    async with _client(handler) as client:
+        health = await probe_model(settings, client=client)
+    assert health.ok is ok
+    assert seen == ["http://ollama.test:11434/api/tags"]
+    if not ok:
+        assert "not pulled" in health.detail
+
+
+@pytest.mark.asyncio
+async def test_ollama_probe_handles_garbage() -> None:
+    settings = _settings(model_backend="ollama", model_name="m")
+    async with _client(lambda r: httpx.Response(200, text="not json")) as client:
+        health = await probe_model(settings, client=client)
+    assert not health.ok
+
+
+@pytest.mark.asyncio
+async def test_claude_probe_gets_the_model() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200 if "haiku" in request.url.path else 404)
+
+    base = {"model_backend": "claude", "anthropic_api_key": "sk-ant-test"}
+    async with _client(handler) as client:
+        ok = await probe_model(_settings(**base, model_name="claude-haiku-4-5"), client=client)
+        missing = await probe_model(
+            _settings(**base, model_name="claude-sonnet-4-6"), client=client
+        )
+    assert ok.ok and not missing.ok and "HTTP 404" in missing.detail
+    assert str(seen[0].url) == "https://api.anthropic.com/v1/models/claude-haiku-4-5"
+    assert seen[0].headers["x-api-key"] == "sk-ant-test"
+    assert seen[0].headers["anthropic-version"] == ClaudeModel.API_VERSION
+
+
+@pytest.mark.asyncio
+async def test_failover_probe_is_healthy_if_any_member_is() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503 if request.url.host == "api.anthropic.com" else 200, json={})
+
+    settings = _settings(
+        model_backend="claude",
+        model_name="claude-haiku-4-5",
+        anthropic_api_key="sk-ant-test",
+        openai_base_url="https://x.test/v1",
+        fallback_models="openai_compat:m",
+    )
+    async with _client(handler) as client:
+        health = await probe_model(settings, client=client)
+    assert (
+        health.ok and "HTTP 503" in health.detail and "openai_compat:m: reachable" in health.detail
+    )
+
+    async with _client(lambda r: httpx.Response(500)) as client:
+        down = await probe_model(settings, client=client)
+    assert not down.ok
+
+
+@pytest.mark.asyncio
+async def test_probe_provider_edge_cases() -> None:
+    class NoProbe:
+        name = "custom:x"
+
+    class Hangs:
+        async def health_check(self, *, timeout_s: float) -> ModelHealth:
+            raise TimeoutError
+
+    built = await probe_provider(NoProbe(), timeout_s=1.0)
+    assert built.ok and "no probe available" in built.detail
+    hung = await probe_provider(Hangs(), timeout_s=1.0)
+    assert not hung.ok and "timed out" in hung.detail
+
+
+@pytest.mark.asyncio
+async def test_probe_reports_config_errors() -> None:
+    health = await probe_model(_settings(model_backend="openai_compat"))
+    assert not health.ok and "LHA_OPENAI_BASE_URL" in health.detail
+
+
+# --- the durable health activity parks on a model outage -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_durable_health_probe_reports_model_outage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    git_ops.init_repo(tmp_path)
+    (tmp_path / "a.txt").write_text("a", encoding="utf-8")
+    git_ops.commit_all(tmp_path, "init")
+    settings = _settings(
+        model_backend="openai_compat",
+        openai_base_url="https://x.test/v1",
+        sandbox="local",
+        allow_unsafe_local=True,
+    )
+    async with _client(lambda r: httpx.Response(503)) as client:
+        monkeypatch.setattr(acts, "probe_model", functools.partial(probe_model, client=client))
+        down = await acts.probe_health(HealthInput("m", str(tmp_path)), settings=settings)
+    assert not down.healthy and "model" in down.reason and "HTTP 503" in down.reason
+
+    async with _client(lambda r: httpx.Response(200, json={"data": []})) as client:
+        monkeypatch.setattr(acts, "probe_model", functools.partial(probe_model, client=client))
+        up = await acts.probe_health(HealthInput("m", str(tmp_path)), settings=settings)
+    assert up.healthy
