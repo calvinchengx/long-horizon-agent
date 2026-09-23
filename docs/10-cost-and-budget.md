@@ -45,6 +45,31 @@ How each backend is priced (`build_provider`, [model/__init__.py](../python/src/
 | `openai_compat` | `LHA_OPENAI_PRICE_IN_PER_MTOK` and `LHA_OPENAI_PRICE_OUT_PER_MTOK`; set both or neither. Unset means unknown |
 | `claude` | the table above; `LHA_CLAUDE_PRICE_IN_PER_MTOK` / `_OUT_` override it for `LHA_MODEL_NAME` only. A configured model with no price is refused at construction (`UnknownPriceError`) |
 
+### Fallback chain pricing
+
+`LHA_FALLBACK_MODELS` is a comma-separated list of `backend:model[@in/out]` entries (USD per
+million input / output tokens; the model part may itself contain `:`, as in
+`ollama:qwen3:8b`). With it set, `build_provider` returns a `FailoverModel`
+([model/failover.py](../python/src/lha/model/failover.py)) over the primary and each fallback in
+order. Each fallback is priced like a primary of its backend, except that the settings prices
+(`LHA_OPENAI_PRICE_*`, `LHA_CLAUDE_PRICE_*`) apply to the primary only:
+
+- `@in/out` on the entry is the explicit price and wins over the Claude table;
+- a `claude` fallback without `@in/out` uses the table, and a model not in it is refused when the
+  provider is built (`UnknownPriceError`);
+- an `openai_compat` fallback without `@in/out` is unpriced (its cost is unknown), and an
+  `ollama` fallback is $0 whatever the entry says.
+
+A malformed entry or price raises `ValueError` when the provider is built. Every
+`openai_compat` fallback uses the same `LHA_OPENAI_BASE_URL` and `LHA_OPENAI_API_KEY` as the
+primary: the chain can switch models on one OpenAI-compatible endpoint, not between two such
+endpoints.
+
+`FailoverModel` stamps `Usage.provider` with the member that served the turn, and
+`estimate_cost_usd` prices the turn with that member. The pre-call worst case (no provider yet)
+is the maximum over all members, so one unpriced member makes every worst case unpriceable and
+the governor denies the call unless `LHA_ALLOW_UNPRICED_MODELS=true`.
+
 ## Unknown prices are never $0
 
 If a provider cannot price a turn, `estimate_cost_usd` raises `UnknownPriceError`. The ledger
@@ -132,9 +157,13 @@ Two mechanisms stop repeated failure on the same item:
   the run with `loop on item <id>` once a count reaches `LHA_STALL_LIMIT`. With the defaults (block
   at 3, stall limit 5), a failing item is blocked before the detector's limit is reached. The
   detector matters when `LHA_STALL_LIMIT` is 3 or less, and for review-blocked loops, which do not
-  block the item. The durable workflow does not use `LoopDetector`.
+  block the item. The durable workflow does not use `LoopDetector`; there, the per-item failure
+  budget blocks the item and a deadlock goes to the deadlock gate.
 
-`ops.lifecycle.should_declare_impossible()` exists but is not called by any run path.
+In the durable workflow, `ops.lifecycle.should_declare_impossible()` compares the count of
+consecutive non-passing verified cycles on one item (`MissionState.fail_streak`) with
+`MissionInput.impossible_after_failures` (default 3). When it is reached, the deadlock gate
+recommends `impossible` ([Running on Temporal](14-running-on-temporal.md#5-gates-sleep-and-abort)).
 
 ## Cost ledger
 
@@ -169,6 +198,10 @@ known spend.
 
 Read it back with `lha costs <mission_id>` (the most recent calls plus totals: known USD,
 unknown-cost calls, tokens) and `lha missions [--limit N]` (each mission's status and totals).
+The status column is the last status a run path wrote to the `missions` row; a durable mission's
+workflow-only states (`DEGRADED_PARK`, `SLEEPING`, an open deadlock gate) are not written there
+([wire contract](19-wire-contract.md#mission-store)). `lha mission-status` queries the live
+status.
 
 The Postgres schema is in [`db/migrations/`](../db/migrations/):
 

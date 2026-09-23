@@ -23,9 +23,9 @@ The Temporal names the Python worker registers are:
 | Kind | Names |
 |---|---|
 | Workflows | `MissionWorkflow`, `SubAgentWorkflow` |
-| Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `run_subagent` |
-| Signals | `human_decision_v1`, `steer_v1` |
-| Queries | `status_v1`, `cycles_done`, `last_item`, `park_reason`, `open_question`, `rejected_decisions` |
+| Activities | `run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`, `read_mission_snapshot`, `run_subagent` |
+| Signals | `human_decision_v1`, `steer_v1`, `snooze_v1` |
+| Queries | `status_v1`, `gate_v1`, `gate_log_v1`, `cycles_done`, `last_item`, `park_reason`, `resume_at`, `open_question`, `rejected_decisions` |
 | Task queue / workflow id | `LHA_TASK_QUEUE` (default `lha-mission`) / `mission:<mission_id>` |
 
 Payloads are the dataclasses in [`python/src/lha/durable/types.py`](../python/src/lha/durable/types.py),
@@ -57,21 +57,25 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 |---|---|---|
 | `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
 | `config` | `lha.config` | Committed, including `sandbox_image`, `sandbox_egress`, `web_allow_hosts`, `trusted_checks`, `harness_paths`, `max_replans`, `max_split_depth` and `approval_timeout_s` |
-| `spec` | conformance harness | Committed: contracts (check names, checklist transitions and splits), model, safety, state and obs cases |
-| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, failover, retry, pricing) | Committed |
-| `safety` | `lha.safety` (command classifier, egress policy) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
+| `spec` | conformance harness | Committed: contracts (check names, checklist transitions and splits), model, safety, state, obs and `coordination/decision_chain.json` cases |
+| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, failover, retry, pricing) | Committed. `BuildProvider` does not build a fallback chain from settings, and there is no health probe |
+| `safety` | `lha.safety` (command classifier, egress policy with credential broker, Rule of Two) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
 | `obs` | `lha.obs` (events, redaction) | Committed |
-| `state` | `lha.state` (git ops, mission anchor, schema migrations) | Committed; no checklist import or `vendor` |
+| `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint) and carrying `.lha/ownership.json` along; no checklist import or `vendor` |
 | `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine) | Committed; no witnesses, trusted runner or extra protected paths |
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
-| `execution` (sandboxes, egress proxy), `agent` (loop, replanner), `hitl` approvals, durable worker, `cmd/lha` | | Not started |
+| `execution` (sandboxes, egress proxy, tools including the web tools), `agent` (loop, replanner), `hitl` (approvals, escalation, webhook), `memory`, `persistence`, `coordination`, `agents`, durable worker, `cmd/lha` | | Not started |
 
-The Go config reads the new settings but nothing in Go uses them yet. The Go suite does not yet
-run the `coordination/*.json` spec cases.
+The Go config reads the settings listed above, but nothing in Go uses the large-mission ones
+(`sandbox_image` through `approval_timeout_s`) yet. It does not read the newer settings at all:
+`LHA_FALLBACK_MODELS`, `LHA_SQLITE_PATH`, the memory settings, the web credential and search
+settings, `LHA_PRIVATE_DATA`, the gate escalation and webhook settings, the deadlock gate default,
+`LHA_CYCLE_PAUSE_SECONDS` and `LHA_MAX_PARALLEL_IMPLEMENTERS`. The Go suite runs
+`coordination/decision_chain.json` but not `coordination/shared_paths.json`.
 
 Consequences today:
 
-- `go build ./cmd/lha` fails: `go/cmd/lha` contains no source files.
+- There is no `go/cmd/lha` directory, so there is no Go binary to build.
 - There is no Go sandbox, agent loop or Temporal worker, so Go cannot run a mission.
 - The Go packages can be tested with `cd go && go test ./...`.
 
@@ -84,8 +88,9 @@ Temporal replays a workflow by matching the commands the code issues against the
 history, and those commands carry sequence-numbered IDs. Python's Temporal SDK numbers activity
 IDs and timer IDs with separate counters; the Go SDK uses one counter shared by both. A history
 recorded by one SDK therefore does not replay under the other once it contains a timer:
-`MissionWorkflow` creates timers when it parks (`workflow.sleep` in `DEGRADED_PARK`) and while
-waiting on a human gate with a timeout. This was verified experimentally.
+`MissionWorkflow` creates timers when it parks (`workflow.sleep` in `DEGRADED_PARK`), while it
+is `SLEEPING` (scheduled start, cycle pause, snooze) and while it waits on a human gate with a
+timeout and escalation reminders. This was verified experimentally.
 
 The design for missions that mix Python and Go workers is still open. Until it is settled, run
 each mission's workflow on workers of one implementation.

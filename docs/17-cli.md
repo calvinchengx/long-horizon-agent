@@ -6,7 +6,7 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 [18-configuration.md](18-configuration.md).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. Today `go/cmd/lha` is empty and no Go binary can be built; see [23-roadmap.md](23-roadmap.md).
+ported. Today there is no `go/cmd/lha` and no Go binary can be built; see [23-roadmap.md](23-roadmap.md).
 
 ## Commands
 
@@ -20,12 +20,10 @@ ported. Today `go/cmd/lha` is empty and no Go binary can be built; see [23-roadm
 | [`mission`](#lha-mission) | plan a task (or import a checklist), then run it locally | a sandbox |
 | [`orchestrate`](#lha-orchestrate) | plan, then run the multi-agent org locally | a sandbox |
 | [`decisions`](#lha-decisions) | print or verify a mission's decision log | a mission workspace |
+| [`missions`](#lha-missions) | list persisted missions with status and recorded spend | the mission store |
+| [`costs`](#lha-costs) | print a mission's persisted cost ledger | the mission store |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
-| [`mission-status`](#lha-mission-status) | query status, cycle count and any open question | Temporal |
-| [`mission-approve`](#lha-mission-approve) | answer an open human gate | Temporal |
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-| [`mission-start`](#lha-mission-start) | plan and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
 | [`mission-approve`](#lha-mission-approve) | answer the open gate (a queued irreversible action, or the deadlock gate) | Temporal |
 | [`mission-snooze`](#lha-mission-snooze) | sleep a mission before its next cycle, or wake it | Temporal |
@@ -36,8 +34,8 @@ ported. Today `go/cmd/lha` is empty and no Go binary can be built; see [23-roadm
 | Code | Meaning |
 |---|---|
 | `0` | success; for the local mission commands, every item verified done |
-| `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`); or an unhandled error (Python traceback) |
-| `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`, an invalid `--checklist` file, neither or both of `--item`/`--checklist`, an unknown `--decision`, a refused `vendor` URL) |
+| `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`, decision log failed verification); `decisions` found a broken chain; `costs` found no ledger rows; or an unhandled error (Python traceback) |
+| `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, a Rule-of-Two violation or invalid web settings, an invalid `--checklist` file, neither or both of `--item`/`--checklist`, an unknown `--decision` or one the open gate does not offer, a refused `vendor` URL) |
 | `3` | the budget governor refused the planning call (`mission`, `orchestrate`, `mission-start`) |
 
 Once a local run is under way, a governor refusal (before a cycle or before a single model call)
@@ -58,15 +56,14 @@ translate errors: an unreachable server or unknown workflow id ends in a traceba
 | `--sandbox TEXT` | `LHA_SANDBOX`, else `docker` | `docker`, `e2b` or `local` (not on `mission-start`) |
 | `--unsafe-local` | off | allow the `local` sandbox (no isolation) (not on `mission-start`) |
 | `--reference TEXT` | none | a workspace-relative path of vendored reference material, recited to the agent every cycle; repeatable (see [`vendor`](#lha-vendor)) |
-| `--approve-interactive` | off | ask on this terminal (`allow? [y/N]`) before any irreversible command (`git push`, publish, uploads); without it they are refused (not on `mission-start`, where the workflow asks) |
+| `--approve-interactive` | off | ask on the terminal before an irreversible command (not on `mission-start`; see below) |
+| `--allow-host TEXT` | none | add a host to this run's web allow-list, on top of `LHA_WEB_ALLOW_HOSTS`; repeatable. A non-empty allow-list registers the web tools (`fetch_url`, and `web_search` when configured) (not on `mission-start`, where the worker's settings apply) |
 
 `run-local`, `mission` and `mission-start` also take `--checklist FILE`: seed the mission with a
 `.json` checklist or a `.md` roadmap instead of planning (format in
 [06-mission-anchor.md](06-mission-anchor.md#importing-a-checklist)). The file's title,
 description and references are used unless given on the command line; `--reference` paths are
 merged with the file's.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
-| `--approve-interactive` | off | ask on the terminal before an irreversible command (not on `mission-start`; see below) |
 
 Without `--approve-interactive`, a command the classifier flags (`git push`, publishing, uploads,
 ...) is refused in a local run. With it, the run prints the tool, the exact argv, the classifier's
@@ -74,6 +71,10 @@ reason and the timeout, and asks `Allow this exact call? [y/N]`. Only `y`/`yes` 
 answer, end of input, or no answer within `LHA_CONSOLE_APPROVAL_TIMEOUT_S` (default 3600) rejects,
 with reminders at `LHA_GATE_ESCALATION_SECONDS` first. When stdin is not a TTY the call is rejected
 without asking. Each answer is committed to the anchor as a `tool_approval` event.
+
+Before any planning call or workspace write, the local commands check the run's web settings and
+the Rule of Two ([09-safety-model.md](09-safety-model.md#5-rule-of-two)): web tools together with
+the `local` sandbox or `LHA_PRIVATE_DATA=true` exit `2`.
 
 The default checks are `uv run ruff check .`, `uv run ty check` and `uv run pytest -q`, run inside
 the sandbox. An item is never marked done without at least one passing gating check, and an
@@ -94,8 +95,8 @@ Prints `lha <version>` (currently `lha 0.1.0`). No options.
 
 Prints every setting as `name = value`, one per line, in declaration order. `SecretStr` settings
 (`openai_api_key`, `anthropic_api_key`, `postgres_dsn`, `langfuse_secret_key`,
-`gate_webhook_url`) print `***` when
-set and `None` when unset. No options.
+`web_credentials`, `web_search_api_key`, `gate_webhook_url`) print `***` when set and `None` when
+unset. No options.
 
 ## `lha db migrate`
 
@@ -214,6 +215,49 @@ them. If the chain fails, it prints `decision chain BROKEN: <problem>` (for exam
 Exit codes: `0` when the chain verifies; `1` when it does not (with or without `--verify`; without
 it the message goes to stderr as `error: ...`); `2` when `--workdir` has no `.lha/` directory.
 
+## `lha missions`
+
+```
+lha missions [--limit N]
+```
+
+Lists the missions in the mission store, most recently updated first, one per line:
+`<mission_id>  <status>  <known spend> [(+<n> unknown-cost)]  calls <n>  head <sha prefix>  updated <time>  <title>`.
+Prints `no missions recorded` when the store is empty.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--limit INTEGER` (>= 1) | `20` | how many missions |
+
+The store is Postgres when `LHA_POSTGRES_DSN` is set, otherwise the SQLite file at
+`LHA_SQLITE_PATH` (default `.lha/lha.sqlite3`, relative to the current directory). Run it from
+the directory the missions were run from, or set `LHA_SQLITE_PATH` to an absolute path everywhere.
+A run whose SQLite path would fall inside its own workspace keeps its database in
+`<workdir>/.git/lha/` instead, which this command does not read unless `LHA_SQLITE_PATH` points
+there. If Postgres is configured but unusable, it warns on stderr and reads SQLite (or exits `2`
+with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`).
+
+The status is the mission row's, written by the run paths; for a durable mission it does not show
+`SLEEPING`, `DEGRADED_PARK` or the outcome of a gate decision (use
+[`mission-status`](#lha-mission-status)).
+
+## `lha costs`
+
+```
+lha costs MISSION_ID [--limit N]
+```
+
+Prints the newest `--limit` rows of the mission's cost ledger (time, cycle id, role, model, input
+and output tokens, USD or `unknown`), then a total line: calls, known USD, unknown-cost calls and
+tokens. Exits `1` with `error: no cost ledger rows for mission <id>` when the ledger is empty.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--limit INTEGER` (>= 0) | `50` | how many of the most recent calls to list (`0`: totals only) |
+
+It reads the same store as [`missions`](#lha-missions). See
+[10-cost-and-budget.md](10-cost-and-budget.md).
+
 ## `lha worker`
 
 Connects to `LHA_TEMPORAL_ADDRESS` / `LHA_TEMPORAL_NAMESPACE` and serves `MissionWorkflow` and
@@ -230,34 +274,23 @@ Plans the task (or imports `--checklist`), initializes the anchor at `--workdir`
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--task TEXT` | `""` | mission description; the Planner decomposes it |
-| `--title TEXT` | `mission` (or the checklist file's title) | mission title |
-| `--checklist FILE` | none | import the checklist instead of planning |
-| `--workdir TEXT` | `.lha/workspaces/durable` | workspace; resolved to an absolute path here before it is sent to the worker |
-| `--deadlock-gate-hours FLOAT` | `24.0` | on deadlock, wait this long for `retry` or `abort` (`0` ends the mission immediately) |
-| `--approval-timeout-hours FLOAT` | `LHA_APPROVAL_TIMEOUT_S` (24h) | how long an irreversible action waits for approval before it is rejected |
-| `--max-cycles INTEGER` | `LHA_MAX_CYCLES` | cycle ceiling |
-
-One of `--task` and `--checklist` is required. Plus `--check`, `--no-default-checks` and
-`--reference`. The check commands travel in the workflow input; the defaults are resolved by this
-command, not by the worker. Irreversible actions are approved with
-[`mission-approve`](#lha-mission-approve).
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 | `--task TEXT` | `""` | mission description; the Planner decomposes it (give `--task` or `--checklist`) |
-| `--title TEXT` | `mission` | mission title |
+| `--title TEXT` | `mission` (or the checklist file's title) | mission title |
 | `--checklist FILE` | none | import a `.json` checklist or `.md` roadmap instead of planning |
-| `--reference PATH` | none | vendored reference material recited every cycle (repeatable) |
-| `--workdir TEXT` | `.lha/workspaces/durable` | workspace; resolved to an absolute path for the worker |
-| `--max-cycles INT` | `LHA_MAX_CYCLES` | cycle ceiling |
-| `--deadlock-gate-hours FLOAT` | `24` | on deadlock, wait this long for `retry` / `abort` / `impossible`; `0` ends the mission `IMPOSSIBLE` at once |
-| `--deadlock-default TEXT` | `LHA_DEADLOCK_GATE_DEFAULT` (`abort`) | the deadlock gate's decision on timeout: `abort` or `impossible` |
-| `--approval-timeout-hours FLOAT` | `24` | how long a queued irreversible action waits for approval before it is rejected |
-| `--cycle-pause-seconds INT` | `LHA_CYCLE_PAUSE_SECONDS` (0) | durable pause between cycles (status `SLEEPING`) |
-| `--start-in-seconds INT` | `0` | sleep (status `SLEEPING`) before the first cycle |
+| `--reference TEXT` | none | vendored reference material recited every cycle (repeatable) |
+| `--workdir TEXT` | `.lha/workspaces/durable` | workspace; resolved to an absolute path here before it is sent to the worker |
+| `--max-cycles INTEGER` | `LHA_MAX_CYCLES` | cycle ceiling |
+| `--deadlock-gate-hours FLOAT` | `24.0` | on deadlock, wait this long for `retry` / `abort` / `impossible`; `0` ends the mission `IMPOSSIBLE` at once |
+| `--deadlock-default TEXT` | `LHA_DEADLOCK_GATE_DEFAULT` (`abort`) | the deadlock gate's decision on timeout: `abort` or `impossible`; anything else exits `2` |
+| `--approval-timeout-hours FLOAT` | `LHA_APPROVAL_TIMEOUT_S` (24 h) | how long a queued irreversible action waits for approval before it is rejected |
+| `--cycle-pause-seconds INTEGER` (>= 0) | `LHA_CYCLE_PAUSE_SECONDS` (0) | durable pause between cycles (status `SLEEPING`) |
+| `--start-in-seconds INTEGER` (>= 0) | `0` | sleep (status `SLEEPING`) before the first cycle |
 
 Plus `--check` and `--no-default-checks`. The check commands and the gate / sleep settings travel
 in the workflow input (with `LHA_GATE_ESCALATION_SECONDS` and `LHA_IMPOSSIBLE_AFTER_FAILURES`);
-they are resolved by this command, not by the worker.
+they are resolved by this command, not by the worker. After starting the workflow it writes the
+mission row (`RUNNING`) and the Planner's spend to the mission store. Irreversible actions are
+approved with [`mission-approve`](#lha-mission-approve).
 
 ## `lha mission-status`
 
@@ -265,11 +298,6 @@ they are resolved by this command, not by the worker.
 lha mission-status MISSION_ID
 ```
 
-Queries `status_v1`, `cycles_done` and `open_question` on workflow `mission:MISSION_ID` and
-prints `status=<status> cycles=<n>`, followed by `waiting on: <question> [<options>]` when a human
-gate is open. Works while running and after the workflow has closed; a worker must be running to
-answer the queries.
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 Queries workflow `mission:MISSION_ID` and prints `status=<status> cycles=<n>`, then, when they
 apply: the open gate (`gate_v1`: kind, id, question, options, default on timeout, opened /
 deadline, reminders sent and the next one, a recommendation, and for a queued action its tool,
@@ -281,28 +309,20 @@ a worker must be running to answer the queries.
 ## `lha mission-approve`
 
 ```
-lha mission-approve MISSION_ID --decision approve|reject|retry|abort
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 lha mission-approve MISSION_ID --decision TEXT
 ```
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--decision TEXT` | required | `approve` or `reject` for an irreversible-action gate; `retry` or `abort` for a deadlock gate |
-
-The value is lower-cased; anything else exits `2`. Sends signal `human_decision_v1` and prints
-`sent decision '<decision>' to mission <id>`. A decision that does not match the open gate's
-options is recorded in `rejected_decisions` and ignored, so check `mission-status` first. See
-[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-and-abort) and
-[15-operations-runbook.md](15-operations-runbook.md).
-<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
 | `--decision TEXT` | required | `approve` or `reject` (a queued irreversible action); `retry`, `abort` or `impossible` (the deadlock gate) |
 
 It queries the open gate first and checks the decision against that gate's options, so a decision
 the gate does not offer (for example `approve` at the deadlock gate) is refused with exit `2`; the
 gate is printed on stderr and nothing is sent. With no gate open, any of the five decisions is
-sent and held until the next gate. On success it sends signal `human_decision_v1` and prints
+sent and held until the next gate. The value is lower-cased; a word outside those five exits `2`
+before contacting Temporal. On success it sends signal `human_decision_v1` and prints
 `sent decision '<decision>' to mission <id>`. See
+[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-sleep-and-abort) and
 [15-operations-runbook.md](15-operations-runbook.md).
 
 ## `lha mission-snooze`

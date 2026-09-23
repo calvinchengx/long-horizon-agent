@@ -10,8 +10,9 @@ mission is `MissionMemory` in [memory/service.py](../python/src/lha/memory/servi
 lead tiered memory: `lha run-local` and `lha mission` (the local runner), `lha orchestrate` (the
 Orchestrator's lead), and the Temporal `run_agent_cycle` activity. All three build the lead with
 `build_lead_loop` ([agent/assembly.py](../python/src/lha/agent/assembly.py)), which takes the
-run's memory as `memory=`. Sub-agents, the reviewer and the replanner do not get memory. Memory is persisted in the mission store ([Persistence](#persistence)): SQLite by
-default, Postgres when `LHA_POSTGRES_DSN` is set.
+run's memory as `memory=`. Sub-agents (researchers and parallel implementers), the reviewer and
+the replanner do not get memory. Memory is persisted in the mission store
+([Persistence](#persistence)): SQLite by default, Postgres when `LHA_POSTGRES_DSN` is set.
 
 ## What happens each cycle
 
@@ -166,8 +167,8 @@ all of the dense-channel dependencies are OK; otherwise lexical-only retrieval: 
 | Postgres store but `pgvector` not importable, or embedder `dim` is not 1024 | at open | lexical-only |
 | the embedder or the vector index raises later in the run | at the failing call | lexical-only for the rest of the run |
 
-Each case records a `memory_degraded` trace event (and a structlog warning) with the reason, and
-the mission continues. Any other memory error is recorded as `memory_error` and the cycle
+Each case logs a structlog warning with the reason (and, on the local run paths, which have a
+`TraceRecorder`, a `memory_degraded` trace event), and the mission continues. Any other memory error is recorded as `memory_error` and the cycle
 proceeds with less or no memory; memory never fails a cycle. `probe_health` (the parked-mission
 health check) still checks only `git`, `model` and `sandbox`.
 

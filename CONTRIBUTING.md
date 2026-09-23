@@ -1,14 +1,15 @@
 # Contributing to LHA
 
-Thanks for your interest! LHA is a durable, self-improving agent organization for long-horizon
-software missions. This guide gets you productive fast.
+Thanks for your interest. LHA is a durable agent organization for long-horizon software
+missions. This guide covers setup and the checks every change must pass.
 
 ## Dev setup
 
-The repo holds two implementations of the same CLI: `python/` and `go/`. Shared, language-neutral
-assets live at the root: `db/migrations/`, `spec/` (conformance cases both test suites run),
-`docs/` and `docker-compose.yml`. A behaviour change must land in both implementations, with a
-`spec/` case that pins it.
+The repo holds two implementations: `python/` (the reference, with the `lha` CLI and worker) and
+`go/` (a port in progress: library packages only, no CLI or worker yet). Shared,
+language-neutral assets live at the root: `db/migrations/`, `spec/` (conformance cases both test
+suites run), `docs/` and `docker-compose.yml`. An observable behaviour change that `spec/` pins
+must land in both implementations, with a `spec/` case that pins it.
 
 Python (run from `python/`):
 
@@ -37,6 +38,12 @@ uv run coverage report
 ```
 
 CI (`.github/workflows/ci.yml`) runs exactly these on every push/PR.
+
+Go (from `go/`; CI does not run these, so run them locally):
+
+```bash
+gofmt -l . && go vet ./... && go test ./...
+```
 
 ### Integration tests (real Postgres + Docker)
 

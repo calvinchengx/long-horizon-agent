@@ -39,8 +39,10 @@ On the durable path, a mission is a Temporal workflow (`MissionWorkflow`). The w
 a deterministic scheduler; each agent cycle runs as one `run_agent_cycle` activity whose result
 Temporal journals. After a worker crash, completed cycles are replayed from history rather than
 re-run; a cycle that was in flight is retried from a clean checkout. Transient failures park the
-mission (`DEGRADED_PARK`) with a durable, backed-off sleep instead of failing it. See
-[architecture](05-architecture.md).
+mission (`DEGRADED_PARK`) with a durable, backed-off sleep instead of failing it, and it resumes
+when a health probe (git, a real model request, the sandbox) passes. A mission can also sleep by
+design (`SLEEPING`): a scheduled start, a pause between cycles or an operator snooze. See
+[architecture](05-architecture.md) and [durable execution](08-durable-execution.md).
 
 The unit of journaling is the cycle, not the individual model call: model calls made by an
 attempt that crashed are made again (and paid for again) by the retry.
@@ -64,10 +66,16 @@ it. See [verification](07-verification.md).
 - **Human gate on irreversible commands.** Shell commands classified as irreversible or
   outward-facing (for example `git push`) are sent to a human. A durable mission queues the exact
   call and waits as `WAITING_ON_HUMAN` for `lha mission-approve`; a local run asks on the
-  terminal with `--approve-interactive`; otherwise the command is denied.
+  terminal with `--approve-interactive`; otherwise the command is denied. An open gate sends
+  reminders on an escalation ladder (optionally to a webhook, `LHA_GATE_WEBHOOK_URL`) and applies
+  its default action on timeout. A durable mission that deadlocks opens a gate too: retry, abort,
+  or declare the mission impossible.
 - **Default-deny egress.** The Docker sandbox has no network unless the operator lists hosts in
   `LHA_SANDBOX_EGRESS`, which a proxy on an internal Docker network enforces. The lead gets the
-  `fetch_url` tool only when `LHA_WEB_ALLOW_HOSTS` lists hosts it may read.
+  `fetch_url` tool (and `web_search`, if a provider is configured) only when
+  `LHA_WEB_ALLOW_HOSTS` or `--allow-host` lists hosts it may read; fetched content is marked
+  untrusted, and a run that would combine web access with private data or a `local` sandbox is
+  refused (Rule of Two).
 - **Budget governor.** Each model call is authorized before it runs against a USD ceiling
   (`LHA_BUDGET_USD_CEILING`, default 10.0). Calls whose cost cannot be computed are refused
   unless `LHA_ALLOW_UNPRICED_MODELS=true`.
@@ -89,8 +97,15 @@ The project is early and under active development.
 | Python durable spine (`lha worker`, `lha mission-start`) | Implemented; durability and replay tests run against the Temporal test server in CI |
 | Large-mission features: imported checklists with witnesses, trusted checks, protected paths, replanning of blocked items, sandbox image and egress allow-list, vendored references, human approval of irreversible actions | Implemented and wired into every Python run path (local, durable, `orchestrate`); an end-to-end test exercises them together on real Docker |
 | Python local multi-agent flow (`lha orchestrate`: researchers, lead, reviewer) | Implemented; runs locally only, not on Temporal |
-| Memory (episodic/semantic/skills), Postgres persistence, Langfuse export | Library code with tests; not wired into the mission run paths |
-| Go port | Library packages in progress (contracts and config include the new fields); no CLI or Temporal worker yet |
+| Human approval gates, escalation ladder and gate webhook, `SLEEPING` (scheduled start, cycle pause, `lha mission-snooze`), the retry/abort/impossible deadlock gate | Implemented and wired. Gates are not written to the `hitl_gates` table, and the workflow-only states (`DEGRADED_PARK`, `SLEEPING`, the deadlock gate's `WAITING_ON_HUMAN`) are not written to the mission row |
+| Web tools (`fetch_url`, `web_search`) with egress policy, credential broker, untrusted-content fencing and the Rule of Two preflight | Implemented and wired when `LHA_WEB_ALLOW_HOSTS` or `--allow-host` is non-empty. A DNS-rebinding window remains between the address check and the connection |
+| Fallback model chain (`LHA_FALLBACK_MODELS`) and a real model health probe for parked missions | Implemented and wired. Fallbacks of one backend share its endpoint (for example `LHA_OPENAI_BASE_URL`) |
+| Persistence (SQLite by default, Postgres with `LHA_POSTGRES_DSN`): mission rows and the cost ledger (`lha missions`, `lha costs`) | Implemented and wired into every run path |
+| Tiered memory (episodic, semantic, skills) in the lead's prompt, with degradation to BM25 and `git grep` | Implemented and wired into every run path. The default `hash` embedder is not semantic |
+| Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
+| File ownership, tickets and blackboard, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` only (not the Temporal workflow); `orchestrate` does not resume an existing mission; no lease granting |
+| Langfuse export, the `SubAgentWorkflow` fan-out, the Auditor and Librarian roles, flaky-test quarantine, sagas and reconciliation | Library code with tests; not called by any run path |
+| Go port | Library packages (contracts, config, spec runner, model, safety, obs, state with the decision chain, verify, governor); no CLI (`go/cmd/lha`) or Temporal worker yet |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 
 ## Where to go next

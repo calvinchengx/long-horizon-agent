@@ -4,7 +4,7 @@ What the Python and Go implementations must agree on so that one deployment can 
 same Temporal names and payloads, the same on-disk mission anchor, the same Postgres schema, and
 the same observable behaviour pinned by [`spec/`](../spec/). The Python implementation is the
 reference; every name below is taken from its code. The Go port implements the anchor and the
-spec'd behaviours today; its Temporal worker is not written yet (see [23-roadmap.md](23-roadmap.md)).
+spec'd behaviours today; it has no CLI and no Temporal worker yet (see [23-roadmap.md](23-roadmap.md)).
 
 ## Temporal
 
@@ -19,10 +19,16 @@ spec'd behaviours today; its Temporal worker is not written yet (see [23-roadmap
 | Activity | `check_mission_health`: `HealthInput` -> `HealthReport` | same |
 | Activity | `unblock_items`: `UnblockInput` -> `CycleResult` | same |
 | Activity | `read_mission_snapshot`: `HealthInput` -> `CycleResult` | same |
+| Activity | `notify_gate`: `GateNotice` -> `NoticeResult` | same |
+| Activity | `declare_impossible`: `FinalizeInput` -> `CycleResult` | same |
 | Activity | `run_subagent`: `SubAgentInput` -> `SubAgentOutput` | [`durable/agent_activities.py`](../python/src/lha/durable/agent_activities.py) |
 | Signal | `human_decision_v1` (string) | [`durable/signals.py`](../python/src/lha/durable/signals.py) |
 | Signal | `steer_v1` (string) | same |
+| Signal | `snooze_v1` (int seconds; `0` wakes a sleeping mission) | same |
 | Query | `status_v1` -> string | same |
+| Query | `gate_v1` -> `GateView` or null | same |
+| Query | `gate_log_v1` -> list of strings (at most 50, oldest first) | same |
+| Query | `resume_at` -> float (epoch seconds, `0` when not sleeping) | `MissionWorkflow` |
 | Query | `cycles_done` -> int | `MissionWorkflow` |
 | Query | `last_item` -> string or null | `MissionWorkflow` |
 | Query | `park_reason` -> string | `MissionWorkflow` |
@@ -39,16 +45,41 @@ Identifiers:
 | sub-agent child workflow id | `subagent:<mission_id>:<role>:<12 hex from workflow.uuid4()>` |
 | cycle id | `c<n>` where `n = cycles_done + 1` |
 | unblock id | `u<n>` where `n` is the deadlock-retry count |
+| approval gate id | `approval-<first 12 hex of the action fingerprint>` |
+| deadlock gate id | `deadlock-<cycles_done>` |
+| gate event cycle id | `gate:<gate id>` |
+| impossible checkpoint cycle id | `impossible-<cycles_done>` |
 
-Non-retryable `ApplicationError` types: `BudgetExceeded`, `MissionConfigError`.
+Non-retryable `ApplicationError` types: `BudgetExceeded`, `MissionConfigError`. A committed
+`.lha/decisions.ndjson` that fails hash-chain verification surfaces from `run_agent_cycle` as a
+non-retryable `MissionConfigError` whose message starts `decision log failed verification:`
+(`_refuse_tampered_chain` in [`durable/activities.py`](../python/src/lha/durable/activities.py)).
 
-Mission status strings: `RUNNING`, `SLEEPING` (defined, never set), `WAITING_ON_HUMAN`,
-`DEGRADED_PARK`, `DONE`, `ABORTED`, `IMPOSSIBLE`. Outcome strings: `completed`, `deadlocked`,
-`budget_exhausted`, `max_cycles`, `aborted`.
+Mission status strings ([`durable/signals.py`](../python/src/lha/durable/signals.py)):
+`RUNNING`, `SLEEPING` (on a durable timer: scheduled start, pause between cycles, or snooze),
+`WAITING_ON_HUMAN` (a gate is open), `DEGRADED_PARK` (a critical dependency is down), `DONE`,
+`ABORTED`, `IMPOSSIBLE`. Outcome strings: `completed`, `deadlocked`, `budget_exhausted`,
+`max_cycles`, `aborted`, `impossible`. The terminal status for each outcome: `completed` ->
+`DONE`; `deadlocked` and `impossible` -> `IMPOSSIBLE`; `budget_exhausted`, `max_cycles` and
+`aborted` -> `ABORTED`.
+
+Gate kinds: `tool_call` (options `approve`, `reject`; default `reject`) and `deadlock` (options
+`retry`, `abort`, `impossible`; default `MissionInput.deadlock_gate_default`, which must be
+`abort` or `impossible`, anything else falls back to `abort`). A `human_decision_v1` value is
+matched case-insensitively against the open gate's options; a non-matching value is recorded in
+`rejected_decisions` and the gate keeps waiting.
+
+`workflow.patched` ids, for behaviour added after histories were recorded:
+`lha-gate-escalation-v1` (gates walk the escalation ladder and emit `notify_gate`; the deadlock
+gate offers `impossible`) and `lha-sleeping-v1` (the SLEEPING timer before a cycle, and
+`cycle_pause_seconds`). A worker in another language must branch on the same ids to replay
+histories from either side of the change.
 
 Timeouts and retry policies are part of the workflow's recorded commands, so they must match for
 replay: see [14-running-on-temporal.md](14-running-on-temporal.md#how-a-cycle-runs). The
 sub-agent activity uses a 15-minute start-to-close, 2-minute heartbeat timeout and 3 attempts.
+`notify_gate` uses a 3-minute start-to-close and 3 attempts (a failure is logged in the gate
+log, never fails the gate); `declare_impossible` a 5-minute start-to-close and 3 attempts.
 
 ### Payload types
 
@@ -59,12 +90,16 @@ Continue-As-New rides inside `MissionInput.state`.
 
 | Type | Fields (default) |
 |---|---|
-| `MissionInput` | `mission_id: str`, `workdir: str`, `max_cycles: int (1000)`, `cycles_before_can: int (200)`, `check_commands: list[list[str]] \| null (null)`, `budget_usd: float \| null (null)`, `park_initial_seconds: int (60)`, `park_max_seconds: int (3600)`, `deadlock_gate_seconds: int (0)`, `approval_timeout_seconds: int (86400)`, `state: MissionState \| null (null)` |
-| `MissionState` | `cycles_done: int (0)`, `status: str ("RUNNING")`, `head_sha: str ("")`, `items_done: int (0)`, `items_total: int (0)`, `last_item: str \| null`, `pending_decision: str \| null`, `steer_notes: list[str] ([])`, `parks: int (0)`, `deadlock_retries: int (0)`, `approved_actions: list[ApprovedAction] ([])`, `rejected_actions: list[str] ([])` (fingerprints) |
+| `MissionInput` | `mission_id: str`, `workdir: str`, `max_cycles: int (1000)`, `cycles_before_can: int (200)`, `check_commands: list[list[str]] \| null (null)`, `budget_usd: float \| null (null)`, `park_initial_seconds: int (60)`, `park_max_seconds: int (3600)`, `deadlock_gate_seconds: int (0)`, `approval_timeout_seconds: int (86400)`, `gate_escalation_seconds: list[int] ([900, 2700, 14400, 43200])`, `deadlock_gate_default: str ("abort")`, `impossible_after_failures: int (3)`, `cycle_pause_seconds: int (0)`, `resume_at: float (0.0)` (epoch seconds; scheduled start), `state: MissionState \| null (null)` |
+| `MissionState` | `cycles_done: int (0)`, `status: str ("RUNNING")`, `head_sha: str ("")`, `items_done: int (0)`, `items_total: int (0)`, `last_item: str \| null`, `pending_decision: str \| null`, `steer_notes: list[str] ([])`, `parks: int (0)`, `deadlock_retries: int (0)`, `approved_actions: list[ApprovedAction] ([])`, `rejected_actions: list[str] ([])` (fingerprints), `fail_item: str \| null (null)`, `fail_streak: int (0)`, `resume_at: float (0.0)`, `escalations: int (0)`, `gate_log: list[str] ([])` |
 | `CycleInput` | `mission_id`, `workdir`, `cycle_id: str`, `check_commands: list[list[str]] \| null`, `budget_usd: float \| null`, `max_cycles: int (1000)`, `steer_notes: list[str] ([])`, `approved_actions: list[ApprovedAction] ([])` |
 | `CycleResult` | `item_id: str \| null`, `advanced: bool`, `head_sha: str`, `is_complete: bool`, `items_done: int`, `items_total: int`, `note: str ("")`, `verdict: str ("")`, `is_deadlocked: bool (false)`, `item_blocked: bool (false)`, `reason: str ("")`, `spent_usd: float (0.0)`, `item_split: bool (false)`, `pending_approvals: list[PendingApproval] ([])`, `used_approvals: list[str] ([])` (fingerprints) |
 | `PendingApproval` | `fingerprint: str`, `tool: str`, `reason: str`, `arguments: str ("")` (the `repr` of the arguments, at most 2000 chars) |
 | `ApprovedAction` | `fingerprint: str`, `summary: str` (`<tool> <arguments>`, at most 500 chars) |
+| `GateView` | `gate_id: str`, `kind: str` (`tool_call` \| `deadlock`), `question: str`, `options: list[str]`, `default_action: str`, `opened_at: str ("")`, `deadline: str ("")`, `escalations_sent: int (0)`, `next_escalation_at: str ("")`, `recommended: str ("")`, `request: PendingApproval \| null (null)`; times are ISO 8601 UTC to the second |
+| `GateNotice` | `mission_id`, `workdir`, `gate_id`, `kind`, `event: str` (`opened` \| `reminder` \| `resolved` \| `defaulted`), `question: str ("")`, `options: list[str] ([])`, `default_action: str ("")`, `decision: str ("")`, `step: int (0)`, `deadline: str ("")`, `request: PendingApproval \| null (null)` |
+| `NoticeResult` | `recorded: bool`, `webhook: str ("off")` (`off` \| `sent` \| `failed: <reason>`) |
+| `FinalizeInput` | `mission_id`, `workdir`, `cycle_id`, `reason: str ("")` |
 | `HealthInput` | `mission_id`, `workdir` |
 | `HealthReport` | `healthy: bool`, `reason: str ("")`, `degraded: list[str] ([])` |
 | `UnblockInput` | `mission_id`, `workdir`, `cycle_id` |
@@ -74,11 +109,27 @@ Continue-As-New rides inside `MissionInput.state`.
 | `FanOutResult` | `outputs: list[SubAgentOutput]`, `failures: list[str]` (returned in workflow code, not a Temporal payload) |
 
 `check_commands: null` means the default Python checks; an explicit empty list is rejected with
-`MissionConfigError`. `items_total` counts work items: `split` parents are excluded.
+`MissionConfigError`, as are `cycles_before_can < 1` and `max_cycles < 0`. `items_total` counts
+work items: `split` parents are excluded. `gate_escalation_seconds` offsets outside
+`(0, gate timeout)` are dropped; the rest are sorted and de-duplicated
+([`hitl/escalation.py`](../python/src/lha/hitl/escalation.py)).
+
+`MissionState.resume_at` is set from `MissionInput.resume_at` on the first run, by
+`snooze_v1` (`now + seconds`, or `0`), and after each cycle when `cycle_pause_seconds > 0`.
+Before each cycle the workflow sleeps (status `SLEEPING`) until it; a `snooze_v1` during the
+sleep moves or ends it. `fail_item`/`fail_streak` count consecutive non-passing verified cycles
+on one item; when `fail_streak >= impossible_after_failures` the deadlock gate sets
+`recommended: "impossible"`. `gate_log` lines are `<ISO time> <text>`, at most 50.
+
+The JSON that `notify_gate` commits to the anchor and POSTs to `LHA_GATE_WEBHOOK_URL` (when set)
+is: `source` (`"lha"`), `mission_id`, `gate_id`, `kind`, `event`, `question` (secrets
+redacted), `options`, `default_action`, `deadline`, plus `decision` and `step` when non-empty,
+and `request` (`fingerprint`, `tool`, `arguments` redacted, `reason`) for a tool-call gate
+(`gate_notice_payload` in [`durable/activities.py`](../python/src/lha/durable/activities.py)).
 
 An action fingerprint is the first 32 lowercase hex characters of the SHA-256 of the canonical JSON
 `{"arguments": <arguments>, "tool": <tool name>}` (sorted keys, separators `,` and `:`, non-JSON
-values stringified) ([`hitl/approvals.py`](../python/src/lha/hitl/approvals.py)). A worker in
+values stringified with `str`, non-ASCII escaped as `\uXXXX`) ([`hitl/approvals.py`](../python/src/lha/hitl/approvals.py)). A worker in
 another language must compute it identically for approvals to carry across cycles.
 
 ### ClaimCheck codec
@@ -105,7 +156,7 @@ store.
 Temporal replay compares the commands a worker issues with the recorded history, including
 command sequence ids. The Python SDK numbers activity ids and timer ids with separate counters; the
 Go SDK uses one shared counter. A history containing both activities and timers (any mission that
-parked, or opened a gate with a timeout) therefore does not replay on a worker of the other
+parked, slept, or opened a gate) therefore does not replay on a worker of the other
 language. Histories with activities only are not affected by this. Until this is resolved, keep a
 mission's workers to one language once it has recorded a timer.
 
@@ -131,10 +182,35 @@ A cycle checkpoint writes an event with `kind: "cycle"` and payload `item_id`, `
 checkpoint's `cycle` event adds `writer` and `branch`, and it is followed by a `kind: "ticket"`
 event (`ticket_id`, `item_id`, `role`, `write_set`, `branch`, `status`, `history` (list of
 `{status, note}`), `ownership_violations`). The exactly-once check looks for the `cycle` event
-among the last 64 lines of `events.ndjson` at `HEAD`. Commit messages:
-`lha: initialize mission anchor`, `lha: complete|attempt|block|split <id> (<description>)`
-(orchestrate appends ` [merged <branch>]` to an integration commit, which is a two-parent merge
-commit), `lha: review reopened <id>`, `lha: unblock <ids> (human retry)`.
+among the last 64 lines of `events.ndjson` at `HEAD`.
+
+Durable gates add their own checkpoints (the checklist is rewritten unchanged). Each
+`notify_gate` call commits one event with `kind` `gate_opened`, `gate_reminder`,
+`gate_resolved` or `gate_defaulted`, `cycle_id` `gate:<gate id>` and the gate payload described
+under [Payload types](#payload-types). A mission declared impossible gets a final checkpoint with
+cycle id `impossible-<n>` and two events: `mission_impossible` (`reason`, `blocked` (item ids),
+`items_done`, `items_total`) and `cycle` (`outcome: "impossible"`, `blocked`), the second one
+making a retry of `declare_impossible` a no-op. A human `retry` at the deadlock gate commits an
+`unblock` event (`items`: the unblocked ids).
+
+Within a cycle checkpoint, each tool call that reached an approval gate adds a `tool_approval`
+event: `tool`, `arguments` (redacted), `reason`, `fingerprint`, `decision` (`approve`, `reject`,
+or `pending` when a durable cycle queued it for the workflow), `approved`, `resolved_by`,
+`defaulted`. The local `TerminalApprover` also adds a `gate_reminder` event per reminder
+(`gate_id`, `gate: "tool_call"`, `step`, `tool`, `fingerprint`).
+
+Commit messages: `lha: initialize mission anchor`,
+`lha: complete|attempt|block|split <id> (<description>)` (orchestrate appends
+` [merged <branch>]` to an integration commit, which is a two-parent merge commit),
+`lha: review reopened <id>`, `lha: unblock <ids> (human retry)`,
+`lha: gate <event> (<kind> <gate id>)`, `lha: mission declared impossible`.
+
+Decisions reach `decisions.ndjson` two ways: the agent's `record_decision` tool queues a
+`DecisionRecord` in memory (`GitMissionAnchor.record_decision`), and a `Checkpoint` can carry
+`decisions`. At the next checkpoint both are chained onto the committed log, and a record with an
+empty `cycle_id` gets the checkpoint's. The queue lives in memory, so a cycle that ends without
+a checkpoint (a crash) loses it. In `orchestrate`, each parallel implementer records into its own
+buffer, and only merged work has its decisions committed.
 
 Fields added since the first release (`references`, `witnesses`, status `split`) have empty
 defaults, so older anchors still load. The Go `contracts` package reads and writes them (and
@@ -189,15 +265,17 @@ Migrations are plain SQL in [`db/migrations/`](../db/migrations/), one file per 
 | `0001_init` | `CREATE EXTENSION vector`; tables below; seeds `schema_registry` (`lha-core`, 1) |
 | `0002_idempotent_ledger` | `cost_ledger` gains `idempotency_key` (unique index), `role`, `cost_known`; `semantic_memory.id` becomes `text` |
 | `0003_cost_unknown_usd_null` | `cost_ledger.usd` becomes nullable with no default; unknown-cost rows set to `NULL` |
+| `0004_memory_skills` | additive only (`IF NOT EXISTS`): `semantic_memory` gains `kind text NOT NULL DEFAULT 'semantic'` and `metadata jsonb NOT NULL DEFAULT '{}'`, plus index `semantic_memory_mission` (`mission_id`); new table `skills` with index `skills_namespace` (`namespace`) |
 
-Tables after all three:
+Tables after all four:
 
 | Table | Columns |
 |---|---|
-| `missions` | `mission_id` PK, `title`, `description`, `acceptance`, `status` (default `RUNNING`), `workflow_id`, `run_id`, `latest_snapshot_id`, `latest_session_id`, `head_sha`, `schema_version`, `created_at`, `updated_at` |
+| `missions` | `mission_id` PK, `title`, `description`, `acceptance`, `status` text (default `RUNNING`; the values in the column comment are the seven status strings above, not a database enum), `workflow_id`, `run_id`, `latest_snapshot_id`, `latest_session_id`, `head_sha`, `schema_version`, `created_at`, `updated_at` |
 | `checklist_items` | PK (`mission_id`, `item_id`), `description`, `status`, `verified_by` jsonb, `depends_on` jsonb, `attempts`, `schema_version`, `updated_at` |
 | `episodic_events` | `id` bigserial PK, `mission_id`, `cycle_id`, `ts`, `kind`, `payload` jsonb, `payload_ref`, `schema_version`; index (`mission_id`, `ts`) |
-| `semantic_memory` | `id` text PK, `mission_id`, `text`, `tsv` tsvector (GIN), `embedding` vector(1024) (HNSW cosine), `embedding_model`, `embedding_version`, `valid`, `source_event_id`, `created_at`, `schema_version` |
+| `semantic_memory` | `id` text PK, `mission_id` (indexed), `text`, `tsv` tsvector (GIN), `embedding` vector(1024) (HNSW cosine), `embedding_model`, `embedding_version`, `valid`, `source_event_id`, `created_at`, `schema_version`, `kind` (default `semantic`), `metadata` jsonb (default `{}`) |
+| `skills` | `id` text PK, `namespace` (default `global`, indexed), `name`, `description`, `code` (default `''`), `preconditions` jsonb (default `[]`), `provenance` (default `''`), `expires_at` text (ISO date), `verified` (default false), `uses` (default 0), `created_at`, `updated_at`, `schema_version` |
 | `idempotency_keys` | `key` PK, `result_ref`, `created_at` |
 | `cost_ledger` | `id` bigserial PK, `mission_id`, `cycle_id`, `ts`, `model`, `input_tokens`, `output_tokens`, `usd` numeric(12,6) nullable, `idempotency_key` unique, `role`, `cost_known` |
 | `hitl_gates` | `gate_id` PK, `mission_id`, `question`, `risk`, `default_action`, `status` (`OPEN`), `deadline`, `decision`, `resolved_by`, `created_at`, `resolved_at` |
@@ -213,10 +291,49 @@ its `schema_migrations` row, so a failing migration leaves neither schema change
 Each file also inserts its own row, so a database initialized by Postgres'
 `docker-entrypoint-initdb.d` (the compose `appdb` service) counts as migrated.
 
-The runtime reads and writes only `cost_ledger` and `missions` through
-[`persistence/repositories.py`](../python/src/lha/persistence/repositories.py) and
-`semantic_memory` through [`memory/semantic_pg.py`](../python/src/lha/memory/semantic_pg.py), and
-none of these is called by a CLI command or workflow yet.
+### Mission store
+
+Every run path persists through one `MissionStore` interface
+([`persistence/store.py`](../python/src/lha/persistence/store.py)), opened by `open_store`:
+`PostgresStore` when `LHA_POSTGRES_DSN` is set, otherwise `SqliteStore`. `PostgresStore` refuses
+to open unless `schema_migrations` lists all four versions above (run `lha db migrate` first).
+If Postgres is configured but unusable and `LHA_POSTGRES_FALLBACK_TO_SQLITE` is true (the
+default), the run falls back to SQLite and the store's `degraded_reason` says why; with the
+fallback off, the durable cycle activity fails with a non-retryable `MissionConfigError`.
+
+`SqliteStore` ([`persistence/sqlite.py`](../python/src/lha/persistence/sqlite.py)) uses the
+file `LHA_SQLITE_PATH` (default `.lha/lha.sqlite3`, resolved against the current directory; a
+path inside the mission checkout is moved to `<workdir>/.git/lha/<name>`), WAL mode, and creates
+its schema on open from its own migration list (`sqlite_0001_init`, recorded in its own
+`schema_migrations`). It has the same `missions`, `cost_ledger`, `episodic_events`,
+`semantic_memory` and `skills` columns as Postgres after `0004`, with SQLite types: JSON as
+text, booleans as integers, timestamps as ISO 8601 text, and `semantic_memory.embedding` as JSON
+text instead of `vector(1024)`, with no `tsv` column. It has no `checklist_items`,
+`idempotency_keys`, `hitl_gates` or `snapshots` tables.
+
+What is written, and by whom:
+
+| Table | Written by |
+|---|---|
+| `missions` | `MissionTracker` ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)), an upsert on `mission_id` |
+| `cost_ledger` | `LedgerSink`, installed as `CostMeter.on_record`: one row per metered model call, keyed by an idempotency key derived from mission id, cycle id and `<key prefix>#<sequence number>`, so a repeated write is a no-op. Key prefixes: `<cycle id>@<attempt>` for a durable cycle (a retried attempt's calls are new rows), `sub:<workflow id>:<activity id>@<attempt>` for a durable sub-agent, `planner` for the Planner's calls in `lha mission-start`; a local runner uses an empty prefix and backfills the calls its meter recorded before the store opened |
+| `episodic_events`, `semantic_memory`, `skills` | the memory plane ([`memory/service.py`](../python/src/lha/memory/service.py)) when `LHA_MEMORY_ENABLED` is true |
+| `checklist_items`, `idempotency_keys`, `hitl_gates`, `snapshots` | nothing; the tables exist in Postgres only |
+
+Mission row statuses actually written: a local runner (`run-local`, `mission`, `orchestrate`)
+writes `RUNNING` at start and, at the end, `DONE` (complete), `IMPOSSIBLE` (deadlocked) or
+`ABORTED` (anything else). `lha mission-start` writes the row as `RUNNING` with the workflow id
+after starting the workflow. In a durable run the cycle activity writes `RUNNING` when a cycle
+starts, `ABORTED` when the budget is exceeded, and after the checkpoint `DONE` (checklist
+complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval),
+`IMPOSSIBLE` (deadlocked) or `RUNNING`. The workflow itself writes nothing, so `DEGRADED_PARK`,
+`SLEEPING`, the deadlock gate's `WAITING_ON_HUMAN`, and a final outcome decided in the workflow
+(abort or impossible at the deadlock gate, a human `retry`, `max_cycles`) never reach the row;
+`status_v1` is the live source for those. Gates are not written to `hitl_gates`; their history
+is in the anchor's `gate_*` events and the `gate_log_v1` query.
+
+`lha missions` lists mission rows with their cost summary, and `lha costs <mission id>` prints a
+mission's cost summary and its most recent ledger rows, from the same store.
 
 ## Conformance cases (`spec/`)
 

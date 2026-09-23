@@ -6,7 +6,8 @@
   the sink existed (e.g. the Planner's call, made before the mission id was known).
 * ``MissionTracker`` upserts the ``missions`` row as the run moves RUNNING → DONE / ABORTED /
   IMPOSSIBLE (``status_for_stop`` maps a local runner's stop reason to the same terminal status
-  the durable workflow reports).
+  the durable workflow reports); the durable cycle activity also writes WAITING_ON_HUMAN when a
+  cycle queued an approval (``durable.activities.cycle_status``).
 
 Persistence is an observer of the run, never a reason to fail it: store errors are logged and
 counted (``failures``), not raised into the agent loop.

@@ -5,12 +5,15 @@ What LHA records about a mission, where it goes, and what is only a hook. The co
 
 | Signal | Local runs (`run-local`, `mission`, `orchestrate`) | Durable runs (`lha worker`) |
 |---|---|---|
-| Structured events (`TraceRecorder`) | yes, printed via structlog | no |
-| Git history + `.lha/` anchor | yes | yes |
+| Structured events (`TraceRecorder`) | yes, printed via structlog | no (memory events are logged via structlog in the worker) |
+| Git history + `.lha/` anchor | yes | yes, plus `gate_*` events for human gates |
 | Temporal event history | n/a | yes |
+| Mission row (`missions`) | yes | yes, written by `mission-start` and each cycle activity |
+| Cost ledger (`cost_ledger`) | every metered call | every metered call, plus `.git/lha/spend.ndjson` |
+| Gate webhook (`LHA_GATE_WEBHOOK_URL`) | gate events from `--approve-interactive` | every gate event |
 | OpenTelemetry spans | `orchestrate` only, if a tracer provider is installed | no |
 | Langfuse | not sent | not sent |
-| Cost | summary line on exit | `.git/lha/spend.ndjson`, `spent_usd` per cycle |
+| Cost summary | summary line on exit | `spent_usd` per cycle; `lha costs` for both |
 
 ## Structured events
 
@@ -36,9 +39,14 @@ Event kinds emitted today:
 | `governor_block` | runner, orchestrator | `reason` |
 | `deadlocked` | runner, orchestrator | `reason` |
 | `loop_detected` | runner | `item_id` |
+| `decision_chain_invalid` | runner, orchestrator | `reason` (the committed decision log failed verification; the run stops) |
 | `research`, `research_failed` | orchestrator | research fan-out results |
 | `reflection` | orchestrator | `item` |
 | `review`, `review_reopened` | orchestrator | reviewer verdict |
+| `parallel_wave` | orchestrator | the items of a parallel wave |
+| `integration` | orchestrator | `item`, `merged`, `branch`, `reason` |
+| `ownership_violation`, `ownership_released` | orchestrator | writer and paths |
+| `memory_degraded`, `memory_error`, `memory_consolidated`, `skill_stored` | memory service | reason or counts ([12-memory.md](12-memory.md)) |
 
 Model spend is recorded by the metering wrapper, not by `llm_turn` events.
 
@@ -47,7 +55,22 @@ print or save it; it is available when calling `run_mission_local`, `plan_and_ru
 `Orchestrator.run_mission` from Python.
 
 The durable activity constructs `AgentLoop` without a recorder, so a mission on Temporal emits no
-`TraceEvent`s. Its record is the Temporal history plus the git anchor.
+`TraceEvent`s. Its record is the Temporal history, the git anchor and the mission store.
+
+## Human gate events
+
+Gate activity is recorded in the anchor's `.lha/events.ndjson`, not in the `hitl_gates` table
+(nothing writes that table):
+
+- **Durable runs.** The `notify_gate` activity commits one checkpoint per gate event (kind
+  `gate_opened`, `gate_reminder`, `gate_resolved` or `gate_defaulted`, commit message
+  `lha: gate <event> (<kind> <gate_id>)`) and POSTs the same JSON to `LHA_GATE_WEBHOOK_URL` when
+  it is set. Reminders follow `LHA_GATE_ESCALATION_SECONDS`. Secrets in the question and the
+  arguments are redacted. A webhook failure is reported in the activity result and never fails
+  the mission.
+- **Local runs with `--approve-interactive`.** The terminal approver's reminders become
+  `gate_reminder` events, and the decision a `tool_approval` event, in the cycle's checkpoint.
+  The opened, reminder, resolved and defaulted events also go to the webhook.
 
 ## Redaction
 
@@ -64,8 +87,8 @@ line, the collected trace or a span attribute:
   `scheme://user:password@host`.
 - `SecretStr` values are always masked. Mappings and lists are redacted recursively.
 
-The rules are pinned by [`spec/obs/redact.json`](../spec/obs/redact.json). The Python suite runs it;
-the Go port has no `obs` package yet.
+The rules are pinned by [`spec/obs/redact.json`](../spec/obs/redact.json). The Python suite and
+the Go port (`go/internal/obs`) both run it.
 
 `lha config` masks every `SecretStr` setting (`***` when set, `None` when unset). See
 [18-configuration.md](18-configuration.md).
@@ -128,9 +151,13 @@ model, input/output tokens, cache read/write tokens, role, USD, and `cost_known`
   `{"key", "cycle_id", "usd", "unknown", "calls"}`. `key` is a hash of mission, cycle and attempt;
   readers keep the last row per key. Each `CycleResult` also carries that attempt's `spent_usd`.
 
-- **Postgres**: `CostLedgerRepo` in
-  [`persistence/repositories.py`](../python/src/lha/persistence/repositories.py) writes idempotent
-  rows to `cost_ledger` (unknown cost stored as `NULL`) and can sum them, but no CLI command or
-  workflow calls it.
+- **Mission store**: every run path installs a `LedgerSink`
+  ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)) on the cost meter, so
+  every metered call (planner, lead, sub-agents, memory consolidation) is written to
+  `cost_ledger` under an idempotency key; unknown cost is stored as `NULL`. The store is SQLite
+  (`LHA_SQLITE_PATH`, default `.lha/lha.sqlite3` relative to the working directory) unless
+  `LHA_POSTGRES_DSN` is set. `lha costs <mission_id>` prints a mission's calls and totals, and
+  `lha missions` lists missions with their status and known spend. See
+  [10-cost-and-budget.md](10-cost-and-budget.md).
 
 Budget enforcement is described in [10-cost-and-budget.md](10-cost-and-budget.md).

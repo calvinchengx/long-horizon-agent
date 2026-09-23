@@ -2,7 +2,7 @@
 
 A gate opens, sends a reminder at each escalation offset that falls strictly inside its timeout,
 and applies its default action at the timeout. ``escalation_schedule`` normalizes the configured
-offsets; ``next_deadline`` says how long to wait before the next rung. Nothing here reads a clock:
+offsets; ``next_rung`` says how long to wait before the next rung. Nothing here reads a clock:
 callers pass elapsed time (``workflow.now()`` in the workflow, ``time.monotonic`` locally).
 """
 

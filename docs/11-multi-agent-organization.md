@@ -62,10 +62,12 @@ round then:
 
 Both round kinds start with `research_fanout`: two queries per item ("Find context relevant
 to…", "Find existing files/code related to…"). Each query goes to a separate `SubAgent`
-concurrently (`asyncio.gather`), using a read-only dispatcher over the Lead's tools
-(`lead_tools`). Egress is on for it only when the caller passes `allow_egress` and
-`LHA_WEB_ALLOW_HOSTS` is set. Failed researchers come back with `error` set. Auth errors
-(401/403), `BudgetExceeded` and cancellation are raised.
+concurrently (`asyncio.gather`), using a read-only dispatcher over the run's tools
+(`build_run_dispatcher(..., allow_mutating=False)`). When the web allow-list
+(`LHA_WEB_ALLOW_HOSTS` plus any `--allow-host`) is non-empty, that dispatcher includes the web
+tools (`fetch_url`, and `web_search` when configured), and the researcher role, which sets
+`allow_egress`, sees them. Failed researchers come back with `error` set. Auth errors (401/403),
+`BudgetExceeded` and cancellation are raised.
 
 **Serial round.** The Lead is built by `build_lead_loop`
 ([agent/assembly.py](../python/src/lha/agent/assembly.py)), as in every run path: the verifier
@@ -97,8 +99,9 @@ status `todo`, `verified_by` cleared, the review notes attached, and a checkpoin
 3. An `Implementer` ([specialists.py](../python/src/lha/agents/specialists.py)) runs. Its
    dispatcher has three layers: `record_decision` (into the implementer's own buffer), then an
    `OwnershipGuard` (writer: its implementer id), then the Lead's dispatcher (`lead_dispatcher`:
-   the same tools, `fetch_url` when `LHA_WEB_ALLOW_HOSTS` is set, and the same human gate). The
-   prompt contains the contract, the mission spec, the item's last failure and reflection, the
+   the same tools and the same human gate). The implementer role does not set `allow_egress`, so
+   the implementer is never shown the web tools, even when the allow-list is set. The prompt
+   contains the contract, the mission spec, the item's last failure and reflection, the
    recorded decisions, the research briefs and the blackboard.
 4. The worktree is verified the way a Lead cycle would verify the item. The mission checks and
    the item's witnesses run on the Lead's verifier (trusted checks outside the sandbox), and an
@@ -127,12 +130,14 @@ and a `ticket` event. All worktrees and branches of the wave are removed at the 
 whatever the outcome.
 
 The command-line knobs are `--check`, `--no-default-checks`, `--sandbox`, `--unsafe-local`,
-`--reference` and `--approve-interactive`; the rest comes from `LHA_*` settings. Parallel waves
-add no CLI option. They are tuned by one setting, `LHA_MAX_PARALLEL_IMPLEMENTERS`. The CLI does
-not pass `allow_egress`, so researchers get no network tool even though their role spec sets
-`allow_egress=True`. The Lead and the implementers get `fetch_url` only through
-`LHA_WEB_ALLOW_HOSTS`. `orchestrate` re-initializes the anchor at the start of every invocation,
-so it does not resume an earlier `orchestrate` run.
+`--reference`, `--approve-interactive` and `--allow-host`; the rest comes from `LHA_*` settings.
+`orchestrate` has no `--checklist` option. Parallel waves add no CLI option. They are tuned by
+one setting, `LHA_MAX_PARALLEL_IMPLEMENTERS`. With a non-empty web allow-list the Lead and the
+Researchers get the web tools; the Reviewer and the implementers are not shown them because
+their roles do not set `allow_egress`. A run with web tools and private data
+(`LHA_PRIVATE_DATA=true` or `--sandbox local`) is refused before planning (Rule of Two).
+`orchestrate` re-initializes the anchor at the start of every invocation, so it does not resume
+an earlier `orchestrate` run.
 
 ## Roles
 
@@ -147,7 +152,7 @@ other backend uses the single configured model for all roles.
 | Planner ([planner.py](../python/src/lha/agents/planner.py)) | opus | no | One model call. It parses a JSON array into `ChecklistItem`s with ids `01`, `02`, … and keeps only dependencies on earlier steps (dropped ones are noted). `plan_mission` also reads each step's `files` and assigns ownership (see below). If nothing parses, it creates a single serial item from the description | `mission`, `orchestrate`, `mission-start` (only `orchestrate` uses the ownership map) |
 | Lead (`AgentLoop`, [agent/loop.py](../python/src/lha/agent/loop.py)) | opus | yes | Works one item per cycle: tools (plus `record_decision`), gating checks and witnesses, checkpoint commit | all |
 | Replanner ([replanner.py](../python/src/lha/agents/replanner.py)) | lead's model | no tools | One model call when an item has just become `blocked`: given the mission, the item, its witnesses and the latest failure report (last 3,000 chars), returns a JSON array of 2 to 6 smaller steps. `Checklist.split` replaces the item with them; fewer than 2 usable steps means no split. Bounded by `LHA_MAX_REPLANS` and `LHA_MAX_SPLIT_DEPTH`. In `orchestrate` it also splits items blocked in a parallel wave | all (unless `LHA_MAX_REPLANS=0`) |
-| Researcher ([team.py](../python/src/lha/agents/team.py)) | haiku | no | Read-only `SubAgent` that returns a brief (capped at 8,000 chars) | `orchestrate` |
+| Researcher ([team.py](../python/src/lha/agents/team.py)) | haiku | no | Read-only `SubAgent` that returns a brief (capped at 8,000 chars); sees the web tools when the allow-list is set | `orchestrate` |
 | Implementer ([specialists.py](../python/src/lha/agents/specialists.py)) | sonnet | yes | `SubAgent` with the implementer prompt, run in its own worktree behind an `OwnershipGuard` | `orchestrate` (parallel waves) |
 | Integrator (`BranchIntegrator`, [integrator.py](../python/src/lha/agents/integrator.py)) | none (deterministic) | merges only | Verified, owned, conflict-free, re-verified merge of an implementer branch | `orchestrate` (parallel waves) |
 | Reviewer ([reviewer.py](../python/src/lha/agents/reviewer.py)) | opus | no | Fresh-context review that returns JSON `verdict` / `blocking_issues` / `advisory`. An unparseable reply counts as blocking, and "approve" with issues counts as "block" | `orchestrate` |
@@ -238,7 +243,8 @@ serial item's files (they are released in memory before any use).
   ticket moves `created → in_progress` (worktree ready) `→ awaiting_verify` (implementer done)
   `→ awaiting_merge` (verified) `→ done` (merged), or to `failed` at the step that failed. The
   final status and the full history are committed as a `ticket` event in the item's checkpoint.
-  A retry is a new ticket. `durable/ledgers.py` also uses `Ticket`.
+  A retry is a new ticket. `durable/ledgers.py` also uses `Ticket`, but it is library code that
+  no workflow calls.
 - [blackboard.py](../python/src/lha/coordination/blackboard.py): entries posted during a round go
   to a response board. `commit_round()` promotes them to the main board, so agents in the same
   round do not see each other's output. In `orchestrate`, research briefs, implementer
@@ -276,12 +282,17 @@ every read ([Mission anchor](06-mission-anchor.md#decisionsndjson)).
 
 ## Not implemented
 
-These are described in role prompts or docstrings but have no implementation:
+These are described in role prompts or docstrings, or would be needed for the organization to
+run durably, but have no implementation:
 
 - lease handling (granting a `LeaseRequest`);
 - a model-backed integrator that resolves merge conflicts or rebases outstanding work (the
   integrator refuses a conflicting branch instead);
-- parallel implementers, integration, tickets and the blackboard in the durable Temporal
-  workflow (only `lha orchestrate` has them).
+- research fan-out, parallel implementers, integration, review, tickets and the blackboard in
+  the durable Temporal workflow (only `lha orchestrate` has them; `SubAgentWorkflow` exists but
+  `MissionWorkflow` never starts it);
+- resuming an interrupted `lha orchestrate` run (the blackboard is in memory, and the next
+  invocation re-initializes the anchor);
+- the Auditor, Librarian, Tester and model-backed Integrator runners in any run path.
 
 Related: [Architecture](05-architecture.md), [CLI](17-cli.md).

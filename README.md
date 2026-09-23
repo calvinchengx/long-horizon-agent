@@ -28,22 +28,27 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
   situational awareness in seconds.
 - **Durable execution.** Missions run as [Temporal](https://temporal.io) workflows: each agent
   cycle is a journaled activity, so a crashed worker resumes from the last completed cycle (the
-  cycle in flight is retried), and waiting on an outage is a durable timer.
+  cycle in flight is retried), and waiting on an outage, a schedule or a human is a durable
+  timer.
 - **Deterministic verification.** An item is done only when real checks (tests, lint, type
   checks) pass in the sandbox, never on the model's say-so.
 - **Guardrails.** Sandboxed execution; irreversible commands (`git push`, deploys, uploads) go
   to a human for approval (durable missions wait as `WAITING_ON_HUMAN`, local runs can ask on
-  the terminal with `--approve-interactive`, otherwise they are refused); default-deny network
-  egress, with an optional per-host allow-list enforced by a proxy; and a budget governor that
+  the terminal with `--approve-interactive`, otherwise they are refused), with reminders on an
+  escalation ladder and an optional webhook; default-deny network egress, with an optional
+  per-host allow-list for the sandbox and for the `fetch_url` tool; and a budget governor that
   refuses spend before it happens.
+- **A record of the run.** Every run keeps a mission row and a per-call cost ledger (SQLite by
+  default, Postgres optionally; `lha missions`, `lha costs`), recalls tiered memory into the
+  prompt, and appends design decisions to a hash-chained log (`lha decisions --verify`).
 
 ## Two implementations
 
-The same `lha` CLI and worker ship in [Python](python/) and [Go](go/). They share commands,
-`LHA_*` settings, the `.lha/` anchor format, the Postgres schema and Temporal workflow and
-activity names, and both run the language-neutral cases in [`spec/`](spec/). The Go port is
-landing in phases, so use Python today; see
-[choosing an implementation](docs/04-choosing-an-implementation.md).
+The `lha` CLI and worker are implemented in [Python](python/). A [Go](go/) port is landing in
+phases as library packages and has no CLI or worker yet, so use Python today. The two share
+`LHA_*` settings, the `.lha/` anchor format (including the decision-log hash chain), the Postgres
+schema and the Temporal workflow and activity names, and both run the language-neutral cases in
+[`spec/`](spec/); see [choosing an implementation](docs/04-choosing-an-implementation.md).
 
 ## Quickstart
 

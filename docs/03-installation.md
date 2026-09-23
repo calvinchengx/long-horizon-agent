@@ -29,9 +29,9 @@ Heavy or environment-specific dependencies are extras, declared in
 
 | Extra | Installs | Used by |
 |---|---|---|
-| `postgres` | `psycopg[binary,pool]`, `pgvector` | `lha db migrate`; the Postgres-backed stores in `lha.persistence` and `lha.memory.semantic_pg` |
-| `embeddings` | `sentence-transformers` | The cross-encoder reranker in `lha.memory.rerank` |
-| `observability` | `langfuse`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp` | OTel spans (`lha.obs.otel`) and the Langfuse client (`lha.obs.langfuse_exporter`) |
+| `postgres` | `psycopg[binary,pool]`, `pgvector` | `lha db migrate`; the Postgres mission store (`LHA_POSTGRES_DSN`: mission rows, cost ledger, memory) and its pgvector index. Without it, runs use SQLite |
+| `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval |
+| `observability` | `langfuse`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp` | OTel spans (`lha.obs.otel`) and the Langfuse client (`lha.obs.langfuse_exporter`); LHA installs no exporter and sends nothing to Langfuse itself |
 | `sandbox` | `docker` | The `docker` sandbox, which is the default |
 | `claude` | `claude-agent-sdk` | The optional Agent SDK lead in `lha.agents.claude_sdk_lead` (not used by any CLI command today) |
 
@@ -63,8 +63,8 @@ go test ./...
 ```
 
 The Go implementation is being ported in phases. Today `go/` contains library packages and their
-tests; `go/cmd/lha` has no source files yet, so `go build ./cmd/lha` fails with
-`no Go files in .../go/cmd/lha`. There is no Go CLI or Temporal worker to install. See
+tests; `go/cmd/lha` does not exist yet, so there is no Go CLI or Temporal worker to build or
+install. See
 [choosing an implementation](04-choosing-an-implementation.md) for what exists.
 
 ## Docker image (Python worker)
@@ -87,7 +87,9 @@ The worker runs agent commands through the configured sandbox (`LHA_SANDBOX`, de
 Point it at a Docker daemon with `DOCKER_HOST`, or use `LHA_SANDBOX=e2b`. The Dockerfile's own
 warning applies: do not mount the host's `/var/run/docker.sock` into the container, because that
 gives the agent root on the host. The image installs no extras, so the `docker` sandbox inside it
-also needs the `sandbox` extra added to the build.
+also needs the `sandbox` extra added to the build, and a Postgres mission store needs the
+`postgres` extra (without it the worker falls back to SQLite, or fails when
+`LHA_POSTGRES_FALLBACK_TO_SQLITE=false`).
 
 There is no Go image yet.
 
@@ -165,7 +167,12 @@ Without `--migrations-dir`, the command uses `db/migrations` in the current dire
 `../db/migrations` if that does not exist, so it works from both the repository root and
 `python/`.
 
-The mission run paths do not read from Postgres or send traces to Langfuse today;
-`LHA_POSTGRES_DSN` is used by `lha db migrate`, and the Langfuse settings by the optional client
-builder. Temporal is the only service the CLI's durable commands need. See
+With `LHA_POSTGRES_DSN` set (and the `postgres` extra installed), every run path writes its
+mission row, cost ledger and memory to `appdb`; without it, they go to a local SQLite file
+(`LHA_SQLITE_PATH`, default `.lha/lha.sqlite3` relative to the working directory). If Postgres is
+set but unusable, runs fall back to SQLite with a warning unless
+`LHA_POSTGRES_FALLBACK_TO_SQLITE=false`. `lha missions` and `lha costs` read the same store, so
+run them with the same settings and working directory as the run (for durable missions, as the
+worker and `mission-start`). Nothing is sent to Langfuse; its settings are read only by an
+optional client builder. Temporal is the only service the CLI's durable commands need. See
 [running on Temporal](14-running-on-temporal.md).

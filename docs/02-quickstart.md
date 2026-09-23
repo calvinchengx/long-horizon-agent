@@ -63,6 +63,14 @@ cat ../.lha/workspaces/stub-demo/.lha/checklist.json   # "status": "blocked", "a
 git -C ../.lha/workspaces/stub-demo log --oneline        # initialize, attempt, attempt, block
 ```
 
+The run is also recorded in the mission store, a SQLite file at `.lha/lha.sqlite3` under the
+directory you ran from (`LHA_SQLITE_PATH`; Postgres when `LHA_POSTGRES_DSN` is set):
+
+```bash
+uv run lha missions                 # the mission, status IMPOSSIBLE (deadlocked), known spend
+uv run lha costs <mission_id>       # every model call; the stub's cost $0
+```
+
 The stub exists for tests and CI. Its output is never a real agent run.
 
 ## 3. A real model at $0 with Ollama
