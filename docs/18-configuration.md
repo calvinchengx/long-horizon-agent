@@ -21,6 +21,10 @@ by `lha` in that case. Copy or symlink it, or export the variables.
 `get_settings()` caches the object for the life of the process. A long-running `lha worker`
 picks up changes only after a restart.
 
+List settings (`LHA_WEB_ALLOW_HOSTS`, `LHA_WEB_ALLOW_PORTS`, `LHA_FALLBACK_MODELS`,
+`LHA_SANDBOX_EGRESS`, `LHA_HARNESS_PATHS`) are comma-separated strings, not JSON; blank items are
+dropped.
+
 Invalid values fail at startup with a pydantic validation error: an unknown `LHA_MODEL_BACKEND` or
 `LHA_SANDBOX`, a non-numeric number, or a boolean other than `1/0`, `true/false`, `yes/no`,
 `on/off` (and `t/f`, `y/n`).
@@ -42,6 +46,9 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 | `LHA_CLAUDE_PRICE_IN_PER_MTOK` | float | unset | overrides the built-in price for `LHA_MODEL_NAME` (both must be set) |
 | `LHA_CLAUDE_PRICE_OUT_PER_MTOK` | float | unset | as above |
 | `LHA_ALLOW_UNPRICED_MODELS` | bool | `false` | let the governor run calls whose cost cannot be computed |
+| `LHA_FALLBACK_MODELS` | comma-separated list | empty | ordered fallback chain of `backend:model[@in/out]` entries; non-empty makes `build_provider` return a `FailoverModel` |
+| `LHA_FALLBACK_MAX_ROUNDS` | int (>= 1) | `2` | rounds over the whole chain before the last transient error is raised |
+| `LHA_MODEL_PROBE_TIMEOUT_S` | float (> 0) | `10.0` | timeout of the model health probe a parked durable mission runs |
 
 See [13-models.md](13-models.md).
 
@@ -87,7 +94,7 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 | `LHA_ALLOW_UNSAFE_LOCAL` | bool | `false` | required for `local`, which runs commands on the host with no isolation |
 | `LHA_SANDBOX_IMAGE` | string | `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` | Docker image the sandbox runs; it must contain the tools the checks and witnesses call ([`sandbox/Dockerfile`](../sandbox/Dockerfile) builds a Go + uv + Node/pnpm image) |
 | `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,pypi.org,files.pythonhosted.org`; `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. Empty: no network |
-| `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the lead's `fetch_url` tool may read; when set, `fetch_url` is registered. Empty: no web tool |
+| `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the web tools may read; see [Web tools](#web-tools) |
 | `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
 | `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
 
@@ -105,6 +112,29 @@ export LHA_TRUSTED_CHECKS='{"e2e": ["make", "e2e"]}'
 export LHA_HARNESS_PATHS='Makefile,e2e/**'
 ```
 
+### Web tools
+
+| Variable | Type | Default | Meaning |
+|---|---|---|---|
+| `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts `fetch_url` may reach; empty means the web tools are not registered. `--allow-host` adds to it per run. Not the sandbox's allow-list (`LHA_SANDBOX_EGRESS`) |
+| `LHA_WEB_ALLOW_PORTS` | comma-separated ints | empty | ports allowed beyond 80/443; a non-integer entry refuses the run |
+| `LHA_WEB_CREDENTIALS` | secret (JSON object) | unset | `{"<placeholder>": {"value": "<secret>", "hosts": ["<allow-listed host>", ...]}}`; brokered into `fetch_url` headers for the bound hosts only |
+| `LHA_WEB_SEARCH_PROVIDER` | `tavily` \| `exa` | unset | registers `web_search` (with a key and a non-empty allow-list) |
+| `LHA_WEB_SEARCH_API_KEY` | secret | unset | the search provider's API key |
+| `LHA_WEB_SEARCH_ENDPOINT` | string | provider default | overrides `https://api.tavily.com/search` / `https://api.exa.ai/search` |
+| `LHA_WEB_TIMEOUT_S` | float (> 0) | `30.0` | per-request timeout of the web tools |
+| `LHA_WEB_MAX_RESPONSE_BYTES` | int (> 0) | `2000000` | response body cap of the web tools |
+| `LHA_PRIVATE_DATA` | bool | `false` | declares that the workspace holds secrets or customer data; with web tools enabled the run is refused (Rule of Two) |
+
+A run with a non-empty allow-list and either `LHA_SANDBOX=local` or `LHA_PRIVATE_DATA=true` is
+refused before it starts. An invalid `LHA_WEB_CREDENTIALS` (bad JSON, a binding to a host
+outside the allow-list), `LHA_WEB_ALLOW_PORTS` or `LHA_WEB_SEARCH_ENDPOINT` is refused the same
+way. See [09-safety-model.md](09-safety-model.md#web-tools).
+
+The web settings above other than `LHA_WEB_ALLOW_HOSTS`, and `LHA_FALLBACK_MODELS`,
+`LHA_FALLBACK_MAX_ROUNDS` and `LHA_MODEL_PROBE_TIMEOUT_S`, are read by the Python implementation
+only; `go/internal/config` does not define them.
+
 ### Observability
 
 | Variable | Type | Default | Meaning |
@@ -118,8 +148,9 @@ export LHA_HARNESS_PATHS='Makefile,e2e/**'
 
 ## Secrets
 
-Four settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`, `LHA_POSTGRES_DSN`,
-`LHA_LANGFUSE_SECRET_KEY`. Their `repr` never shows the value; code unwraps them with
+Six settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`, `LHA_POSTGRES_DSN`,
+`LHA_LANGFUSE_SECRET_KEY`, `LHA_WEB_CREDENTIALS` and `LHA_WEB_SEARCH_API_KEY`. Their `repr` never
+shows the value; code unwraps them with
 `get_secret_value()` only where the value is sent. `Settings.redacted()` masks every field whose
 value is a `SecretStr`, so a new secret field is masked as long as it is declared `SecretStr`.
 
