@@ -3,128 +3,192 @@
 The memory plane has three tiers: episodic (what happened), semantic (distilled facts retrieved
 by similarity) and procedural (verified skills). It also has retrieval components: hybrid lexical
 and dense search, and a reranker. Code: [`python/src/lha/memory/`](../python/src/lha/memory/),
-contracts in [contracts/memory.py](../python/src/lha/contracts/memory.py).
+contracts in [contracts/memory.py](../python/src/lha/contracts/memory.py). The wiring into a
+mission is `MissionMemory` in [memory/service.py](../python/src/lha/memory/service.py).
 
-**Current integration status.** Only the git anchor's event log is written during a mission. The
-semantic index, hybrid retriever, reranker, consolidation and skill store are libraries with
-tests. The agent loop, the orchestrator, the durable activities and the CLI do not call them, so a
-running mission neither stores nor retrieves semantic memories or skills. There is also no
-setting that selects a memory backend.
+**Integration status.** With `LHA_MEMORY_ENABLED=true` (the default), every run path gives the
+lead tiered memory: `lha run-local` and `lha mission` (the local runner), `lha orchestrate` (the
+Orchestrator's lead), and the Temporal `run_agent_cycle` activity. All three build the lead with
+`build_lead_loop` ([agent/assembly.py](../python/src/lha/agent/assembly.py)), which takes the
+run's memory as `memory=`. Sub-agents, the reviewer and the replanner do not get memory. Memory is persisted in the mission store ([Persistence](#persistence)): SQLite by
+default, Postgres when `LHA_POSTGRES_DSN` is set.
 
-## Tiers
+## What happens each cycle
 
-| Tier | Durable record | In-process component |
+`AgentLoop.run_cycle` ([agent/loop.py](../python/src/lha/agent/loop.py)) calls the memory plane
+twice:
+
+1. **Before the first turn, `recall`** builds one memory block for the active item. It is placed
+   in the task (first user) message, after the item and its last failure and before the recent
+   commits. In-session compaction keeps the task message verbatim, so the block survives it.
+2. **After the checkpoint commit, `observe_cycle`** records the committed outcome.
+
+The block has three sections, rendered by `render_memory_block`
+([agent/prompt.py](../python/src/lha/agent/prompt.py)):
+
+| Section | Source | Default count |
 |---|---|---|
-| Episodic | `.lha/events.ndjson` in the mission anchor, committed with each checkpoint ([Mission anchor](06-mission-anchor.md)); Postgres table `episodic_events` exists in the schema but nothing writes it | `InMemoryEpisodicLog` ([episodic.py](../python/src/lha/memory/episodic.py)): `append` and `tail(n)` |
-| Semantic | Postgres `semantic_memory` via `PgSemanticIndex` | `InMemorySemanticIndex` |
-| Procedural | none | `InMemorySkillStore` |
+| Earlier attempts and outcomes | `cycle_outcome` events of this item, then the mission's most recent other outcomes | `LHA_MEMORY_EPISODIC_K=4` for this item, plus `k // 2` others (at least 1) |
+| Skills that worked before | verified, unexpired skills in this repo's namespace or `global` | `LHA_MEMORY_SKILLS_K=2` |
+| Related facts, progress, decisions and code | hybrid retrieval (below) | `LHA_MEMORY_SEMANTIC_K=4` |
 
-## Embedders
+The whole block is capped at `LHA_MEMORY_PROMPT_BUDGET_CHARS` (default 4000 characters, roughly
+1000 tokens; `build_messages` also enforces an absolute cap of 20000). The budget is split
+0.4 / 0.2 / 0.4 across the three sections; what an empty section leaves unused goes to the
+sections after it. Lines keep their relevance order and are clipped, never reordered. With nothing
+to show, no block is added and the prompt is exactly what it was without memory. Rendering and
+retrieval are deterministic: the same store contents and checkout give the same block.
 
-[embeddings.py](../python/src/lha/memory/embeddings.py):
+Each episode line gives the cycle, item, verdict, attempt number and status (`in_progress`,
+`done`, `blocked`, or `split` when the replanner replaced the item with sub-items), the tools used, the
+files changed in that commit (from `git diff --name-only`), and either "what worked" (the lead's
+done summary on a verified cycle) or "claimed" (the done summary) plus the verification failure.
 
-| Embedder | `name` / `version` | `dim` | Notes |
-|---|---|---|---|
-| `HashEmbedder` | `hash` / `1` | 256 by default | Hashed bag of tokens, normalized. Lexical, not semantic. Offline, $0, for dev and CI |
-| `VoyageEmbedder` | `voyage:<model>` / `<model>` | 1024 by default | Calls `https://api.voyageai.com/v1/embeddings` with httpx. Needs an API key passed in code (there is no setting for it) |
+## What is recorded
 
-## Semantic index and version gating
+`observe_cycle` runs after the checkpoint, so a memory failure can never undo or block a commit:
 
-Every `MemoryRecord` carries `embedding_model` and `embedding_version`. Queries only compare
-vectors from the same (model, version) as the current embedder, so a query never compares
-vectors from different embedder versions.
+- **Episodic**: appends a `cycle_outcome` event (item, verdict, verified, status, attempts, tools,
+  files changed, done summary, failure report tail, head sha) to `episodic_events`.
+- **Semantic**: stores a `progress` record for the cycle in `semantic_memory` (with its vector
+  when the dense channel is on).
+- **Procedural**: when the item was VERIFIED, stores a skill: the item description, the done
+  summary, the tools and the files changed, `verified=True`, provenance
+  `<mission>:<cycle>:<head>`, expiring after 90 days. The namespace is the checkout's absolute
+  path, so a later mission in the same workspace can recall it. Failed cycles never become
+  skills, and the store refuses unverified skills (`SkillNotVerifiedError`).
+- **Consolidation**: see below.
 
-- **`InMemorySemanticIndex`** ([semantic_memory.py](../python/src/lha/memory/semantic_memory.py)):
-  - exact cosine similarity;
-  - stamps records with the embedder's name and version on insert;
-  - re-adding an id replaces the record;
-  - optional `max_records` evicts the oldest records first;
-  - `invalidate(ids)` sets `valid=False`, and invalid records are never returned;
-  - `cosine()` raises on a length mismatch instead of returning 0.
-- **`PgSemanticIndex`** ([semantic_pg.py](../python/src/lha/memory/semantic_pg.py)):
-  - `semantic_memory` has `embedding vector(1024)` with an HNSW cosine index and an index on
-    (`embedding_model`, `embedding_version`);
-  - the embedder's `dim` must equal the column width (1024 by default), otherwise construction
-    raises `EmbeddingDimensionError`, so `HashEmbedder()` at 256 is rejected unless built with
-    `dim=1024`;
-  - `add()` upserts by id; `query()` filters on `valid` and the current model and version, and
-    orders by `embedding <=> %s::vector`;
-  - it has no `invalidate` or `remove` method;
-  - the `tsv` column and its GIN index exist in the schema, but nothing writes `tsv`.
-
-Re-embedding after an embedder change is not implemented. Rows from the old version remain and
-are ignored by queries from the new embedder.
+The git anchor's `.lha/events.ndjson` is still written by the checkpoint as before; the memory
+plane does not read it.
 
 ## Hybrid retrieval
 
-`HybridRetriever` ([hybrid.py](../python/src/lha/memory/hybrid.py)) combines a dense
-`SemanticIndex` with `BM25Index`:
+The semantic section ranks these candidates for the query (the item description):
 
-- `BM25Index` is an in-memory Okapi BM25 over lower-cased `[a-z0-9]+` tokens (k1 = 1.5,
-  b = 0.75, idf = `log(1 + (N - df + 0.5)/(df + 0.5))`).
-- `query(text, k=5, candidate_k=20)` takes the top `candidate_k` from each side and fuses them
-  with reciprocal rank fusion. The score is the sum of `1/(60 + rank)`, so no score calibration is
-  needed.
-- Only records known to this retriever instance and still `valid` are returned. The retriever keeps
-  its own in-process id-to-record map, so dense hits for ids it was never given (for example
-  Postgres rows from an earlier process) are dropped.
-- `add()` de-duplicates by id and writes to both sides. `invalidate()` marks records invalid,
-  removes them from BM25, and forwards to the dense index if it supports `invalidate`.
-  `max_records` evicts the oldest from both sides if the dense index supports `remove`.
+- persisted records of this mission: `progress` notes and consolidated `fact`s (the newest 500
+  valid ones). Progress notes of the active item are skipped, since the episodic section already
+  shows them;
+- the anchor's five most recent decisions (`.lha/decisions.ndjson`);
+- when `LHA_MEMORY_INDEX_REPO_FILES=true` (default), the checkout's tracked text files
+  (`git ls-files`, excluding `.lha/`, files up to 100 KB, the first `LHA_MEMORY_MAX_REPO_FILES=400`
+  paths in sorted order) split into 40-line chunks;
+- in lexical-only mode, `git grep -i -F` hits for the query's terms (one record per file, most
+  matches first, top 10 files).
 
-## Reranking
+Rankings are fused with reciprocal rank fusion (`reciprocal_rank_fusion`, score = sum of
+`1/(60 + rank)`):
 
-[rerank.py](../python/src/lha/memory/rerank.py):
+- lexical: `BM25Index` over all candidates;
+- dense (hybrid mode only): cosine between the embedder's vectors for the query and the repo
+  chunks and decisions (computed in process, cached per run), and the store's dense index for the
+  persisted records — `SqliteSemanticIndex` (vectors stored as JSON, exact cosine) on SQLite,
+  `PgSemanticIndex` (pgvector, scoped to the mission) on Postgres;
+- `git grep` (lexical-only mode only).
 
-- `NoopReranker` keeps the fusion order.
-- `CrossEncoderReranker` (default `BAAI/bge-reranker-v2-m3`, via `sentence_transformers`) scores
-  (query, text) pairs in a worker thread and re-sorts.
+The fused list is then reranked (`NoopReranker` keeps fusion order; `LHA_MEMORY_RERANK=cross_encoder`
+uses `CrossEncoderReranker`, which needs the `embeddings` extra and falls back to `NoopReranker`
+with a warning if it cannot be built).
 
-`HybridRetriever` does not call a reranker. The caller applies it to the fused hits.
+`HybridRetriever` in [hybrid.py](../python/src/lha/memory/hybrid.py) is not used by the service,
+which combines `BM25Index` and `reciprocal_rank_fusion` itself because its dense side is split
+between the store and in-process vectors. `InMemorySemanticIndex`, `InMemorySkillStore` and
+`InMemoryEpisodicLog` are also not used at runtime; they remain libraries with tests.
+
+Skills are ranked the same way: BM25 over `name + description`, plus embedder cosine in hybrid
+mode, fused with RRF.
+
+## Embedders
+
+[embeddings.py](../python/src/lha/memory/embeddings.py). `LHA_MEMORY_EMBEDDER` picks the dense
+channel:
+
+| Setting | Embedder | `dim` | Notes |
+|---|---|---|---|
+| `hash` (default) | `HashEmbedder`, `hash` / `1` | 256 on SQLite, 1024 on Postgres | Hashed bag of tokens, normalized. Lexical, not semantic, but needs no extra, network or key |
+| `sentence_transformers` | `SentenceTransformerEmbedder`, `st:<model>` / `<model>` | the model's | A real local semantic embedder (`LHA_MEMORY_EMBEDDING_MODEL`, default `BAAI/bge-m3`). Needs the `embeddings` extra; without it, retrieval falls back to lexical-only |
+| `none` | none | — | Lexical-only (BM25 + `git grep`) by choice |
+
+`VoyageEmbedder` (`voyage:<model>`, 1024, calls the Voyage API with httpx) exists but no setting
+selects it.
+
+## Version gating
+
+Every `MemoryRecord` carries `embedding_model` and `embedding_version`. The SQLite index, the
+pgvector index and `InMemorySemanticIndex` only compare vectors from the same (model, version) as
+the current embedder. After an embedder change, old rows are still returned lexically (BM25) but
+not by the dense channel. Re-embedding is not implemented.
+
+`PgSemanticIndex` ([semantic_pg.py](../python/src/lha/memory/semantic_pg.py)) details:
+
+- `semantic_memory.embedding` is `vector(1024)` with an HNSW cosine index; the embedder's `dim`
+  must equal it, otherwise construction raises `EmbeddingDimensionError`. The memory service
+  checks this when it opens and uses lexical-only retrieval instead;
+- `add()` upserts by id and writes `kind` and `metadata` (migration 0004); with `mission_id` set,
+  rows are stamped with it and `query()` only sees that mission's rows;
+- `query()` filters on `valid`, non-null embeddings and the current model and version, and orders
+  by `embedding <=> %s::vector`;
+- the `tsv` column and its GIN index exist in the schema, but nothing writes `tsv` (BM25 runs in
+  process).
 
 ## Consolidation
 
-`consolidate(model, episodes, mission_id, batch_size=200)`
-([consolidation.py](../python/src/lha/memory/consolidation.py)) sends episodes to the model in
-batches and asks for a JSON array of facts. Each fact becomes a semantic `MemoryRecord`
-(`fact_<id>`). If a batch's reply cannot be parsed, its distinct episodes are kept verbatim and
-tagged `metadata["consolidation"] = "verbatim"`, and `failed_batches` is incremented. Nothing is
-dropped. `soft_invalidate(records, predicate)` sets `valid=False` and never deletes or rewrites.
-Consolidation calls `model.complete` directly, so it is budget-checked only if the caller passes a
-`MeteredModel`. No code schedules consolidation, for example during a park.
+Every `LHA_MEMORY_CONSOLIDATE_EVERY` (default 5; 0 disables) `cycle_outcome` events recorded
+since the last pass, `observe_cycle` consolidates the new episodes into semantic `fact` records,
+then soft-invalidates the progress notes they cover (`valid=false`; never deleted), and appends a
+`memory_consolidation` event holding the watermark (`upto_id`). The count lives in the store, so
+it spans Temporal activity attempts and process restarts.
 
-## Skills library
+- `LHA_MEMORY_CONSOLIDATION=extractive` (default): deterministic and free. One fact per item,
+  rebuilt from all of that item's episodes so far ("verified in c5 after 3 attempt(s); what
+  worked: ...; last failure: ...; files: ..."), upserted under a stable id so a newer pass
+  replaces the older fact.
+- `LHA_MEMORY_CONSOLIDATION=model`: `consolidate()` ([consolidation.py](../python/src/lha/memory/consolidation.py))
+  sends the rendered episodes to the lead's provider, wrapped in the mission's `CostMeter` with
+  role `librarian`, so the calls are budget-checked and land in the cost ledger. A batch whose
+  reply cannot be parsed is kept verbatim (`failed_batches` in the event). If the call fails (for
+  example `BudgetExceeded`), a `memory_error` is recorded, the watermark does not move, and the
+  next cycle retries.
 
-`InMemorySkillStore` ([skills.py](../python/src/lha/memory/skills.py)) stores `Skill` records.
-Each has a name, description, code, preconditions, namespace, provenance, `expires_at`,
-`verified` and `uses`.
+## Degradation
 
-- `add()` raises `SkillNotVerifiedError` unless `verified=True`. The store does not run tests
-  itself; the caller sets the flag.
-- `find(query, k, namespace)` ranks skills by description similarity under the store's
-  embedder and, when a namespace is given, keeps skills from that namespace or `global`.
-- `expires_at` and `preconditions` are stored but not checked by the store.
+[ops/degradation.py](../python/src/lha/ops/degradation.py): `postgres`, `pgvector` and
+`embeddings` are OPTIONAL dependencies (with `langfuse` and `egress_proxy`), so
+`decide_safe_park` never parks for them. `decide_memory_mode` returns hybrid retrieval only when
+all of the dense-channel dependencies are OK; otherwise lexical-only retrieval: BM25 plus
+`git grep`. The service applies it:
+
+| Condition | Detected | Result |
+|---|---|---|
+| `LHA_POSTGRES_DSN` set but Postgres unreachable, unmigrated or `psycopg` missing | the store falls back to SQLite (`degraded_reason`) | lexical-only |
+| `LHA_MEMORY_EMBEDDER=sentence_transformers` without the `embeddings` extra | at open | lexical-only |
+| `LHA_MEMORY_EMBEDDER=none` | at open | lexical-only |
+| Postgres store but `pgvector` not importable, or embedder `dim` is not 1024 | at open | lexical-only |
+| the embedder or the vector index raises later in the run | at the failing call | lexical-only for the rest of the run |
+
+Each case records a `memory_degraded` trace event (and a structlog warning) with the reason, and
+the mission continues. Any other memory error is recorded as `memory_error` and the cycle
+proceeds with less or no memory; memory never fails a cycle. `probe_health` (the parked-mission
+health check) still checks only `git`, `model` and `sandbox`.
+
+## Persistence
+
+Tables (SQLite mirrors of [db/migrations](../db/migrations/), see [Cost and budget](10-cost-and-budget.md#cost-ledger)
+for the store itself):
+
+| Table | Used for |
+|---|---|
+| `episodic_events` | `cycle_outcome` and `memory_consolidation` events |
+| `semantic_memory` | `progress` and `fact` records; `kind` and `metadata` columns added by migration `0004_memory_skills` |
+| `skills` | verified skills (migration `0004_memory_skills`) |
 
 ## Extras
 
 | Component | Requires |
 |---|---|
-| In-memory index, BM25, hybrid, `HashEmbedder`, `NoopReranker`, consolidation, skills | core install |
-| `VoyageEmbedder` | core install (httpx) + Voyage API key |
-| `PgSemanticIndex` | `postgres` extra (`psycopg[binary,pool]`, `pgvector`), a Postgres with the `vector` extension, `lha db migrate` |
-| `CrossEncoderReranker` | `embeddings` extra (`sentence-transformers`) |
-
-## Degradation when pgvector is unavailable
-
-[ops/degradation.py](../python/src/lha/ops/degradation.py) classifies `pgvector` (with `langfuse`
-and `egress_proxy`) as an optional dependency. `decide_safe_park` does not park for an optional
-dependency that is down. It only lists it in `degraded`. That is all the code does:
-
-- `probe_health` checks only `git`, `model` and `sandbox`. It never reports on `pgvector`.
-- No code catches a `PgSemanticIndex` failure and falls back to lexical search or `git grep`.
-  `HybridRetriever.query()` does not catch errors from the dense side, so a database error
-  propagates to the caller.
-
-Since no run path uses semantic memory, a Postgres outage does not affect a running mission today.
+| Memory on SQLite, `HashEmbedder`, BM25, `git grep`, `NoopReranker`, extractive consolidation, skills | core install (and `git`) |
+| Memory on Postgres with pgvector | `postgres` extra (`psycopg[binary,pool]`, `pgvector`), a Postgres with the `vector` extension, `lha db migrate` |
+| `SentenceTransformerEmbedder`, `CrossEncoderReranker` | `embeddings` extra (`sentence-transformers`) |
+| `VoyageEmbedder` | core install (httpx) + Voyage API key, passed in code |
 
 Related: [Configuration](18-configuration.md), [Operations runbook](15-operations-runbook.md).

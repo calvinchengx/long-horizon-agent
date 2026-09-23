@@ -1,13 +1,14 @@
 """``lha`` command-line entry point.
 
-Commands are added as the planes land. For now this exposes ``version`` and ``config``,
-which are enough to confirm the package installs and configures correctly at $0.
+Run paths (``run-local`` / ``mission`` / ``orchestrate`` / ``mission-start``) persist the mission
+row and every metered model call to the mission store (SQLite by default, Postgres with
+``LHA_POSTGRES_DSN``); ``missions`` and ``costs`` read it back.
 """
 
 from __future__ import annotations
 
 import shlex
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, NoReturn
 
 import typer
@@ -17,6 +18,7 @@ from lha.config import Settings, get_settings
 
 if TYPE_CHECKING:
     from lha.contracts.hitl import HITLGate
+    from lha.persistence.store import MissionStore
     from lha.state.checklist_import import ImportedChecklist
 
 app = typer.Typer(
@@ -132,13 +134,14 @@ def _run[T](coro: Awaitable[T]) -> T:
 
     from lha.execution.factory import UnsafeSandboxError
     from lha.governor.metering import BudgetExceeded
+    from lha.persistence.store import StoreUnavailableError
 
     async def _main() -> T:
         return await coro
 
     try:
         return asyncio.run(_main())
-    except UnsafeSandboxError as exc:
+    except (UnsafeSandboxError, StoreUnavailableError) as exc:
         _fail(str(exc))
     except BudgetExceeded as exc:
         _fail(str(exc), code=3)
@@ -232,6 +235,73 @@ def vendor(
             f"{item.url} -> {into}/{item.path} ({item.bytes} bytes, sha256 {item.sha256[:12]})"
         )
     typer.echo(f"manifest: {into}/MANIFEST.json")
+
+
+async def _with_store[T](fn: Callable[[MissionStore], Awaitable[T]]) -> T:
+    from lha.persistence.store import open_store
+
+    store = await open_store(get_settings())
+    try:
+        if store.degraded_reason:
+            typer.echo(f"warning: {store.degraded_reason}; reading SQLite instead", err=True)
+        return await fn(store)
+    finally:
+        await store.close()
+
+
+def _usd(value: float | None) -> str:
+    return "unknown" if value is None else f"${value:.4f}"
+
+
+@app.command()
+def missions(
+    limit: int = typer.Option(20, min=1, help="How many missions (most recently updated first)."),
+) -> None:
+    """List persisted missions with their status and recorded spend."""
+    from lha.persistence.store import CostSummary, MissionRow
+
+    async def _read(store: MissionStore) -> list[tuple[MissionRow, CostSummary]]:
+        rows = await store.list_missions(limit=limit)
+        return [(row, await store.cost_summary(row.mission_id)) for row in rows]
+
+    rows = _run(_with_store(_read))
+    if not rows:
+        typer.echo("no missions recorded")
+        return
+    for row, cost in rows:
+        unknown = f" (+{cost.unknown_cost_calls} unknown-cost)" if cost.unknown_cost_calls else ""
+        typer.echo(
+            f"{row.mission_id}  {row.status:<16} {_usd(cost.known_usd)}{unknown}  "
+            f"calls {cost.calls}  head {(row.head_sha or '-')[:12]}  "
+            f"updated {row.updated_at[:19]}  {row.title}"
+        )
+
+
+@app.command()
+def costs(
+    mission_id: str = typer.Argument(..., help="Mission id."),
+    limit: int = typer.Option(50, min=0, help="Show the most recent N calls (0 = summary only)."),
+) -> None:
+    """Show a mission's persisted cost ledger: every metered model call, plus totals."""
+    from lha.persistence.store import CostRow, CostSummary
+
+    async def _read(store: MissionStore) -> tuple[CostSummary, list[CostRow]]:
+        rows = await store.list_costs(mission_id, limit=limit) if limit else []
+        return await store.cost_summary(mission_id), rows
+
+    summary, rows = _run(_with_store(_read))
+    if not summary.calls:
+        _fail(f"no cost ledger rows for mission {mission_id}", code=1)
+    for row in rows:
+        typer.echo(
+            f"{row.ts[:19]}  {row.cycle_id:<12} {row.role or '-':<11} {row.model:<24} "
+            f"in {row.input_tokens:>7}  out {row.output_tokens:>6}  {_usd(row.usd)}"
+        )
+    typer.echo(
+        f"total: {summary.calls} calls  known {_usd(summary.known_usd)}  "
+        f"unknown-cost calls {summary.unknown_cost_calls}  "
+        f"tokens in {summary.input_tokens} out {summary.output_tokens}"
+    )
 
 
 @app.command(name="run-local")
@@ -439,8 +509,11 @@ def mission_start(
     from lha.durable.types import MissionInput
     from lha.durable.worker import connect_client
     from lha.durable.workflows import MissionWorkflow
+    from lha.governor.cost import CostEntry
     from lha.ids import new_id
     from lha.model import build_provider
+    from lha.persistence.store import open_store
+    from lha.persistence.tracking import LedgerSink, MissionTracker
     from lha.state.mission_anchor import GitMissionAnchor
 
     if not task.strip() and not checklist_file:
@@ -452,6 +525,7 @@ def mission_start(
     async def _start() -> str:
         settings = get_settings()
         references = list(reference)
+        planner_spend: list[CostEntry] = []
         if imported is not None:
             checklist = imported.checklist
             mission_title = title or imported.title or "mission"
@@ -466,6 +540,7 @@ def mission_start(
                 checklist = await planner.plan(title=mission_title, description=task)
             finally:
                 await aclose_provider(planner_model)
+            planner_spend = list(meter.ledger.entries)
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(
             title=mission_title, description=description, items=checklist, references=references
@@ -489,6 +564,19 @@ def mission_start(
             id=f"mission:{mission_id}",
             task_queue=settings.task_queue,
         )
+        # The mission row + the Planner's spend (the cycle activities record the rest).
+        store = await open_store(settings, workdir=workdir)
+        try:
+            await LedgerSink(store, mission_id, key_prefix="planner").backfill(planner_spend)
+            await MissionTracker(
+                store,
+                mission_id,
+                title=mission_title,
+                description=description,
+                workflow_id=f"mission:{mission_id}",
+            ).running()
+        finally:
+            await store.close()
         return mission_id
 
     mission_id = _run(_start())

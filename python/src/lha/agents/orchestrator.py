@@ -41,6 +41,7 @@ from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import new_id
 from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import agent_span
+from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.verifier import default_python_checks
@@ -127,6 +128,20 @@ class Orchestrator:
             read_tools = AllowListDispatcher.for_tools(
                 lead_tools(settings), allow_mutating=False, allow_egress=allow_egress and web
             )
+            mission_id = new_id("mission")
+            # Persistence + memory (mission row, persistent cost ledger, tiered memory).
+            services = await open_run_services(
+                settings,
+                mission_id=mission_id,
+                workdir=workdir,
+                meter=meter,
+                title=title,
+                description=description,
+                model=meter.wrap(raw["lead"], role="librarian"),
+                recorder=recorder,
+            )
+            stack.push_async_callback(services.close)
+            await services.tracker.running()
             lead = build_lead_loop(
                 settings,
                 model=lead_model,
@@ -134,10 +149,10 @@ class Orchestrator:
                 workdir=workdir,
                 gate=gate,
                 recorder=recorder,
+                memory=services.memory,
             )
             reviewer = Reviewer(review_model, read_tools)
 
-            mission_id = new_id("mission")
             ctx = ToolContext(mission_id=mission_id, session=session)
             reflections: dict[str, str] = {}
             cycles = 0
@@ -271,8 +286,12 @@ class Orchestrator:
             except BudgetExceeded as exc:
                 recorder.record("governor_block", mission_id=mission_id, reason=str(exc))
                 stopped = f"governor: {exc.decision.reason}"
+            except BaseException as exc:
+                await services.finish(f"error: {type(exc).__name__}", head_sha=last_head)
+                raise
 
             final = await anchor.read_checklist()
+            await services.finish(stopped, head_sha=last_head)
         return MissionSummary(
             mission_id=mission_id,
             completed=final.is_complete,

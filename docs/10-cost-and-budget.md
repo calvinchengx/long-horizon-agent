@@ -112,7 +112,9 @@ attempt appends one row `{key, cycle_id, usd, unknown, calls}` to `.git/lha/spen
 Unknown-cost calls are carried forward as unknown entries.
 
 Sub-agent activities (`run_subagent`) build a fresh meter from the worker's ceiling. Their spend
-is not added to the mission's journal.
+is not added to the mission's journal (so it does not count toward the cycle governor), but every
+sub-agent call is written to the persistent cost ledger under the parent mission id (cycle id
+`subagent:<role>`).
 
 ## Loop detection and per-item failure budget
 
@@ -138,9 +140,35 @@ Two mechanisms stop repeated failure on the same item:
 
 | Store | Where | Unknown cost |
 |---|---|---|
-| `CostLedger` | [governor/cost.py](../python/src/lha/governor/cost.py), in memory, one per mission run | `cost_known=False`, `usd=0.0` |
-| Spend journal | `.git/lha/spend.ndjson`, durable path only | `unknown` count per attempt |
-| `CostLedgerRepo` | [persistence/repositories.py](../python/src/lha/persistence/repositories.py), Postgres `cost_ledger` | `usd = NULL` |
+| `CostLedger` | [governor/cost.py](../python/src/lha/governor/cost.py), in memory, one per mission run; what the governor reads | `cost_known=False`, `usd=0.0` |
+| Spend journal | `.git/lha/spend.ndjson`, durable path only; seeds the next attempt's governor | `unknown` count per attempt |
+| Persistent `cost_ledger` | the mission store: SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), see below | `usd = NULL`, `cost_known = false` |
+
+### The persistent ledger
+
+EVERY metered model call is also written to the `cost_ledger` table. `CostMeter.on_record`
+([metering.py](../python/src/lha/governor/metering.py)) is an optional async hook called with each
+recorded `CostEntry`; the run paths install a `LedgerSink`
+([persistence/tracking.py](../python/src/lha/persistence/tracking.py)) there. A failing hook is
+logged and never fails the call (its spend is already in the in-memory ledger). Where each run
+path writes:
+
+| Run path | Rows | Idempotency `call_key` |
+|---|---|---|
+| `lha run-local`, `lha mission`, `lha orchestrate` | every call of every role (planner, lead, researcher, reviewer, reflection, librarian); the Planner's call, made before the mission id exists, is backfilled when the run starts | `#<n>` (sequence within the run) |
+| `run_agent_cycle` activity | every call of the attempt; the seeded `(prior)` entries are not written again | `<cycle>@<attempt>#<n>` |
+| `run_subagent` activity | every sub-agent call, under the parent mission id | `sub:<workflow>:<activity>@<attempt>#<n>` |
+| `lha mission-start` | the Planner's call | `planner#<n>` |
+
+The row key is `idempotency_key("cost", mission_id, cycle_id, call_key)` (the same derivation as
+`CostLedgerRepo`), inserted with `INSERT OR IGNORE` (SQLite) / `ON CONFLICT (idempotency_key) DO
+NOTHING` (Postgres): a replayed write of the same logical call is a no-op, while a retried
+activity attempt (a new attempt number) records its re-spent calls as new rows. A call whose cost
+is unknown is stored with `usd = NULL` and `cost_known = false`, never as $0, so `SUM(usd)` is the
+known spend.
+
+Read it back with `lha costs <mission_id>` (the most recent calls plus totals: known USD,
+unknown-cost calls, tokens) and `lha missions [--limit N]` (each mission's status and totals).
 
 The Postgres schema is in [`db/migrations/`](../db/migrations/):
 
@@ -148,13 +176,15 @@ The Postgres schema is in [`db/migrations/`](../db/migrations/):
 - `0002` adds `idempotency_key` (unique), `role` and `cost_known`;
 - `0003` makes `usd` nullable and rewrites unknown rows to `NULL`.
 
-`CostLedgerRepo.record()` inserts with `ON CONFLICT (idempotency_key) DO NOTHING`, using the key
-`idempotency_key("cost", mission_id, cycle_id, call_key)`, so a retried write does not double
-count. `total_usd()` is `SUM(usd)`, which gives known spend. `unknown_cost_calls()` counts
-`NOT cost_known`. It needs the `postgres` extra and `lha db migrate`.
+The SQLite store creates the same columns (`usd REAL` nullable, `idempotency_key` unique) when it
+opens. The Postgres store (`PostgresStore`,
+[persistence/postgres.py](../python/src/lha/persistence/postgres.py)) needs the `postgres` extra
+and `lha db migrate`; if it cannot be used, the run falls back to SQLite with a warning unless
+`LHA_POSTGRES_FALLBACK_TO_SQLITE=false` (then the run fails). `CostLedgerRepo`
+([persistence/repositories.py](../python/src/lha/persistence/repositories.py)) is an older
+Postgres-only helper with the same insert; the run paths use `PostgresStore`.
 
-`CostLedgerRepo` is not called by any run path today: no runner or activity writes spend to
-Postgres. Reported cost comes from the in-memory ledger (`lha run-local` / `mission` /
+Reported cost on the terminal still comes from the in-memory ledger (`lha run-local` / `mission` /
 `orchestrate` print `cost $…`) and, for durable runs, from `spent_usd` in each `CycleResult`.
 
 Related: [Models](13-models.md), [Configuration](18-configuration.md).
