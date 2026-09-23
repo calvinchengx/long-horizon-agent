@@ -3,7 +3,8 @@
 Every model call in LHA goes through one interface, `ModelProvider`
 ([`contracts/model.py`](../python/src/lha/contracts/model.py)). `build_provider` in
 [`model/__init__.py`](../python/src/lha/model/__init__.py) is the only place a concrete backend is
-chosen, from `LHA_MODEL_BACKEND`. Four backends exist:
+chosen, from `LHA_MODEL_BACKEND` (plus an optional fallback chain, see
+[Failover](#retries-and-failover)). Four backends exist:
 
 | `LHA_MODEL_BACKEND` | Class | Transport | Cost source |
 |---|---|---|---|
@@ -179,10 +180,64 @@ activity the attempt then fails and Temporal's own retry policy takes over (see
 
 **Failover** ([`model/failover.py`](../python/src/lha/model/failover.py)). `FailoverModel` wraps an
 ordered list of providers: on a transient error it tries the next provider; after a full round of
-transient failures it backs off (same rules) and tries again, up to `max_rounds` (default 2).
-Non-transient errors raise immediately. Each turn is priced by the provider that served it.
-`FailoverModel` is a library class: no `LHA_*` setting selects it, and `build_provider` never
-constructs it. Using it requires constructing it in code.
+transient failures it backs off (same rules) and tries again, up to `max_rounds`. Non-transient
+errors (400, 401, 403, programming errors) raise immediately.
+
+`LHA_FALLBACK_MODELS` selects it. It is a comma-separated, ordered list of
+`backend:model[@in/out]` entries, where `in`/`out` are USD per 1M tokens. When it is non-empty,
+`build_provider` returns `FailoverModel([primary, *fallbacks])`, so every run path gets the chain
+(`mission`, `run-local`, `orchestrate` including per-role routing and the planner,
+`mission-start`, and the Temporal cycle and sub-agent activities).
+
+```bash
+export LHA_MODEL_BACKEND=claude
+export LHA_MODEL_NAME=claude-sonnet-4-6
+export LHA_ANTHROPIC_API_KEY=...
+export LHA_OPENAI_BASE_URL=https://api.groq.com/openai/v1
+export LHA_OPENAI_API_KEY=...
+export LHA_FALLBACK_MODELS="openai_compat:llama-3.3-70b-versatile@0.59/0.79,ollama:qwen3:8b"
+```
+
+| Setting | Default | Notes |
+|---|---|---|
+| `LHA_FALLBACK_MODELS` | empty | `backend` is `stub`, `ollama`, `openai_compat` or `claude`; the model part may contain `:` (`ollama:qwen3:8b`). A malformed entry raises `ValueError` when the provider is built |
+| `LHA_FALLBACK_MAX_ROUNDS` | `2` | `FailoverModel.max_rounds` |
+
+- Fallback entries use the backend's shared settings: `openai_compat` entries use
+  `LHA_OPENAI_BASE_URL` / `LHA_OPENAI_API_KEY` (so one OpenAI-compatible endpoint per
+  deployment), `claude` entries use `LHA_ANTHROPIC_API_KEY`, `ollama` entries use
+  `LHA_OLLAMA_BASE_URL`. A missing key or base URL fails when the provider is built.
+- Prices: an entry's `@in/out` price wins. Otherwise `claude` entries use the built-in table
+  (an id not in the table fails with `UnknownPriceError`), `ollama` and `stub` are `$0`, and an
+  unpriced `openai_compat` entry is **unknown**. `LHA_OPENAI_PRICE_*` and `LHA_CLAUDE_PRICE_*`
+  apply to the primary model only.
+- Per-role routing (`lha orchestrate` with `claude`) changes the primary model only; the
+  fallbacks stay as configured.
+- In a chain, each member retries a transient error once (`CHAIN_MEMBER_RETRIES`) instead of 3
+  times, so an outage fails over in seconds.
+- Cost is keyed on the provider that served the turn: each backend stamps `Usage.provider` (and
+  `Usage.model` from the response), and `FailoverModel.estimate_cost_usd` prices the turn with that
+  provider. The pre-call worst-case estimate uses the most expensive member; if any member is
+  unpriced, the governor refuses the call unless `LHA_ALLOW_UNPRICED_MODELS=true`.
+
+## Health probe
+
+A parked durable mission resumes only when `check_mission_health` reports the model healthy
+([`model/health.py`](../python/src/lha/model/health.py)). `probe_model` builds the configured
+provider (including the fallback chain) and sends the cheapest request each backend has, under
+`LHA_MODEL_PROBE_TIMEOUT_S` (default 10 s). No tokens are spent.
+
+| Provider | Probe | Healthy when |
+|---|---|---|
+| `stub` | none | always |
+| `ollama` | `GET {LHA_OLLAMA_BASE_URL}/api/tags` | 2xx and `LHA_MODEL_NAME` (or `<name>:latest`) is pulled |
+| `openai_compat` | `GET {LHA_OPENAI_BASE_URL}/models` with the bearer key | 2xx |
+| `claude` | `GET https://api.anthropic.com/v1/models/{model}` with the API key | 2xx |
+| failover chain | every member, concurrently | any member is healthy |
+
+A configuration error, transport error, timeout or non-2xx response (including 401/403 and 404
+for an unknown Claude model) is reported as DOWN with the reason. See
+[15-operations-runbook.md](15-operations-runbook.md#degradation-modes).
 
 ## Go implementation
 

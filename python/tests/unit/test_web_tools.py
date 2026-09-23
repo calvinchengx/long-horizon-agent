@@ -11,6 +11,7 @@ import pytest
 
 from lha.contracts.tools import ToolContext
 from lha.execution.sandbox_local import LocalSandbox
+from lha.execution.tools.untrusted import UNTRUSTED_CLOSE, UNTRUSTED_NOTICE
 from lha.execution.tools.web import FetchUrlTool, WebSearchTool
 from lha.safety.egress import EgressPolicy
 
@@ -19,6 +20,13 @@ PUBLIC_IP = "93.184.216.34"
 
 async def _public(host: str, port: int) -> list[str]:
     return [PUBLIC_IP]
+
+
+def _body(content: str) -> str:
+    """The payload inside the untrusted-content fence (asserting the fence is there)."""
+    assert content.startswith("<untrusted_content source=")
+    assert content.endswith(f"\n{UNTRUSTED_CLOSE}")
+    return content.split(f"{UNTRUSTED_NOTICE}\n", 1)[1].removesuffix(f"\n{UNTRUSTED_CLOSE}")
 
 
 async def _ctx(tmp_path: Path) -> ToolContext:
@@ -57,7 +65,7 @@ async def test_fetch_strips_html_and_scripts(tmp_path: Path) -> None:
     page = "<html><script>steal()</script><style>p{}</style><p>Hello <b>world</b></p></html>"
     tool = _fetch(lambda r: httpx.Response(200, text=page))
     result = await tool.run({"url": "https://a.test/page"}, await _ctx(tmp_path))
-    assert result.ok and result.content == "Hello world"
+    assert result.ok and _body(result.content) == "Hello world"
 
 
 @pytest.mark.asyncio
@@ -104,7 +112,7 @@ async def test_fetch_caps_the_response_body(
     monkeypatch.setattr(FetchUrlTool, "MAX_RESPONSE_BYTES", 10)
     tool = _fetch(lambda r: httpx.Response(200, content=b"x" * 1000))
     result = await tool.run({"url": "https://a.test"}, await _ctx(tmp_path))
-    assert result.ok and result.content == "x" * 10
+    assert result.ok and _body(result.content) == "x" * 10
 
 
 # --- web_search -------------------------------------------------------------------------------
@@ -115,6 +123,7 @@ def _search(provider: str, handler: Callable[[httpx.Request], httpx.Response]) -
         api_key="key",
         provider=provider,  # type: ignore[arg-type]
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        resolver=_public,
     )
 
 
@@ -152,7 +161,7 @@ async def test_exa_search_sends_key_as_header_and_defaults_count(tmp_path: Path)
     result = await _search("exa", handler).run(
         {"query": "q", "max_results": -1}, await _ctx(tmp_path)
     )
-    assert result.ok and result.content == "(no results)"
+    assert result.ok and _body(result.content) == "(no results)"
     assert seen[0].headers["x-api-key"] == "key"
     assert json.loads(seen[0].content) == {"query": "q", "numResults": 5}
 
@@ -166,4 +175,4 @@ async def test_search_errors_and_odd_payloads(tmp_path: Path) -> None:
     odd = await _search("tavily", lambda r: httpx.Response(200, json=["x"])).run(
         {"query": "q"}, await _ctx(tmp_path)
     )
-    assert odd.ok and odd.content == "(no results)"
+    assert odd.ok and _body(odd.content) == "(no results)"

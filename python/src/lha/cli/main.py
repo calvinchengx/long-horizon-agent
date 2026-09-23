@@ -41,6 +41,10 @@ _SANDBOX_HELP = "Execution sandbox: docker | e2b | local (default: LHA_SANDBOX, 
 _UNSAFE_LOCAL_HELP = (
     "Allow the 'local' sandbox: agent commands run directly on this host with NO isolation."
 )
+_ALLOW_HOST_HELP = (
+    "Add a host to this run's web allow-list (repeatable; added to LHA_WEB_ALLOW_HOSTS). A "
+    "non-empty allow-list registers the web tools (fetch_url, and web_search when configured)."
+)
 _CHECKLIST_HELP = (
     "Seed the mission with your own checklist instead of planning: a .json checklist or a "
     ".md roadmap ('- [ ] item (witness: go:TestX)'; each '## ' section depends on the previous)."
@@ -104,10 +108,15 @@ def resolve_check_commands(check: list[str], no_default_checks: bool) -> list[li
     return defaults + extra
 
 
-def _run_settings(sandbox: str | None, unsafe_local: bool) -> Settings:
-    """Settings with the CLI's sandbox overrides; refuses an unsafe local sandbox up front
-    (before any planning spend or workspace writes)."""
+def _run_settings(
+    sandbox: str | None, unsafe_local: bool, allow_host: list[str] | None = None
+) -> Settings:
+    """Settings with the CLI's sandbox / web overrides; refuses an unsafe local sandbox, a
+    lethal-trifecta run (Rule of Two) and invalid web settings up front (before any planning
+    spend or workspace writes)."""
     from lha.execution.factory import SANDBOX_KINDS, UnsafeSandboxError, build_sandbox
+    from lha.execution.tools.toolset import preflight_run_tools, with_allow_hosts
+    from lha.safety.rule_of_two import RuleOfTwoViolation
 
     settings = get_settings()
     update: dict[str, object] = {}
@@ -120,11 +129,18 @@ def _run_settings(sandbox: str | None, unsafe_local: bool) -> Settings:
         update["allow_unsafe_local"] = True
     if update:
         settings = settings.model_copy(update=update)
+    settings = with_allow_hosts(settings, allow_host or [])
     if settings.sandbox == "local":
         try:
             build_sandbox("local", allow_unsafe_local=settings.allow_unsafe_local)
         except UnsafeSandboxError as exc:
             _fail(f"{exc} (or pass --unsafe-local)")
+    try:
+        preflight_run_tools(settings)
+    except RuleOfTwoViolation as exc:
+        _fail(str(exc))
+    except ValueError as exc:  # WebConfigError, bad LHA_WEB_ALLOW_PORTS
+        _fail(f"invalid web settings: {exc}")
     return settings
 
 
@@ -135,13 +151,14 @@ def _run[T](coro: Awaitable[T]) -> T:
     from lha.execution.factory import UnsafeSandboxError
     from lha.governor.metering import BudgetExceeded
     from lha.persistence.store import StoreUnavailableError
+    from lha.safety.rule_of_two import RuleOfTwoViolation
 
     async def _main() -> T:
         return await coro
 
     try:
         return asyncio.run(_main())
-    except (UnsafeSandboxError, StoreUnavailableError) as exc:
+    except (UnsafeSandboxError, StoreUnavailableError, RuleOfTwoViolation) as exc:
         _fail(str(exc))
     except BudgetExceeded as exc:
         _fail(str(exc), code=3)
@@ -321,6 +338,7 @@ def run_local(
     ),
     sandbox: str | None = typer.Option(None, "--sandbox", help=_SANDBOX_HELP),
     unsafe_local: bool = typer.Option(False, "--unsafe-local", help=_UNSAFE_LOCAL_HELP),
+    allow_host: list[str] = typer.Option([], "--allow-host", help=_ALLOW_HOST_HELP),
 ) -> None:
     """Run a mission locally (no Temporal) until complete / deadlocked / over-budget."""
     from lha.agent.runner import run_mission_local
@@ -330,7 +348,7 @@ def run_local(
     if bool(item) == bool(checklist_file):
         _fail("give either --item (repeatable) or --checklist FILE")
     checks = checks_from_commands(resolve_check_commands(check, no_default_checks))
-    settings = _run_settings(sandbox, unsafe_local)
+    settings = _run_settings(sandbox, unsafe_local, allow_host)
     references = list(reference)
     if checklist_file:
         imported = _load_checklist_file(checklist_file)
@@ -377,6 +395,7 @@ def mission(
     ),
     sandbox: str | None = typer.Option(None, "--sandbox", help=_SANDBOX_HELP),
     unsafe_local: bool = typer.Option(False, "--unsafe-local", help=_UNSAFE_LOCAL_HELP),
+    allow_host: list[str] = typer.Option([], "--allow-host", help=_ALLOW_HOST_HELP),
 ) -> None:
     """Plan a task into a checklist (or import one), then run it locally to completion."""
     from lha.agent.runner import plan_and_run_local, run_mission_local
@@ -385,7 +404,7 @@ def mission(
     if not task.strip() and not checklist_file:
         _fail("give --task (to plan) or --checklist FILE (to import a checklist)")
     checks = checks_from_commands(resolve_check_commands(check, no_default_checks))
-    settings = _run_settings(sandbox, unsafe_local)
+    settings = _run_settings(sandbox, unsafe_local, allow_host)
     gate = _gate(approve_interactive)
     if checklist_file:
         imported = _load_checklist_file(checklist_file)
@@ -429,6 +448,7 @@ def orchestrate(
     ),
     sandbox: str | None = typer.Option(None, "--sandbox", help=_SANDBOX_HELP),
     unsafe_local: bool = typer.Option(False, "--unsafe-local", help=_UNSAFE_LOCAL_HELP),
+    allow_host: list[str] = typer.Option([], "--allow-host", help=_ALLOW_HOST_HELP),
 ) -> None:
     """Plan, then run the FULL multi-agent org (research fan-out + Lead + review) locally."""
     from lha.agent.runner import MissionSummary, aclose_provider, build_meter
@@ -438,7 +458,7 @@ def orchestrate(
     from lha.model import build_provider
 
     checks = checks_from_commands(resolve_check_commands(check, no_default_checks))
-    settings = _run_settings(sandbox, unsafe_local)
+    settings = _run_settings(sandbox, unsafe_local, allow_host)
 
     async def _mission() -> MissionSummary:
         meter = build_meter(settings)  # planner + every org role share one budget

@@ -125,7 +125,7 @@ async def test_fetch_follows_allowed_redirect_and_blocks_disallowed(tmp_path: Pa
         client=client, egress_policy=EgressPolicy(allow_hosts={"a.test"}), resolver=_resolver({})
     )
     ok = await tool.run({"url": "https://a.test/start"}, await _ctx(tmp_path))
-    assert ok.ok and ok.content == "hello"
+    assert ok.ok and "\nhello\n</untrusted_content>" in ok.content
     away = await tool.run({"url": "https://a.test/away"}, await _ctx(tmp_path))
     assert not away.ok and "other.test" in (away.error or "")
 
@@ -174,7 +174,9 @@ async def test_fetch_broker_injects_only_for_bound_host(tmp_path: Path) -> None:
     assert not bad.ok
 
 
-def test_default_client_ignores_env_proxies() -> None:
+@pytest.mark.asyncio
+async def test_default_client_ignores_env_proxies() -> None:
     tool = FetchUrlTool(egress_policy=EgressPolicy())
-    assert tool._client._trust_env is False
-    assert tool._client.follow_redirects is False
+    async with tool._http.open() as client:  # a fresh per-call client
+        assert client._trust_env is False
+        assert client.follow_redirects is False

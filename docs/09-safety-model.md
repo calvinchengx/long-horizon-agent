@@ -79,10 +79,12 @@ and never raises into the agent loop. Checks run in this order:
    reason and fingerprint. With no gate configured it is denied.
 
 The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
-`list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). When
-`LHA_WEB_ALLOW_HOSTS` is set, the lead also gets `fetch_url`, limited to those hosts, and the
-dispatcher allows egress for it ([agent/assembly.py](../python/src/lha/agent/assembly.py)).
-`web_search` exists but no run path registers it. `SubAgent` applies its role's mutating and
+`list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). Every run path
+builds its dispatcher with `build_run_dispatcher()`
+([toolset.py](../python/src/lha/execution/tools/toolset.py)); the lead's goes through
+`lead_dispatcher()` in [agent/assembly.py](../python/src/lha/agent/assembly.py). When
+`LHA_WEB_ALLOW_HOSTS` is set it adds `fetch_url` (and `web_search`, when configured) and allows
+egress for them (section 4). `SubAgent` applies its role's mutating and
 egress policy a second time, hiding and refusing tools the role may not use, even when the
 dispatcher would allow them.
 
@@ -175,11 +177,53 @@ The egress policy is implemented in [egress.py](../python/src/lha/safety/egress.
   or more hosts. `resolve_headers()` substitutes a secret only into requests to a bound host, so
   the agent sees only placeholders.
 
-`LHA_WEB_ALLOW_HOSTS` (comma-separated hosts, empty by default) is the allow-list for the lead's
-`fetch_url`; with it empty, the tool is not registered. `lha vendor` builds its allow-list from the
-hosts of the URLs it is given. `web_search` posts to fixed Tavily or Exa endpoints without
-consulting an `EgressPolicy`, and no run path registers it. Egress cases are pinned in
-[`spec/safety/egress.json`](../spec/safety/egress.json).
+`lha vendor` builds its allow-list from the hosts of the URLs it is given. Egress cases are
+pinned in [`spec/safety/egress.json`](../spec/safety/egress.json).
+
+### Web tools
+
+The web tools are off unless the operator lists hosts. `build_run_dispatcher()` in
+[toolset.py](../python/src/lha/execution/tools/toolset.py) is the only place run paths assemble
+tools: `lha mission`, `lha run-local`, `lha orchestrate` and the Temporal cycle activity
+(`run_agent_cycle`) reach it through `lead_tools()` / `lead_dispatcher()` in
+[agent/assembly.py](../python/src/lha/agent/assembly.py); the orchestrator's Researchers and
+Reviewer and the sub-agent activity (`run_subagent`) call it directly.
+
+| Setting | Effect |
+|---|---|
+| `LHA_WEB_ALLOW_HOSTS` (comma-separated) | empty (default): no web tools are registered. Non-empty: `fetch_url` is registered and may reach exactly these hosts |
+| `--allow-host HOST` (repeatable) | on `mission`, `run-local` and `orchestrate`, adds hosts for this run to `LHA_WEB_ALLOW_HOSTS`. Durable missions use the worker's settings |
+| `LHA_WEB_ALLOW_PORTS` | extra ports beyond 80/443 |
+| `LHA_WEB_SEARCH_PROVIDER` + `LHA_WEB_SEARCH_API_KEY` | also registers `web_search` (`tavily` or `exa`), still only with a non-empty allow-list |
+| `LHA_WEB_SEARCH_ENDPOINT` | overrides the provider's public endpoint |
+| `LHA_WEB_CREDENTIALS` | brokered credentials for `fetch_url` (below) |
+| `LHA_WEB_TIMEOUT_S`, `LHA_WEB_MAX_RESPONSE_BYTES` | per-request timeout (30 s) and body cap (2,000,000 bytes) for both tools |
+
+Which agents get them: the Lead in every path; the Researchers in `lha orchestrate`; a durable
+sub-agent when both its role (`researcher`) and its `SubAgentInput.allow_egress` allow egress. The
+Reviewer's role hides them (`SubAgent` role filtering). `allow_egress=False` on
+`run_mission_local` / `Orchestrator.run_mission` drops them.
+
+`fetch_url` applies the in-process policy above with `allow_hosts` = the allow-list (normalized the
+same way, so `Bücher.Test` allows `xn--bcher-kva.test`), `allow_ports` = `LHA_WEB_ALLOW_PORTS`,
+the body cap `LHA_WEB_MAX_RESPONSE_BYTES` and the timeout `LHA_WEB_TIMEOUT_S`.
+`LHA_WEB_CREDENTIALS` is a secret JSON object mapping a placeholder to
+`{"value": "<secret>", "hosts": [...]}`; every bound host must be in the allow-list, or the run
+refuses to start. The tool description lists the placeholders and their hosts (never the values),
+and the broker substitutes a secret only into a request to a bound host, so a redirect to another
+allowed host carries the placeholder, not the secret.
+
+`web_search` may reach only its endpoint: the endpoint's scheme, host and port form its own
+policy, the host must resolve to public addresses, and the API key is placed into the request by
+a `CredentialBroker` bound to the endpoint host. The endpoint host does not need to be in
+`LHA_WEB_ALLOW_HOSTS`. A placeholder in the model's query is removed before substitution.
+
+Both tools are `untrusted_input=True`. Their output goes through `mark_untrusted()`
+([untrusted.py](../python/src/lha/execution/tools/untrusted.py)): secret-looking strings are
+masked with the trace redactor (section 6), and the text is wrapped in
+`<untrusted_content source="...">` with a first line telling the model to treat it as data. Fence
+tags inside the content are escaped so a page cannot close the fence early. The fence is a prompt
+signal; the enforcement is the Rule of Two (section 5).
 
 ### Sandbox network
 
@@ -214,10 +258,30 @@ deliberately. Only HTTP(S) is proxied, so SSH remotes have no route. See
 ## 5. Rule of two
 
 [rule_of_two.py](../python/src/lha/safety/rule_of_two.py): a session may hold at most two of
-untrusted content, private data, and external comms. The dispatcher derives its capability set from
-its usable tools (`egress` gives external comms, `untrusted_input` gives untrusted content) plus
-any `capabilities` the caller declares, such as private data. Without a gate, holding all three
-raises `RuleOfTwoViolation` at construction. With a gate, every egress call goes through the gate.
+untrusted content, private data, and external comms. It is enforced in two places.
+
+**Per run, fail closed.** `check_run_rule_of_two()` in
+[toolset.py](../python/src/lha/execution/tools/toolset.py) runs before a run starts (the CLI
+checks before planning spends anything; `build_run_dispatcher()` checks again) with the run's
+capabilities:
+
+| Capability | Held when |
+|---|---|
+| untrusted content | the web tools are enabled (non-empty `LHA_WEB_ALLOW_HOSTS`) |
+| external comms | the web tools are enabled |
+| private data | `LHA_PRIVATE_DATA=true`, or `LHA_SANDBOX=local` (the agent's shell runs on the host, with the host's files, credentials and network) |
+
+So a run with web tools must use `docker` or `e2b` and must not declare private data. Otherwise it
+raises `RuleOfTwoViolation`: `lha` exits with code 2 and a message naming the cause, and the
+activities raise a non-retryable `ERROR_CONFIG`. A human gate (including the durable
+`DeferredApprovalGate`) does not lift this check. It is run-level because the agents of a run
+share context (research briefs reach the Lead).
+
+**Per dispatcher.** The dispatcher derives its capability set from its usable tools (`egress`
+gives external comms, `untrusted_input` gives untrusted content) plus the capabilities the caller
+declares (`build_run_dispatcher()` declares private data as above). Without a gate, holding all
+three raises `RuleOfTwoViolation` at construction. With a gate, every egress call goes through the
+gate.
 
 ## 6. Secrets in child processes and traces
 
@@ -242,9 +306,12 @@ raises `RuleOfTwoViolation` at construction. With a gate, every egress call goes
   privileges of the process running the mission ([verification](07-verification.md#trusted-checks)).
 - An approved action is allowed exactly as it was requested, but the approver sees only the tool
   and its arguments; what a `git push` sends is whatever the agent committed.
-- DNS rebinding: `fetch_url` resolves and checks addresses, then httpx resolves again when it
-  connects. A 0-TTL rebinding server can race the check. Sandbox network isolation is the
-  backstop.
+- DNS rebinding: `fetch_url` and `web_search` resolve and check addresses, then httpx resolves
+  again when it connects. A 0-TTL rebinding server can race the check. The web tools run in the
+  worker process, not in the sandbox, so sandbox network isolation does not cover them.
+- An allow-listed host can still serve prompt injection. With web tools on, the Lead can act on
+  what it read (edit files, run commands in the sandbox). The Rule of Two keeps private data out of
+  such runs; it does not make the content safe.
 - The Docker container can write anything in the workspace except `.git` and `.lha`. The harness
   checks for weakened test files after the fact ([Verification](07-verification.md)).
 - Redaction is pattern-based. Secrets in unrecognized formats pass through.
