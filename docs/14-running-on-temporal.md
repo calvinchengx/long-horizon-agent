@@ -70,63 +70,111 @@ uv run lha mission-start --task "Add a slugify() helper with tests" \
 1. Plans the task into a checklist with the configured model (one metered call against
    `LHA_BUDGET_USD_CEILING` in this process).
 2. Initializes the git mission anchor at `--workdir` (see [06-mission-anchor.md](06-mission-anchor.md)).
-3. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing
-   `MissionInput(mission_id, workdir, check_commands)`.
+3. Starts `MissionWorkflow` with id `mission:<mission_id>` on `LHA_TASK_QUEUE`, passing a
+   `MissionInput` with the mission id, the workdir, the check commands and the settings below.
+
+| `MissionInput` field | CLI option | Else setting (default) |
+|---|---|---|
+| `max_cycles` | `--max-cycles` | `LHA_MAX_CYCLES` (1000) |
+| `deadlock_gate_seconds` | `--deadlock-gate-hours` (x 3600) | 24 hours; `0` = no gate |
+| `deadlock_gate_default` | `--deadlock-default abort\|impossible` | `LHA_DEADLOCK_GATE_DEFAULT` (`abort`) |
+| `approval_timeout_seconds` | `--approval-timeout-hours` (x 3600) | 24 hours |
+| `cycle_pause_seconds` | `--cycle-pause-seconds` | `LHA_CYCLE_PAUSE_SECONDS` (0) |
+| `resume_at` | `--start-in-seconds N` (now + N) | 0 (start now) |
+| `gate_escalation_seconds` | none | `LHA_GATE_ESCALATION_SECONDS` (`[900, 2700, 14400, 43200]`) |
+| `impossible_after_failures` | none | `LHA_IMPOSSIBLE_AFTER_FAILURES` (3) |
+
+These values are read by the process that runs `mission-start` and travel in the workflow input,
+so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` is different: the worker's `notify_gate`
+activity reads it, so set it on the workers.
 
 It prints the id and returns; it does not wait for the mission. The workflow's other inputs keep
-their defaults: `max_cycles=1000`, `cycles_before_can=200`, `budget_usd=None` (the worker's
-ceiling), `park_initial_seconds=60`, `park_max_seconds=3600`, `deadlock_gate_seconds=0`.
-`LHA_MAX_CYCLES` is not passed. There is no `--sandbox` option: the worker's `LHA_SANDBOX` applies.
+their defaults: `cycles_before_can=200`, `budget_usd=None` (the worker's ceiling),
+`park_initial_seconds=60`, `park_max_seconds=3600`. There is no `--sandbox` option: the worker's
+`LHA_SANDBOX` applies.
 
-`--workdir` is passed to the worker as given. A relative path is resolved against the worker's
-current directory, so use an absolute path unless the worker runs in the same directory. The
-worker must be able to reach the same filesystem path.
+`--workdir` is resolved to an absolute path before it is passed to the worker. The worker must be
+able to reach the same filesystem path.
 
 ## 4. Watch it
 
 ```bash
 uv run lha mission-status mission_3f9a1c0b2d4e
-# status=RUNNING cycles=3
+# status=WAITING_ON_HUMAN cycles=3
+# gate: tool_call approval-5d41402abc4b
+#   question: Mission mission_3f9a1c0b2d4e wants to run an irreversible action: ...
+#   options: approve | reject  (default on timeout: reject)
+#   opened: 2026-09-24T10:00:00+00:00  deadline: 2026-09-25T10:00:00+00:00
+#   reminders sent: 1  next reminder: 2026-09-24T10:45:00+00:00
+#   pending action: run_command {'argv': ['git', 'push', 'origin', 'main']}
+#   reason: git push (outward-facing / rewrites history)
+#   fingerprint: 5d41402abc4b2a76b9719d911017c592
+# recent gate events:
+#   2026-09-24T10:00:00+00:00 tool_call gate approval-5d41402abc4b opened (default reject)
+#   2026-09-24T10:15:00+00:00 tool_call gate approval-5d41402abc4b: reminder 1 (escalation)
 ```
 
-`mission-status` sends two queries, `status_v1` and `cycles_done`. Queries work while the workflow
-runs and after it has closed, but a worker must be polling the task queue to answer them. The
-workflow also answers `last_item`, `park_reason` and `rejected_decisions`, which the CLI does not
-expose; use the Temporal UI or `temporal workflow query`.
+`mission-status` queries `status_v1` and `cycles_done`, then `gate_v1` (the open gate, with the
+pending action and its reason), `resume_at` (printed as "sleeping until ..." when set) and
+`gate_log_v1` (the last 8 gate / sleep events). For a workflow served by an older worker that
+does not answer `gate_v1`, it falls back to `open_question`. Queries work while the workflow runs
+and after it has closed, but a worker must be polling the task queue to answer them. The workflow
+also answers `last_item`, `park_reason` and `rejected_decisions`, which the CLI does not expose;
+use the Temporal UI or `temporal workflow query`.
 
 Statuses the workflow sets:
 
 | Status | When |
 |---|---|
 | `RUNNING` | dispatching or running a cycle |
+| `SLEEPING` | on a durable timer by design: a scheduled start (`--start-in-seconds`), the pause between cycles (`--cycle-pause-seconds`) or `lha mission-snooze` |
 | `DEGRADED_PARK` | a cycle exhausted its retries; sleeping and probing health |
-| `WAITING_ON_HUMAN` | a deadlock gate is open (only when `deadlock_gate_seconds > 0`) |
+| `WAITING_ON_HUMAN` | a gate is open: an irreversible action waiting for approval, or the deadlock gate |
 | `DONE` | every item verified done |
-| `IMPOSSIBLE` | deadlocked: items remain and none is actionable |
-| `ABORTED` | budget exhausted, `max_cycles` reached, or a non-retryable failure |
-
-`SLEEPING` is defined in [`durable/signals.py`](../python/src/lha/durable/signals.py) and in the
-`missions` table comment but no code path sets it.
+| `IMPOSSIBLE` | deadlocked with no deadlock gate, or declared impossible at the deadlock gate |
+| `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure |
 
 The Temporal UI at <http://localhost:8080> shows each workflow's event history: every activity
 with its input, result, attempts and failures, the timers of a park, and each Continue-As-New.
 Large payloads appear as ClaimCheck pointers (see [19-wire-contract.md](19-wire-contract.md)).
 The committed work is in git: `git -C <workdir> log --oneline` and `<workdir>/.lha/progress.md`.
 
-## 5. Gates and abort
+## 5. Gates, sleep and abort
 
 ```bash
-uv run lha mission-approve mission_3f9a1c0b2d4e --decision retry
+uv run lha mission-approve mission_3f9a1c0b2d4e --decision approve      # a queued action
+uv run lha mission-approve mission_3f9a1c0b2d4e --decision impossible   # the deadlock gate
+uv run lha mission-snooze  mission_3f9a1c0b2d4e --seconds 3600          # 0 wakes it
 uv run lha mission-abort   mission_3f9a1c0b2d4e
 ```
 
-`mission-approve` sends the `human_decision_v1` signal with `--decision` (default `approve`). The
-workflow stores it until a gate consumes it. The only gate in `MissionWorkflow` is the deadlock
-gate, which offers `retry` and `abort` (default `abort` on timeout). A decision that matches no
-offered option (compared case-insensitively) is discarded, recorded in `rejected_decisions`, and
-the gate keeps waiting. Because `mission-start` leaves `deadlock_gate_seconds` at `0`, a mission
-started from the CLI never opens this gate: a deadlock ends the mission immediately with status
-`IMPOSSIBLE`. The help text's `approve | reject | abort` does not match the gate's options.
+**Irreversible actions.** When the agent runs a command the classifier flags (for example
+`git push`), it is refused for now and queued. After the cycle the workflow opens a `tool_call`
+gate: status `WAITING_ON_HUMAN`, the action and its reason in `mission-status`. `approve` allows
+that exact action once in a later cycle; `reject`, or no answer within the approval timeout
+(`--approval-timeout-hours`, default 24), rejects it for good.
+
+**Deadlock gate.** With `--deadlock-gate-hours` > 0 (default 24), a deadlock opens a gate offering
+`retry` (unblock the blocked items and continue), `abort` (status `ABORTED`) and `impossible` (a
+final `lha: mission declared impossible` checkpoint, status `IMPOSSIBLE`). The default on timeout
+is `--deadlock-default` (`abort` unless set to `impossible`). When the blocked item failed
+`LHA_IMPOSSIBLE_AFTER_FAILURES` (3) cycles in a row the gate recommends `impossible`. With
+`--deadlock-gate-hours 0`, a deadlock ends the mission immediately with status `IMPOSSIBLE`.
+
+`mission-approve` sends the `human_decision_v1` signal. It checks `--decision` against the open
+gate first: a decision the gate does not offer (for example `approve` at the deadlock gate) is
+refused with exit 2 and nothing is sent. With no gate open, any of `approve`, `reject`, `retry`,
+`abort`, `impossible` is sent and held until the next gate; a held decision the gate does not offer
+is discarded (recorded in `rejected_decisions`) and the gate keeps waiting.
+
+**Escalation ladder.** Every gate sends reminders at `LHA_GATE_ESCALATION_SECONDS` after it opens
+(default 15 minutes, 45 minutes, 4 hours and 12 hours; offsets past the gate's timeout are
+skipped), then applies its default at the timeout. Each step is committed to the mission anchor
+as a `gate_opened` / `gate_reminder` / `gate_resolved` / `gate_defaulted` event, listed by
+`mission-status`, and POSTed as JSON to `LHA_GATE_WEBHOOK_URL` if the workers have it set.
+
+**Sleeping.** `mission-snooze --seconds N` parks the mission on a durable timer (status
+`SLEEPING`) before its next cycle; `--seconds 0` wakes it. A cycle already running finishes first.
 
 `mission-abort` requests cancellation of the workflow. Temporal delivers it to a running
 `run_agent_cycle` at its next heartbeat (every 5 s). The workflow does not catch it: it closes as

@@ -12,14 +12,14 @@ The durable `MissionWorkflow` exposes its status through the `status_v1` query
 | Status | Meaning | What to do |
 |---|---|---|
 | `RUNNING` | a cycle is being dispatched or is running | nothing |
+| `SLEEPING` | on a durable timer by design: scheduled start, pause between cycles, or a snooze | nothing; `lha mission-snooze <id> --seconds 0` wakes it |
 | `DEGRADED_PARK` | a cycle failed 5 attempts with retryable errors; the workflow sleeps and probes health | read the `park_reason` query; fix the dependency |
-| `WAITING_ON_HUMAN` | the deadlock gate is open | send `retry` or `abort` with `lha mission-approve` |
+| `WAITING_ON_HUMAN` | a gate is open: an irreversible action waiting for approval, or the deadlock gate | `lha mission-status <id>` shows it; answer with `lha mission-approve` |
 | `DONE` | every item verified done | nothing |
-| `IMPOSSIBLE` | deadlocked: items remain, none actionable | inspect blocked items; start a new mission |
-| `ABORTED` | budget exhausted, `max_cycles` reached, or a non-retryable failure | see below |
+| `IMPOSSIBLE` | deadlocked with no gate, or declared impossible at the deadlock gate | inspect blocked items; start a new mission |
+| `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure | see below |
 
-`SLEEPING` appears in the schema comment and in `durable/signals.py` but is never set. The
-`missions` table in Postgres is not written by the workflow; the status lives in the workflow.
+The `missions` table in Postgres is not written by the workflow; the status lives in the workflow.
 
 Local runs (`run-local`, `mission`, `orchestrate`) have no status query. They print a summary and
 exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason>`,
@@ -31,7 +31,12 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
   `<workdir>/.lha/checklist.json`. Each cycle is one commit: `lha: complete <id> (...)`,
   `lha: attempt <id> (...)` or `lha: block <id> (...)`.
 - **Workflow**: the Temporal UI (<http://localhost:8080>) shows every activity, attempt, failure
-  and timer. `lha mission-status` returns status and cycle count.
+  and timer. `lha mission-status` returns status, cycle count, the open gate (with a queued
+  action and its reason), the sleep deadline and the last gate events.
+- **Gate events**: `<workdir>/.lha/events.ndjson` holds `tool_approval` (every answer to a flagged
+  command: `pending`, `approve`, `reject`, with who decided and whether it was a default),
+  `gate_opened`, `gate_reminder`, `gate_resolved`, `gate_defaulted` and `mission_impossible`
+  events. Set `LHA_GATE_WEBHOOK_URL` on the workers to receive the gate events as JSON POSTs.
 - **Spend**: `<workdir>/.git/lha/spend.ndjson` holds one row per cycle attempt (`usd`, `unknown`,
   `calls`). Each `run_agent_cycle` result in the history carries `spent_usd` for that cycle.
 - **Langfuse**: no LHA code sends data to Langfuse (see [16-observability.md](16-observability.md)).
@@ -41,7 +46,9 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
 | Outcome | Status | Cause |
 |---|---|---|
 | `completed` | `DONE` | every checklist item is `done` |
-| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) |
+| `deadlocked` | `IMPOSSIBLE` | nothing actionable (blocked items, unsatisfiable dependencies) and no deadlock gate |
+| `impossible` | `IMPOSSIBLE` | "impossible" at the deadlock gate (human or default); final checkpoint `lha: mission declared impossible` |
+| `aborted` | `ABORTED` | "abort" at the deadlock gate (human or the default) |
 | `budget_exhausted` | `ABORTED` | the governor refused a model call (`BudgetExceeded`, non-retryable) |
 | `max_cycles` | `ABORTED` | `cycles_done >= max_cycles` (1000 for CLI-started missions) |
 | workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused |
@@ -60,18 +67,30 @@ initializes a new anchor.
 
 ## Common actions
 
-**Resolve the deadlock gate.** The gate opens only when the workflow was started with
-`deadlock_gate_seconds > 0`, which `lha mission-start` does not set; start the workflow from code
-with a `MissionInput` to use it. While open, `lha mission-approve <id> --decision retry` runs
-`unblock_items` (every `blocked` item back to retryable, committed as
-`lha: unblock ... (human retry)`) and the mission continues; `abort`, or the timeout, ends it as
-`deadlocked`.
+**Approve or reject an irreversible action.** `lha mission-status <id>` shows the queued action
+(tool, arguments, reason, fingerprint, deadline). `lha mission-approve <id> --decision approve`
+allows that exact action once in a later cycle; `reject`, or no answer before the approval timeout
+(`mission-start --approval-timeout-hours`, default 24), rejects it and it is never asked about
+again. In a local run with `--approve-interactive` the same question is asked on the terminal
+(`y/N`, default reject; rejected without asking when stdin is not a TTY).
+
+**Resolve the deadlock gate.** The gate opens when the mission was started with
+`--deadlock-gate-hours` > 0 (the default is 24). While open,
+`lha mission-approve <id> --decision retry` runs `unblock_items` (every `blocked` item back to
+retryable, committed as `lha: unblock ... (human retry)`) and the mission continues; `abort` ends
+it `ABORTED`; `impossible` writes a final checkpoint and ends it `IMPOSSIBLE`. On timeout the
+`--deadlock-default` applies (`abort`, or `impossible`). `mission-approve` refuses a decision the
+open gate does not offer.
+
+**Snooze.** `lha mission-snooze <id> --seconds N` parks the mission (status `SLEEPING`) before its
+next cycle; `--seconds 0` wakes it. `--cycle-pause-seconds` and `--start-in-seconds` at
+`mission-start` do the same on a schedule.
 
 **Steer.** Send `steer_v1` with a note (`temporal workflow signal --workflow-id mission:<id>
 --name steer_v1 --input '"..."'`). Following cycles include it in the prompt.
 
 **Stop.** `lha mission-abort <id>` cancels the workflow (see
-[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-and-abort)).
+[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-sleep-and-abort)).
 
 **Change the budget ceiling.** A CLI-started mission uses the worker's `LHA_BUDGET_USD_CEILING`,
 read once per worker process and applied per cycle attempt. Change it and restart the worker; the
@@ -128,11 +147,16 @@ alerts on park.
   moves on. The local runners also stop when one item fails `LHA_STALL_LIMIT` consecutive times
   (`loop on item <id>`); with the default of 5 the item is blocked first, so this fires only when
   the limit is 3 or less. The durable workflow has no such detector.
-- `ops/lifecycle.py` (`should_declare_impossible`, `MissionOutcome`) and the `AutoPolicyGate` /
-  `CallbackGate` classes in `hitl/gate.py` are library code with no caller. **Planned**: a
-  "declare impossible?" gate, gates with an escalation ladder, and persisting gates to the
-  `hitl_gates` table. Today the one durable gate is the deadlock gate, with a timeout and a
-  default of `abort`.
+- Every gate has a timeout, a default and an escalation ladder: reminders at
+  `LHA_GATE_ESCALATION_SECONDS` (default 15 min, 45 min, 4 h and 12 h after it opens, skipping
+  offsets past the timeout), each committed as a `gate_reminder` event, shown by `mission-status`
+  and POSTed to the optional webhook; then the default. Tool-call gates default to **reject**; the
+  deadlock gate to `abort` (or `impossible`).
+- The deadlock gate recommends "impossible" when `ops.lifecycle.should_declare_impossible` says
+  the blocked item failed `LHA_IMPOSSIBLE_AFTER_FAILURES` (3) cycles in a row.
+- `MissionOutcome` in `ops/lifecycle.py` and the `AutoPolicyGate` / `CallbackGate` classes in
+  `hitl/gate.py` have no caller in a run path. **Planned**: persisting gates to the `hitl_gates`
+  table.
 
 ## Safe deploys during an in-flight mission
 
@@ -143,8 +167,12 @@ a new worker picks it up. The guard:
   replays every `*.json` history in a directory against the current `MissionWorkflow` and
   `SubAgentWorkflow`, using the same ClaimCheck data converter as the worker.
 - [`tests/durability/test_replay.py`](../python/tests/durability/test_replay.py) replays the
-  committed history `tests/durability/histories/mission_three_items.json`, and checks that a
-  tampered history fails. CI runs it on every push and pull request.
+  committed histories in `tests/durability/histories/` (a three-item mission, a deadlock gate and
+  an approval gate recorded with the pre-ladder code, and an approval on the escalation ladder),
+  and checks that a tampered history fails. CI runs it on every push and pull request.
+- New workflow behaviour is guarded by `workflow.patched(...)` (see
+  [08-durable-execution.md](08-durable-execution.md#replay-safety-net)), so a mission started by
+  an older worker keeps its old command sequence after a deploy.
 
 Before deploying a workflow change:
 
@@ -157,8 +185,9 @@ Before deploying a workflow change:
 **Planned**: worker Build IDs / worker versioning. `build_worker` sets no Build ID, so every worker
 on the queue can pick up any mission; mixed old and new workers are not separated.
 
-When a change is intentionally incompatible, re-record the committed history with
-`LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py`.
+When a change is intentionally incompatible, re-record one history with
+`LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py -k <test>` and keep the older
+histories replaying.
 
 ## Recovery
 
