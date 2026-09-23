@@ -21,6 +21,7 @@ from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checklist
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check
+from lha.coordination.decision_log import DecisionChainError
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.tools import default_local_tools
 from lha.governor.cost import CostLedger
@@ -32,6 +33,9 @@ from lha.obs.events import TraceRecorder, configure_logging
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.verifier import default_python_checks
 
+# ``stopped_reason`` prefix when the committed decision log fails hash-chain verification.
+DECISION_CHAIN_STOP = "decision log failed verification"
+
 
 @dataclass
 class MissionSummary:
@@ -39,7 +43,7 @@ class MissionSummary:
 
     ``stopped_reason`` is ``"complete"`` ONLY when every item is verified done; otherwise e.g.
     ``"deadlocked: <reason>"``, ``"governor: <reason>"`` (budget / max cycles),
-    ``"loop on item <id>"`` or ``"max_cycles"``.
+    ``"loop on item <id>"``, ``"decision log failed verification: <why>"`` or ``"max_cycles"``.
     """
 
     mission_id: str
@@ -155,6 +159,10 @@ async def run_mission_local(
             except BudgetExceeded as exc:
                 recorder.record("governor_block", mission_id=mission_id, reason=str(exc))
                 stopped = f"governor: {exc.decision.reason}"
+                break
+            except DecisionChainError as exc:  # altered decision history: refuse to continue
+                recorder.record("decision_chain_invalid", mission_id=mission_id, reason=str(exc))
+                stopped = f"{DECISION_CHAIN_STOP}: {exc}"
                 break
             if outcome.advanced:
                 cycles += 1

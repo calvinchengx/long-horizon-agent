@@ -10,7 +10,7 @@ progress narrative — is recited every cycle to fight drift.
 from __future__ import annotations
 
 from lha.contracts.model import ModelMessage
-from lha.contracts.state import ChecklistItem, SituationSnapshot
+from lha.contracts.state import ChecklistItem, DecisionRecord, SituationSnapshot
 from lha.contracts.tools import ToolSpec
 
 ACTION_INSTRUCTIONS = (
@@ -32,6 +32,7 @@ CORRECTIVE_INSTRUCTIONS = (
 # Caller-supplied extra context (e.g. research briefs / progress) is clipped to its newest tail.
 _EXTRA_CONTEXT_CAP = 8000
 _LAST_FAILURE_CAP = 3000
+_DECISION_LINE_CAP = 600
 
 
 def render_tools(specs: list[ToolSpec]) -> str:
@@ -40,6 +41,25 @@ def render_tools(specs: list[ToolSpec]) -> str:
         props = spec.parameters.get("properties", {}) if isinstance(spec.parameters, dict) else {}
         lines.append(f"- {spec.name}: {spec.description} (args: {props})")
     return "\n".join(lines) if lines else "(no tools available)"
+
+
+def render_decisions(decisions: list[DecisionRecord]) -> str:
+    """The recorded design decisions as a prompt section ('' when there are none)."""
+    if not decisions:
+        return ""
+    lines = [
+        "Design decisions already recorded (stay consistent with them; if one must change, "
+        "record the new decision with record_decision):"
+    ]
+    for record in decisions:
+        cycle = f"[{record.cycle_id}] " if record.cycle_id else ""
+        line = f"- {cycle}{record.decision} — {record.rationale}"
+        if record.alternatives_rejected:
+            line += f" (rejected: {record.alternatives_rejected})"
+        if record.affected:
+            line += f" (affects: {', '.join(record.affected)})"
+        lines.append(line[:_DECISION_LINE_CAP])
+    return "\n".join(lines)
 
 
 def corrective_message(reason: str) -> ModelMessage:
@@ -85,6 +105,9 @@ def build_messages(
             f"Previous attempt #{item.attempts} FAILED verification:\n"
             f"{item.last_failure[-_LAST_FAILURE_CAP:]}\n\n"
         )
+    decisions = render_decisions(snapshot.last_decisions)
+    if decisions:
+        user += f"{decisions}\n\n"
     user += f"Recent commits:\n{recent}\n\nWork this item using the tools, then signal done."
     return [
         ModelMessage(role="system", content=system),
