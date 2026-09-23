@@ -190,6 +190,18 @@ def reset_to_head(cwd: str | Path, *, keep: tuple[str, ...] = RESET_KEEP) -> Non
     run_git(cwd, "clean", "-ffdxq", *excludes)
 
 
+def discard_changes(cwd: str | Path) -> None:
+    """Return the work tree to ``HEAD``: tracked edits and untracked (NOT ignored) files go.
+
+    Unlike ``reset_to_head`` this keeps ignored files (dependency caches, build outputs, local
+    remotes), because it runs after an ordinary failed attempt, not after a crash.
+    """
+    if not has_commits(cwd):
+        return
+    run_git(cwd, "reset", "--hard", "--quiet", "HEAD")
+    run_git(cwd, "clean", "-fdq")
+
+
 def list_branches(cwd: str | Path, *, include_remote: bool = False) -> list[str]:
     """Return branch names (empty if no commits yet).
 
