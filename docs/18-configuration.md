@@ -182,11 +182,33 @@ only; `go/internal/config` does not define them.
 `build_langfuse()` has no caller; setting these has no effect on a run today. See
 [16-observability.md](16-observability.md).
 
+### Human gates and sleeping
+
+| Variable | Type | Default | Meaning |
+|---|---|---|---|
+| `LHA_CONSOLE_APPROVAL_TIMEOUT_S` | int >= 1 | `3600` | local runs with `--approve-interactive`: how long the terminal prompt waits before rejecting (durable missions use `mission-start --approval-timeout-hours`) |
+| `LHA_GATE_ESCALATION_SECONDS` | JSON list of ints | `[900, 2700, 14400, 43200]` | reminder offsets after a gate opens (the escalation ladder); offsets at or past the gate's timeout are skipped |
+| `LHA_DEADLOCK_GATE_DEFAULT` | `abort` \| `impossible` | `abort` | the deadlock gate's decision on timeout (`retry` is refused) |
+| `LHA_IMPOSSIBLE_AFTER_FAILURES` | int >= 1 | `3` | the deadlock gate recommends `impossible` after this many consecutive failed cycles on one item |
+| `LHA_CYCLE_PAUSE_SECONDS` | int >= 0 | `0` | durable missions: pause between cycles (status `SLEEPING`) |
+| `LHA_GATE_WEBHOOK_URL` | secret | unset | if set, every gate event (opened, reminder, resolved, defaulted) is POSTed there as JSON; off by default |
+| `LHA_GATE_WEBHOOK_TIMEOUT_SECONDS` | float, 0 < x <= 60 | `5.0` | timeout of each webhook POST; a failed or slow POST never changes a gate's outcome |
+
+`mission-start` reads `LHA_GATE_ESCALATION_SECONDS`, `LHA_DEADLOCK_GATE_DEFAULT`,
+`LHA_IMPOSSIBLE_AFTER_FAILURES` and `LHA_CYCLE_PAUSE_SECONDS` and puts them in the workflow input,
+so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` and its timeout are read by the worker (the
+`notify_gate` activity) and by local runs. See
+[09-safety-model.md](09-safety-model.md#human-gates-on-tool-calls) and
+[08-durable-execution.md](08-durable-execution.md#human-gates).
+
 ## Secrets
 
 Six settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`, `LHA_POSTGRES_DSN`,
 `LHA_LANGFUSE_SECRET_KEY`, `LHA_WEB_CREDENTIALS` and `LHA_WEB_SEARCH_API_KEY`. Their `repr` never
 shows the value; code unwraps them with
+<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
+These settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`, `LHA_POSTGRES_DSN`,
+`LHA_LANGFUSE_SECRET_KEY` and `LHA_GATE_WEBHOOK_URL` (chat webhook URLs embed their credential). Their `repr` never shows the value; code unwraps them with
 `get_secret_value()` only where the value is sent. `Settings.redacted()` masks every field whose
 value is a `SecretStr`, so a new secret field is masked as long as it is declared `SecretStr`.
 
@@ -214,6 +236,9 @@ keys do not reach agent-run commands. Keep `.env` out of version control (`.giti
 | `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine`, and the egress tests need internet access). Otherwise skipped |
 | `LHA_IT_SANDBOX_IMAGE` | `tests/integration/test_large_mission_e2e.py` | the polyglot sandbox image built from `sandbox/Dockerfile` (default `lha-sandbox:dev`) |
 | `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay history `tests/durability/histories/mission_three_items.json` |
+<!-- MERGE-DEDUPE: both versions kept below; reconcile against code -->
+| `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (pulls `python:3.12-slim`). Otherwise skipped |
+| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json` and `mission_approval_ladder.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
 | `LHA_PYDIFF` | `go/internal/safety/zz_pydiff_test.go` | directory of Python egress dumps for the Go differential tests; unset: skipped |
 | `LHA_APPDB_PASSWORD` | `docker-compose.yml` | `appdb` password (default `lha`) |
 | `LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_SALT` | `docker-compose.yml` | required by the Langfuse service; compose refuses to start without them |

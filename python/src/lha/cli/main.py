@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
 
@@ -18,6 +18,7 @@ from lha.config import Settings, get_settings
 
 if TYPE_CHECKING:
     from lha.contracts.hitl import HITLGate
+    from lha.durable.types import GateView
     from lha.persistence.store import MissionStore
     from lha.state.checklist_import import ImportedChecklist
 
@@ -54,8 +55,9 @@ _REFERENCE_HELP = (
     "recited to the agent every cycle."
 )
 _APPROVE_HELP = (
-    "Ask on this terminal before any irreversible command (git push, publish, uploads); "
-    "without it such commands are refused."
+    "Ask on this terminal (y/N, default reject) before any irreversible command (git push, "
+    "publish, uploads); rejected without asking when stdin is not a TTY, and after "
+    "LHA_APPROVAL_TIMEOUT_SECONDS without an answer. Without this flag such commands are refused."
 )
 
 
@@ -72,12 +74,12 @@ def _merge_references(references: list[str], extra: list[str]) -> list[str]:
     return [*references, *(r for r in extra if r not in references)]
 
 
-def _gate(approve_interactive: bool) -> HITLGate | None:
+def _gate(approve_interactive: bool, settings: Settings | None = None) -> HITLGate | None:
     if not approve_interactive:
         return None
     from lha.hitl.approvals import console_gate
 
-    return console_gate()
+    return console_gate(settings)
 
 
 # Optional third-party modules -> the pip extra / package that provides them.
@@ -370,7 +372,7 @@ def run_local(
             checklist=checklist,
             checks=checks,
             settings=settings,
-            gate=_gate(approve_interactive),
+            gate=_gate(approve_interactive, settings),
             references=references,
         )
     )
@@ -405,7 +407,7 @@ def mission(
         _fail("give --task (to plan) or --checklist FILE (to import a checklist)")
     checks = checks_from_commands(resolve_check_commands(check, no_default_checks))
     settings = _run_settings(sandbox, unsafe_local, allow_host)
-    gate = _gate(approve_interactive)
+    gate = _gate(approve_interactive, settings)
     if checklist_file:
         imported = _load_checklist_file(checklist_file)
         summary = _run(
@@ -474,7 +476,7 @@ def orchestrate(
             description=task,
             checklist=checklist,
             checks=checks,
-            gate=_gate(approve_interactive),
+            gate=_gate(approve_interactive, settings),
             references=list(reference),
         )
 
@@ -519,13 +521,30 @@ def mission_start(
         ),
     ),
     max_cycles: int | None = typer.Option(None, help="Cycle ceiling (default: LHA_MAX_CYCLES)."),
+    deadlock_default: str | None = typer.Option(
+        None,
+        "--deadlock-default",
+        help="Deadlock gate decision when nobody answers: abort | impossible "
+        "(default: LHA_DEADLOCK_GATE_DEFAULT, else abort).",
+    ),
+    cycle_pause_seconds: int | None = typer.Option(
+        None,
+        "--cycle-pause-seconds",
+        min=0,
+        help="Durable pause between cycles (status SLEEPING). Default: LHA_CYCLE_PAUSE_SECONDS.",
+    ),
+    start_in_seconds: int = typer.Option(
+        0, "--start-in-seconds", min=0, help="Sleep (status SLEEPING) before the first cycle."
+    ),
 ) -> None:
     """Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."""
     import os
+    import time
 
     from lha.agent.runner import aclose_provider, build_meter
     from lha.agents.planner import Planner
     from lha.config import get_settings
+    from lha.durable.signals import DEADLOCK_DEFAULTS
     from lha.durable.types import MissionInput
     from lha.durable.worker import connect_client
     from lha.durable.workflows import MissionWorkflow
@@ -541,6 +560,14 @@ def mission_start(
     check_commands = resolve_check_commands(check, no_default_checks)
     imported = _load_checklist_file(checklist_file) if checklist_file else None
     workdir = os.path.abspath(workdir)  # the worker may run from another directory
+    gate_settings = get_settings()
+    default_choice = (deadlock_default or gate_settings.deadlock_gate_default).strip().lower()
+    if default_choice not in DEADLOCK_DEFAULTS:
+        _fail(f"--deadlock-default must be one of {', '.join(DEADLOCK_DEFAULTS)}")
+    pause = (
+        gate_settings.cycle_pause_seconds if cycle_pause_seconds is None else cycle_pause_seconds
+    )
+    resume_at = time.time() + start_in_seconds if start_in_seconds > 0 else 0.0
 
     async def _start() -> str:
         settings = get_settings()
@@ -580,6 +607,11 @@ def mission_start(
                     if approval_timeout_hours is not None
                     else settings.approval_timeout_s
                 ),
+                gate_escalation_seconds=list(settings.gate_escalation_seconds),
+                deadlock_gate_default=default_choice,
+                impossible_after_failures=settings.impossible_after_failures,
+                cycle_pause_seconds=pause,
+                resume_at=resume_at,
             ),
             id=f"mission:{mission_id}",
             task_queue=settings.task_queue,
@@ -603,25 +635,98 @@ def mission_start(
     typer.echo(f"started mission {mission_id} (workflow id: mission:{mission_id})")
 
 
+def format_gate(gate: GateView | None) -> list[str]:
+    """Human-readable lines for the open gate (``[]`` when none is open)."""
+    if gate is None:
+        return []
+    lines = [
+        f"gate: {gate.kind} {gate.gate_id}",
+        f"  question: {gate.question}",
+        f"  options: {' | '.join(gate.options)}  (default on timeout: {gate.default_action})",
+        f"  opened: {gate.opened_at}  deadline: {gate.deadline}",
+        f"  reminders sent: {gate.escalations_sent}"
+        + (f"  next reminder: {gate.next_escalation_at}" if gate.next_escalation_at else ""),
+    ]
+    if gate.recommended:
+        lines.append(f"  recommended: {gate.recommended}")
+    if gate.request is not None:
+        lines += [
+            f"  pending action: {gate.request.tool} {gate.request.arguments}",
+            f"  reason: {gate.request.reason}",
+            f"  fingerprint: {gate.request.fingerprint}",
+        ]
+    return lines
+
+
+_ALL_DECISIONS = ("approve", "reject", "retry", "abort", "impossible")
+
+
+def check_decision(gate: GateView | None, decision: str) -> str:
+    """The normalized decision, validated against the open gate's options (``ValueError``).
+
+    With no gate open, any known decision is accepted: the workflow holds it for the next gate.
+    """
+    choice = decision.strip().lower()
+    options = list(gate.options) if gate is not None else list(_ALL_DECISIONS)
+    if choice not in options:
+        where = f"the open {gate.kind} gate" if gate is not None else "a mission gate"
+        raise ValueError(
+            f"unknown --decision {decision!r} for {where}; expected {', '.join(options)}"
+        )
+    return choice
+
+
+async def _optional_query(query: Awaitable[Any]) -> Any:
+    """The query's answer, or ``None`` when the workflow does not answer it (older workers)."""
+    from temporalio.client import WorkflowQueryFailedError
+
+    try:
+        return await query
+    except WorkflowQueryFailedError:
+        return None
+
+
+async def _query_gate(handle: Any) -> GateView | None:
+    from lha.durable.signals import QUERY_GATE
+    from lha.durable.types import GateView
+
+    return await _optional_query(handle.query(QUERY_GATE, result_type=GateView))
+
+
 @app.command(name="mission-status")
 def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) -> None:
-    """Query a running mission's status + cycle count (works mid-run and after completion)."""
+    """Query a mission's status, cycles, sleep, open gate (+ pending action) and gate events."""
     import asyncio
+    from datetime import UTC, datetime
 
     from lha.config import get_settings
-    from lha.durable.signals import QUERY_CYCLES, QUERY_STATUS
+    from lha.durable.signals import QUERY_CYCLES, QUERY_GATE_LOG, QUERY_STATUS
     from lha.durable.worker import connect_client
 
-    async def _run() -> str:
+    async def _run() -> list[str]:
         client = await connect_client(get_settings())
         handle = client.get_workflow_handle(f"mission:{mission_id}")
         status = await handle.query(QUERY_STATUS)
         cycles = await handle.query(QUERY_CYCLES)
-        question = await handle.query("open_question")
-        line = f"status={status} cycles={cycles}"
-        return f"{line}\nwaiting on: {question}" if question else line
+        lines = [f"status={status} cycles={cycles}"]
+        gate = await _query_gate(handle)
+        if gate is not None:
+            lines += format_gate(gate)
+        else:
+            question = await _optional_query(handle.query("open_question"))
+            if question:
+                lines.append(f"waiting on: {question}")
+        resume_at = await _optional_query(handle.query("resume_at"))
+        if resume_at:
+            lines.append(f"sleeping until {datetime.fromtimestamp(resume_at, UTC).isoformat()}")
+        log = await _optional_query(handle.query(QUERY_GATE_LOG)) or []
+        if log:
+            lines.append("recent gate events:")
+            lines += [f"  {line}" for line in log[-8:]]
+        return lines
 
-    typer.echo(asyncio.run(_run()))
+    for line in asyncio.run(_run()):
+        typer.echo(line)
 
 
 @app.command(name="mission-approve")
@@ -630,28 +735,58 @@ def mission_approve(
     decision: str = typer.Option(
         ...,
         help=(
-            "approve | reject (an irreversible action), retry | abort (a deadlock); "
-            "see 'lha mission-status' for what the mission is waiting on."
+            "approve | reject (an irreversible action), retry | abort | impossible (a deadlock); "
+            "checked against the open gate - see 'lha mission-status'."
         ),
     ),
 ) -> None:
     """Resolve an open human gate on a mission with a decision."""
-    decision = decision.strip().lower()
-    if decision not in ("approve", "reject", "retry", "abort"):
-        _fail(f"unknown --decision {decision!r}; expected approve, reject, retry or abort")
+    if decision.strip().lower() not in _ALL_DECISIONS:
+        _fail(f"unknown --decision {decision!r}; expected {', '.join(_ALL_DECISIONS)}")
     import asyncio
 
     from lha.config import get_settings
     from lha.durable.signals import SIGNAL_HUMAN_DECISION
     from lha.durable.worker import connect_client
 
+    async def _run() -> str:
+        client = await connect_client(get_settings())
+        handle = client.get_workflow_handle(f"mission:{mission_id}")
+        gate = await _query_gate(handle)
+        try:
+            choice = check_decision(gate, decision)
+        except ValueError as exc:
+            for line in format_gate(gate):
+                typer.echo(line, err=True)
+            _fail(str(exc))
+        await handle.signal(SIGNAL_HUMAN_DECISION, choice)
+        return choice
+
+    choice = asyncio.run(_run())
+    typer.echo(f"sent decision '{choice}' to mission {mission_id}")
+
+
+@app.command(name="mission-snooze")
+def mission_snooze(
+    mission_id: str = typer.Argument(..., help="Mission id."),
+    seconds: int = typer.Option(
+        ..., min=0, help="Sleep (status SLEEPING) this long before the next cycle; 0 wakes it."
+    ),
+) -> None:
+    """Park a mission on a durable timer (SLEEPING) before its next cycle, or wake it."""
+    import asyncio
+
+    from lha.config import get_settings
+    from lha.durable.signals import SIGNAL_SNOOZE
+    from lha.durable.worker import connect_client
+
     async def _run() -> None:
         client = await connect_client(get_settings())
         handle = client.get_workflow_handle(f"mission:{mission_id}")
-        await handle.signal(SIGNAL_HUMAN_DECISION, decision)
+        await handle.signal(SIGNAL_SNOOZE, seconds)
 
     asyncio.run(_run())
-    typer.echo(f"sent decision '{decision}' to mission {mission_id}")
+    typer.echo(f"mission {mission_id}: " + (f"snoozed {seconds}s" if seconds else "woken"))
 
 
 @app.command(name="mission-abort")
