@@ -9,6 +9,8 @@ replanner. Keeping it in one place is what stops the three paths from drifting a
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from lha.agent.loop import AgentLoop
 from lha.agents.replanner import Replanner
 from lha.config import Settings
@@ -25,6 +27,9 @@ from lha.safety.egress import EgressPolicy
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.trusted import CommandTrustedRunner, TrustedAwareVerifier
 from lha.verify.verifier import DeterministicVerifier
+
+if TYPE_CHECKING:
+    from lha.memory.service import CycleMemory
 
 
 async def open_lead_sandbox(settings: Settings, workdir: str) -> SandboxSession:
@@ -70,8 +75,13 @@ def build_lead_loop(
     workdir: str,
     gate: HITLGate | None = None,
     recorder: TraceRecorder | None = None,
+    memory: CycleMemory | None = None,
 ) -> AgentLoop:
-    """The lead's ``AgentLoop`` with every large-mission capability wired from settings."""
+    """The lead's ``AgentLoop`` with every large-mission capability wired from settings.
+
+    ``memory``: the run's tiered memory (``lha.persistence.services.open_run_services``), or
+    ``None`` for no memory.
+    """
     return AgentLoop(
         model=model,
         dispatcher=lead_dispatcher(settings, gate),
@@ -84,4 +94,5 @@ def build_lead_loop(
         replanner=Replanner(model) if settings.max_replans > 0 else None,
         max_replans=settings.max_replans,
         max_split_depth=settings.max_split_depth,
+        memory=memory,
     )

@@ -54,6 +54,7 @@ from lha.verify.witnesses import parse_witness
 
 if TYPE_CHECKING:
     from lha.agents.replanner import Replanner
+    from lha.memory.service import CycleMemory
 
 _OBSERVATION_CAP = 4000
 _TRUNCATED_STOP_REASONS = frozenset({"max_tokens", "length", "model_length"})
@@ -167,6 +168,7 @@ class AgentLoop:
         replanner: Replanner | None = None,
         max_replans: int = 0,
         max_split_depth: int = 2,
+        memory: CycleMemory | None = None,
     ) -> None:
         self._model = model
         self._dispatcher = dispatcher
@@ -181,6 +183,9 @@ class AgentLoop:
         self._replanner = replanner
         self._max_replans = max_replans
         self._max_split_depth = max_split_depth
+        # Optional tiered memory (``lha.memory.service``): recalled into the task message before
+        # the first turn, fed the committed outcome after the checkpoint. Never fails a cycle.
+        self._memory = memory
 
     async def run_cycle(
         self,
@@ -210,16 +215,24 @@ class AgentLoop:
         if not item.allow_harness_edits:
             harness_before = await asyncio.to_thread(snapshot_harness, workdir, self._harness_globs)
 
+        memory_text = ""
+        if self._memory is not None:
+            memory_text = await self._memory.recall(
+                mission_id=mission_id, cycle_id=cycle_id, item=item, snapshot=snapshot
+            )
         messages = build_messages(
             anchor_text=anchor_text or "",
             mission_text=mission.render_anchor() if mission else snapshot.anchor_text(),
             snapshot=snapshot,
             item=item,
             specs=self._dispatcher.specs(),
+            memory_text=memory_text,
         )
         self._emit("cycle_started", mission_id, cycle_id, item_id=item.id)
 
         tool_calls = 0
+        tools_used: list[str] = []
+        done_summary = ""
         turns = 0
         core: VerificationResult | None = None  # verifier verdict, before harness integrity
         dirty = True  # workspace changed since the last verification (or none ran yet)
@@ -243,6 +256,7 @@ class AgentLoop:
                         ModelMessage(role="tool", content=observation, tool_call_id=call.id)
                     )
                     tool_calls += 1
+                    tools_used.append(call.name)
                 dirty = True
                 continue
 
@@ -253,6 +267,7 @@ class AgentLoop:
                 messages.append(corrective_message(action.error))
                 continue
             if action.done:
+                done_summary = action.summary
                 if not self._verify_on_done or turns == self._max_turns:
                     break
                 core = self._with_errors(
@@ -282,6 +297,7 @@ class AgentLoop:
                 )
             )
             tool_calls += 1
+            tools_used.append(call.name)
             dirty = True
 
         if core is None or dirty:
@@ -301,6 +317,26 @@ class AgentLoop:
             verified=verification.all_green,
             verdict=verification.verdict,
         )
+        if self._memory is not None:
+            from lha.memory.service import CycleObservation
+
+            await self._memory.observe_cycle(
+                CycleObservation(
+                    mission_id=mission_id,
+                    cycle_id=cycle_id,
+                    item_id=item.id,
+                    item_description=item.description,
+                    verdict=verification.verdict,
+                    verified=verification.all_green,
+                    status=item.status,
+                    attempts=item.attempts,
+                    head_sha=head,
+                    before_head=snapshot.head_sha,
+                    failure="" if verification.all_green else verification.failure_report(),
+                    done_summary=done_summary,
+                    tools=tools_used,
+                )
+            )
         return CycleOutcome(
             item_id=item.id,
             advanced=True,
