@@ -62,6 +62,10 @@ type gitResult struct {
 }
 
 func runRaw(ctx context.Context, cwd string, args []string, timeout time.Duration) (gitResult, error) {
+	return runRawEnv(ctx, cwd, args, timeout, nil)
+}
+
+func runRawEnv(ctx context.Context, cwd string, args []string, timeout time.Duration, extraEnv map[string]string) (gitResult, error) {
 	if timeout <= 0 {
 		timeout = GitTimeout
 	}
@@ -70,6 +74,9 @@ func runRaw(ctx context.Context, cwd string, args []string, timeout time.Duratio
 	cmd := exec.CommandContext(tctx, "git", args...)
 	cmd.Dir = cwd
 	cmd.Env = gitEnv()
+	for k, v := range extraEnv {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
 	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -99,6 +106,8 @@ func runRaw(ctx context.Context, cwd string, args []string, timeout time.Duratio
 type RunOptions struct {
 	NoCheck bool          // do not turn a non-zero exit into a GitError
 	Timeout time.Duration // 0 means GitTimeout
+	// Env is added to the git environment (python: _git_with_env), e.g. GIT_INDEX_FILE.
+	Env map[string]string
 }
 
 // RunGit runs `git <args>` in cwd and returns stdout (stripped); non-zero exit is a *GitError.
@@ -108,7 +117,7 @@ func RunGit(ctx context.Context, cwd string, args ...string) (string, error) {
 
 // RunGitWith is RunGit with options.
 func RunGitWith(ctx context.Context, cwd string, opts RunOptions, args ...string) (string, error) {
-	res, err := runRaw(ctx, cwd, args, opts.Timeout)
+	res, err := runRawEnv(ctx, cwd, args, opts.Timeout, opts.Env)
 	if err != nil {
 		return "", err
 	}
@@ -306,6 +315,21 @@ func ResetToHeadKeep(ctx context.Context, cwd string, keep []string) error {
 		args = append(args, "-e", p)
 	}
 	_, err = RunGit(ctx, cwd, args...)
+	return err
+}
+
+// DiscardChanges returns the work tree to HEAD: tracked edits and untracked (NOT ignored) files
+// go. Unlike ResetToHead it keeps ignored files (dependency caches, build outputs, local
+// remotes), because it runs after an ordinary failed attempt, not after a crash.
+func DiscardChanges(ctx context.Context, cwd string) error {
+	ok, err := HasCommits(ctx, cwd)
+	if err != nil || !ok {
+		return err
+	}
+	if _, err := RunGit(ctx, cwd, "reset", "--hard", "--quiet", "HEAD"); err != nil {
+		return err
+	}
+	_, err = RunGit(ctx, cwd, "clean", "-fdq")
 	return err
 }
 

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 )
@@ -72,6 +73,58 @@ func sha256File(path string) (string, error) {
 // SnapshotHarness maps each existing harness file under workdir to its sha256. Unreadable
 // entries are skipped (like os.walk without onerror); symlinks are never followed or hashed.
 func SnapshotHarness(workdir string) HarnessSnapshot {
+	return SnapshotHarnessGlobs(workdir, nil)
+}
+
+// GlobRegex turns a workspace-relative glob into a regexp: "**" spans directories, "*" and "?"
+// do not (python: glob_regex). Like Python's re.match with "$", it also matches before one
+// trailing newline.
+func GlobRegex(pattern string) *regexp.Regexp {
+	pattern = strings.TrimLeft(pyStrip(pattern), "/")
+	var out strings.Builder
+	for i := 0; i < len(pattern); {
+		switch {
+		case strings.HasPrefix(pattern[i:], "**/"):
+			out.WriteString("(?:.*/)?")
+			i += 3
+		case strings.HasPrefix(pattern[i:], "**"):
+			out.WriteString(".*")
+			i += 2
+		case pattern[i] == '*':
+			out.WriteString("[^/]*")
+			i++
+		case pattern[i] == '?':
+			out.WriteString("[^/]")
+			i++
+		default:
+			r, size := utf8.DecodeRuneInString(pattern[i:])
+			out.WriteString(regexp.QuoteMeta(string(r)))
+			i += size
+		}
+	}
+	return regexp.MustCompile(`^` + out.String() + `\n?\z`)
+}
+
+// SnapshotHarnessGlobs is SnapshotHarness plus operator-chosen extra globs (LHA_HARNESS_PATHS,
+// e.g. "Makefile,e2e/**"): files matching any of them are protected too.
+func SnapshotHarnessGlobs(workdir string, extraGlobs []string) HarnessSnapshot {
+	extra := []*regexp.Regexp{}
+	for _, g := range extraGlobs {
+		if pyStrip(g) != "" {
+			extra = append(extra, GlobRegex(g))
+		}
+	}
+	protected := func(rel string) bool {
+		if IsHarnessFile(rel) {
+			return true
+		}
+		for _, rx := range extra {
+			if rx.MatchString(rel) {
+				return true
+			}
+		}
+		return false
+	}
 	snapshot := HarnessSnapshot{}
 	_ = filepath.WalkDir(workdir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -94,7 +147,7 @@ func SnapshotHarness(workdir string) HarnessSnapshot {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
-		if !IsHarnessFile(rel) {
+		if !protected(rel) {
 			return nil
 		}
 		if digest, err := sha256File(path); err == nil {
