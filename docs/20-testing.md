@@ -225,5 +225,10 @@ Packages with tests: `config`, `contracts`, `governor`, `model`, `obs`, `safety`
 Go decision chain. `internal/state/crossimpl_test.go` writes a mission anchor with Go and reads
 it with the Python implementation (via `uv run --project ../python`), and the reverse, including
 byte-identical `decisions.ndjson` links and each side verifying the other's chain; it skips
-when `uv` is not on `PATH` or under `-short`. There is no Go CLI or Temporal worker, so no Go
-test exercises a workflow or its replay.
+when `uv` is not on `PATH` or under `-short`. `cmd/lha/e2e_test.go` builds the Go CLI, runs
+`lha run-local` with the stub model on the real local sandbox and tools, and runs the same inputs
+through Python's `lha run-local` (and a scripted stub mission through `run_mission_local`),
+comparing exit codes, reports, checkpoint commits and the `.lha/` files; `internal/hitl` runs
+Python's `TerminalApprover` on the same scenarios as the Go console gate. Both skip the Python
+half when `uv` is not on `PATH`; the Docker run is gated on `LHA_IT_DOCKER=1`. There is no Go
+Temporal worker, so no Go test exercises a workflow or its replay.

@@ -4,7 +4,8 @@ What the Python and Go implementations must agree on so that one deployment can 
 same Temporal names and payloads, the same on-disk mission anchor, the same Postgres schema, and
 the same observable behaviour pinned by [`spec/`](../spec/). The Python implementation is the
 reference; every name below is taken from its code. The Go port implements the anchor and the
-spec'd behaviours today; it has no CLI and no Temporal worker yet (see [23-roadmap.md](23-roadmap.md)).
+spec'd behaviours, and its CLI runs local single-agent missions; it has no Temporal worker yet
+(see [23-roadmap.md](23-roadmap.md)).
 
 ## Temporal
 
