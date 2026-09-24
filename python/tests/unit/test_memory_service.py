@@ -16,7 +16,7 @@ from lha.contracts.model import ModelMessage, TurnResult
 from lha.contracts.state import Checklist, ChecklistItem, SituationSnapshot
 from lha.contracts.verify import Check
 from lha.memory import service as memsvc
-from lha.memory.embeddings import HashEmbedder
+from lha.memory.embeddings import HashEmbedder, PaddedEmbedder
 from lha.memory.service import (
     CONSOLIDATION_KIND,
     EPISODE_KIND,
@@ -447,14 +447,14 @@ async def test_postgres_memory_needs_the_pgvector_adapter(
     assert memory.mode.degraded == ["pgvector"]
 
 
-async def test_postgres_memory_rejects_an_embedder_of_the_wrong_width(
+async def test_postgres_memory_rejects_an_embedder_wider_than_the_column(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    class _Small(HashEmbedder):
+    class _Wide(HashEmbedder):
         def __init__(self, *_a: object, **_k: object) -> None:
-            super().__init__(dim=384)
+            super().__init__(dim=2048)
 
-    monkeypatch.setattr(memsvc, "SentenceTransformerEmbedder", _Small)
+    monkeypatch.setattr(memsvc, "SentenceTransformerEmbedder", _Wide)
     store = _FakePgStore(tmp_path / "s.sqlite3")
     memory = await open_mission_memory(
         _settings(memory_embedder="sentence_transformers"),
@@ -463,7 +463,31 @@ async def test_postgres_memory_rejects_an_embedder_of_the_wrong_width(
         mission_id="m",
     )
     assert memory is not None and memory.mode.label == "lexical"
-    assert "384" in memory.mode.reason and "vector(1024)" in memory.mode.reason
+    assert "2048" in memory.mode.reason and "vector(1024)" in memory.mode.reason
+
+
+async def test_postgres_memory_pads_a_narrower_embedder_to_the_column(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Small(HashEmbedder):
+        def __init__(self, *_a: object, **_k: object) -> None:
+            super().__init__(dim=384)
+
+    monkeypatch.setattr(memsvc, "SentenceTransformerEmbedder", _Small)
+    monkeypatch.setitem(sys.modules, "pgvector", types.ModuleType("pgvector"))
+    store = _FakePgStore(tmp_path / "s.sqlite3")
+    memory = await open_mission_memory(
+        _settings(memory_embedder="sentence_transformers"),
+        store=store,
+        workdir=tmp_path,
+        mission_id="m",
+    )
+    assert memory is not None and memory.mode.label == "hybrid"
+    assert isinstance(memory.embedder, PaddedEmbedder) and memory.embedder.dim == 1024
+    assert memory.embedder.name == "hash" and memory.embedder.inner.dim == 384
+    (vector,) = await memory.embedder.embed(["listen port"])
+    assert len(vector) == 1024 and vector[384:] == [0.0] * 640
+    await memory.close()
 
 
 async def test_postgres_memory_is_hybrid_with_a_1024_wide_embedder(
