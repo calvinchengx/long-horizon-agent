@@ -66,7 +66,8 @@ class GateView:
 
 @dataclass
 class GateNotice:
-    """Input of the ``notify_gate`` activity: one gate event (anchor event + optional webhook)."""
+    """Input of the ``notify_gate`` activity: one gate event (anchor event, ``hitl_gates`` row,
+    optional webhook)."""
 
     mission_id: str
     workdir: str
@@ -80,12 +81,16 @@ class GateNotice:
     step: int = 0
     deadline: str = ""
     request: PendingApproval | None = None
+    # When the event happened, in workflow time (ISO-8601 UTC); "" from workflows built before
+    # it existed (the activity then uses its own clock).
+    at: str = ""
 
 
 @dataclass
 class NoticeResult:
     recorded: bool
     webhook: str = "off"  # "off" | "sent" | "failed: <reason>"
+    stored: bool = False  # written to the mission store's ``hitl_gates`` table
 
 
 @dataclass

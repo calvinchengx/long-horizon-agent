@@ -6,15 +6,19 @@ the row through the workflow. On the time-skipping server, with the same SQLite 
 activity writes, these prove the row reads:
 
 * SLEEPING while the mission sleeps between cycles, then DONE;
-* WAITING_ON_HUMAN while the deadlock gate is open (the cycle wrote IMPOSSIBLE just before),
-  then DONE after "retry", ABORTED after "abort", IMPOSSIBLE after "impossible";
+* WAITING_ON_HUMAN while the deadlock gate is open (the deadlocked cycle wrote RUNNING just
+  before), then DONE after "retry", ABORTED after "abort", IMPOSSIBLE after "impossible";
 * ABORTED after a cancellation (``lha mission-abort``), whether it sleeps or waits on a gate;
+* ABORTED after a cancellation mid-cycle, even when the cycle writes RUNNING while finishing:
+  the workflow waits for the cancelled cycle (``lha-cycle-wait-cancel-v1``) and writes ABORTED
+  after it, and a cycle that completes anyway cannot swallow the abort;
 * and a row write that keeps failing never fails or blocks the mission.
 """
 
 from __future__ import annotations
 
 import asyncio
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +56,8 @@ from tests.durability._support import SETTINGS, init_mission, working_model
 from tests.durability.test_human_gates import _never_works, cycle_with, status_is, wait_for, worker
 
 _TIMEOUT_S = 120
+# Heartbeats reach the server at once, so a cancel reaches a running cycle in about a second.
+_FAST_BEAT = timedelta(milliseconds=200)
 
 
 async def mission_row(mission_id: str) -> MissionRow | None:
@@ -235,7 +241,7 @@ async def test_cancelling_during_a_cycle_records_aborted_and_never_parks(tmp_pat
     tq = "lha-row-cancel-cycle"
     async with (
         await WorkflowEnvironment.start_time_skipping() as env,
-        worker(env, tq, _endless_cycle),
+        worker(env, tq, _endless_cycle, max_heartbeat_throttle_interval=_FAST_BEAT),
     ):
         handle = await env.client.start_workflow(
             MissionWorkflow.run, inp, id=f"mission:{inp.mission_id}", task_queue=tq
@@ -244,3 +250,85 @@ async def test_cancelling_during_a_cycle_records_aborted_and_never_parks(tmp_pat
         await _cancel_and_expect_aborted(inp.mission_id, handle)
         parks = await handle.query(MissionWorkflow.park_reason)
     assert parks == ""
+
+
+#: Per test: how the cycle below ends, and an event made on that test's loop.
+_late: dict[str, Any] = {"mode": "acknowledge", "started": None}
+
+
+@activity.defn(name="run_agent_cycle")
+async def _late_writing_cycle(inp: CycleInput) -> CycleResult:
+    """The race: a cycle still finishing when the mission is aborted writes its own status.
+
+    It heartbeats until cancelled, then writes RUNNING to the row (what the real cycle does in
+    its last step) and either acknowledges the cancellation or completes normally anyway.
+    """
+    _late["started"].set()
+    try:
+        while True:
+            activity.heartbeat()
+            await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        await asyncio.sleep(0.2)  # the workflow must wait for this, not write ABORTED first
+        await _record_mission_status(
+            MissionStatusInput(mission_id=inp.mission_id, workdir=inp.workdir, status="RUNNING"),
+            settings=SETTINGS,
+        )
+        if _late["mode"] == "acknowledge":
+            raise
+        return CycleResult(
+            item_id=None, advanced=False, head_sha="", is_complete=False, items_done=0,
+            items_total=1,
+        )  # fmt: skip
+
+
+def _history_order(history: Any) -> list[str]:
+    """Scheduled activity types and the cycle's close events, in history order."""
+    names: dict[int, str] = {}
+    out: list[str] = []
+    for event in history.events:
+        attrs = event.activity_task_scheduled_event_attributes
+        if event.HasField("activity_task_scheduled_event_attributes"):
+            names[event.event_id] = attrs.activity_type.name
+            out.append(f"scheduled:{attrs.activity_type.name}")
+        for field, label in (
+            ("activity_task_completed_event_attributes", "completed"),
+            ("activity_task_canceled_event_attributes", "canceled"),
+        ):
+            if event.HasField(field):
+                scheduled = getattr(event, field).scheduled_event_id
+                out.append(f"{label}:{names[scheduled]}")
+    return out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["acknowledge", "complete_anyway"])
+async def test_abort_mid_cycle_waits_for_the_cycle_and_the_row_ends_aborted(
+    tmp_path: Path, mode: str
+) -> None:
+    _late["started"] = asyncio.Event()
+    _late["mode"] = mode
+    inp = await init_mission(tmp_path, n=1)
+    await _seed_row(inp.mission_id, inp.workdir)
+    tq = f"lha-row-cancel-race-{mode}"
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        worker(env, tq, _late_writing_cycle, max_heartbeat_throttle_interval=_FAST_BEAT),
+    ):
+        handle = await env.client.start_workflow(
+            MissionWorkflow.run, inp, id=f"mission:{inp.mission_id}", task_queue=tq
+        )
+        await asyncio.wait_for(_late["started"].wait(), _TIMEOUT_S)
+        # Even a cycle that completes normally after the cancel cannot swallow the abort.
+        await _cancel_and_expect_aborted(inp.mission_id, handle)
+        order = _history_order(await handle.fetch_history())
+    closed = "canceled" if mode == "acknowledge" else "completed"
+    # The cycle's close (after its late RUNNING write) precedes the workflow's ABORTED write.
+    assert order == [
+        "scheduled:run_agent_cycle",
+        f"{closed}:run_agent_cycle",
+        "scheduled:record_mission_status",
+        "completed:record_mission_status",
+    ]
+    row = await mission_row(inp.mission_id)
+    assert row is not None and row.status == STATUS_ABORTED

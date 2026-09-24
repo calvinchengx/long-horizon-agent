@@ -82,10 +82,8 @@ async def test_check_resolved_rejects_any_private_answer() -> None:
 @pytest.mark.asyncio
 async def test_fetch_denies_without_policy(tmp_path: Path) -> None:
     calls: list[httpx.Request] = []
-    client = httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda r: calls.append(r) or httpx.Response(200))
-    )
-    result = await FetchUrlTool(client=client).run({"url": "https://a.test"}, await _ctx(tmp_path))
+    mock = httpx.MockTransport(lambda r: calls.append(r) or httpx.Response(200))
+    result = await FetchUrlTool(transport=mock).run({"url": "https://a.test"}, await _ctx(tmp_path))
     assert not result.ok and "no egress policy" in (result.error or "")
     assert calls == []
 
@@ -100,9 +98,9 @@ async def test_fetch_rechecks_every_redirect_hop(tmp_path: Path) -> None:
             return httpx.Response(302, headers={"location": "http://169.254.169.254/latest"})
         return httpx.Response(200, text="metadata!")
 
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    mock = httpx.MockTransport(handler)
     tool = FetchUrlTool(
-        client=client,
+        transport=mock,
         egress_policy=EgressPolicy(allow_hosts={"a.test", "169.254.169.254"}),
         resolver=_resolver({}),
     )
@@ -120,9 +118,9 @@ async def test_fetch_follows_allowed_redirect_and_blocks_disallowed(tmp_path: Pa
             return httpx.Response(302, headers={"location": "https://other.test/"})
         return httpx.Response(200, text="<html><body><p>hello</p></body></html>")
 
-    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    mock = httpx.MockTransport(handler)
     tool = FetchUrlTool(
-        client=client, egress_policy=EgressPolicy(allow_hosts={"a.test"}), resolver=_resolver({})
+        transport=mock, egress_policy=EgressPolicy(allow_hosts={"a.test"}), resolver=_resolver({})
     )
     ok = await tool.run({"url": "https://a.test/start"}, await _ctx(tmp_path))
     assert ok.ok and "\nhello\n</untrusted_content>" in ok.content
@@ -132,9 +130,9 @@ async def test_fetch_follows_allowed_redirect_and_blocks_disallowed(tmp_path: Pa
 
 @pytest.mark.asyncio
 async def test_fetch_blocks_host_resolving_to_private_ip(tmp_path: Path) -> None:
-    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda r: httpx.Response(200)))
+    mock = httpx.MockTransport(lambda r: httpx.Response(200))
     tool = FetchUrlTool(
-        client=client,
+        transport=mock,
         egress_policy=EgressPolicy(allow_hosts={"a.test"}),
         resolver=_resolver({"a.test": ["10.1.2.3"]}),
     )
@@ -155,7 +153,7 @@ async def test_fetch_broker_injects_only_for_bound_host(tmp_path: Path) -> None:
     broker = CredentialBroker()
     broker.register("{{API}}", "real-secret", hosts={"api.test"})
     tool = FetchUrlTool(
-        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        transport=httpx.MockTransport(handler),
         egress_policy=EgressPolicy(allow_hosts={"api.test", "cdn.test"}),
         broker=broker,
         resolver=_resolver({}),
@@ -177,6 +175,7 @@ async def test_fetch_broker_injects_only_for_bound_host(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_default_client_ignores_env_proxies() -> None:
     tool = FetchUrlTool(egress_policy=EgressPolicy())
-    async with tool._http.open() as client:  # a fresh per-call client
-        assert client._trust_env is False
-        assert client.follow_redirects is False
+    async with tool._http.open() as session:  # a fresh per-call client
+        assert session.client._trust_env is False
+        assert session.client.follow_redirects is False
+        assert session.backend is not None  # connections go through the pinned backend

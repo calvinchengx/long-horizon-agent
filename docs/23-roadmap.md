@@ -96,8 +96,8 @@ quality with real models.
 | Replanner (split a blocked item) | done: every run path |
 | Per-role model routing (Claude tiers) | done: `orchestrate` with the `claude` backend |
 | File ownership, tickets, blackboard, parallel implementers in git worktrees, `BranchIntegrator` | done in `lha orchestrate` only (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3); not in the durable workflow ([11-multi-agent-organization.md](11-multi-agent-organization.md)) |
-| Memory: episodic, semantic, skills, hybrid BM25 + dense retrieval, consolidation, degradation to lexical-only | done: every run path gives the lead a memory block (`LHA_MEMORY_ENABLED`, default on) ([12-memory.md](12-memory.md)) |
-| Persistence: mission rows and the idempotent cost ledger on SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), `lha missions`, `lha costs`, `lha db migrate` | done: every run path |
+| Memory: episodic, semantic, skills, hybrid BM25 + dense retrieval, consolidation, degradation to lexical-only | done: every run path gives the lead a memory block (`LHA_MEMORY_ENABLED`, default on); semantic embeddings at $0 with `LHA_MEMORY_EMBEDDER=ollama` ([12-memory.md](12-memory.md)) |
+| Persistence: mission rows, the idempotent cost ledger and human gates (`hitl_gates`) on SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), `lha missions`, `lha costs`, `lha gates`, `lha db migrate` | done: every run path |
 | Model resilience: fallback chain (`LHA_FALLBACK_MODELS`), health probe before a parked mission resumes | done: every run path ([13-models.md](13-models.md#retries-and-failover)) |
 | Operator-configurable egress allow-list | done: `LHA_SANDBOX_EGRESS` (sandbox, via proxy) and `LHA_WEB_ALLOW_HOSTS` / `--allow-host` (web tools) |
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
@@ -114,26 +114,21 @@ quality with real models.
 
 These limitations are in the current code:
 
-- Gates are not persisted to the `hitl_gates` table. An open gate lives in the workflow state and
-  its events in the anchor.
-- The `missions` row is written by the local runners, `mission-start` and the durable cycle
-  activity, never by `MissionWorkflow`. For a durable mission the activity writes `RUNNING`,
-  `DONE`, `IMPOSSIBLE` (the checklist is deadlocked), `ABORTED` (budget refused) and
-  `WAITING_ON_HUMAN` (the cycle queued an approval). The row never shows `DEGRADED_PARK`,
-  `SLEEPING`, `WAITING_ON_HUMAN` for the deadlock gate, or the outcome the workflow reaches after
-  a gate decision (for example abort or impossible at the deadlock gate) or at `max_cycles`.
+- The `missions` row and the `hitl_gates` rows are best-effort copies: when the store is down,
+  the workflow goes on and the rows lag until the next write. `lha mission-status` and the
+  anchor's `gate_*` events are the live and complete sources. A durable gate's `resolved_by`
+  cannot name the person who answered (the `human_decision_v1` signal carries no identity).
 - Lease granting: a `LeaseRequest` for another writer's file is never granted.
 - Parallel implementer waves, tickets and the blackboard exist only in `lha orchestrate`, not in
   the Temporal workflow.
 - The Go port has no CLI (`go/cmd/lha`) and no Temporal worker, and Temporal histories with
   timers do not replay across the two languages (see [Go phase 2](#go-phase-2-temporal-not-started)).
 - `lha orchestrate` re-initializes the anchor and does not resume an earlier run.
-- The default memory embedder (`hash`) is lexical, not semantic; `sentence_transformers` needs the
-  `embeddings` extra.
+- The default memory embedder stays `hash` (lexical): `ollama` is semantic but needs a running
+  Ollama server with the model pulled (without one, retrieval is lexical-only), and
+  `sentence_transformers` needs the `embeddings` extra.
 - Every `openai_compat` model, primary or fallback, uses the one endpoint in
   `LHA_OPENAI_BASE_URL`.
-- Web tools check the resolved address before connecting, but the HTTP client resolves again,
-  so DNS rebinding between the two lookups is a residual risk.
 
 ## Go port
 

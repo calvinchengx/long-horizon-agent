@@ -60,8 +60,9 @@ The durable activity constructs `AgentLoop` without a recorder, so a mission on 
 
 ## Human gate events
 
-Gate activity is recorded in the anchor's `.lha/events.ndjson`, not in the `hitl_gates` table
-(nothing writes that table):
+Gate activity is recorded in the anchor's `.lha/events.ndjson` and, one row per gate, in the
+mission store's `hitl_gates` table (`lha gates [MISSION_ID]`: kind, question, options, reminders,
+decision, who and when):
 
 - **Durable runs.** The `notify_gate` activity commits one checkpoint per gate event (kind
   `gate_opened`, `gate_reminder`, `gate_resolved` or `gate_defaulted`, commit message

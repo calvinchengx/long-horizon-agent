@@ -15,6 +15,8 @@ dependencies = [
     "orjson>=3.10",
     "tenacity>=8.3",
     "httpx>=0.27",
+    # Imported directly: the web tools' pinned-address network backend (DNS-rebinding defence).
+    "httpcore>=1.0",
     "temporalio>=1.27.2",
 ]
 

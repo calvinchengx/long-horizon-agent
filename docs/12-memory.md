@@ -107,24 +107,44 @@ channel:
 | Setting | Embedder | `dim` | Notes |
 |---|---|---|---|
 | `hash` (default) | `HashEmbedder`, `hash` / `1` | 256 on SQLite, 1024 on Postgres | Hashed bag of tokens, normalized. Lexical, not semantic, but needs no extra, network or key |
-| `sentence_transformers` | `SentenceTransformerEmbedder`, `st:<model>` / `<model>` | the model's | A real local semantic embedder (`LHA_MEMORY_EMBEDDING_MODEL`, default `BAAI/bge-m3`). Needs the `embeddings` extra; without it, retrieval falls back to lexical-only |
+| `ollama` | `OllamaEmbedder`, `ollama:<model>` / `<model>@<digest>` | the model's (measured) | A real semantic embedder served by a local [Ollama](https://ollama.com) at `LHA_OLLAMA_BASE_URL` (`POST /api/embed`): $0, no Python extra. `LHA_MEMORY_EMBEDDING_MODEL`, default `nomic-embed-text` (768 wide); pull it first (`ollama pull nomic-embed-text`). Unreachable or not pulled: lexical-only |
+| `sentence_transformers` | `SentenceTransformerEmbedder`, `st:<model>` / `<model>` | the model's | A real local semantic embedder in the worker process (`LHA_MEMORY_EMBEDDING_MODEL`, default `BAAI/bge-m3`). Needs the `embeddings` extra; without it, retrieval falls back to lexical-only |
 | `none` | none | — | Lexical-only (BM25 + `git grep`) by choice |
+
+The default stays `hash` because it needs nothing running: with `ollama` and no Ollama server,
+retrieval is lexical-only (BM25 + `git grep`, no dense channel at all), which recalls less than
+`hash`'s hashed-token cosine. Choose `ollama` when an Ollama server with the model is available
+to every process that runs cycles (the worker, or the machine running `lha mission`).
+
+When the memory plane opens (once per run, and once per cycle in the durable activity),
+`OllamaEmbedder.connect` checks `GET /api/tags` for the model, takes its digest into the version
+and embeds a probe text to learn `dim`. Each call embeds up to 64 texts. The repository chunks
+are embedded again each time the plane opens (vectors are cached only for the run), so on a
+large checkout expect each durable cycle to spend time embedding with a local model.
 
 `VoyageEmbedder` (`voyage:<model>`, 1024, calls the Voyage API with httpx) exists but no setting
 selects it.
+
+On Postgres, an embedder narrower than the `vector(1024)` column (for example
+`nomic-embed-text`, 768) is wrapped in `PaddedEmbedder`, which appends zeros up to 1024. Zeros
+change neither dot products nor norms, so cosine similarity is unchanged, and the HNSW index
+works as for a 1024-wide model. An embedder wider than 1024 cannot be stored: retrieval is
+lexical-only.
 
 ## Version gating
 
 Every `MemoryRecord` carries `embedding_model` and `embedding_version`. The SQLite index, the
 pgvector index and `InMemorySemanticIndex` only compare vectors from the same (model, version) as
 the current embedder. After an embedder change, old rows are still returned lexically (BM25) but
-not by the dense channel. Re-embedding is not implemented.
+not by the dense channel. The Ollama version includes the model's digest, so re-pulling a model
+whose weights changed is an embedder change too. Re-embedding is not implemented.
 
 `PgSemanticIndex` ([semantic_pg.py](../python/src/lha/memory/semantic_pg.py)) details:
 
 - `semantic_memory.embedding` is `vector(1024)` with an HNSW cosine index; the embedder's `dim`
   must equal it, otherwise construction raises `EmbeddingDimensionError`. The memory service
-  checks this when it opens and uses lexical-only retrieval instead;
+  pads a narrower embedder to 1024 when it opens (`PaddedEmbedder`, above) and uses
+  lexical-only retrieval for a wider one;
 - `add()` upserts by id and writes `kind` and `metadata` (migration 0004); with `mission_id` set,
   rows are stamped with it and `query()` only sees that mission's rows;
 - `query()` filters on `valid`, non-null embeddings and the current model and version, and orders
@@ -162,10 +182,11 @@ all of the dense-channel dependencies are OK; otherwise lexical-only retrieval: 
 | Condition | Detected | Result |
 |---|---|---|
 | `LHA_POSTGRES_DSN` set but Postgres unreachable, unmigrated or `psycopg` missing | the store falls back to SQLite (`degraded_reason`) | lexical-only |
+| `LHA_MEMORY_EMBEDDER=ollama` and Ollama unreachable at `LHA_OLLAMA_BASE_URL`, the model not pulled, or the probe embedding fails | at open | lexical-only |
 | `LHA_MEMORY_EMBEDDER=sentence_transformers` without the `embeddings` extra | at open | lexical-only |
 | `LHA_MEMORY_EMBEDDER=none` | at open | lexical-only |
-| Postgres store but `pgvector` not importable, or embedder `dim` is not 1024 | at open | lexical-only |
-| the embedder or the vector index raises later in the run | at the failing call | lexical-only for the rest of the run |
+| Postgres store but `pgvector` not importable, or embedder `dim` is wider than 1024 | at open | lexical-only |
+| the embedder (for example Ollama stops answering) or the vector index raises later in the run | at the failing call | lexical-only for the rest of the run |
 
 Each case logs a structlog warning with the reason (and, on the local run paths, which have a
 `TraceRecorder`, a `memory_degraded` trace event), and the mission continues. Any other memory error is recorded as `memory_error` and the cycle
@@ -189,6 +210,7 @@ for the store itself):
 |---|---|
 | Memory on SQLite, `HashEmbedder`, BM25, `git grep`, `NoopReranker`, extractive consolidation, skills | core install (and `git`) |
 | Memory on Postgres with pgvector | `postgres` extra (`psycopg[binary,pool]`, `pgvector`), a Postgres with the `vector` extension, `lha db migrate` |
+| `OllamaEmbedder` | core install (httpx) + a running Ollama with the embedding model pulled |
 | `SentenceTransformerEmbedder`, `CrossEncoderReranker` | `embeddings` extra (`sentence-transformers`) |
 | `VoyageEmbedder` | core install (httpx) + Voyage API key, passed in code |
 

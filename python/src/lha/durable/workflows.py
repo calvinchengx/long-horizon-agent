@@ -24,8 +24,8 @@ Human gates (status ``WAITING_ON_HUMAN``): an irreversible tool call a cycle que
 reject, default reject) and, when ``deadlock_gate_seconds > 0``, a deadlock (retry / abort /
 impossible, default ``deadlock_gate_default``). Every gate has a timeout, a default action and an
 escalation ladder: reminders at ``gate_escalation_seconds`` after it opens, each recorded in the
-anchor and sent to the optional webhook by the ``notify_gate`` activity (never from workflow
-code), then the default. ``ops.lifecycle.should_declare_impossible`` drives the deadlock gate's
+anchor and the ``hitl_gates`` table and sent to the optional webhook by the ``notify_gate``
+activity (never from workflow code), then the default. ``ops.lifecycle.should_declare_impossible`` drives the deadlock gate's
 "impossible" recommendation.
 
 ``SLEEPING`` is the status while the workflow waits on a durable timer by design: a scheduled
@@ -34,11 +34,13 @@ operator ``snooze``. It is distinct from ``DEGRADED_PARK`` (a dependency is down
 ``WAITING_ON_HUMAN`` (a gate is open).
 
 The ``missions`` row (``lha missions``): the cycle activity writes what a cycle observes (RUNNING,
-DONE, IMPOSSIBLE when deadlocked, WAITING_ON_HUMAN for a queued approval); the workflow writes
-the statuses only it knows through the ``record_mission_status`` activity — SLEEPING,
+also when deadlocked, DONE, WAITING_ON_HUMAN for a queued approval); the workflow writes the
+statuses only it knows through the ``record_mission_status`` activity — SLEEPING,
 DEGRADED_PARK, WAITING_ON_HUMAN when a gate opens, and the final status of every ending
 (including a failure and a cancellation by ``lha mission-abort``). Those writes are best effort:
-a short timeout and retry, then the mission goes on.
+a short timeout and retry, then the mission goes on. On a cancellation the workflow waits for the
+cycle in flight to acknowledge it (``WAIT_CANCELLATION_COMPLETED``) before it writes ABORTED, and
+the store never moves a terminal status back, so an abort mid-cycle ends ABORTED.
 
 Determinism: behaviour added after histories were recorded is guarded by ``workflow.patched``
 (``PATCH_*`` below), so a history recorded by an older build replays down its old code path.
@@ -141,6 +143,7 @@ _NOTIFY_TIMEOUT = timedelta(minutes=3)
 PATCH_GATE_LADDER = "lha-gate-escalation-v1"
 PATCH_SLEEPING = "lha-sleeping-v1"
 PATCH_MISSION_ROW = "lha-mission-row-v1"
+PATCH_CYCLE_CANCEL = "lha-cycle-wait-cancel-v1"
 
 # ``record_mission_status`` is best effort: a short timeout and a few quick retries, then the
 # mission goes on without the row update (logged).
@@ -174,6 +177,19 @@ def _config_failure(message: str) -> ApplicationError:
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def _raise_if_cancel_requested() -> None:
+    """Re-raise a workflow cancellation that a waited-for activity swallowed.
+
+    With ``WAIT_CANCELLATION_COMPLETED``, an activity that finishes successfully although it was
+    asked to cancel hands its result back and the SDK drops the ``CancelledError``; the pending
+    request is still counted on the workflow task (``Task.cancelling()``), so an abort is never
+    lost that way.
+    """
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError("mission cancelled while its cycle was finishing")
 
 
 @workflow.defn
@@ -234,6 +250,8 @@ class MissionWorkflow:
 
             await self._sleep_until_resume(inp)
             state.status = STATUS_RUNNING
+            # A cancelled cycle is waited for (its last row write lands before ABORTED).
+            wait_cancel = workflow.patched(PATCH_CYCLE_CANCEL)
             try:
                 result = await workflow.execute_activity(
                     run_agent_cycle,
@@ -250,7 +268,14 @@ class MissionWorkflow:
                     start_to_close_timeout=CYCLE_START_TO_CLOSE,
                     heartbeat_timeout=CYCLE_HEARTBEAT_TIMEOUT,
                     retry_policy=_CYCLE_RETRY,
+                    cancellation_type=(
+                        workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
+                        if wait_cancel
+                        else workflow.ActivityCancellationType.TRY_CANCEL
+                    ),
                 )
+                if wait_cancel:
+                    _raise_if_cancel_requested()
             except ActivityError as err:
                 if is_cancelled_exception(err):
                     raise  # the mission was cancelled: never park on it
@@ -438,6 +463,7 @@ class MissionWorkflow:
                     step=step,
                     deadline=view.deadline,
                     request=view.request,
+                    at=_iso(workflow.now()),
                 ),
                 start_to_close_timeout=_NOTIFY_TIMEOUT,
                 retry_policy=_SHORT_RETRY,

@@ -176,12 +176,16 @@ exhausted or `max_cycles` is reached.
   activity. See [durable execution](08-durable-execution.md#human-gates).
 
 The workflow itself never touches a database. The cycle activity writes the mission row:
-`RUNNING`, `DONE`, `IMPOSSIBLE` (the checklist is deadlocked), `WAITING_ON_HUMAN` (the cycle
-queued an approval) and `ABORTED` (budget). The workflow writes the statuses only it decides
-through the best-effort `record_mission_status` activity: `DEGRADED_PARK`, `SLEEPING`, an open
-gate's `WAITING_ON_HUMAN`, and the final status of every ending (a deadlock-gate decision,
-`max_cycles`, a failure, a cancellation). `lha mission-status` reads the live status from the
-workflow. Gates are not written to the `hitl_gates` table.
+`RUNNING` (also for a deadlocked checklist, whose outcome the workflow decides), `DONE`,
+`WAITING_ON_HUMAN` (the cycle queued an approval) and `ABORTED` (budget). The workflow writes the
+statuses only it decides through the best-effort `record_mission_status` activity:
+`DEGRADED_PARK`, `SLEEPING`, an open gate's `WAITING_ON_HUMAN`, and the final status of every
+ending (`IMPOSSIBLE` for a deadlock, a deadlock-gate decision, `max_cycles`, a failure, a
+cancellation). The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` back to a
+non-terminal status, and a cancelled cycle is waited for before `ABORTED` is written, so an abort
+during a cycle ends as `ABORTED`. `lha mission-status` reads the live status from the workflow.
+Every gate event (opened, reminder, resolved, defaulted) is written to the `hitl_gates` table by
+the `notify_gate` activity (`lha gates`).
 
 ### Memory and state
 
@@ -195,14 +199,16 @@ the same services through `open_run_services`
 ([`persistence/services.py`](../python/src/lha/persistence/services.py)):
 
 - the `MissionStore` ([`persistence/store.py`](../python/src/lha/persistence/store.py)), SQLite
-  or Postgres, holding one row per mission and a `cost_ledger` row for every metered model call
-  (`lha missions`, `lha costs`). Store errors are logged, never raised into the cycle.
+  or Postgres, holding one row per mission, a `cost_ledger` row for every metered model call and
+  a `hitl_gates` row for every human gate (`lha missions`, `lha costs`, `lha gates`). Store
+  errors are logged, never raised into the cycle.
 - `MissionMemory` ([`memory/service.py`](../python/src/lha/memory/service.py)), when
   `LHA_MEMORY_ENABLED` is true (the default): before the lead's first turn it recalls a bounded
   block of episodic, procedural (skills) and semantic memory into the prompt; after the
   checkpoint it records the outcome and periodically consolidates. Semantic retrieval fuses BM25
   and an embedder's cosine ranking. The default embedder (`LHA_MEMORY_EMBEDDER=hash`) is a
-  deterministic lexical hash, not a semantic model. When Postgres, pgvector or the embedder is unavailable, the
+  deterministic lexical hash, not a semantic model; `ollama` (a local Ollama, no extra, $0) and
+  `sentence_transformers` are semantic. When Postgres, pgvector or the embedder is unavailable, the
   dense channel is dropped and retrieval runs on BM25 and `git grep`; memory errors never fail a
   cycle.
 
@@ -233,8 +239,9 @@ See [memory](12-memory.md).
   they are bound to; `web_search` is added when a search provider and key are also configured
   ([`execution/tools/toolset.py`](../python/src/lha/execution/tools/toolset.py)). Their output is
   fenced as untrusted content. A run with web tools is refused before it starts with a `local`
-  sandbox or `LHA_PRIVATE_DATA=true` (Rule of Two). `fetch_url` checks the resolved address, but
-  the HTTP client resolves the name again when it connects, so a DNS-rebinding window remains.
+  sandbox or `LHA_PRIVATE_DATA=true` (Rule of Two). The web tools resolve each host once, check
+  every address, and connect to a checked address while TLS and the `Host` header keep the
+  hostname, so DNS rebinding cannot redirect the connection.
 
 See [the safety model](09-safety-model.md).
 

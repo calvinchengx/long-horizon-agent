@@ -30,6 +30,7 @@ import fcntl
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -46,7 +47,6 @@ from lha.coordination.decision_log import DecisionChainError
 from lha.durable.signals import (
     STATUS_ABORTED,
     STATUS_DONE,
-    STATUS_IMPOSSIBLE,
     STATUS_RUNNING,
     STATUS_WAITING_ON_HUMAN,
 )
@@ -78,7 +78,7 @@ from lha.obs.otel import span
 from lha.obs.redact import redact_text
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.persistence.services import open_run_services
-from lha.persistence.store import StoreUnavailableError, open_store
+from lha.persistence.store import GateEvent, StoreUnavailableError, open_store
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
 from lha.verify.verifier import default_python_checks
@@ -452,17 +452,17 @@ def cycle_status(after: SituationSnapshot, *, awaiting_approval: bool = False) -
     """``missions.status`` after a cycle, from the committed truth (activity-side).
 
     complete → DONE; the cycle asked for approval of an irreversible action → WAITING_ON_HUMAN
-    (the workflow now asks a human); deadlocked → IMPOSSIBLE (a human "retry" makes the next cycle
-    RUNNING again); otherwise (including an item split by the replanner) → RUNNING. The
-    statuses the workflow owns (SLEEPING, DEGRADED_PARK, an open deadlock gate, the final outcome)
-    are written by ``record_mission_status``.
+    (the workflow now asks a human); otherwise → RUNNING, including a deadlocked checklist:
+    whether a deadlock ends the mission is the workflow's decision (IMPOSSIBLE at once, or a
+    deadlock gate whose "retry" goes on), and the store never moves a row out of a terminal
+    status, so the activity must not write one the workflow may still overrule. The statuses the
+    workflow owns (SLEEPING, DEGRADED_PARK, an open gate, every final outcome) are written by
+    ``record_mission_status``.
     """
     if after.is_complete:
         return STATUS_DONE
     if awaiting_approval:
         return STATUS_WAITING_ON_HUMAN
-    if after.is_deadlocked:
-        return STATUS_IMPOSSIBLE
     return STATUS_RUNNING
 
 
@@ -612,6 +612,55 @@ async def _record_gate_event(notice: GateNotice, payload: dict[str, object]) -> 
         return False
 
 
+#: ``hitl_gates.resolved_by`` on the durable path: the ``human_decision`` signal carries no
+#: identity, so the row says how the gate closed, not which person answered.
+RESOLVED_BY_SIGNAL = "human (human_decision signal)"
+RESOLVED_BY_TIMEOUT = "default (timeout)"
+
+
+def gate_event_from_notice(notice: GateNotice, payload: dict[str, object]) -> GateEvent:
+    """The ``hitl_gates`` event for a durable gate notice (question/arguments redacted)."""
+    request = payload.get("request")
+    return GateEvent(
+        mission_id=notice.mission_id,
+        gate_id=notice.gate_id,
+        kind=notice.kind,
+        event=notice.event,
+        at=notice.at or datetime.now(UTC).isoformat(timespec="seconds"),
+        question=str(payload["question"]),
+        options=list(notice.options),
+        default_action=notice.default_action,
+        deadline=notice.deadline,
+        decision=notice.decision,
+        resolved_by={"resolved": RESOLVED_BY_SIGNAL, "defaulted": RESOLVED_BY_TIMEOUT}.get(
+            notice.event, ""
+        ),
+        step=notice.step,
+        risk="irreversible" if notice.request is not None else notice.kind,
+        request={str(k): str(v) for k, v in request.items()} if isinstance(request, dict) else None,
+    )
+
+
+async def _store_gate_event(event: GateEvent, *, settings: Settings, workdir: str) -> bool:
+    """Write the event to ``hitl_gates`` (idempotent); a store problem never fails the gate."""
+    try:
+        store = await open_store(settings, workdir=workdir)
+        try:
+            await store.record_gate_event(event)
+        finally:
+            await store.close()
+        return True
+    except Exception as exc:
+        get_logger("lha.persistence").warning(
+            "gate_row_write_failed",
+            mission_id=event.mission_id,
+            gate_id=event.gate_id,
+            gate_event=event.event,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        return False
+
+
 async def _notify_gate(
     notice: GateNotice,
     *,
@@ -621,11 +670,14 @@ async def _notify_gate(
     settings = settings or get_settings()
     payload = gate_notice_payload(notice)
     recorded = await _record_gate_event(notice, payload)
+    stored = await _store_gate_event(
+        gate_event_from_notice(notice, payload), settings=settings, workdir=notice.workdir
+    )
     url = settings.gate_webhook_url.get_secret_value() if settings.gate_webhook_url else None
     webhook = await post_webhook(
         url, payload, timeout=settings.gate_webhook_timeout_seconds, transport=transport
     )
-    return NoticeResult(recorded=recorded, webhook=webhook)
+    return NoticeResult(recorded=recorded, webhook=webhook, stored=stored)
 
 
 def make_notify_activity(
@@ -642,7 +694,8 @@ def make_notify_activity(
 
 @activity.defn
 async def notify_gate(notice: GateNotice) -> NoticeResult:
-    """Activity: record a gate event in the anchor + POST it to the optional webhook.
+    """Activity: record a gate event in the anchor and the ``hitl_gates`` table, and POST it to
+    the optional webhook.
 
     A notification problem never fails the gate: both outcomes are reported instead.
     """
