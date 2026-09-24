@@ -22,6 +22,9 @@ the matching package is ported; it runs every file below.
 | `model/pricing.json` | Claude price table and per-call cost |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
 
+| `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
+| `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
+
 ## Changing behaviour
 
 The Python implementation is the reference. To change a behaviour on purpose: change Python,

@@ -865,7 +865,225 @@ async def _capture(call: Any) -> list[ModelMessage]:
     return seen
 
 
+# --- execution/paths --------------------------------------------------------------------------
+
+_REL_PATHS = [
+    "",
+    ".",
+    "./",
+    "a",
+    "a/./b/../c.txt",
+    "a//b/",
+    "src\\pkg\\x.py",
+    "../x",
+    "..",
+    "a/../../x",
+    "a/b/../../..",
+    "a/..",
+    "/etc/passwd",
+    "\\\\srv\\share",
+    "C:\\x",
+    "C:x",
+    "1:x",
+    "é:x",
+    "a:b",
+    "a\x00b",
+    ".lha/checklist.json",
+    "./.git/hooks/pre-commit",
+    ".GIT/config",
+    ".Lha",
+    "a/../.git/config",
+    "src/.git_notes",
+    ".github/workflows/ci.yml",
+    ".gitignore",
+    "sub/.git/x",
+    "'quoted'",
+    "mixed\"'",
+    "tab\there",
+    "ünïcödé/файл.txt",
+]
+
+
+def export_paths() -> None:
+    from lha.execution.paths import (
+        PathEscapeError,
+        contained_posix,
+        is_protected,
+        normalize_relpath,
+    )
+
+    normalize: list[dict[str, Any]] = []
+    protected: list[dict[str, Any]] = []
+    contained: list[dict[str, Any]] = []
+    for path in _REL_PATHS:
+        try:
+            normalize.append(
+                {"path": path, "normalized": str(normalize_relpath(path)), "error": None}
+            )
+        except PathEscapeError as exc:
+            normalize.append({"path": path, "normalized": None, "error": str(exc)})
+        try:
+            protected.append({"path": path, "protected": is_protected(path), "error": None})
+        except PathEscapeError as exc:
+            protected.append({"path": path, "protected": None, "error": str(exc)})
+        for workdir in ("/workspace", "/home/user/workspace/"):
+            try:
+                result = contained_posix(workdir, path)
+                contained.append(
+                    {"workdir": workdir, "path": path, "result": result, "error": None}
+                )
+            except PathEscapeError as exc:
+                contained.append(
+                    {"workdir": workdir, "path": path, "result": None, "error": str(exc)}
+                )
+    _write(
+        "execution/paths.json",
+        {"normalize_relpath": normalize, "is_protected": protected, "contained_posix": contained},
+    )
+
+
+# --- execution/arguments ----------------------------------------------------------------------
+
+
+def _argument_corpus() -> list[tuple[dict[str, Any], Any, str]]:
+    from lha.execution.tools import (
+        GrepTool,
+        ReadFileTool,
+        RecordDecisionTool,
+        ShellTool,
+        WriteFileTool,
+    )
+    from lha.execution.tools.decisions import DecisionBuffer
+    from lha.execution.tools.web import FetchUrlTool, WebSearchTool
+
+    shell = ShellTool.spec.parameters
+    write = WriteFileTool.spec.parameters
+    read = ReadFileTool.spec.parameters
+    grep = GrepTool.spec.parameters
+    fetch = FetchUrlTool.spec.parameters
+    search = WebSearchTool.spec.parameters
+    decision = RecordDecisionTool(DecisionBuffer()).spec.parameters
+    enum = {"type": "string", "enum": ["a", "b", "ü"]}
+    num_enum = {"enum": [1, 2.5, None, "x"]}
+    bounded = {"type": "number", "minimum": 0.5, "maximum": 10}
+    nested = {
+        "type": "object",
+        "properties": {
+            "cfg": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "tags": {"type": "array"}},
+                "required": ["name", "tags"],
+                "additionalProperties": False,
+            },
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {"id": {"type": "integer", "minimum": 0}},
+                    "required": ["id"],
+                },
+            },
+            "extra": {"type": "null"},
+        },
+        "additionalProperties": {"type": "boolean"},
+    }
+    odd = {"type": ["string", "null"], "properties": "not-a-dict", "enum": "not-a-list"}
+    return [
+        (shell, {"argv": ["ls", "-la"]}, ""),
+        (shell, {"argv": "rm -rf /"}, ""),
+        (shell, {"argv": ["ls", 3]}, ""),
+        (shell, {"argv": ["ls", None]}, ""),
+        (shell, {"argv": ["ls", 1.5]}, ""),
+        (shell, {"argv": ["ls"], "timeout_s": True}, ""),
+        (shell, {"argv": ["ls"], "timeout_s": 0}, ""),
+        (shell, {"argv": ["ls"], "timeout_s": -3}, ""),
+        (shell, {"argv": ["ls"], "timeout_s": 1.5}, ""),
+        (shell, {"argv": ["ls"], "timeout_s": 5.0}, ""),
+        (shell, {"argv": ["ls"], "timeout_s": 30}, ""),
+        (shell, {"argv": ["ls"], "unknown": {"x": 1}}, ""),
+        (write, {"path": "a", "content": ["x"]}, ""),
+        (write, {"path": "a", "content": {"k": "v"}}, ""),
+        (write, {"path": 123, "content": "x"}, ""),
+        (read, {"path": "a"}, ""),
+        (read, {"path": False}, ""),
+        (grep, {"pattern": "x", "regex": "yes"}, ""),
+        (grep, {"pattern": "x", "regex": 1}, ""),
+        (grep, {"pattern": "x", "regex": True, "subdir": "src"}, ""),
+        (fetch, {"url": "https://a.test", "headers": {"X-Count": 3}}, ""),
+        (fetch, {"url": "https://a.test", "headers": ["x"]}, ""),
+        (fetch, {"url": "https://a.test", "headers": {"Accept": "text/html"}}, ""),
+        (search, {"query": "q", "max_results": "5"}, ""),
+        (search, {"query": "q", "max_results": 5}, ""),
+        (decision, {"decision": "d", "rationale": "r"}, ""),
+        (decision, {"decision": "d", "rationale": "r", "extra": 1}, ""),
+        (decision, {"decision": "d", "rationale": "r", "affected": ["a", 2]}, ""),
+        (decision, {"decision": "d", "rationale": 3}, ""),
+        (enum, "a", "mode"),
+        (enum, "ü", "mode"),
+        (enum, "c", "mode"),
+        (enum, 1, "mode"),
+        (num_enum, 1.0, "v"),
+        (num_enum, True, "v"),
+        (num_enum, 2.5, "v"),
+        (num_enum, None, "v"),
+        (num_enum, 3, "v"),
+        (num_enum, [1], "v"),
+        (bounded, 0.5, "n"),
+        (bounded, 0.25, "n"),
+        (bounded, 11, "n"),
+        (bounded, 10.0, "n"),
+        (bounded, True, "n"),
+        (bounded, 1e300, "n"),
+        (nested, {"cfg": {"name": "x", "tags": []}}, ""),
+        (nested, {"cfg": {"name": "x"}}, ""),
+        (nested, {"cfg": {"name": "x", "tags": [], "more": 1}}, ""),
+        (nested, {"cfg": {"name": 1, "tags": []}}, ""),
+        (nested, {"rows": [{"id": 1}, {"id": -1}]}, ""),
+        (nested, {"rows": [{"id": 1}, {}]}, ""),
+        (nested, {"rows": [{"id": 1}, "x"]}, ""),
+        (nested, {"extra": None}, ""),
+        (nested, {"extra": 0}, ""),
+        (nested, {"flag": True}, ""),
+        (nested, {"flag": "yes"}, ""),
+        (nested, {"cfg": "x"}, "outer"),
+        (odd, 5, "o"),
+        (odd, {"k": 1}, "o"),
+        ({}, {"anything": [1, {"a": None}]}, ""),
+        ({"type": "object"}, [], ""),
+        ({"type": "array", "items": {"type": "string"}}, ["a", "b", 3], "list"),
+        ({"type": "integer"}, 10**20, "big"),
+        ({"type": "string"}, 'quote\'d "x"', "s"),
+    ]
+
+
+def export_arguments() -> None:
+    from lha.execution.dispatcher import _missing_required, validate_arguments
+
+    cases = []
+    for schema, value, where in _argument_corpus():
+        error = validate_arguments(schema, value, where)
+        if isinstance(value, dict):
+            # Go maps have no insertion order: every case must give the same error sorted.
+            resorted = {k: value[k] for k in sorted(value)}
+            assert validate_arguments(schema, resorted, where) == error, (schema, value)
+        cases.append({"schema": schema, "value": value, "where": where, "error": error})
+    missing = []
+    for required, arguments in [
+        (["path"], {}),
+        (["path", "content"], {"content": "x"}),
+        (["b", "a"], {}),
+        ([], {"x": 1}),
+        ("not-a-list", {}),
+        ([1, "a"], {"a": 1}),
+    ]:
+        found = _missing_required({"required": required}, arguments)
+        missing.append({"required": required, "arguments": arguments, "missing": sorted(found)})
+    _write("execution/arguments.json", {"validate": cases, "missing_required": missing})
+
+
 def main() -> None:
+    export_paths()
+    export_arguments()
     export_classifier()
     export_egress()
     export_redact()
