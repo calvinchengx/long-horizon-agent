@@ -2,9 +2,11 @@
 
 Each sub-agent (Researcher/Reviewer/...) is a Temporal child workflow whose body is a single
 ``run_subagent`` activity — so a sub-agent is independently retried and its result journaled.
-``research_children`` fans out N children concurrently (the read-parallelism win) and returns
-every brief AND every failure; cancellation of the parent propagates to the children and is
-re-raised, never swallowed.
+``fan_out_children`` / ``research_children`` fan out N children concurrently (the
+read-parallelism win) and return every brief AND every failure; cancellation of the parent
+propagates to the children and is re-raised, never swallowed. ``MissionWorkflow`` fans out
+researchers this way before a round when a mission sets ``research_per_item``
+(``lha.durable.org_round``).
 """
 
 from __future__ import annotations
@@ -54,8 +56,9 @@ def _describe(inp: SubAgentInput, exc: BaseException) -> str:
     return f"{inp.role_name}: {type(cause).__name__}: {cause}"
 
 
-async def research_children(inputs: list[SubAgentInput]) -> FanOutResult:
-    """Fan out sub-agent child workflows concurrently; return all briefs and all failures.
+async def fan_out_children(inputs: list[SubAgentInput]) -> list[SubAgentOutput | str]:
+    """Fan out sub-agent child workflows concurrently; one entry per input, in order: the
+    sub-agent's output, or a description of its failure (``"<role>: <error>"``).
 
     Must be called from workflow code. Child ids are ``subagent:<mission>:<role>:<uuid>`` with a
     deterministic (replay-safe) ``workflow.uuid4()``, so they never collide across fan-outs or
@@ -78,12 +81,24 @@ async def research_children(inputs: list[SubAgentInput]) -> FanOutResult:
         for task in tasks:
             task.cancel()
         raise
-    out = FanOutResult()
+    out: list[SubAgentOutput | str] = []
     for inp, res in zip(inputs, results, strict=True):
         if isinstance(res, SubAgentOutput):
-            out.outputs.append(res)
+            out.append(res)
         elif isinstance(res, asyncio.CancelledError) or not isinstance(res, Exception):
             raise res  # cancellation (or a BaseException) is never swallowed
         else:
-            out.failures.append(_describe(inp, res))
+            out.append(_describe(inp, res))
+    return out
+
+
+async def research_children(inputs: list[SubAgentInput]) -> FanOutResult:
+    """Fan out sub-agent child workflows concurrently; return all briefs and all failures
+    (``fan_out_children`` grouped into successes and failures)."""
+    out = FanOutResult()
+    for res in await fan_out_children(inputs):
+        if isinstance(res, SubAgentOutput):
+            out.outputs.append(res)
+        else:
+            out.failures.append(res)
     return out

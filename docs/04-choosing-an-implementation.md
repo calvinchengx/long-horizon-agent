@@ -23,7 +23,7 @@ The Temporal names the Python worker registers are:
 | Kind | Names |
 |---|---|
 | Workflows | `MissionWorkflow`, `SubAgentWorkflow` |
-| Activities | `run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`, `read_mission_snapshot`, `run_subagent` |
+| Activities | `run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`, `read_mission_snapshot`, `record_mission_status`, `run_subagent`, `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle` |
 | Signals | `human_decision_v1`, `steer_v1`, `snooze_v1` |
 | Queries | `status_v1`, `gate_v1`, `gate_log_v1`, `cycles_done`, `last_item`, `park_reason`, `resume_at`, `open_question`, `rejected_decisions` |
 | Task queue / workflow id | `LHA_TASK_QUEUE` (default `lha-mission`) / `mission:<mission_id>` |

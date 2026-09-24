@@ -12,8 +12,9 @@ page.
 | Piece | File | Role |
 |---|---|---|
 | `MissionWorkflow` | [workflows.py](../python/src/lha/durable/workflows.py) | One long-lived workflow per mission (id `mission:<mission_id>`) |
-| `SubAgentWorkflow` | [subagent_workflow.py](../python/src/lha/durable/subagent_workflow.py) | Child workflow that runs one sub-agent activity |
-| Activities | [activities.py](../python/src/lha/durable/activities.py), [agent_activities.py](../python/src/lha/durable/agent_activities.py) | Non-deterministic work |
+| `SubAgentWorkflow` | [subagent_workflow.py](../python/src/lha/durable/subagent_workflow.py) | Child workflow that runs one sub-agent activity (the researchers of the [organization](#the-multi-agent-organization-opt-in)) |
+| Organization round | [org_round.py](../python/src/lha/durable/org_round.py) | Workflow code for one round of research, a Lead cycle or a parallel wave, and review, when a mission opts in |
+| Activities | [activities.py](../python/src/lha/durable/activities.py), [agent_activities.py](../python/src/lha/durable/agent_activities.py), [org_activities.py](../python/src/lha/durable/org_activities.py) | Non-deterministic work |
 | Types | [types.py](../python/src/lha/durable/types.py) | Plain dataclasses that cross the Temporal boundary |
 | Names | [signals.py](../python/src/lha/durable/signals.py) | Versioned signal and query names, status constants |
 | Worker | [worker.py](../python/src/lha/durable/worker.py) | `lha worker` / `python -m lha.durable.worker` |
@@ -29,7 +30,12 @@ The worker registers both workflows and these activities (Temporal activity type
 | `notify_gate` | `MissionWorkflow`, on every gate event | start-to-close 3 min, 3 attempts | Commits a `gate_<event>` event to the anchor and POSTs it to the optional webhook |
 | `declare_impossible` | `MissionWorkflow`, after an "impossible" decision | start-to-close 5 min, 3 attempts | Final checkpoint: `mission_impossible` event, progress entry, commit `lha: mission declared impossible` |
 | `read_mission_snapshot` | `MissionWorkflow`, terminal path | start-to-close 2 min, 3 attempts | Reads checklist counts and HEAD when no cycle has reported yet |
+| `record_mission_status` | `MissionWorkflow`, on a status only it knows | 30 s per attempt, 3 attempts within 2 min | Upserts the mission row (see below) |
 | `run_subagent` | `SubAgentWorkflow` | start-to-close 15 min, heartbeat 2 min, 3 attempts | Runs one role as a `SubAgent` |
+| `plan_round` | an organization round | start-to-close 5 min, 3 attempts | Picks a parallel wave or the next item from the committed checklist and ownership map; removes an interrupted wave's worktrees, branches and cached results |
+| `run_implementer` | a parallel wave, one per item | start-to-close 1 h, heartbeat 2 min, the cycle retry policy | One implementer in its own git worktree; commits on its branch |
+| `integrate_branch` | a parallel wave, one per item | start-to-close 1 h, heartbeat 2 min, the cycle retry policy | Merges one implementer branch and commits the checkpoint |
+| `review_cycle` | an organization round, after a verified item | start-to-close 1 h, heartbeat 2 min, the cycle retry policy | Independent review; a blocking review reopens the item |
 
 Workflow `run` methods take exactly one argument. Temporal only applies type hints when the payload
 count matches the parameter count, so the state carried across Continue-As-New rides inside
@@ -53,7 +59,7 @@ again. Each attempt is made safe to repeat:
 - **Clean start.** Each attempt runs `git reset --hard` and `git clean -ffdx` to HEAD first, so
   partial edits from a crashed attempt are discarded, not committed.
 - **Exactly-once commit per cycle id.** Cycle ids are `c<n>`, derived from `cycles_done`. If one of
-  the last 64 events in `HEAD:.lha/events.ndjson` is a `cycle` event with this id, the previous
+  the last 256 events in `HEAD:.lha/events.ndjson` is a `cycle` event with this id, the previous
   attempt committed and then crashed before reporting. The attempt returns that result instead of
   working another item.
 - **Heartbeats.** Sent every 5 s while the agent loop runs, so a dead worker is detected after the
@@ -121,7 +127,8 @@ sequenceDiagram
 ## Workflow loop and outcomes
 
 Each iteration: stop at `max_cycles`, otherwise sleep while `resume_at` is in the future
-([SLEEPING](#sleeping)), run one cycle, absorb its result (`head_sha`,
+([SLEEPING](#sleeping)), run one cycle (or, for a mission that opted in, one
+[organization round](#the-multi-agent-organization-opt-in)), absorb its result (`head_sha`,
 `items_done`, `items_total`, `last_item`), and ask a human about any irreversible actions it
 queued ([human gates](#human-gates)). The mission ends with an explicit outcome:
 
@@ -328,7 +335,9 @@ validated against the open gate first), `mission-snooze` (`snooze_v1`) and `miss
 
 ## Continue-As-New
 
-The workflow continues as new every `cycles_before_can` cycles (default 200). It also does so
+The workflow continues as new every `cycles_before_can` cycles (default 200; after an
+organization round that crossed a multiple of it, since a wave can count several cycles). It
+also does so
 whenever Temporal reports `is_continue_as_new_suggested()`, including between park probes. The
 new run receives the same `MissionInput` with `state` set to the current `MissionState`:
 `cycles_done`, `status`, `head_sha`, `items_done`, `items_total`, `last_item`,
@@ -352,13 +361,93 @@ with a cycle attempt, not another sleep.
 
 ## Sub-agent fan-out
 
-`research_children()` starts one `SubAgentWorkflow` per input concurrently. It returns every
-output and every failure (as `role: ExceptionType: message`), and re-raises cancellation.
-`run_subagent` builds its own `CostMeter` from the worker's `budget_usd_ceiling`. That meter is not
-seeded from the mission's spend journal. `MissionWorkflow` does not call `research_children` today.
-The fan-out is implemented and tested
-([test_subagent_fanout.py](../python/tests/durability/test_subagent_fanout.py)) but not part of
-the mission loop.
+`fan_out_children()` starts one `SubAgentWorkflow` per input concurrently and returns one entry
+per input, in order: the output, or the failure (as `role: ExceptionType: message`). It re-raises
+cancellation. `research_children()` groups the same results into outputs and failures.
+`run_subagent` meters the sub-agent like a cycle when the workdir is a mission checkout: the
+ledger starts from the mission's spend journal, the ceiling is `SubAgentInput.budget_usd` (else
+the worker's `budget_usd_ceiling`), and its spend is appended to the journal afterwards. In any
+other directory it gets a fresh ledger. The organization's research step uses `fan_out_children`
+(next section).
+
+## The multi-agent organization (opt-in)
+
+A mission opts in with any of three `MissionInput` fields (`lha mission-start --research N
+--review --max-parallel N`). The defaults (`0`, `false`, `0`) keep the Lead-only loop above,
+command for command. With any of them set, each iteration runs one round of
+[`org_round.py`](../python/src/lha/durable/org_round.py) instead of the single cycle activity:
+
+| Field | Range | Effect |
+|---|---|---|
+| `research_per_item` | 0 to 4 | Before the round, that many read-only researcher child workflows (`SubAgentWorkflow`) per item, concurrently. The objectives are fixed templates ("Find context relevant to", "Find existing files/code related to", "Find the tests and checks that cover", "Find the conventions and interfaces to respect for") |
+| `review` | bool | After every verified item, the `review_cycle` activity |
+| `max_parallel` | 0 to 8 | Parallel implementer waves of at most this many items (and never more than the cycles left); below 2 disables waves |
+
+A value outside its range fails the workflow with a non-retryable `MissionConfigError`. A round:
+
+1. `plan_round` reads the committed checklist and `.lha/ownership.json` (the files of `done` and
+   `split` items released). If at least two actionable items each own a non-empty write-set, the
+   round is a **wave** over up to `max_parallel` of them. Otherwise it is a **serial** round on
+   the next actionable item. A durable mission has an ownership map only when `mission-start`
+   planned it with `--max-parallel 2` or more
+   ([assignment](11-multi-agent-organization.md#file-ownership)); an imported checklist has
+   none, so its items are always serial.
+2. **Research.** Every researcher failure is kept: it goes to the gate log
+   (`lha mission-status`) and is committed as a `research` event (`item`, `n`, `failed`,
+   `failures`) with the item's checkpoint. The round goes on with the briefs that arrived.
+3. **Serial round.** One `run_agent_cycle` with the briefs in the Lead's prompt
+   (`CycleInput.research_*`). When the mission has an ownership map, the Lead's dispatcher is
+   wrapped in an `OwnershipGuard` as in `orchestrate`: unassigned space, shared files and the
+   active item's files, never another open item's files.
+   **Wave.** One `run_implementer` activity per item, concurrently. Each implementer works in its
+   own worktree on branch `lha/implementer-<item>/<cycle>` from the round's base commit, behind an
+   `OwnershipGuard`, with `record_decision` and `request_lease`
+   ([leases](11-multi-agent-organization.md#leases)). Its worktree is verified (mission checks,
+   the item's witnesses, harness integrity) and its work committed on the branch. Then one
+   `integrate_branch` activity per item, in checklist order: the `BranchIntegrator` merges the
+   branch only if it verified, changed only files the committed map lets its writer write
+   (leases included), merges without conflict and passes the checks again on the merged
+   checkout. The checkpoint is the merge commit (`lha: complete <id> ... [merged <branch>]`) with
+   `cycle` and `ticket` events. A refused branch or a failed implementer is recorded as a failed
+   attempt (blocked after 3 in a row, then split by the replanner within the replan budget).
+   Each integration counts as one cycle (`cycles_done`).
+4. **Review.** After a passed serial cycle or a merged branch, `review_cycle` has a Reviewer
+   (fresh context, read-only tools, no web tools) review the item's diff (`base..head` without
+   `.lha/`, capped at 20,000 chars, then 8,000 inside the reviewer). The verdict is committed
+   as a `review` event in a checkpoint `<cycle>-review`. A blocking verdict reopens the item (`todo`, `verified_by` cleared, the
+   review notes in `notes` and `last_failure`); the third blocking review in a row for the same
+   item blocks it instead, so the deadlock gate hands it to a human. A review whose activity
+   fails for good is written to the gate log, and the item stays done.
+
+Retry safety of the organization's activities:
+
+- `run_implementer` holds a per-cycle lock (`.git/lha-impl-<cycle>.lock`), re-creates its
+  worktree from the base commit on every attempt, heartbeats while it runs, and caches its
+  result under `.git/lha/implementers/` once the branch is committed. A retry returns the cached
+  result if the branch still points at it. The worktree is removed at the end; the branch stays
+  for the integrator.
+- `integrate_branch` and `review_cycle` hold the checkout lock (`.git/lha-cycle.lock`), abort a
+  half-finished merge, reset to `HEAD`, and return the committed result when `HEAD` already has
+  their `cycle` / `review` event (exactly once per cycle id). The integrator deletes the branch
+  after its checkpoint.
+- `plan_round` removes the worktrees, `lha/implementer-*` branches and cached results of an
+  interrupted wave before planning.
+
+Failures: an implementer that fails with a non-retryable error is integrated as a failed
+attempt. If implementers fail only after exhausting their retries on retryable errors (an
+outage), the other branches are still integrated, then that error is raised, so the mission
+parks as after a failed cycle, and a later round redoes those items. A budget refusal anywhere
+ends the mission (`budget_exhausted`). Approvals queued by implementers are asked for after the
+wave, as for a cycle.
+
+Budget: every implementer, integration (the replanner's split), review and researcher starts
+its ledger from the mission's spend journal and appends its own spend to it, so all of them count
+against `budget_usd`. The implementers of one wave run concurrently, so each sees the others'
+spend only after they finish: the ceiling can be overshot by up to one wave's spend. Their calls
+also go to the persistent cost ledger (`lha costs`). Tiered memory, reflection and the
+blackboard are not part of the durable organization: the Lead's briefs come from the round's
+research, and an implementer's context is the mission spec, the item's last failure, the recent
+decisions, its research briefs and the operator's steering notes.
 
 ## ClaimCheck payload codec
 
@@ -395,11 +484,16 @@ has these tests:
   [`histories/`](../python/tests/durability/histories/): `mission_three_items.json`,
   `mission_deadlock_gate_legacy.json` and `mission_approval_gate_legacy.json` (a deadlock gate
   answered "retry" and an approval gate answered "approve", recorded with the workflow code from
-  before the escalation ladder), `mission_approval_ladder.json` and `mission_row_gate_retry.json`
-  (a deadlock gate answered "retry", then done, with the workflow's mission-row writes);
+  before the escalation ladder), `mission_approval_ladder.json`, `mission_row_gate_retry.json`
+  (a deadlock gate answered "retry", then done, with the workflow's mission-row writes) and
+  `mission_org_wave_review.json` (the organization: a wave of two implementers with researcher
+  child workflows and a review after each integration, then a serial round);
+- `test_fresh_org_history_replays`: records that organization mission and replays it;
 - `test_committed_histories_cover_what_they_claim`: the legacy histories carry no patch marker, the
   ladder history carries `lha-gate-escalation-v1` and its `notify_gate` activities, only the
-  mission-row history carries `lha-mission-row-v1` and schedules `record_mission_status`;
+  mission-row history carries `lha-mission-row-v1` and schedules `record_mission_status`, and
+  only the organization history carries `lha-durable-org-v1` and schedules `plan_round`,
+  `run_implementer`, `integrate_branch` and `review_cycle`;
 - `test_replay_detects_a_changed_workflow`: renames `run_agent_cycle` in a copy of the history and
   expects a non-determinism error.
 
@@ -411,6 +505,7 @@ Behaviour added to `MissionWorkflow` after histories were recorded is guarded by
 | `lha-gate-escalation-v1` | gates with the escalation ladder and `notify_gate`, and the deadlock gate's `impossible` option (the older `await_human_gate`, with `approve`/`reject` or `retry`/`abort`, is kept for replay) |
 | `lha-sleeping-v1` | the `SLEEPING` durable timer (scheduled start, pause between cycles, snooze) |
 | `lha-mission-row-v1` | the `record_mission_status` activity: the workflow writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and every final status to the mission row |
+| `lha-durable-org-v1` | an organization round; reached only by a mission whose `MissionInput` opts in, so a history recorded without those fields never hits it |
 
 Without the `lha-gate-escalation-v1` guard both legacy histories fail replay with a
 non-determinism error (`notify_gate` issued where `run_agent_cycle` / `unblock_items` was

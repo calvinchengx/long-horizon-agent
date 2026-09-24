@@ -22,17 +22,30 @@ notes go to a ``Blackboard`` whose response board is promoted between rounds, so
 round never see each other's output but later rounds see all of it. The ownership map lives in
 the anchor (``.lha/ownership.json``); a finished item's files are released back to the lead.
 
+An implementer that needs a file outside its write-set calls ``request_lease``; the
+``LeaseBroker`` (``lha.coordination.leases``) grants it when the file is unowned or its owner has
+finished, refuses it otherwise, and commits the decision (and a grant's ownership change) to the
+anchor at once.
+
+Resuming (``run_mission(resume=True)``, ``lha orchestrate --resume``): the existing anchor is kept
+(checklist, ownership map, decision chain, events) instead of being re-initialized; uncommitted
+residue, a half-finished merge and leftover implementer worktrees are discarded; the mission id,
+the blackboard's main board and the latest reflections are rebuilt from the committed
+``orchestrate`` / ``blackboard`` / ``reflection`` events, and cycle ids continue after the last
+committed one. Nothing that was committed is lost.
+
 Every model call of every role goes through ONE ``CostMeter`` (``MeteredModel``): it is
 budget-checked before it runs (hard stop, ``BudgetExceeded``) and recorded in one ledger after.
 Pass the same meter to the Planner's provider (``meter.wrap(...)``) so intake is counted too.
-The durable Temporal spine runs only the serial Lead composition; this is the $0/local driver.
+The budget and cycle ceilings apply to one invocation. The durable Temporal workflow runs the
+same organization (``lha.durable.org_round``); this is the local driver.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass, field
+import re
 from pathlib import Path
 
 import httpx
@@ -45,20 +58,24 @@ from lha.agent.assembly import (
 )
 from lha.agent.prompt import render_decisions
 from lha.agent.runner import DECISION_CHAIN_STOP, MissionSummary, build_meter
-from lha.agents.integrator import (
-    BranchIntegrator,
-    add_worktree,
-    branch_for,
-    commit_worktree,
-    prune_worktrees,
-    remove_worktree,
-)
+from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_worktree
 from lha.agents.reflection import reflect_on_failure
-from lha.agents.replanner import Replanner
 from lha.agents.reviewer import Reviewer, ReviewResult
 from lha.agents.router import model_for_role
-from lha.agents.specialists import Implementer
 from lha.agents.team import research_fanout
+from lha.agents.waves import (
+    MAX_CONSECUTIVE_FAILURES,
+    ImplementerRun,
+    diff_since,
+    implement_in_worktree,
+    implementer_objective,
+    integrate_run,
+    item_checks,
+    maybe_split,
+    new_implementer_run,
+    parallel_batch,
+    reopen_for_review,
+)
 from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
 from lha.contracts.model import ModelProvider
@@ -66,18 +83,16 @@ from lha.contracts.state import (
     Checklist,
     ChecklistItem,
     Checkpoint,
-    DecisionRecord,
     EventRecord,
     SituationSnapshot,
 )
-from lha.contracts.tools import ToolContext, ToolDispatcher
-from lha.contracts.verify import Check, CheckResult, VerificationResult, ensure_unique_check_names
+from lha.contracts.tools import ToolContext
+from lha.contracts.verify import Check, CheckResult
 from lha.coordination.blackboard import Blackboard
 from lha.coordination.decision_log import DecisionChainError
 from lha.coordination.enforcement import OwnershipGuard, changed_paths, effective_ownership
-from lha.coordination.ownership import LEAD, FileOwnershipMap, OwnershipViolation, writer_for_item
-from lha.coordination.ticket import TaskContract, Ticket, TicketStatus
-from lha.execution.tools import DecisionBuffer, with_decision_tool
+from lha.coordination.leases import LeaseBroker, lease_handler
+from lha.coordination.ownership import LEAD, FileOwnershipMap, writer_for_item
 from lha.execution.tools.toolset import build_run_dispatcher, preflight_run_tools
 from lha.governor.governor import LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
@@ -86,70 +101,37 @@ from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import agent_span
 from lha.persistence.services import open_run_services
 from lha.state import git_ops
-from lha.state.mission_anchor import GitMissionAnchor
-from lha.verify.harness_integrity import harness_violations, integrity_result, snapshot_harness
+from lha.state.mission_anchor import ANCHOR_DIR, MISSION_FILE, GitMissionAnchor
 from lha.verify.verifier import default_python_checks
-from lha.verify.witnesses import parse_witness
+
+__all__ = ["MissionResumeError", "Orchestrator", "anchor_exists", "parallel_batch"]
 
 _ROLES = ("lead", "researcher", "reviewer", "implementer")
 _REVIEW_DIFF_CAP = 20_000
-_MAX_CONSECUTIVE_FAILURES = 3  # same threshold as the Lead's AgentLoop
+_MAX_CONSECUTIVE_FAILURES = MAX_CONSECUTIVE_FAILURES
 _BOARD_ENTRIES = 6  # newest blackboard entries shown to later rounds
 _BOARD_ENTRY_CAP = 1_500
+# Committed event kinds that let ``--resume`` rebuild the in-memory state of a run.
+RUN_EVENT = "orchestrate"
+BOARD_EVENT = "blackboard"
+REFLECTION_EVENT = "reflection"
+_CYCLE_ID = re.compile(r"^c(\d+)$")
+
+# Kept for callers of the old private names.
+_ImplementerRun = ImplementerRun
+_diff_since = diff_since
 
 
-def _diff_since(workdir: str, base: str, head: str) -> str:
-    if not base or not head or base == head:
-        return "(no new commits)"
-    diff = git_ops.run_git(
-        workdir, "diff", f"{base}..{head}", "--", ".", ":(exclude).lha", check=False
-    )
-    return diff or "(empty diff)"
+class MissionResumeError(ValueError):
+    """``resume`` was asked for a workdir without a mission anchor (or vice versa)."""
 
 
-def parallel_batch(
-    checklist: Checklist, ownership: FileOwnershipMap, limit: int
-) -> list[ChecklistItem]:
-    """Actionable items that may run concurrently: each has a non-empty write-set of its own.
-
-    Write-sets are disjoint by construction (single writer per file), so any subset is safe.
-    Fewer than two such items means there is nothing to parallelize (the Lead works serially).
-    """
-    if limit < 2:
-        return []
-    done = {i.id for i in checklist.items if i.status == "done"}
-    batch = [
-        item
-        for item in checklist.items
-        if item.is_actionable_status
-        and all(dep in done for dep in item.depends_on)
-        and ownership.write_set(writer_for_item(item.id))
-    ]
-    return batch[:limit] if len(batch) >= 2 else []
-
-
-@dataclass
-class _ImplementerRun:
-    """One implementer's attempt at one item, before integration."""
-
-    item: ChecklistItem
-    cycle_id: str
-    writer: str
-    ticket: Ticket
-    branch: str = ""
-    worktree: Path | None = None
-    head: str = ""
-    brief: str = ""
-    tool_calls: int = 0
-    verification: VerificationResult | None = None
-    violations: list[OwnershipViolation] = field(default_factory=list)
-    decisions: list[DecisionRecord] = field(default_factory=list)
-    error: str = ""
-    tickets: list[dict[str, object]] = field(default_factory=list)  # lifecycle, for events
-
-    def advance(self, to: TicketStatus, note: str = "") -> None:
-        self.ticket = self.ticket.transition(to)
-        self.tickets.append({"status": to.value, "note": note[:300]})
+def anchor_exists(workdir: str | Path) -> bool:
+    """True if ``workdir`` holds a committed mission anchor (``.lha/mission.json`` at HEAD)."""
+    path = Path(workdir)
+    if not (path / ANCHOR_DIR).is_dir() or not git_ops.is_repo(path):
+        return False
+    return git_ops.exists_at_head(path, f"{ANCHOR_DIR}/{MISSION_FILE}")
 
 
 class Orchestrator:
@@ -184,14 +166,15 @@ class Orchestrator:
         self,
         *,
         workdir: str,
-        title: str,
-        description: str,
-        checklist: Checklist,
+        title: str = "",
+        description: str = "",
+        checklist: Checklist | None = None,
         checks: list[Check] | None = None,
         allow_egress: bool | None = None,
         gate: HITLGate | None = None,
         references: list[str] | None = None,
         ownership: FileOwnershipMap | None = None,
+        resume: bool = False,
     ) -> MissionSummary:
         """Run the org until complete / deadlocked / over-budget / looping.
 
@@ -204,8 +187,17 @@ class Orchestrator:
         the Lead and the Researchers get the web tools iff ``LHA_WEB_ALLOW_HOSTS`` is set (the
         Reviewer's role hides them); ``False`` drops them. A lethal-trifecta run raises
         ``RuleOfTwoViolation`` before it starts.
+
+        ``resume``: continue the mission already anchored in ``workdir`` (its committed spec,
+        checklist, ownership map and decisions); ``title`` / ``description`` / ``checklist`` /
+        ``references`` / ``ownership`` are then ignored. Raises ``MissionResumeError`` if there
+        is no anchor. Without ``resume`` the anchor is (re-)initialized from the arguments.
         """
         preflight_run_tools(self._settings)
+        if resume and not await asyncio.to_thread(anchor_exists, workdir):
+            raise MissionResumeError(f"no mission anchor to resume at {workdir!r}")
+        if not resume and checklist is None:
+            raise ValueError("a checklist is required unless resuming")
         configure_logging()
         run = _MissionRun(
             orchestrator=self,
@@ -220,6 +212,7 @@ class Orchestrator:
             checklist=checklist,
             ownership=ownership,
             references=references,
+            resume=resume,
         )
 
 
@@ -249,8 +242,15 @@ class _MissionRun:
         self.board = Blackboard()
         self.reflections: dict[str, str] = {}
         self.cycles = 0
+        # Cycle ids continue after the last committed one when a run is resumed.
+        self.cycle_offset = 0
+        self.run_number = 1
         self.last_head = ""
         self.stopped = "max_cycles"
+
+    def _cycle_id(self, n: int) -> str:
+        """The id of this invocation's ``n``-th cycle (1-based)."""
+        return f"c{self.cycle_offset + n}"
 
     # --- the mission loop --------------------------------------------------------------
     async def execute(
@@ -258,27 +258,43 @@ class _MissionRun:
         *,
         title: str,
         description: str,
-        checklist: Checklist,
+        checklist: Checklist | None,
         ownership: FileOwnershipMap | None,
         references: list[str] | None,
+        resume: bool,
     ) -> MissionSummary:
         settings = self.settings
         meter = self.meter
         # The sandbox session and one shared HTTP pool for every role's provider are both closed
         # when the mission ends, however it ends.
         async with contextlib.AsyncExitStack() as stack:
+            self.anchor = GitMissionAnchor(self.workdir)
+            if resume:
+                await asyncio.to_thread(self._recover_workspace)
+                title, description = await self._restore_run_state(title, description)
+            else:
+                assert checklist is not None  # checked by run_mission
+                await self.anchor.initialize(
+                    title=title,
+                    description=description,
+                    items=checklist,
+                    references=references,
+                    ownership=ownership,
+                )
+            await asyncio.to_thread(prune_worktrees, self.workdir)
+            await self.anchor.append_event(
+                EventRecord(
+                    kind=RUN_EVENT,
+                    payload={
+                        "mission_id": self.mission_id,
+                        "resumed": resume,
+                        "run": self.run_number,
+                    },
+                )
+            )
             self.session = await open_lead_sandbox(settings, self.workdir)
             stack.push_async_callback(self.session.close)
             http = await stack.enter_async_context(httpx.AsyncClient(timeout=300.0))
-            self.anchor = GitMissionAnchor(self.workdir)
-            await self.anchor.initialize(
-                title=title,
-                description=description,
-                items=checklist,
-                references=references,
-                ownership=ownership,
-            )
-            await asyncio.to_thread(prune_worktrees, self.workdir)
             raw = {
                 role: self.org._models.get(role) or model_for_role(role, settings, client=http)
                 for role in _ROLES
@@ -293,7 +309,8 @@ class _MissionRun:
             self.read_tools = build_run_dispatcher(
                 settings, allow_mutating=False, allow_egress=self.allow_egress
             )
-            # Persistence + memory (mission row, persistent cost ledger, tiered memory).
+            # Persistence + memory (mission row, persistent cost ledger, tiered memory). A resumed
+            # run keeps the mission id, so its ledger keys get their own prefix.
             self.services = await open_run_services(
                 settings,
                 mission_id=self.mission_id,
@@ -303,6 +320,7 @@ class _MissionRun:
                 description=description,
                 model=meter.wrap(raw["lead"], role="librarian"),
                 recorder=self.recorder,
+                key_prefix="" if self.run_number == 1 else f"run{self.run_number}",
             )
             stack.push_async_callback(self.services.close)
             await self.services.tracker.running()
@@ -333,6 +351,9 @@ class _MissionRun:
                 verifier=lead_verifier(self.workdir),
                 checks=self.mission_checks,
             )
+            # Leases are decided against this run's own anchor instance, so a grant and the
+            # ownership release staged by ``_current_ownership`` are committed together.
+            self.leases = LeaseBroker(self.anchor)
             self.ctx = ToolContext(mission_id=self.mission_id, session=self.session)
 
             try:
@@ -364,6 +385,62 @@ class _MissionRun:
             head_sha=self.last_head,
             stopped_reason=self.stopped,
             trace_jsonl=self.recorder.to_jsonl(),
+        )
+
+    # --- resume ---------------------------------------------------------------------------
+    def _recover_workspace(self) -> None:
+        """Discard what an interrupted run left uncommitted (never anything committed)."""
+        if (git_ops.git_dir(self.workdir) / "MERGE_HEAD").exists():
+            git_ops.run_git(self.workdir, "merge", "--abort", check=False)
+        git_ops.discard_changes(self.workdir)
+        self.last_head = git_ops.head_sha(self.workdir)
+
+    async def _restore_run_state(self, title: str, description: str) -> tuple[str, str]:
+        """Rebuild the mission id, board, reflections and cycle numbering from committed events.
+
+        Returns the committed mission's title and description (the arguments are fallbacks).
+        """
+        # The decision chain must still verify before anything builds on it.
+        await self.anchor.read_decisions()
+        spec = await self.anchor.read_mission()
+        events = await self.anchor.read_events()
+        checklist = await self.anchor.read_checklist()
+        runs = [e for e in events if e.kind == RUN_EVENT]
+        if runs:
+            self.mission_id = str(runs[-1].payload.get("mission_id") or self.mission_id)
+        self.run_number = len(runs) + 1
+        numbers = [
+            int(m.group(1)) for e in events if (m := _CYCLE_ID.match(e.cycle_id)) is not None
+        ]
+        self.cycle_offset = max(numbers, default=0)
+        for event in events:
+            if event.kind == BOARD_EVENT:
+                self.board.post(
+                    str(event.payload.get("author", "")), str(event.payload.get("text", ""))
+                )
+        open_ids = {i.id for i in checklist.items if i.is_open}
+        for event in events:
+            item_id = str(event.payload.get("item", ""))
+            if event.kind == REFLECTION_EVENT and item_id in open_ids:
+                self.reflections[item_id] = str(event.payload.get("text", ""))
+        self.recorder.record(
+            "resumed",
+            mission_id=self.mission_id,
+            run=self.run_number,
+            cycle_offset=self.cycle_offset,
+            board=len(self.board.read()),
+        )
+        if spec is None:
+            return title, description
+        return spec.title, spec.description
+
+    async def _post(self, author: str, content: str) -> None:
+        """Post to this round's response board, and record it for a later ``--resume``."""
+        self.board.respond(author, content)
+        await self.anchor.append_event(
+            EventRecord(
+                kind=BOARD_EVENT, payload={"author": author, "text": content[:_BOARD_ENTRY_CAP]}
+            )
         )
 
     async def _loop(self, *, title: str, description: str) -> None:
@@ -443,7 +520,7 @@ class _MissionRun:
                 failed[item_id].append(result.error)
             elif result.brief:
                 briefs[item_id].append(result.brief)
-                self.board.respond(f"researcher:{item_id}", result.brief)
+                await self._post(f"researcher:{item_id}", result.brief)
         for item in items:
             self.recorder.record(
                 "research",
@@ -467,7 +544,7 @@ class _MissionRun:
         title: str,
         description: str,
     ) -> bool:
-        cycle_id = f"c{self.cycles + 1}"
+        cycle_id = self._cycle_id(self.cycles + 1)
         self.meter.cycle_id = cycle_id
         briefs = (await self._research([item])).get(item.id, [])
 
@@ -555,8 +632,15 @@ class _MissionRun:
             item_description=item.description,
             failure_summary=failure_summary,
         )
-        self.reflections[item.id] = f"\nReflection on {item.id}: {reflection}\n"
+        await self._set_reflection(item.id, f"\nReflection on {item.id}: {reflection}\n")
         self.recorder.record("reflection", mission_id=self.mission_id, item=item.id)
+
+    async def _set_reflection(self, item_id: str, text: str) -> None:
+        """Remember ``text`` for the item's next attempt (recorded for a later ``--resume``)."""
+        self.reflections[item_id] = text
+        await self.anchor.append_event(
+            EventRecord(kind=REFLECTION_EVENT, payload={"item": item_id, "text": text[:2_000]})
+        )
 
     async def _review(self, item: ChecklistItem, cycle_id: str, base: str, head: str) -> str:
         """Independent review of a verified item's ``base..head`` diff.
@@ -566,7 +650,7 @@ class _MissionRun:
         """
         if not self.org._do_review:
             return "approved"
-        diff = await asyncio.to_thread(_diff_since, self.workdir, base, head)
+        diff = await asyncio.to_thread(diff_since, self.workdir, base, head)
         review = await self.reviewer.review(
             diff=diff[:_REVIEW_DIFF_CAP], criteria=item.description, ctx=self.ctx
         )
@@ -580,9 +664,9 @@ class _MissionRun:
         if not review.blocking:
             self.loop_detector.observe(f"{item.id}:review_blocked", failed=False)
             return "approved"
+        await self._set_reflection(item.id, f"\n{review.notes()}\n")
+        await self._post(f"reviewer:{item.id}", review.notes())
         self.last_head = await self._reopen(item.id, cycle_id, review) or self.last_head
-        self.reflections[item.id] = f"\n{review.notes()}\n"
-        self.board.respond(f"reviewer:{item.id}", review.notes())
         self.recorder.record("review_reopened", mission_id=self.mission_id, item=item.id)
         if self.loop_detector.observe(f"{item.id}:review_blocked"):
             self.stopped = f"loop on item {item.id} (review keeps blocking)"
@@ -592,13 +676,8 @@ class _MissionRun:
     async def _reopen(self, item_id: str, cycle_id: str, review: ReviewResult) -> str | None:
         """Put a verified-but-review-blocked item back to ``todo`` with the review notes."""
         checklist = await self.anchor.read_checklist()
-        item = checklist.get(item_id)
-        if item is None:
+        if reopen_for_review(checklist, item_id, review) is None:
             return None
-        item.status = "todo"
-        item.verified_by = []
-        item.notes = review.notes()
-        item.last_failure = "reviewer blocked: " + "; ".join(review.blocking_issues or ["unparsed"])
         return await self.anchor.commit_checkpoint(
             Checkpoint(
                 cycle_id=cycle_id,
@@ -617,7 +696,7 @@ class _MissionRun:
     ) -> bool:
         base = snapshot.head_sha
         first = self.cycles + 1
-        self.meter.cycle_id = f"c{first}"
+        self.meter.cycle_id = self._cycle_id(first)
         self.recorder.record(
             "parallel_wave",
             mission_id=self.mission_id,
@@ -625,7 +704,10 @@ class _MissionRun:
             base=base,
         )
         briefs = await self._research(batch)
-        runs = [self._new_run(item, f"c{first + n}", ownership) for n, item in enumerate(batch)]
+        runs = [
+            self._new_run(item, self._cycle_id(first + n), ownership)
+            for n, item in enumerate(batch)
+        ]
         try:
             outcomes = await asyncio.gather(
                 *(
@@ -655,304 +737,122 @@ class _MissionRun:
 
     def _new_run(
         self, item: ChecklistItem, cycle_id: str, ownership: FileOwnershipMap
-    ) -> _ImplementerRun:
-        writer = writer_for_item(item.id)
-        contract = TaskContract(
-            objective=item.description,
-            role="implementer",
-            output_schema="a short summary of what you changed and why",
-            boundaries=[
-                "write only the files in write_set; request a lease instead of writing others",
-                "do not edit .lha/ (harness-owned) or existing tests / test configuration",
-            ],
-            write_set=ownership.write_set(writer),
+    ) -> ImplementerRun:
+        return new_implementer_run(
+            item,
+            cycle_id,
+            ownership,
             tool_budget=self.settings.max_turns_per_cycle,
             acceptance=[c.name for c in self.mission_checks],
         )
-        ticket = Ticket(
-            id=f"{cycle_id}-{item.id}",
-            contract=contract,
-            item_id=item.id,
-            attempts=item.attempts,
-        )
-        run = _ImplementerRun(item=item, cycle_id=cycle_id, writer=writer, ticket=ticket)
-        run.tickets.append({"status": TicketStatus.CREATED.value, "note": ""})
-        return run
-
-    def _objective(
-        self, run: _ImplementerRun, snapshot: SituationSnapshot, briefs: list[str]
-    ) -> tuple[str, str]:
-        contract = run.ticket.contract
-        objective = (
-            f"Checklist item [{run.item.id}]: {contract.objective}\n\n"
-            f"Your write-set (the ONLY files you may create or modify): "
-            f"{', '.join(contract.write_set)}\n"
-            f"Boundaries: {'; '.join(contract.boundaries)}\n"
-            f"Acceptance: the gating checks {', '.join(contract.acceptance) or '(none)'} must "
-            "pass in your worktree. When the item is done, reply with "
-            '{"done": true, "summary": "' + contract.output_schema + '"}.'
-        )
-        parts: list[str] = []
-        if snapshot.mission is not None:
-            parts.append(snapshot.mission.render_anchor())
-        if run.item.last_failure:
-            parts.append(f"Previous attempt FAILED:\n{run.item.last_failure[-3000:]}")
-        if self.reflections.get(run.item.id):
-            parts.append(self.reflections[run.item.id].strip())
-        decisions = render_decisions(snapshot.last_decisions)
-        if decisions:
-            parts.append(decisions)
-        if briefs:
-            parts.append("Research briefs:\n" + "\n---\n".join(briefs))
-        board = self._board_context()
-        if board:
-            parts.append(board)
-        return objective, "\n\n".join(parts)
 
     def _item_checks(self, item: ChecklistItem) -> tuple[list[Check], list[CheckResult]]:
         """The mission checks plus the item's witnesses (as the Lead's cycle would gate it),
         and a failing result for each witness that cannot be turned into a check."""
-        witnesses: list[Check] = []
-        errors: list[CheckResult] = []
-        for witness in item.witnesses:
-            try:
-                witnesses.append(parse_witness(witness, self.trusted))
-            except ValueError as exc:
-                errors.append(
-                    CheckResult(
-                        name=witness,
-                        passed=False,
-                        exit_code=2,
-                        output_tail=f"invalid witness: {exc}",
-                    )
-                )
-        return ensure_unique_check_names([*self.mission_checks, *witnesses]), errors
+        return item_checks(item, self.mission_checks, self.trusted)
 
     async def _implement(
         self,
-        run: _ImplementerRun,
+        run: ImplementerRun,
         base: str,
         ownership: FileOwnershipMap,
         snapshot: SituationSnapshot,
         briefs: list[str],
     ) -> None:
         """Run one implementer in its own worktree; verify there; commit on its branch."""
-        run.branch = branch_for(run.writer, run.cycle_id)
-        run.worktree = await asyncio.to_thread(
-            add_worktree, self.workdir, branch=run.branch, base=base
+        objective, extra = implementer_objective(
+            run,
+            mission_text=snapshot.mission.render_anchor() if snapshot.mission is not None else "",
+            reflection=self.reflections.get(run.item.id, ""),
+            decisions_text=render_decisions(snapshot.last_decisions),
+            briefs=briefs,
+            board=self._board_context(),
         )
-        run.ticket = run.ticket.model_copy(update={"branch": run.branch})
-        run.advance(TicketStatus.IN_PROGRESS)
-        worktree = run.worktree
-        globs = tuple(self.settings.harness_globs())
-        session = await open_lead_sandbox(self.settings, str(worktree))
-        try:
-            harness_before = (
-                None
-                if run.item.allow_harness_edits
-                else await asyncio.to_thread(snapshot_harness, worktree, globs)
-            )
-            buffer = DecisionBuffer()
-            # The Lead's tools and human gate, behind the implementer's ownership guard.
-            guarded: ToolDispatcher = OwnershipGuard(
-                lead_dispatcher(self.settings, self.hitl_gate, allow_egress=self.allow_egress),
-                ownership,
-                writers=(run.writer,),
-            )
-            implementer = Implementer(
-                self.implementer_model,
-                with_decision_tool(guarded, buffer),
-                max_turns=self.settings.max_turns_per_cycle,
-            )
-            objective, extra = self._objective(run, snapshot, briefs)
-            with agent_span("implement", mission_id=self.mission_id, item=run.item.id):
-                result = await implementer.run(
-                    objective=objective,
-                    ctx=ToolContext(mission_id=self.mission_id, session=session),
-                    extra_context=extra,
-                )
-            run.brief = result.brief
-            run.tool_calls = result.tool_calls
-            run.decisions = list(buffer.records)
-            self.board.respond(run.writer, f"[{run.item.id}] {result.brief}")
-            run.advance(TicketStatus.AWAITING_VERIFY)
-            checks, witness_errors = self._item_checks(run.item)
-            verification = await lead_verifier(str(worktree)).verify(session, checks)
-            if witness_errors:
-                verification = verification.with_results(witness_errors)
-            if harness_before is not None:
-                after = await asyncio.to_thread(snapshot_harness, worktree, globs)
-                tampered = harness_violations(harness_before, after)
-                if tampered:
-                    verification = verification.with_results([integrity_result(tampered)])
-            run.verification = verification
-        finally:
-            await session.close()
-        run.head = await asyncio.to_thread(
-            commit_worktree,
-            worktree,
-            f"lha: {run.writer} {run.item.id} ({run.item.description})",
+        summaries: list[str] = []
+        await implement_in_worktree(
+            run,
+            settings=self.settings,
+            workdir=self.workdir,
+            base=base,
+            ownership=ownership,
+            model=self.implementer_model,
+            gate=self.hitl_gate,
+            allow_egress=self.allow_egress,
+            mission_id=self.mission_id,
+            mission_checks=self.mission_checks,
+            objective=objective,
+            extra=extra,
+            lease=lease_handler(
+                self.leases,
+                writer=run.writer,
+                cycle_id=run.cycle_id,
+                ownership=ownership,
+                log=run.leases,
+            ),
+            on_summary=summaries.append,
         )
-        paths = await asyncio.to_thread(changed_paths, worktree, base, run.head)
-        run.violations = ownership.violations(writer=run.writer, paths=paths)
+        for decision in run.leases:
+            self.recorder.record(
+                "lease",
+                mission_id=self.mission_id,
+                writer=decision.writer,
+                path=decision.path,
+                granted=decision.granted,
+                why=decision.why,
+            )
+        for summary in summaries:
+            await self._post(run.writer, f"[{run.item.id}] {summary}")
 
-    async def _integrate(self, run: _ImplementerRun, snapshot: SituationSnapshot) -> bool:
+    async def _integrate(self, run: ImplementerRun, snapshot: SituationSnapshot) -> bool:
         """Offer one implementer branch to the integrator and checkpoint the result."""
         item = run.item
-        own = run.verification
-        verified = own is not None and own.all_green
-        before = await asyncio.to_thread(git_ops.head_sha, self.workdir)
-        post: VerificationResult | None = None
-        if run.error:
-            reason = f"implementer failed: {run.error}"
-        elif not verified:
-            reason = own.failure_report() if own is not None else "the branch was not verified"
-        else:
-            run.advance(TicketStatus.AWAITING_MERGE)
-            integration = await self.integrator.integrate(
-                branch=run.branch,
-                branch_head=run.head,
-                base=snapshot.head_sha,
-                verified=True,
-                violations=run.violations,
-                checks=self._item_checks(item)[0],
-            )
-            post = integration.verification if integration.merged else None
-            reason = integration.reason
 
-        checklist = await self.anchor.read_checklist()
-        merged = post is not None
-        if post is not None:
-            run.advance(TicketStatus.DONE, f"merged {run.branch}")
-            checklist.record_success(
-                item.id, [r.name for r in post.results if r.gating and r.passed]
-            )
-            # The slice is finished: its lease ends in the same commit that merges it (as do
-            # those of any other finished item not yet released).
-            persisted = await self.anchor.read_ownership()
-            done = [writer_for_item(i.id) for i in checklist.items if i.status == "done"]
-            released = effective_ownership(persisted, done)
-            if released != persisted:
-                self.anchor.stage_ownership(released)
-        else:
-            run.advance(TicketStatus.FAILED, reason)
-            checklist.record_failure(
-                item.id, reason, max_consecutive_failures=_MAX_CONSECUTIVE_FAILURES
-            )
-        current = checklist.get(item.id)
-        status = current.status if current is not None else ""
-        attempts = current.attempts if current is not None else 0
-        split_into: list[str] = []
-        if merged:
-            verb, note, verdict = "complete", "verified + integrated", "passed"
-        else:
-            verb = "block" if status == "blocked" else "attempt"
-            note = f"not integrated (attempt {attempts}, status {status})"
-            verdict = own.verdict if own is not None and not own.all_green else "failed"
-            if status == "blocked" and current is not None:
-                split_into = await self._maybe_split(checklist, current, snapshot)
-                if split_into:
-                    verb, status = "split", "split"
-                    note += f"; split into {', '.join(split_into)}"
-        shown = post if post is not None else own
-        head = await self.anchor.commit_checkpoint(
-            Checkpoint(
-                cycle_id=run.cycle_id,
-                progress_summary=(
-                    f"- {run.cycle_id} [{item.id}] {item.description}: {note} "
-                    f"({run.writer}, {run.branch or 'no branch'})"
+        async def split(checklist: Checklist, current: ChecklistItem) -> list[str]:
+            return await maybe_split(
+                checklist,
+                current,
+                settings=self.settings,
+                model=self.lead_model,
+                mission_text=(
+                    snapshot.mission.render_anchor() if snapshot.mission is not None else ""
                 ),
-                checklist=checklist,
-                # Decisions travel with the code they describe: only merged work records them.
-                decisions=run.decisions if merged else [],
-                events=[
-                    EventRecord(
-                        kind="cycle",
-                        cycle_id=run.cycle_id,
-                        payload={
-                            "item_id": item.id,
-                            "verified": merged,
-                            "verdict": verdict,
-                            "status": status,
-                            "tool_calls": run.tool_calls,
-                            "writer": run.writer,
-                            "branch": run.branch,
-                            "split_into": split_into,
-                            "checks": [
-                                {
-                                    "name": r.name,
-                                    "passed": r.passed,
-                                    "gating": r.gating,
-                                    "exit_code": r.exit_code,
-                                    "duration_s": round(r.duration_s, 3),
-                                }
-                                for r in (shown.results if shown is not None else [])
-                            ],
-                        },
-                    ),
-                    EventRecord(
-                        kind="ticket",
-                        cycle_id=run.cycle_id,
-                        payload={
-                            "ticket_id": run.ticket.id,
-                            "item_id": item.id,
-                            "role": run.ticket.contract.role,
-                            "write_set": run.ticket.contract.write_set,
-                            "branch": run.branch,
-                            "status": run.ticket.status.value,
-                            "history": run.tickets,
-                            "ownership_violations": [v.path for v in run.violations],
-                        },
-                    ),
-                ],
-                commit_message=f"lha: {verb} {item.id} ({item.description})"
-                + (f" [merged {run.branch}]" if merged and run.head != snapshot.head_sha else ""),
             )
+
+        report = await integrate_run(
+            run,
+            anchor=self.anchor,
+            integrator=self.integrator,
+            workdir=self.workdir,
+            base=snapshot.head_sha,
+            checks=self._item_checks(item)[0],
+            split=split,
         )
-        await asyncio.to_thread(self.integrator.abort)  # never leave a half-finished merge
-        self.last_head = head or self.last_head
+        merged = report.merged
+        self.last_head = report.head or self.last_head
         self.recorder.record(
             "integration",
             mission_id=self.mission_id,
             item=item.id,
             merged=merged,
             branch=run.branch,
-            reason=reason[:500],
+            reason=report.reason[:500],
         )
 
         if not merged:
-            if checklist.is_deadlocked:
-                self.stopped = f"deadlocked: {checklist.deadlock_reason()}"
+            if report.checklist.is_deadlocked:
+                self.stopped = f"deadlocked: {report.checklist.deadlock_reason()}"
                 return False
             if self.loop_detector.observe(f"{item.id}:failed"):
                 self.stopped = f"loop on item {item.id}"
                 return False
-            if status not in ("blocked", "split"):
-                await self._reflect(item, f"{item.id} was not integrated: {reason}")
+            if report.status not in ("blocked", "split"):
+                await self._reflect(item, f"{item.id} was not integrated: {report.reason}")
             return True
         self.loop_detector.observe(f"{item.id}:failed", failed=False)
-        review = await self._review(item, run.cycle_id, before, head)
+        review = await self._review(item, run.cycle_id, report.before, report.head)
         if review != "approved":
             return review == "reopened"
-        if checklist.is_complete:
+        if report.checklist.is_complete:
             self.stopped = "complete"
             return False
         return True
-
-    async def _maybe_split(
-        self, checklist: Checklist, item: ChecklistItem, snapshot: SituationSnapshot
-    ) -> list[str]:
-        """Split a newly blocked item with the replanner, within the mission's replan budget
-        (the same bounds as the Lead's ``AgentLoop``); returns the child ids ([] if not split)."""
-        settings = self.settings
-        if settings.max_replans <= 0:
-            return []
-        if sum(1 for i in checklist.items if i.status == "split") >= settings.max_replans:
-            return []
-        if item.id.count(".") >= settings.max_split_depth:
-            return []
-        mission_text = snapshot.mission.render_anchor() if snapshot.mission is not None else ""
-        drafts = await Replanner(self.lead_model).split(mission_text=mission_text, item=item)
-        if len(drafts) < 2:
-            return []
-        return [child.id for child in checklist.split(item.id, drafts)]

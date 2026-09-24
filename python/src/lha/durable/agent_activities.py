@@ -1,11 +1,18 @@
 """Activity that runs a sub-agent (the non-deterministic body of a sub-agent child workflow).
 
+The sub-agent is budgeted like a cycle: when the workdir is a mission checkout, its meter is
+seeded with the mission's recorded spend (``.git/lha/spend.ndjson``), the ceiling is
+``SubAgentInput.budget_usd`` (else the worker's), and its own spend is appended to that journal,
+so researchers count against the same mission budget as the Lead.
+
 Every metered call of the sub-agent is also written to the persistent cost ledger (SQLite or
 Postgres, ``lha.persistence``) under the parent mission id, keyed by workflow/activity/attempt so a
 retried attempt's calls are new rows and a replayed write is a no-op.
 """
 
 from __future__ import annotations
+
+import asyncio
 
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -14,16 +21,24 @@ from lha.agents.roles import ROLES
 from lha.agents.subagent import SubAgent
 from lha.config import get_settings
 from lha.contracts.tools import ToolContext
-from lha.durable.activities import _with_heartbeat
-from lha.durable.types import ERROR_BUDGET_EXCEEDED, ERROR_CONFIG, SubAgentInput, SubAgentOutput
+from lha.durable.activities import _with_heartbeat, build_cycle_meter, record_spend
+from lha.durable.types import (
+    ERROR_BUDGET_EXCEEDED,
+    ERROR_CONFIG,
+    CycleInput,
+    SubAgentInput,
+    SubAgentOutput,
+)
 from lha.execution import UnsafeSandboxError, open_sandbox
 from lha.execution.tools.toolset import build_run_dispatcher
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import BudgetExceeded, CostMeter
+from lha.ids import idempotency_key
 from lha.model import build_provider
 from lha.persistence.store import StoreUnavailableError, open_store
 from lha.persistence.tracking import LedgerSink
+from lha.state import git_ops
 
 
 @activity.defn
@@ -35,14 +50,31 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         raise ApplicationError(
             f"unknown sub-agent role {inp.role_name!r}", type=ERROR_CONFIG, non_retryable=True
         )
-    meter = CostMeter(
-        ledger=CostLedger(),
-        governor=BudgetGovernor(
-            ceiling_usd=settings.budget_usd_ceiling,
-            max_cycles=settings.max_cycles,
-            allow_unknown_cost=settings.allow_unpriced_models,
-        ),
-    )
+    journal = await asyncio.to_thread(git_ops.is_repo, inp.workdir)
+    cycle_id = f"{inp.cycle_id}:{inp.role_name}" if inp.cycle_id else f"subagent:{inp.role_name}"
+    if journal:  # a mission checkout: the mission's spend so far counts
+        meter = await asyncio.to_thread(
+            build_cycle_meter,
+            settings,
+            CycleInput(
+                mission_id=inp.mission_id,
+                workdir=inp.workdir,
+                cycle_id=cycle_id,
+                budget_usd=inp.budget_usd,
+                max_cycles=settings.max_cycles,
+            ),
+        )
+    else:
+        meter = CostMeter(
+            ledger=CostLedger(),
+            governor=BudgetGovernor(
+                ceiling_usd=(
+                    settings.budget_usd_ceiling if inp.budget_usd is None else inp.budget_usd
+                ),
+                max_cycles=settings.max_cycles,
+                allow_unknown_cost=settings.allow_unpriced_models,
+            ),
+        )
     try:  # web tools iff LHA_EGRESS_ALLOW_HOSTS and the role + input allow egress
         dispatcher = build_run_dispatcher(
             settings,
@@ -62,7 +94,7 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         raise ApplicationError(
             f"cannot start sub-agent: {exc}", type=ERROR_CONFIG, non_retryable=True
         ) from exc
-    meter.cycle_id = f"subagent:{inp.role_name}"
+    meter.cycle_id = cycle_id
     try:
         store = await open_store(settings, workdir=inp.workdir)
     except BaseException as exc:
@@ -78,6 +110,7 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         prefix = f"sub:{info.workflow_id}:{info.activity_id}@{info.attempt}"
     else:
         prefix = f"sub:{inp.role_name}"
+    spend_key = idempotency_key(inp.mission_id, prefix)
     LedgerSink(store, inp.mission_id, key_prefix=prefix).attach(meter)
     agent = SubAgent(role=role, model=model, dispatcher=dispatcher)
     try:
@@ -94,6 +127,14 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         try:
             await session.close()
             await model.aclose()
+            if journal:
+                await asyncio.to_thread(
+                    record_spend,
+                    inp.workdir,
+                    key=spend_key,
+                    cycle_id=cycle_id,
+                    ledger=meter.ledger,
+                )
         finally:
             meter.on_record = None
             await store.close()

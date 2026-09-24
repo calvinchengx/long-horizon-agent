@@ -66,23 +66,24 @@ path (local, durable and `orchestrate`) through [`agent/assembly.py`](../python/
 Not done: `--checklist` on `orchestrate`; a Planner that writes witnesses; measurements of split
 quality with real models.
 
-### Phase 2: independent reviewer and decision log (partial)
+### Phase 2: independent reviewer and decision log (done)
 
-- Done, local only: the reviewer in `lha orchestrate` gives a structured verdict and can reopen an
-  item.
+- Done: the reviewer gives a structured verdict and can reopen an item, in `lha orchestrate` and
+  in a durable mission started with `--review` (the `review_cycle` activity; the third blocking
+  review in a row blocks the item)
+  ([08-durable-execution.md](08-durable-execution.md#the-multi-agent-organization-opt-in)).
 - Done, every run path: the hash-chained decision log. The lead's `record_decision` tool queues a
   decision, the cycle's checkpoint chains it into `.lha/decisions.ndjson`, and the five newest
   decisions go into the next prompt. `lha decisions --verify` checks the chain. An altered log
   stops a local run, and fails a durable cycle with a non-retryable error
   ([06-mission-anchor.md](06-mission-anchor.md#decisionsndjson)).
-- Not done: the reviewer inside the durable workflow.
+- Not done: measurements of how much review changes outcomes on real tasks.
 
-### Phase 3: read-only researcher fan-out (partial)
+### Phase 3: read-only researcher fan-out (done)
 
-- Done, local only: `lha orchestrate` fans out read-only researchers per item.
-- Library: `SubAgentWorkflow` and `research_children` run sub-agents as durable child workflows.
-  The worker registers `SubAgentWorkflow` and it is tested, but `MissionWorkflow` never starts
-  it.
+- Done: `lha orchestrate` fans out read-only researchers per item, and a durable mission started
+  with `--research N` runs N researchers per item before each round as `SubAgentWorkflow` child
+  workflows; failed researchers are written to the gate log and committed as `research` events.
 
 ### Phase 4 and later
 
@@ -91,7 +92,9 @@ quality with real models.
 | Planner (task -> checklist) | done: used by `mission`, `orchestrate`, `mission-start` (skipped when `--checklist` is given) |
 | Replanner (split a blocked item) | done: every run path |
 | Per-role model routing (Claude tiers) | done: `orchestrate` with the `claude` backend |
-| File ownership, tickets, blackboard, parallel implementers in git worktrees, `BranchIntegrator` | done in `lha orchestrate` only (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3); not in the durable workflow ([11-multi-agent-organization.md](11-multi-agent-organization.md)) |
+| File ownership, tickets, parallel implementers in git worktrees, `BranchIntegrator`, lease granting | done in `lha orchestrate` (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3) and in a durable mission started with `--max-parallel N` (one activity per implementer and per integration) ([11-multi-agent-organization.md](11-multi-agent-organization.md)) |
+| Blackboard, reflection | done in `lha orchestrate` only |
+| Resuming `lha orchestrate` | done: `--resume` ([11-multi-agent-organization.md](11-multi-agent-organization.md#resuming-lha-orchestrate)) |
 | Memory: episodic, semantic, skills, hybrid BM25 + dense retrieval, consolidation, degradation to lexical-only | done: every run path gives the lead a memory block (`LHA_MEMORY_ENABLED`, default on) ([12-memory.md](12-memory.md)) |
 | Persistence: mission rows and the idempotent cost ledger on SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), `lha missions`, `lha costs`, `lha db migrate` | done: every run path |
 | Model resilience: fallback chain (`LHA_FALLBACK_MODELS`), health probe before a parked mission resumes | done: every run path ([13-models.md](13-models.md#retries-and-failover)) |
@@ -117,12 +120,17 @@ These limitations are in the current code:
   `WAITING_ON_HUMAN` (the cycle queued an approval). The row never shows `DEGRADED_PARK`,
   `SLEEPING`, `WAITING_ON_HUMAN` for the deadlock gate, or the outcome the workflow reaches after
   a gate decision (for example abort or impossible at the deadlock gate) or at `max_cycles`.
-- Lease granting: a `LeaseRequest` for another writer's file is never granted.
-- Parallel implementer waves, tickets and the blackboard exist only in `lha orchestrate`, not in
-  the Temporal workflow.
+- Leases: a request for a file another open item owns is refused, not queued, and a lease lasts
+  until its writer's item is done.
+- The durable organization has no blackboard or reflection (only `lha orchestrate` has them), and
+  the implementers of one durable wave see each other's spend only after they finish, so the
+  budget ceiling can be overshot by up to one wave's spend. A durable mission gets parallel waves
+  only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
 - The Go port has no CLI (`go/cmd/lha`) and no Temporal worker, and Temporal histories with
   timers do not replay across the two languages (see [Go phase 2](#go-phase-2-temporal-not-started)).
-- `lha orchestrate` re-initializes the anchor and does not resume an earlier run.
+- `lha orchestrate --resume` rebuilds the blackboard and reflections from committed events, so
+  posts made after the interrupted run's last checkpoint are lost; the budget and cycle ceilings
+  apply per invocation.
 - The default memory embedder (`hash`) is lexical, not semantic; `sentence_transformers` needs the
   `embeddings` extra.
 - Every `openai_compat` model, primary or fallback, uses the one endpoint in

@@ -53,6 +53,8 @@ suites; see [20-testing.md](20-testing.md)):
 | Every run path writes the mission row and every metered model call to the store; `lha missions` and `lha costs` read them back | `tests/unit/test_persistence_wiring.py`, `tests/integration/test_postgres_store.py` |
 | Recorded decisions are hash-chained, shown in the next cycle's prompt, and an altered log stops the run | `tests/unit/test_decision_chain_wiring.py` |
 | Parallel implementers cannot write files they do not own, and only verified, owned, conflict-free, re-verified branches are merged | `tests/unit/test_ownership_integration.py` |
+| A durable mission that opts in runs researchers as child workflows (failures surfaced), parallel implementer waves as activities in their own worktrees merged one checkpoint at a time, and a review that reopens an item; the org activities are retry-safe, an implementer outage parks the mission, and the recorded organization history replays | `tests/durability/test_org_workflow.py`, `test_replay.py` |
+| A lease is granted only for an unowned file or one whose owner has finished, is refused otherwise, and is committed to `.lha/ownership.json` with a `lease` event; `lha orchestrate --resume` continues the same mission without losing committed work | `tests/unit/test_leases_and_resume.py` |
 | Tiered memory is recalled into the prompt, survives activity retries, and degrades to lexical-only retrieval instead of failing a cycle | `tests/unit/test_memory_service.py`, `test_persistence_wiring.py` |
 
 These tests use the stub model (scripted, including the replanner's split and the approver's
@@ -66,27 +68,32 @@ a blocked item are.
   multi-day mission unattended. LHA's claim is narrower: the system can run for weeks (sleep,
   survive crashes, resume) while a model drives it in verified steps. Whether a given model makes
   useful progress over that span is an open question.
-- **The multi-agent organization helps.** `lha orchestrate` runs researchers, a lead, parallel
-  implementers with a branch integrator, and a reviewer, and is unit-tested with scripted models.
-  There is no measurement showing it beats the single-agent loop on real tasks.
+- **The multi-agent organization helps.** `lha orchestrate`, and a durable mission started with
+  `--research`, `--review` or `--max-parallel`, run researchers, a lead, parallel implementers
+  with a branch integrator, and a reviewer; both are tested with scripted models. There is no
+  measurement showing either beats the single-agent loop on real tasks.
 - **Library code that no command or workflow calls.** Langfuse export (`build_langfuse` only
-  builds a client), an OpenTelemetry exporter (LHA installs no `TracerProvider`), sub-agent
-  fan-out inside the durable workflow (the worker registers `SubAgentWorkflow` and
-  `research_children` is tested, but `MissionWorkflow` never starts a child), saga compensation,
-  orphan-branch reconciliation, the durable ticket ledgers, flaky-test quarantine, mutation checks
+  builds a client), an OpenTelemetry exporter (LHA installs no `TracerProvider`), saga
+  compensation, orphan-branch reconciliation, the durable ticket ledgers, flaky-test quarantine,
+  mutation checks
   and trust bootstrap, offline prompt evolution and the eval harness exist as tested library code
   only (see [23-roadmap.md](23-roadmap.md)). These, by contrast, are wired into the run paths: the
   large-mission features, human approval gates with the escalation ladder and webhook, the
   `SLEEPING` status, web tools under the egress policy and the Rule of Two, the fallback model
   chain and health probe, SQLite/Postgres persistence of mission rows and the cost ledger, tiered
-  memory in the prompt, the hash-chained decision log, and, in `lha orchestrate` only, file
-  ownership, tickets, the blackboard, parallel implementer waves and the branch integrator.
+  memory in the prompt, the hash-chained decision log, file ownership with lease granting,
+  tickets, parallel implementer waves and the branch integrator (in `lha orchestrate`, and in a
+  durable mission that opts in, where the researchers run as `SubAgentWorkflow` children), and,
+  in `lha orchestrate` only, the blackboard and reflection.
 - **Known gaps in wired features.** Gates are not written to the `hitl_gates` table; they live in
   the workflow state and as `gate_*` events in the anchor. A durable mission's row never shows
   `DEGRADED_PARK` or `SLEEPING`, nor `WAITING_ON_HUMAN` for the deadlock gate, nor the outcome
   the workflow reaches after a gate decision or at `max_cycles`: it shows what the last cycle
-  activity wrote. A `LeaseRequest` for a foreign file is never granted. `lha orchestrate` does not
-  resume an earlier run. The default `hash` embedder is lexical, not semantic. Every
+  activity wrote. A contended lease is refused, not queued, and a lease lasts until its writer's
+  item is done. The implementers of one durable wave run concurrently, so the budget ceiling can
+  be overshot by up to one wave's spend. `lha orchestrate --resume` loses blackboard posts and
+  reflections made after the interrupted run's last checkpoint. The default `hash` embedder is
+  lexical, not semantic. Every
   `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`.
   `fetch_url` checks the resolved address before connecting, but the HTTP client resolves again,
   so DNS rebinding between the two lookups is a residual risk. The Go port has no CLI and no
@@ -113,8 +120,8 @@ parts of the current code and do not match it everywhere:
   1,000), and shows a `phase0-placeholder` check name (check names are now derived from the check
   command).
 - `lsp-weeklong-run.txt` shows features the code does not have: a worker Build ID, a separate
-  `lha-research` task queue, research fan-out inside the durable run, a `--task @file` argument
-  form, and a log format that `lha` does not print.
+  `lha-research` task queue (durable research, with `--research`, runs on the mission's own task
+  queue), a `--task @file` argument form, and a log format that `lha` does not print.
 
 To produce a real run to compare against, configure a real model ([13-models.md](13-models.md))
 and run `lha mission` or `lha mission-start`; the git history and `.lha/` files it leaves are the
