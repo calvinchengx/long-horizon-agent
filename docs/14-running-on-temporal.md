@@ -47,7 +47,7 @@ ClaimCheck data converter over `LHA_OBJECT_STORE_ROOT`, and polls `LHA_TASK_QUEU
 | Kind | Names |
 |---|---|
 | Workflows | `MissionWorkflow`, `SubAgentWorkflow` |
-| Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `notify_gate`, `declare_impossible`, `run_subagent` |
+| Activities | `run_agent_cycle`, `check_mission_health`, `unblock_items`, `read_mission_snapshot`, `notify_gate`, `declare_impossible`, `record_mission_status`, `run_subagent`, and the organization's `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle` |
 
 It runs until interrupted. It has no options; everything comes from `LHA_*` settings of the worker
 process. The model backend, sandbox (`LHA_SANDBOX`, default `docker`), sandbox image and egress
@@ -71,16 +71,21 @@ uv run lha mission-start --task "Add a slugify() helper with tests" \
 # or from your own checklist, with vendored references
 uv run lha mission-start --checklist roadmap.md --reference reference/api.md.txt \
   --workdir /srv/missions/emulator --deadlock-gate-hours 48
+
+# or with the multi-agent organization: 2 researchers per item, a reviewer, parallel waves of 3
+uv run lha mission-start --task "Add slugify(), titlecase() and a CLI" \
+  --research 2 --review --max-parallel 3 --workdir .lha/workspaces/org-durable
 ```
 
 `lha mission-start`, in order:
 
 1. With `--task`, plans the task into a checklist with the configured model (one metered call
-   against `LHA_BUDGET_USD_CEILING` in this process). With `--checklist FILE`, imports the file
+   against `LHA_BUDGET_USD_CEILING` in this process); with `--max-parallel 2` or more the plan
+   also assigns file ownership. With `--checklist FILE`, imports the file
    instead ([importing a checklist](06-mission-anchor.md#importing-a-checklist)); one of the two
    is required.
-2. Initializes the git mission anchor at `--workdir`, including any `--reference` paths (see
-   [06-mission-anchor.md](06-mission-anchor.md)).
+2. Initializes the git mission anchor at `--workdir`, including any `--reference` paths and the
+   ownership map (see [06-mission-anchor.md](06-mission-anchor.md)).
 3. Writes the mission row (status `RUNNING`, or `SLEEPING` with `--start-in-seconds`) and the
    Planner's spend to the mission store; if the workflow then cannot be started, the row is set
    to `ABORTED`.
@@ -99,6 +104,16 @@ It prints the id and returns; it does not wait for the mission.
 | `resume_at` | `--start-in-seconds N` (now + N) | 0 (start now) |
 | `gate_escalation_seconds` | none | `LHA_GATE_ESCALATION_SECONDS` (`[900, 2700, 14400, 43200]`) |
 | `impossible_after_failures` | none | `LHA_IMPOSSIBLE_AFTER_FAILURES` (3) |
+| `research_per_item` | `--research N` (0 to 4) | 0 (no researchers) |
+| `review` | `--review` | off |
+| `max_parallel` | `--max-parallel N` (0 to 8) | 0 (no parallel waves) |
+
+The last three opt the mission into the multi-agent organization (researcher child workflows,
+the reviewer, parallel implementer waves in git worktrees); with the defaults the workflow runs
+the Lead loop alone. See
+[Durable execution](08-durable-execution.md#the-multi-agent-organization-opt-in). Every
+implementer worktree is created under the workdir's `.git/lha-worktrees/`, so the worker hosts
+that run the organization's activities need the same filesystem path as the ones that run cycles.
 
 These values are read by the process that runs `mission-start` and travel in the workflow input,
 so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` is different: the worker's `notify_gate`

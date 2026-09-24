@@ -198,8 +198,10 @@ The web tools are off unless the operator lists hosts. `build_run_dispatcher()` 
 [toolset.py](../python/src/lha/execution/tools/toolset.py) is the only place run paths assemble
 tools: `lha mission`, `lha run-local`, `lha orchestrate` and the Temporal cycle activity
 (`run_agent_cycle`) reach it through `lead_tools()` / `lead_dispatcher()` in
-[agent/assembly.py](../python/src/lha/agent/assembly.py); the orchestrator's Researchers and
-Reviewer and the sub-agent activity (`run_subagent`) call it directly.
+[agent/assembly.py](../python/src/lha/agent/assembly.py) (so do the parallel implementers, in
+`orchestrate` and in the durable `run_implementer` activity); the orchestrator's Researchers and
+Reviewer, the sub-agent activity (`run_subagent`) and the durable `review_cycle` activity (with
+`allow_egress=False`) call it directly.
 
 | Setting | Effect |
 |---|---|
@@ -212,8 +214,9 @@ Reviewer and the sub-agent activity (`run_subagent`) call it directly.
 | `LHA_WEB_TIMEOUT_S`, `LHA_WEB_MAX_RESPONSE_BYTES` | per-request timeout (30 s) and body cap (2,000,000 bytes) for both tools |
 
 Which agents get them: the Lead in every path; the Researchers in `lha orchestrate`; a durable
-sub-agent when both its role (`researcher`) and its `SubAgentInput.allow_egress` allow egress. The
-Reviewer's role hides them (`SubAgent` role filtering). `allow_egress=False` on
+sub-agent when both its role (`researcher`) and its `SubAgentInput.allow_egress` allow egress
+(the durable organization's researchers set it). The Reviewer's and the implementers' roles hide
+them (`SubAgent` role filtering). `allow_egress=False` on
 `run_mission_local` / `Orchestrator.run_mission` drops them.
 
 `fetch_url` applies the in-process policy above with `allow_hosts` = the allow-list (normalized the

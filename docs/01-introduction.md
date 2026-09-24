@@ -96,15 +96,15 @@ The project is early and under active development.
 | Python single-agent spine (`lha mission`, `lha run-local`) | Implemented and tested |
 | Python durable spine (`lha worker`, `lha mission-start`) | Implemented; durability and replay tests run against the Temporal test server in CI |
 | Large-mission features: imported checklists with witnesses, trusted checks, protected paths, replanning of blocked items, sandbox image and egress allow-list, vendored references, human approval of irreversible actions | Implemented and wired into every Python run path (local, durable, `orchestrate`); an end-to-end test exercises them together on real Docker |
-| Python local multi-agent flow (`lha orchestrate`: researchers, lead, reviewer) | Implemented; runs locally only, not on Temporal |
+| Python multi-agent flow: researchers, lead, reviewer, parallel implementers | Implemented locally (`lha orchestrate`, resumable with `--resume`) and, opt-in per mission, on Temporal (`lha mission-start --research N --review --max-parallel N`) |
 | Human approval gates, escalation ladder and gate webhook, `SLEEPING` (scheduled start, cycle pause, `lha mission-snooze`), the retry/abort/impossible deadlock gate | Implemented and wired. Gates are not written to the `hitl_gates` table; the workflow writes its own states (`DEGRADED_PARK`, `SLEEPING`, an open gate's `WAITING_ON_HUMAN`, every final status) to the mission row, best effort |
 | Web tools (`fetch_url`, `web_search`) with egress policy, credential broker, untrusted-content fencing and the Rule of Two preflight | Implemented and wired when `LHA_WEB_ALLOW_HOSTS` or `--allow-host` is non-empty. A DNS-rebinding window remains between the address check and the connection |
 | Fallback model chain (`LHA_FALLBACK_MODELS`) and a real model health probe for parked missions | Implemented and wired. Fallbacks of one backend share its endpoint (for example `LHA_OPENAI_BASE_URL`) |
 | Persistence (SQLite by default, Postgres with `LHA_POSTGRES_DSN`): mission rows and the cost ledger (`lha missions`, `lha costs`) | Implemented and wired into every run path |
 | Tiered memory (episodic, semantic, skills) in the lead's prompt, with degradation to BM25 and `git grep` | Implemented and wired into every run path. The default `hash` embedder is not semantic |
 | Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
-| File ownership, tickets and blackboard, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` only (not the Temporal workflow); `orchestrate` does not resume an existing mission; no lease granting |
-| Langfuse export, the `SubAgentWorkflow` fan-out, the Auditor and Librarian roles, flaky-test quarantine, sagas and reconciliation | Library code with tests; not called by any run path |
+| File ownership with lease granting, tickets, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` and into durable missions started with `--max-parallel`; the blackboard and reflection only in `orchestrate` |
+| Langfuse export, the Auditor and Librarian roles, flaky-test quarantine, sagas and reconciliation | Library code with tests; not called by any run path |
 | Go port | Library packages (contracts, config, spec runner, model, safety, obs, state with the decision chain, verify, governor); no CLI (`go/cmd/lha`) or Temporal worker yet |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 

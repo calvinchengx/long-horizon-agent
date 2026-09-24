@@ -40,6 +40,13 @@ DEGRADED_PARK, WAITING_ON_HUMAN when a gate opens, and the final status of every
 (including a failure and a cancellation by ``lha mission-abort``). Those writes are best effort:
 a short timeout and retry, then the mission goes on.
 
+The multi-agent organization (opt-in per mission: ``MissionInput.research_per_item``,
+``review``, ``max_parallel``) replaces the single cycle activity with one round of
+``lha.durable.org_round``: researcher child workflows before the round, a serial Lead cycle or a
+parallel implementer wave (one activity per implementer, in its own git worktree, then one
+integration activity per branch), and an independent review after every verified item. With
+all three off (the default) the workflow issues exactly the commands it always did.
+
 Determinism: behaviour added after histories were recorded is guarded by ``workflow.patched``
 (``PATCH_*`` below), so a history recorded by an older build replays down its old code path.
 """
@@ -75,6 +82,7 @@ with workflow.unsafe.imports_passed_through():
     from lha.hitl.escalation import escalation_schedule, next_rung
     from lha.ops.lifecycle import should_declare_impossible
 
+from lha.durable.org_round import PATCH_ORG, org_config_error, org_enabled, run_org_round
 from lha.durable.signals import (
     DEADLOCK_DEFAULTS,
     GATE_DEADLOCK,
@@ -141,6 +149,8 @@ _NOTIFY_TIMEOUT = timedelta(minutes=3)
 PATCH_GATE_LADDER = "lha-gate-escalation-v1"
 PATCH_SLEEPING = "lha-sleeping-v1"
 PATCH_MISSION_ROW = "lha-mission-row-v1"
+# PATCH_ORG ("lha-durable-org-v1", ``lha.durable.org_round``): the multi-agent round, reached
+# only by missions that opt in, so every history recorded without it replays unchanged.
 
 # ``record_mission_status`` is best effort: a short timeout and a few quick retries, then the
 # mission goes on without the row update (logged).
@@ -227,6 +237,9 @@ class MissionWorkflow:
             raise _config_failure(f"cycles_before_can must be >= 1 (got {inp.cycles_before_can})")
         if inp.max_cycles < 0:
             raise _config_failure(f"max_cycles must be >= 0 (got {inp.max_cycles})")
+        org_error = org_config_error(inp)
+        if org_error:
+            raise _config_failure(org_error)
 
         while True:
             if state.cycles_done >= inp.max_cycles:
@@ -234,23 +247,28 @@ class MissionWorkflow:
 
             await self._sleep_until_resume(inp)
             state.status = STATUS_RUNNING
+            org = org_enabled(inp) and workflow.patched(PATCH_ORG)
+            cycles_before = state.cycles_done
             try:
-                result = await workflow.execute_activity(
-                    run_agent_cycle,
-                    CycleInput(
-                        mission_id=inp.mission_id,
-                        workdir=inp.workdir,
-                        cycle_id=f"c{state.cycles_done + 1}",
-                        check_commands=inp.check_commands,
-                        budget_usd=inp.budget_usd,
-                        max_cycles=inp.max_cycles,
-                        steer_notes=list(state.steer_notes),
-                        approved_actions=list(state.approved_actions),
-                    ),
-                    start_to_close_timeout=CYCLE_START_TO_CLOSE,
-                    heartbeat_timeout=CYCLE_HEARTBEAT_TIMEOUT,
-                    retry_policy=_CYCLE_RETRY,
-                )
+                if org:  # research / review / parallel waves (``lha.durable.org_round``)
+                    result = await run_org_round(inp, state, self._log)
+                else:
+                    result = await workflow.execute_activity(
+                        run_agent_cycle,
+                        CycleInput(
+                            mission_id=inp.mission_id,
+                            workdir=inp.workdir,
+                            cycle_id=f"c{state.cycles_done + 1}",
+                            check_commands=inp.check_commands,
+                            budget_usd=inp.budget_usd,
+                            max_cycles=inp.max_cycles,
+                            steer_notes=list(state.steer_notes),
+                            approved_actions=list(state.approved_actions),
+                        ),
+                        start_to_close_timeout=CYCLE_START_TO_CLOSE,
+                        heartbeat_timeout=CYCLE_HEARTBEAT_TIMEOUT,
+                        retry_policy=_CYCLE_RETRY,
+                    )
             except ActivityError as err:
                 if is_cancelled_exception(err):
                     raise  # the mission was cancelled: never park on it
@@ -269,7 +287,8 @@ class MissionWorkflow:
                 self._maybe_continue_as_new(inp)
                 continue
 
-            state.cycles_done += 1
+            if not org:
+                state.cycles_done += 1  # an org round counts its own cycles as it goes
             self._absorb(result)
             self._track_failures(result)
             await self._resolve_approvals(inp, result)
@@ -285,7 +304,11 @@ class MissionWorkflow:
             if inp.cycle_pause_seconds > 0 and workflow.patched(PATCH_SLEEPING):
                 wake = workflow.now().timestamp() + inp.cycle_pause_seconds
                 state.resume_at = max(state.resume_at, wake)
-            if state.cycles_done % inp.cycles_before_can == 0:
+            if org:  # a wave can advance several cycles: CAN when a multiple is crossed
+                cbc = inp.cycles_before_can
+                if state.cycles_done // cbc > cycles_before // cbc:
+                    workflow.continue_as_new(dataclasses.replace(inp, state=state))
+            elif state.cycles_done % inp.cycles_before_can == 0:
                 workflow.continue_as_new(dataclasses.replace(inp, state=state))
             self._maybe_continue_as_new(inp)
 

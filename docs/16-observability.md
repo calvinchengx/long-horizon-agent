@@ -11,7 +11,7 @@ What LHA records about a mission, where it goes, and what is only a hook. The co
 | Mission row (`missions`) | yes | yes, written by `mission-start`, each cycle activity and the workflow (`record_mission_status`) |
 | Cost ledger (`cost_ledger`) | every metered call | every metered call, plus `.git/lha/spend.ndjson` |
 | Gate webhook (`LHA_GATE_WEBHOOK_URL`) | gate events from `--approve-interactive` | every gate event |
-| OpenTelemetry spans | `orchestrate` only, if a tracer provider is installed | no |
+| OpenTelemetry spans | `orchestrate` and the durable implementers, if a tracer provider is installed | no |
 | Langfuse | not sent | not sent |
 | Cost summary | summary line on exit | `spent_usd` per cycle; `lha costs` for both |
 
@@ -103,9 +103,11 @@ nothing. Install it with the `observability` extra:
 cd python && uv sync --extra observability   # langfuse, opentelemetry-sdk, opentelemetry-exporter-otlp
 ```
 
-The only caller is the orchestrator (`lha orchestrate`), which opens one `cycle` span per item
-attempt with `mission_id` and `item`. LHA never installs a `TracerProvider` or exporter, so with
-the CLI the spans are no-ops. To export them, embed the orchestrator in a process that configures
+The callers are the orchestrator (`lha orchestrate`), which opens one `cycle` span per serial
+item attempt, and every parallel implementer (in `orchestrate` and in the durable
+`run_implementer` activity), which opens an `implement` span; both carry `mission_id` and `item`.
+LHA never installs a `TracerProvider` or exporter, so with the CLI and the worker the spans are
+no-ops. To export them, embed the orchestrator in a process that configures
 the OpenTelemetry SDK (for example an OTLP exporter pointed at a collector or at Langfuse's OTLP
 endpoint).
 

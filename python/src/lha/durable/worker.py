@@ -24,6 +24,12 @@ from lha.durable.activities import (
 )
 from lha.durable.agent_activities import run_subagent
 from lha.durable.data_converter import build_data_converter
+from lha.durable.org_activities import (
+    integrate_branch,
+    plan_round,
+    review_cycle,
+    run_implementer,
+)
 from lha.durable.subagent_workflow import SubAgentWorkflow
 from lha.durable.types import MissionInput, MissionResult
 from lha.durable.workflows import MissionWorkflow
@@ -54,6 +60,10 @@ def build_worker(client: Client, task_queue: str) -> Worker:
             read_mission_snapshot,
             record_mission_status,
             run_subagent,
+            plan_round,
+            run_implementer,
+            integrate_branch,
+            review_cycle,
         ],
     )
 

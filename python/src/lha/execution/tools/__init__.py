@@ -10,6 +10,11 @@ from lha.execution.tools.decisions import (
     with_decision_tool,
 )
 from lha.execution.tools.fs import GrepTool, ListFilesTool, ReadFileTool, WriteFileTool
+from lha.execution.tools.leases import (
+    REQUEST_LEASE,
+    LeaseToolDispatcher,
+    with_lease_tool,
+)
 from lha.execution.tools.shell import ShellTool
 from lha.execution.tools.web import FetchUrlTool, WebSearchTool
 
@@ -25,11 +30,13 @@ def default_local_tools() -> list[Tool]:
 
 __all__ = [
     "RECORD_DECISION",
+    "REQUEST_LEASE",
     "DecisionBuffer",
     "DecisionSink",
     "DecisionToolDispatcher",
     "FetchUrlTool",
     "GrepTool",
+    "LeaseToolDispatcher",
     "ListFilesTool",
     "ReadFileTool",
     "RecordDecisionTool",
@@ -38,4 +45,5 @@ __all__ = [
     "WriteFileTool",
     "default_local_tools",
     "with_decision_tool",
+    "with_lease_tool",
 ]

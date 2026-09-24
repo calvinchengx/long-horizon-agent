@@ -136,10 +136,18 @@ attempt appends one row `{key, cycle_id, usd, unknown, calls}` to `.git/lha/spen
 `key = idempotency_key(mission, cycle, attempt)`). The next attempt seeds its ledger with the sum.
 Unknown-cost calls are carried forward as unknown entries.
 
-Sub-agent activities (`run_subagent`) build a fresh meter from the worker's ceiling. Their spend
-is not added to the mission's journal (so it does not count toward the cycle governor), but every
-sub-agent call is written to the persistent cost ledger under the parent mission id (cycle id
-`subagent:<role>`).
+The other durable activities that call a model are budgeted the same way: the organization's
+`run_implementer`, `review_cycle` and `integrate_branch` (its replanner split), and
+`run_subagent` when its workdir is a mission checkout. Each seeds its ledger from the journal,
+uses `budget_usd` (else the worker's ceiling) as the ceiling, and appends its own spend row
+(keys `idempotency_key(mission, cycle, "impl" | "split", attempt)`,
+`idempotency_key(mission, "<cycle>-review", attempt)`, and for a sub-agent
+`idempotency_key(mission, "sub:<workflow>:<activity>@<attempt>")`). The implementers of one
+parallel wave run concurrently and each sees only the spend recorded before it started, so a wave
+can overshoot the ceiling by up to its own spend. A `run_subagent` outside a git checkout builds
+a fresh meter from the worker's ceiling. Every call of these activities is also written to the
+persistent cost ledger under the mission id (sub-agent cycle id `subagent:<role>`, or
+`<cycle>-research:<role>` for the organization's researchers).
 
 ## Loop detection and per-item failure budget
 
@@ -187,6 +195,7 @@ path writes:
 | `lha run-local`, `lha mission`, `lha orchestrate` | every call of every role (planner, lead, researcher, reviewer, reflection, librarian); the Planner's call, made before the mission id exists, is backfilled when the run starts | `#<n>` (sequence within the run) |
 | `run_agent_cycle` activity | every call of the attempt; the seeded `(prior)` entries are not written again | `<cycle>@<attempt>#<n>` |
 | `run_subagent` activity | every sub-agent call, under the parent mission id | `sub:<workflow>:<activity>@<attempt>#<n>` |
+| `run_implementer`, `review_cycle`, the split in `integrate_branch` | every call of the attempt | `impl:` / `review:` / `split:` + `<workflow>:<activity>@<attempt>#<n>` |
 | `lha mission-start` | the Planner's call | `planner#<n>` |
 
 The row key is `idempotency_key("cost", mission_id, cycle_id, call_key)` (the same derivation as
