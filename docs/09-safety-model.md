@@ -306,7 +306,8 @@ gate.
 - [obs/redact.py](../python/src/lha/obs/redact.py) masks values under secret-looking keys (not
   `input_tokens`-style counters) and secret-looking strings: `sk-…`, GitHub and Slack tokens, AWS
   key ids, Google keys, `Authorization:` values, `Bearer` tokens and `scheme://user:pass@`. It is
-  applied in `TraceRecorder.record()` and to OTel span attributes (`agent_span`). It is not a
+  applied in `TraceRecorder.record()` and to every OTel span attribute and span error status
+  (`lha.obs.otel`). It is not a
   structlog processor, so direct `structlog` calls are not redacted. Cases are in
   [`spec/obs/redact.json`](../spec/obs/redact.json).
 

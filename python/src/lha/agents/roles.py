@@ -65,40 +65,6 @@ ROLES: dict[str, RoleSpec] = {
             "findings anchored to evidence."
         ),
     ),
-    "tester": RoleSpec(
-        name="tester",
-        tier=ModelTier.SONNET,
-        system_prompt=(
-            "You are a Tester/QA. Write adversarial/property tests independent of the "
-            "implementation. Never edit the existing test harness; only add tests."
-        ),
-        allow_mutating=True,
-    ),
-    "integrator": RoleSpec(
-        name="integrator",
-        tier=ModelTier.SONNET,
-        system_prompt=(
-            "You are the Integrator and sole writer to main. Merge green branches, rebase "
-            "outstanding work, resolve conflicts, and run full verification before promoting."
-        ),
-        allow_mutating=True,
-    ),
-    "auditor": RoleSpec(
-        name="auditor",
-        tier=ModelTier.SONNET,
-        system_prompt=(
-            "You are the Reward-Hacking Auditor. Check diff scope, test-harness immutability, and "
-            "whether self-reported success matches the verifier. Flag anything suspicious."
-        ),
-    ),
-    "librarian": RoleSpec(
-        name="librarian",
-        tier=ModelTier.SONNET,
-        system_prompt=(
-            "You are the Librarian. Curate memory: distill episodes into semantic facts and "
-            "admit reusable skills only after they pass the test gate. Prune stale lessons."
-        ),
-    ),
     "implementer": RoleSpec(
         name="implementer",
         tier=ModelTier.SONNET,

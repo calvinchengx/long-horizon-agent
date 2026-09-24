@@ -44,7 +44,12 @@ from lha.agent.assembly import (
     open_lead_sandbox,
 )
 from lha.agent.prompt import render_decisions
-from lha.agent.runner import DECISION_CHAIN_STOP, MissionSummary, build_meter
+from lha.agent.runner import (
+    DECISION_CHAIN_STOP,
+    MissionSummary,
+    build_meter,
+    mission_span_attributes,
+)
 from lha.agents.integrator import (
     BranchIntegrator,
     add_worktree,
@@ -83,7 +88,7 @@ from lha.governor.governor import LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import new_id
 from lha.obs.events import TraceRecorder, configure_logging
-from lha.obs.otel import agent_span
+from lha.obs.otel import agent_span, span
 from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
@@ -214,13 +219,16 @@ class Orchestrator:
             allow_egress=allow_egress,
             gate=gate,
         )
-        return await run.execute(
-            title=title,
-            description=description,
-            checklist=checklist,
-            ownership=ownership,
-            references=references,
-        )
+        with span("lha.mission", {"lha.run_path": "orchestrate", "lha.title": title}) as traced:
+            summary = await run.execute(
+                title=title,
+                description=description,
+                checklist=checklist,
+                ownership=ownership,
+                references=references,
+            )
+            traced.set(mission_span_attributes(summary))
+            return summary
 
 
 class _MissionRun:
@@ -330,7 +338,7 @@ class _MissionRun:
             self.integrator = BranchIntegrator(
                 workdir=self.workdir,
                 session=self.session,
-                verifier=lead_verifier(self.workdir),
+                verifier=lead_verifier(self.workdir, self.settings),
                 checks=self.mission_checks,
             )
             self.ctx = ToolContext(mission_id=self.mission_id, session=self.session)
@@ -777,7 +785,7 @@ class _MissionRun:
             self.board.respond(run.writer, f"[{run.item.id}] {result.brief}")
             run.advance(TicketStatus.AWAITING_VERIFY)
             checks, witness_errors = self._item_checks(run.item)
-            verification = await lead_verifier(str(worktree)).verify(session, checks)
+            verification = await lead_verifier(str(worktree), self.settings).verify(session, checks)
             if witness_errors:
                 verification = verification.with_results(witness_errors)
             if harness_before is not None:

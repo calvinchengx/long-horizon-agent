@@ -35,6 +35,7 @@ from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import new_id
 from lha.model import build_provider
 from lha.obs.events import TraceRecorder, configure_logging
+from lha.obs.otel import span
 from lha.persistence.services import RunServices, open_run_services
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.verifier import default_python_checks
@@ -117,6 +118,53 @@ async def run_mission_local(
     ``allow_egress``: ``None`` => web tools iff ``LHA_WEB_ALLOW_HOSTS`` is set; ``True`` requires
     it; ``False`` drops them. A lethal-trifecta run raises ``RuleOfTwoViolation`` up front.
     """
+    with span("lha.mission", {"lha.run_path": "local", "lha.title": title}) as traced:
+        summary = await _run_mission_local(
+            workdir=workdir,
+            title=title,
+            description=description,
+            checklist=checklist,
+            checks=checks,
+            settings=settings,
+            anchor_text=anchor_text,
+            allow_egress=allow_egress,
+            meter=meter,
+            model=model,
+            gate=gate,
+            references=references,
+        )
+        traced.set(mission_span_attributes(summary))
+        return summary
+
+
+def mission_span_attributes(summary: MissionSummary) -> dict[str, object]:
+    """What a finished mission's ``lha.mission`` span records."""
+    return {
+        "lha.mission_id": summary.mission_id,
+        "lha.stopped_reason": summary.stopped_reason,
+        "lha.completed": summary.completed,
+        "lha.cycles": summary.cycles,
+        "lha.items_done": summary.items_done,
+        "lha.items_total": summary.items_total,
+        "lha.cost_usd": summary.total_usd,
+    }
+
+
+async def _run_mission_local(
+    *,
+    workdir: str,
+    title: str,
+    description: str,
+    checklist: Checklist,
+    checks: list[Check] | None,
+    settings: Settings | None,
+    anchor_text: str | None,
+    allow_egress: bool | None,
+    meter: CostMeter | None,
+    model: ModelProvider | None,
+    gate: HITLGate | None,
+    references: list[str] | None,
+) -> MissionSummary:
     settings = settings or get_settings()
     preflight_run_tools(settings)  # Rule of Two + web settings, before anything is opened
     configure_logging()

@@ -140,7 +140,7 @@ With the `claude` backend, `lha orchestrate` builds each role's model from its t
 | Tier | Model | Roles |
 |---|---|---|
 | Opus | `claude-opus-4-8` | lead, reviewer (and the planner role definition) |
-| Sonnet | `claude-sonnet-4-6` | tester, integrator, auditor, librarian, implementer |
+| Sonnet | `claude-sonnet-4-6` | implementer |
 | Haiku | `claude-haiku-4-5-20251001` | researcher |
 
 The replanner, which splits a blocked item, uses the lead's model on every run path. The
@@ -148,10 +148,7 @@ planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the router. Explici
 `LHA_CLAUDE_PRICE_*` values apply only to calls whose model is `LHA_MODEL_NAME`; routed roles are
 priced from the table. With any other backend every role uses `LHA_MODEL_NAME`.
 
-The `claude` extra installs `claude-agent-sdk` for
-[`agents/claude_sdk_lead.py`](../python/src/lha/agents/claude_sdk_lead.py), an optional Lead
-engine. No CLI command uses it; to run the lead through Claude Code, use the `claude_code` lead
-engine below.
+To run the lead through Claude Code, use the `claude_code` lead engine below.
 
 ## `claude_code`: Claude Code (`claude -p`)
 

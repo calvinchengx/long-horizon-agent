@@ -32,6 +32,8 @@ features (all run without services; HTTP, Postgres and the network are faked):
 | `test_web_tools.py`, `test_web_wiring.py` | `fetch_url` and `web_search` error paths; the `LHA_WEB_ALLOW_HOSTS` allow-list and `--allow-host`, default-deny egress, private addresses and redirects, IDNA hosts, the size cap, host-bound credentials from the broker, untrusted wrapping, the Rule of Two preflight (refused before the workspace is touched, and a non-retryable config error in the activities), web tools in every run path |
 | `test_model_failover_health.py` | `LHA_FALLBACK_MODELS` parsing and chain order, pricing by the serving model, the health probe per backend (stub, OpenAI-compatible model list, Ollama pulled model, Claude model lookup, failover), the durable health probe reporting a model outage |
 | `test_memory_service.py`, `test_hybrid_memory.py`, `test_memory.py`, `test_mem_fixes.py` | tiered memory in the prompt (budget, determinism, episodic recall, skills admitted only after verification, consolidation), degradation to lexical retrieval when the embedder or dense index fails, Postgres memory needing pgvector and a 1024-wide embedder, hybrid retrieval and fusion |
+| `test_flaky_retry_verifier.py` | the verifier re-runs a failing check; quarantine needs a pass and a fail on one work-tree revision; a consistent failure still gates; a quarantined check never makes an item green; timeouts and advisory checks are not re-run; the committed `check_quarantined` event is read back from `HEAD` (uncommitted edits ignored) and written by a local mission |
+| `test_otel_tracing.py` | exporter setup from `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` and the Langfuse keys (Basic auth), `OTEL_SDK_DISABLED`, the missing extra, the CLI configuring it at start (`cli` / `worker`); mission, cycle, model-call and tool-call spans and their parents on a local run, the cycle activity span; redaction; a dead backend never blocking |
 
 ```bash
 uv run pytest -q tests/unit
@@ -138,8 +140,7 @@ Coverage uses `pytest-cov` (a dev dependency). Settings are in
 [`python/pyproject.toml`](../python/pyproject.toml):
 
 - `source = ["src/lha"]`, branch coverage on.
-- Omitted: `execution/sandbox_e2b.py` (needs an E2B account) and `obs/langfuse_exporter.py` (needs
-  the optional `langfuse` package and a server).
+- Omitted: `execution/sandbox_e2b.py` (needs an E2B account).
 - `fail_under = 90` with `precision = 2`, so 89.95% fails.
 
 Coverage flags are not in pytest `addopts`; pass them explicitly:
@@ -161,8 +162,9 @@ uv run ty check               # types for src/, Python 3.12; warnings are errors
 ```
 
 `ty` is told to ignore unresolved imports of optional extras (`psycopg`, `docker`, `e2b`,
-`langfuse`, `opentelemetry`, `claude_agent_sdk`, and others), so the check passes without them
-installed.
+`opentelemetry`, and others), so the check passes without them installed. The OpenTelemetry SDK
+and OTLP/HTTP exporter (the `observability` extra) are also dev dependencies, so the tracing
+tests run against the real SDK.
 
 ## What CI enforces
 

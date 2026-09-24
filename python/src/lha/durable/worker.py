@@ -83,4 +83,7 @@ async def run_worker() -> None:
 
 
 if __name__ == "__main__":
+    from lha.obs.otel import configure_tracing
+
+    configure_tracing(component="worker")
     asyncio.run(run_worker())

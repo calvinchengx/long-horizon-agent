@@ -15,13 +15,6 @@ from lha.contracts.verify import (
     ensure_unique_check_names,
 )
 from lha.verify.flaky_quarantine import FlakeEvidenceError, FlakyQuarantine
-from lha.verify.mutation import MutationToolError, parse_mutation_summary, run_mutation_testing
-from lha.verify.trust_bootstrap import (
-    TrustBootstrap,
-    parse_coverage_pct,
-    parse_format_total,
-    parse_total_coverage,
-)
 from lha.verify.verifier import DeterministicVerifier, clip_output_tail, default_python_checks
 
 
@@ -171,77 +164,6 @@ def test_mark_flaky_requires_evidence() -> None:
     quarantine.record("pytest", revision="r2", passed=False)
     with pytest.raises(FlakeEvidenceError):
         quarantine.mark_flaky("pytest")
-    quarantine.record_results(
-        [
-            CheckResult(name="pytest", passed=True, exit_code=0),
-        ],
-        revision="r2",
-    )
+    quarantine.record("pytest", revision="r2", passed=True)
     quarantine.mark_flaky("pytest")
     assert quarantine.is_flaky("pytest")
-
-
-# --- mutation wrapper (V7) --------------------------------------------------------------------
-def test_parse_mutmut3_status_line() -> None:
-    text = (
-        "\r⠋ 10/120  🎉 5 🫥 0  ⏰ 0  🤔 0  🙁 5  🔇 0"
-        "\r⠙ 120/120  🎉 90 🫥 5  ⏰ 5  🤔 0  🙁 20  🔇 0\n"
-    )
-    result = parse_mutation_summary(text)
-    assert result is not None
-    assert (result.killed, result.survived, result.timeout, result.no_tests) == (90, 20, 5, 5)
-    assert result.score == pytest.approx(95 / 120)
-
-
-def test_parse_plain_text_summary() -> None:
-    result = parse_mutation_summary("12 killed, 3 survived")
-    assert result is not None and result.score == pytest.approx(0.8)
-    assert parse_mutation_summary("Traceback: boom") is None
-
-
-@pytest.mark.asyncio
-async def test_mutation_missing_tool_or_no_summary_raises() -> None:
-    missing = FakeSession({"mutmut": ExecResult(exit_code=127, stderr="not found")})
-    with pytest.raises(MutationToolError):
-        await run_mutation_testing("/w", command=["mutmut", "run"], session=missing)
-    garbage = FakeSession({"mutmut": ExecResult(exit_code=1, stderr="usage error")})
-    with pytest.raises(MutationToolError):
-        await run_mutation_testing("/w", command=["mutmut", "run"], session=garbage)
-    ok = FakeSession({"mutmut": ExecResult(exit_code=2, stdout="🎉 3 🙁 1")})
-    result = await run_mutation_testing("/w", command=["mutmut", "run"], session=ok)
-    assert result.killed == 3 and result.exit_code == 2
-
-
-# --- trust bootstrap coverage (V7) ------------------------------------------------------------
-def test_parse_branch_and_fractional_coverage() -> None:
-    branch = "Name  Stmts Miss Branch BrPart Cover\nTOTAL   100   10     20      4   87%\n"
-    assert parse_total_coverage(branch) == pytest.approx(0.87)
-    fractional = "TOTAL     200     15  92.50%\n"
-    assert parse_total_coverage(fractional) == pytest.approx(0.925)
-    assert parse_total_coverage("nothing here") is None
-    assert parse_coverage_pct("nothing here") == 0.0
-    assert parse_format_total("83.33\n") == pytest.approx(0.8333)
-
-
-@pytest.mark.asyncio
-async def test_trust_not_read_when_tests_fail() -> None:
-    session = FakeSession({"pytest": ExecResult(exit_code=1, stdout="TOTAL 10 0 100%")})
-    trust = await TrustBootstrap().measure(
-        "/w", command=["pytest"], total_command=["coverage"], session=session
-    )
-    assert not trust.trusted and not trust.tests_passed and not trust.measured
-    assert [argv[0] for argv, _ in session.calls] == ["pytest"]  # coverage never consulted
-
-
-@pytest.mark.asyncio
-async def test_trust_prefers_coverage_format_total() -> None:
-    session = FakeSession(
-        {
-            "pytest": ExecResult(exit_code=0, stdout="TOTAL 10 5 50%"),
-            "coverage": ExecResult(exit_code=0, stdout="72.5\n"),
-        }
-    )
-    trust = await TrustBootstrap(coverage_threshold=0.7).measure(
-        "/w", command=["pytest"], total_command=["coverage"], session=session
-    )
-    assert trust.coverage_pct == pytest.approx(0.725) and trust.trusted

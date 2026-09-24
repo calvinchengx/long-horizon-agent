@@ -6,9 +6,8 @@ run can be replayed/inspected — this is what powers the "watch it think, act, 
 the audit trail. Event data is passed through ``lha.obs.redact`` first, so secret-looking keys and
 values never reach logs or the collected trace.
 
-The recorder does NOT export to Langfuse (or any other backend) itself;
-``lha.obs.langfuse_exporter`` only builds a client. OTel spans (``lha.obs.otel``) are the
-supported path to external tracing.
+The recorder does NOT export to any backend itself; external tracing (an OTLP collector, or
+Langfuse through its OTLP endpoint) is the OpenTelemetry spans of ``lha.obs.otel``.
 """
 
 from __future__ import annotations

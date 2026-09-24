@@ -145,6 +145,7 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 | `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the web tools may read; see [Web tools](#web-tools) |
 | `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
 | `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
+| `LHA_FLAKY_RETRIES` | int (0 to 5) | `1` | re-runs of a failing, not timed-out gating check on the same work tree; a check that then passes is quarantined (non-gating for the rest of the mission, with a committed `check_quarantined` event). `0` turns re-runs and quarantine off. See [07-verification.md](07-verification.md#flaky-check-quarantine) |
 
 `LHA_SANDBOX_IMAGE` and `LHA_SANDBOX_EGRESS` apply to `docker` only. `e2b` authenticates through
 the E2B SDK's own configuration (not an `LHA_*` variable). See
@@ -194,12 +195,17 @@ See [11-multi-agent-organization.md](11-multi-agent-organization.md).
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_LANGFUSE_HOST` | string | unset | Langfuse URL for `build_langfuse()` |
+| `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` | URL | unset | OTLP/HTTP collector base URL (`/v1/traces` is appended). When unset, the standard `OTEL_EXPORTER_OTLP_ENDPOINT` is used |
+| `OTEL_EXPORTER_OTLP_HEADERS` | string | unset | standard OpenTelemetry variable, read by the exporter: headers for the collector (for example an API key) |
+| `OTEL_SDK_DISABLED` | bool | `false` | standard OpenTelemetry kill switch: `true` installs no exporter |
+| `LHA_OTEL_SERVICE_NAME` | string | `lha` | the traces' `service.name` |
+| `LHA_OTEL_EXPORT_TIMEOUT_S` | int | `5` | seconds one export may take before its spans are dropped |
+| `LHA_LANGFUSE_HOST` | string | unset | Langfuse URL; with both keys set, spans also go to `<host>/api/public/otel` |
 | `LHA_LANGFUSE_PUBLIC_KEY` | string | unset | Langfuse public key |
 | `LHA_LANGFUSE_SECRET_KEY` | secret | unset | Langfuse secret key |
 
-`build_langfuse()` has no caller; setting these has no effect on a run today. See
-[16-observability.md](16-observability.md).
+Export needs the `observability` extra; without it these settings only produce a warning at
+start. See [16-observability.md](16-observability.md).
 
 ### Human gates and sleeping
 
@@ -229,7 +235,8 @@ governor (including `LHA_APPROVAL_TIMEOUT_S`), sandbox (including `LHA_WEB_ALLOW
 `LHA_POSTGRES_FALLBACK_TO_SQLITE`, the `LHA_MEMORY_*` settings, the other web settings,
 `LHA_PRIVATE_DATA`, `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
 `LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS`, the human-gate settings,
-`LHA_LEAD_ENGINE` or the `LHA_CLAUDE_CODE_*` settings.
+`LHA_LEAD_ENGINE`, the `LHA_CLAUDE_CODE_*` settings, `LHA_FLAKY_RETRIES` or the `LHA_OTEL_*`
+settings.
 
 ## Secrets
 

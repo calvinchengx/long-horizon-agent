@@ -15,7 +15,7 @@ import json
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ModelBackend = Literal["stub", "ollama", "openai_compat", "claude", "claude_code"]
@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     # Comma-separated globs (workspace-relative) the agent may not modify, on top of the test
     # files harness integrity always protects, e.g. "Makefile,e2e/**,.github/**".
     harness_paths: str = ""
+    # Re-runs of a failing (not timed-out) gating check on the same work tree before it counts
+    # as failed; a check that passes on a re-run is quarantined (non-gating for the rest of the
+    # mission, see lha.verify.flaky_quarantine). 0 = no re-runs and no quarantine.
+    flaky_retries: int = Field(default=1, ge=0, le=5)
 
     # --- Multi-agent coordination (lha orchestrate) ---------------------------------
     # Most checklist items one parallel wave runs at once, each by its own implementer in its
@@ -128,7 +132,23 @@ class Settings(BaseSettings):
     # waves: every item is then worked serially by the Lead.
     max_parallel_implementers: int = 3
 
-    # --- Observability ---------------------------------------------------------------
+    # --- Observability (lha.obs.otel; needs the ``observability`` extra) ---------------
+    # OTLP/HTTP collector base URL (``/v1/traces`` is appended). The standard
+    # OTEL_EXPORTER_OTLP_ENDPOINT is read too; the LHA_ name wins when both are set.
+    otel_exporter_otlp_endpoint: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "LHA_OTEL_EXPORTER_OTLP_ENDPOINT", "otel_exporter_otlp_endpoint"
+        ),
+    )
+    # The standard OpenTelemetry kill switch: when true, no tracer provider is installed.
+    otel_sdk_disabled: bool = Field(
+        default=False, validation_alias=AliasChoices("otel_sdk_disabled", "OTEL_SDK_DISABLED")
+    )
+    otel_service_name: str = "lha"
+    # Seconds one span export may take before it is dropped (the agent never waits on it).
+    otel_export_timeout_s: int = 5
+    # Langfuse: with all three set, spans also go to <host>/api/public/otel (OTLP, Basic auth).
     langfuse_host: str | None = None
     langfuse_public_key: str | None = None
     langfuse_secret_key: SecretStr | None = None

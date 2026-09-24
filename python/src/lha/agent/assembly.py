@@ -3,7 +3,8 @@
 The local runner, the durable cycle activity and the multi-agent orchestrator must build the lead
 the SAME way: the configured sandbox image with its egress allow-list, the tool set (plus the
 web tools under the egress policy and the Rule of Two, see ``lha.execution.tools.toolset``), the
-human gate, a verifier that runs operator-defined trusted checks outside the sandbox,
+human gate, a verifier that runs operator-defined trusted checks outside the sandbox and
+re-runs failing checks to quarantine proven flakes,
 operator-protected harness paths, the replanner, and the lead engine (the built-in turn loop, or
 one ``claude -p`` session per cycle). Keeping it in one place is what stops the three paths from
 drifting apart.
@@ -16,7 +17,7 @@ from typing import TYPE_CHECKING
 from lha.agent.claude_code_engine import ClaudeCodeEngine
 from lha.agent.loop import AgentLoop
 from lha.agents.replanner import Replanner
-from lha.config import Settings
+from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
 from lha.contracts.model import ModelProvider
 from lha.contracts.sandbox import SandboxSession
@@ -29,6 +30,7 @@ from lha.execution.tools.toolset import build_run_dispatcher, run_tools
 from lha.model.claude_code import DEFAULT_MODEL
 from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
+from lha.verify.flaky_quarantine import FlakyRetryVerifier
 from lha.verify.trusted import CommandTrustedRunner, TrustedAwareVerifier
 from lha.verify.verifier import DeterministicVerifier
 
@@ -64,9 +66,16 @@ def lead_dispatcher(
     return build_run_dispatcher(settings, allow_mutating=True, allow_egress=allow_egress, gate=gate)
 
 
-def lead_verifier(workdir: str) -> Verifier:
-    """Sandbox checks in the sandbox; operator ``trusted:`` checks on the trusted runner."""
-    return TrustedAwareVerifier(DeterministicVerifier(), CommandTrustedRunner(), workdir)
+def lead_verifier(workdir: str, settings: Settings | None = None) -> Verifier:
+    """Sandbox checks in the sandbox; operator ``trusted:`` checks on the trusted runner; a
+    failing gating check re-run up to ``LHA_FLAKY_RETRIES`` times, and proven flakes quarantined
+    (``lha.verify.flaky_quarantine``)."""
+    settings = settings or get_settings()
+    return FlakyRetryVerifier(
+        TrustedAwareVerifier(DeterministicVerifier(), CommandTrustedRunner(), workdir),
+        retries=settings.flaky_retries,
+        workdir=workdir,
+    )
 
 
 def lead_engine(settings: Settings, *, guarded: bool = False) -> ClaudeCodeEngine | None:
@@ -132,7 +141,7 @@ def build_lead_loop(
         dispatcher=with_decision_tool(
             dispatcher or lead_dispatcher(settings, gate, allow_egress=allow_egress), anchor
         ),
-        verifier=lead_verifier(workdir),
+        verifier=lead_verifier(workdir, settings),
         anchor=anchor,
         recorder=recorder,
         max_turns=settings.max_turns_per_cycle,

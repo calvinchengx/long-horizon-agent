@@ -14,7 +14,7 @@ maintainer, do not open a public issue.
 | [`db/migrations/`](../db/migrations/) | the Postgres schema, one SQL file per version |
 | [`docs/`](../docs/) | this documentation (`NN-slug.md`) and the predicted runs |
 | [`website/`](../website/) | the Starlight site that renders `docs/` |
-| [`docker-compose.yml`](../docker-compose.yml) | local Temporal, Postgres + pgvector (optional; the mission store defaults to SQLite), Langfuse (LHA does not configure an exporter to it) |
+| [`docker-compose.yml`](../docker-compose.yml) | local Temporal, Postgres + pgvector (optional; the mission store defaults to SQLite), Langfuse (receives traces when the `LHA_LANGFUSE_*` settings are set; see [16-observability.md](16-observability.md)) |
 
 A behaviour change that is observable (which commands need approval, which URLs may be fetched,
 what is redacted, how a checklist moves, what a call costs, what bytes the anchor holds) must land
@@ -29,7 +29,7 @@ uv run lha --help
 ```
 
 Optional extras: `uv sync --extra postgres --extra embeddings --extra observability --extra
-sandbox --extra claude`. For Go, install Go 1.26 and work in `go/`.
+sandbox`. For Go, install Go 1.26 and work in `go/`.
 
 ## Checks before a pull request
 

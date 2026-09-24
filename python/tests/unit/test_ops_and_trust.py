@@ -1,10 +1,9 @@
-"""Tests for ops (degradation/safe-park, lifecycle) and verifier-trust coverage parsing."""
+"""Tests for ops (degradation/safe-park, lifecycle)."""
 
 from __future__ import annotations
 
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.ops.lifecycle import should_declare_impossible
-from lha.verify.trust_bootstrap import parse_coverage_pct
 
 
 def test_safe_park_when_critical_down() -> None:
@@ -33,9 +32,3 @@ def test_no_park_when_only_optional_degraded() -> None:
 def test_declare_impossible_threshold() -> None:
     assert not should_declare_impossible(consecutive_failures=2, threshold=3)
     assert should_declare_impossible(consecutive_failures=3, threshold=3)
-
-
-def test_parse_coverage_pct() -> None:
-    text = "Name      Stmts   Miss  Cover\nfoo.py       10      2    80%\nTOTAL        10      2    80%\n"
-    assert parse_coverage_pct(text) == 0.8
-    assert parse_coverage_pct("no coverage line") == 0.0

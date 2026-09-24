@@ -30,6 +30,15 @@ app = typer.Typer(
 db_app = typer.Typer(help="Database maintenance (Postgres).", no_args_is_help=True)
 app.add_typer(db_app, name="db")
 
+
+@app.callback()
+def _startup(ctx: typer.Context) -> None:
+    """Process start: install the trace exporter when one is configured (``lha.obs.otel``)."""
+    from lha.obs.otel import configure_tracing
+
+    configure_tracing(component="worker" if ctx.invoked_subcommand == "worker" else "cli")
+
+
 _CHECK_HELP = (
     'A gating verification command, shell-quoted (repeatable), e.g. --check "uv run pytest -q". '
     "Added to the default Python checks (ruff, ty, pytest) unless --no-default-checks."

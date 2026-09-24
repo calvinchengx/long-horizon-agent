@@ -46,6 +46,7 @@ from lha.contracts.verify import (
     ensure_unique_check_names,
 )
 from lha.obs.events import TraceRecorder
+from lha.obs.otel import span, traced_dispatch
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.harness_integrity import (
@@ -219,6 +220,35 @@ class AgentLoop:
         cycle_id: str,
         anchor_text: str | None = None,
         checks: list[Check] | None = None,
+    ) -> CycleOutcome:
+        with span("lha.cycle", {"lha.mission_id": mission_id, "lha.cycle_id": cycle_id}) as traced:
+            outcome = await self._run_cycle(
+                ctx=ctx,
+                mission_id=mission_id,
+                cycle_id=cycle_id,
+                anchor_text=anchor_text,
+                checks=checks,
+            )
+            traced.set(
+                {
+                    "lha.item_id": outcome.item_id,
+                    "lha.verdict": outcome.verdict,
+                    "lha.verified": outcome.verified,
+                    "lha.tool_calls": outcome.tool_calls,
+                    "lha.turns": outcome.turns,
+                    "lha.head_sha": outcome.head_sha,
+                }
+            )
+            return outcome
+
+    async def _run_cycle(
+        self,
+        *,
+        ctx: ToolContext,
+        mission_id: str,
+        cycle_id: str,
+        anchor_text: str | None,
+        checks: list[Check] | None,
     ) -> CycleOutcome:
         checklist = await self._anchor.read_checklist()  # committed truth, owned in memory
         snapshot = await self._anchor.read_situational_awareness()
@@ -505,7 +535,7 @@ class AgentLoop:
     async def _dispatch_result(
         self, call: ToolCall, ctx: ToolContext, mission_id: str, cycle_id: str
     ) -> ToolResult:
-        tool_result = await self._dispatcher.dispatch(call, ctx)
+        tool_result = await traced_dispatch(self._dispatcher, call, ctx)
         self._emit("tool_call", mission_id, cycle_id, tool=call.name, ok=tool_result.ok)
         return tool_result
 
@@ -604,6 +634,7 @@ class AgentLoop:
                 checklist=checklist,
                 events=[
                     *self._gate_events(cycle_id),
+                    *self._verifier_events(mission_id, cycle_id),
                     EventRecord(
                         kind="cycle",
                         cycle_id=cycle_id,
@@ -674,6 +705,16 @@ class AgentLoop:
             return []
         events: list[EventRecord] = drain()
         return [e if e.cycle_id else e.model_copy(update={"cycle_id": cycle_id}) for e in events]
+
+    def _verifier_events(self, mission_id: str, cycle_id: str) -> list[EventRecord]:
+        """Flaky-check quarantine events the verifier kept this cycle (committed with it)."""
+        drain = getattr(self._verifier, "drain_events", None)
+        if not callable(drain):
+            return []
+        events: list[EventRecord] = [e.model_copy(update={"cycle_id": cycle_id}) for e in drain()]
+        for event in events:
+            self._emit(event.kind, mission_id, cycle_id, **event.payload)
+        return events
 
     def _emit(self, kind: str, mission_id: str, cycle_id: str, **data: object) -> None:
         if self._recorder is not None:
