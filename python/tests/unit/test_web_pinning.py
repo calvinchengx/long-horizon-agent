@@ -20,6 +20,7 @@ from lha.execution.sandbox_local import LocalSandbox
 from lha.execution.tools.web import FetchUrlTool, WebSearchTool
 from lha.safety.egress import EgressPolicy
 from lha.safety.pinned_http import PinnedNetworkBackend, PinnedTransport
+from lha.state.vendor import vendor_urls
 
 PUBLIC_A = "93.184.216.34"
 PUBLIC_B = "93.184.216.35"
@@ -195,6 +196,17 @@ async def test_web_search_dials_its_vetted_endpoint_address(tmp_path: Path) -> N
     again = await tool.run({"query": "q"}, await _ctx(tmp_path))  # now resolves to loopback
     assert not again.ok and "non-public" in (again.error or "")
     assert sockets.dialled == [PUBLIC_A]
+
+
+@pytest.mark.asyncio
+async def test_lha_vendor_pins_every_hop_too(tmp_path: Path) -> None:
+    resolver = RebindingResolver({"docs.test": PUBLIC_A})
+    sockets = FakeSockets({PUBLIC_A: _http("200 OK", "<p>reference</p>")})
+    saved = await vendor_urls(
+        ["https://docs.test/ref"], tmp_path / "ref", resolver=resolver, network_backend=sockets
+    )
+    assert saved[0].bytes > 0 and resolver.calls == ["docs.test"]
+    assert sockets.dialled == [PUBLIC_A] and sockets.sni == [(PUBLIC_A, "docs.test", True)]
 
 
 # --- PinnedNetworkBackend ---------------------------------------------------------------------
