@@ -41,12 +41,20 @@ def _clip(text: str) -> str:
     return text if len(text) <= MAX_TOOL_OUTPUT else text[:MAX_TOOL_OUTPUT] + "\n…[truncated]"
 
 
+def _link_inside(link: Path, root: Path) -> bool:
+    """True if symlink ``link`` resolves inside ``root``; a symlink loop counts as outside."""
+    try:
+        return link.resolve().is_relative_to(root)
+    except RuntimeError:
+        return False
+
+
 def _contained_files(root: Path, start: Path) -> list[Path]:
     """Regular files under ``start`` whose real path stays inside ``root`` (sorted, capped)."""
     found: list[Path] = []
     for path in sorted(start.rglob("*")):
         rel = path.relative_to(root)
-        if _ignored(rel) or (path.is_symlink() and not path.resolve().is_relative_to(root)):
+        if _ignored(rel) or (path.is_symlink() and not _link_inside(path, root)):
             continue
         if path.is_file():
             found.append(path)

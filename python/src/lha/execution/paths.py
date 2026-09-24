@@ -76,10 +76,17 @@ def contained_posix(workdir: str, relpath: str) -> str:
 
 
 def resolve_within(root: str | os.PathLike[str], relpath: str) -> Path:
-    """Resolve ``relpath`` under ``root`` following symlinks; raise if the result escapes."""
+    """Resolve ``relpath`` under ``root`` following symlinks; raise if the result escapes.
+
+    A symlink loop (``Path.resolve`` raises ``RuntimeError`` on Python < 3.13) becomes a
+    ``PathEscapeError`` carrying the same message, so callers only need to handle ``OSError``.
+    """
     rel = normalize_relpath(relpath)
-    root_resolved = Path(root).resolve()
-    candidate = (root_resolved / rel).resolve()
+    try:
+        root_resolved = Path(root).resolve()
+        candidate = (root_resolved / rel).resolve()
+    except RuntimeError as exc:
+        raise PathEscapeError(str(exc)) from exc
     if not candidate.is_relative_to(root_resolved):
         raise PathEscapeError(f"path escapes the workspace: {relpath!r}")
     return candidate
