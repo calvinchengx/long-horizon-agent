@@ -39,6 +39,25 @@ type SandboxSession interface {
 	Close(ctx context.Context) error
 }
 
+// HostWorkdirSession is implemented by sessions whose Workdir is not a path on this machine (the
+// Docker sandbox mounts the host workspace at /workspace): HostWorkdir is the host directory.
+type HostWorkdirSession interface {
+	HostWorkdir() string
+}
+
+// HostRoot is the workspace as a path on THIS machine, for code that reads it without the
+// sandbox (harness integrity, the list_files / grep tools, the dispatcher's path checks). A
+// session that mounts a host directory implements HostWorkdirSession; otherwise Workdir is
+// already a host path (python: contracts.sandbox.host_root).
+func HostRoot(s SandboxSession) string {
+	if h, ok := s.(HostWorkdirSession); ok {
+		if dir := h.HostWorkdir(); dir != "" {
+			return dir
+		}
+	}
+	return s.Workdir()
+}
+
 // Sandbox opens sandbox sessions.
 type Sandbox interface {
 	Name() string

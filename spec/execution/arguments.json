@@ -1,0 +1,1733 @@
+{
+ "validate": [
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls",
+     "-la"
+    ]
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": "rm -rf /"
+   },
+   "where": "",
+   "error": "argv must be of type array, got str"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls",
+     3
+    ]
+   },
+   "where": "",
+   "error": "argv[1] must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls",
+     null
+    ]
+   },
+   "where": "",
+   "error": "argv[1] must be of type string, got NoneType"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls",
+     1.5
+    ]
+   },
+   "where": "",
+   "error": "argv[1] must be of type string, got float"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "timeout_s": true
+   },
+   "where": "",
+   "error": "timeout_s must be of type integer, got bool"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "timeout_s": 0
+   },
+   "where": "",
+   "error": "timeout_s must be >= 1"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "timeout_s": -3
+   },
+   "where": "",
+   "error": "timeout_s must be >= 1"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "timeout_s": 1.5
+   },
+   "where": "",
+   "error": "timeout_s must be of type integer, got float"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "timeout_s": 5.0
+   },
+   "where": "",
+   "error": "timeout_s must be of type integer, got float"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "timeout_s": 30
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "value": {
+    "argv": [
+     "ls"
+    ],
+    "unknown": {
+     "x": 1
+    }
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "content": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   },
+   "value": {
+    "path": "a",
+    "content": [
+     "x"
+    ]
+   },
+   "where": "",
+   "error": "content must be of type string, got list"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "content": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   },
+   "value": {
+    "path": "a",
+    "content": {
+     "k": "v"
+    }
+   },
+   "where": "",
+   "error": "content must be of type string, got dict"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "content": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   },
+   "value": {
+    "path": 123,
+    "content": "x"
+   },
+   "where": "",
+   "error": "path must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "value": {
+    "path": "a"
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "value": {
+    "path": false
+   },
+   "where": "",
+   "error": "path must be of type string, got bool"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "pattern": {
+      "type": "string"
+     },
+     "subdir": {
+      "type": "string"
+     },
+     "regex": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "pattern"
+    ]
+   },
+   "value": {
+    "pattern": "x",
+    "regex": "yes"
+   },
+   "where": "",
+   "error": "regex must be of type boolean, got str"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "pattern": {
+      "type": "string"
+     },
+     "subdir": {
+      "type": "string"
+     },
+     "regex": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "pattern"
+    ]
+   },
+   "value": {
+    "pattern": "x",
+    "regex": 1
+   },
+   "where": "",
+   "error": "regex must be of type boolean, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "pattern": {
+      "type": "string"
+     },
+     "subdir": {
+      "type": "string"
+     },
+     "regex": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "pattern"
+    ]
+   },
+   "value": {
+    "pattern": "x",
+    "regex": true,
+    "subdir": "src"
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "url": {
+      "type": "string"
+     },
+     "headers": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "url"
+    ]
+   },
+   "value": {
+    "url": "https://a.test",
+    "headers": {
+     "X-Count": 3
+    }
+   },
+   "where": "",
+   "error": "headers.X-Count must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "url": {
+      "type": "string"
+     },
+     "headers": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "url"
+    ]
+   },
+   "value": {
+    "url": "https://a.test",
+    "headers": [
+     "x"
+    ]
+   },
+   "where": "",
+   "error": "headers must be of type object, got list"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "url": {
+      "type": "string"
+     },
+     "headers": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "url"
+    ]
+   },
+   "value": {
+    "url": "https://a.test",
+    "headers": {
+     "Accept": "text/html"
+    }
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     },
+     "max_results": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   },
+   "value": {
+    "query": "q",
+    "max_results": "5"
+   },
+   "where": "",
+   "error": "max_results must be of type integer, got str"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     },
+     "max_results": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   },
+   "value": {
+    "query": "q",
+    "max_results": 5
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "decision": {
+      "type": "string"
+     },
+     "rationale": {
+      "type": "string"
+     },
+     "alternatives_rejected": {
+      "type": "string"
+     },
+     "affected": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "decision",
+     "rationale"
+    ],
+    "additionalProperties": false
+   },
+   "value": {
+    "decision": "d",
+    "rationale": "r"
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "decision": {
+      "type": "string"
+     },
+     "rationale": {
+      "type": "string"
+     },
+     "alternatives_rejected": {
+      "type": "string"
+     },
+     "affected": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "decision",
+     "rationale"
+    ],
+    "additionalProperties": false
+   },
+   "value": {
+    "decision": "d",
+    "rationale": "r",
+    "extra": 1
+   },
+   "where": "",
+   "error": "unexpected argument 'extra'"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "decision": {
+      "type": "string"
+     },
+     "rationale": {
+      "type": "string"
+     },
+     "alternatives_rejected": {
+      "type": "string"
+     },
+     "affected": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "decision",
+     "rationale"
+    ],
+    "additionalProperties": false
+   },
+   "value": {
+    "decision": "d",
+    "rationale": "r",
+    "affected": [
+     "a",
+     2
+    ]
+   },
+   "where": "",
+   "error": "affected[1] must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "decision": {
+      "type": "string"
+     },
+     "rationale": {
+      "type": "string"
+     },
+     "alternatives_rejected": {
+      "type": "string"
+     },
+     "affected": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "decision",
+     "rationale"
+    ],
+    "additionalProperties": false
+   },
+   "value": {
+    "decision": "d",
+    "rationale": 3
+   },
+   "where": "",
+   "error": "rationale must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "string",
+    "enum": [
+     "a",
+     "b",
+     "ü"
+    ]
+   },
+   "value": "a",
+   "where": "mode",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "string",
+    "enum": [
+     "a",
+     "b",
+     "ü"
+    ]
+   },
+   "value": "ü",
+   "where": "mode",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "string",
+    "enum": [
+     "a",
+     "b",
+     "ü"
+    ]
+   },
+   "value": "c",
+   "where": "mode",
+   "error": "mode must be one of ['a', 'b', 'ü']"
+  },
+  {
+   "schema": {
+    "type": "string",
+    "enum": [
+     "a",
+     "b",
+     "ü"
+    ]
+   },
+   "value": 1,
+   "where": "mode",
+   "error": "mode must be of type string, got int"
+  },
+  {
+   "schema": {
+    "enum": [
+     1,
+     2.5,
+     null,
+     "x"
+    ]
+   },
+   "value": 1.0,
+   "where": "v",
+   "error": null
+  },
+  {
+   "schema": {
+    "enum": [
+     1,
+     2.5,
+     null,
+     "x"
+    ]
+   },
+   "value": true,
+   "where": "v",
+   "error": null
+  },
+  {
+   "schema": {
+    "enum": [
+     1,
+     2.5,
+     null,
+     "x"
+    ]
+   },
+   "value": 2.5,
+   "where": "v",
+   "error": null
+  },
+  {
+   "schema": {
+    "enum": [
+     1,
+     2.5,
+     null,
+     "x"
+    ]
+   },
+   "value": null,
+   "where": "v",
+   "error": null
+  },
+  {
+   "schema": {
+    "enum": [
+     1,
+     2.5,
+     null,
+     "x"
+    ]
+   },
+   "value": 3,
+   "where": "v",
+   "error": "v must be one of [1, 2.5, None, 'x']"
+  },
+  {
+   "schema": {
+    "enum": [
+     1,
+     2.5,
+     null,
+     "x"
+    ]
+   },
+   "value": [
+    1
+   ],
+   "where": "v",
+   "error": "v must be one of [1, 2.5, None, 'x']"
+  },
+  {
+   "schema": {
+    "type": "number",
+    "minimum": 0.5,
+    "maximum": 10
+   },
+   "value": 0.5,
+   "where": "n",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "number",
+    "minimum": 0.5,
+    "maximum": 10
+   },
+   "value": 0.25,
+   "where": "n",
+   "error": "n must be >= 0.5"
+  },
+  {
+   "schema": {
+    "type": "number",
+    "minimum": 0.5,
+    "maximum": 10
+   },
+   "value": 11,
+   "where": "n",
+   "error": "n must be <= 10"
+  },
+  {
+   "schema": {
+    "type": "number",
+    "minimum": 0.5,
+    "maximum": 10
+   },
+   "value": 10.0,
+   "where": "n",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "number",
+    "minimum": 0.5,
+    "maximum": 10
+   },
+   "value": true,
+   "where": "n",
+   "error": "n must be of type number, got bool"
+  },
+  {
+   "schema": {
+    "type": "number",
+    "minimum": 0.5,
+    "maximum": 10
+   },
+   "value": 1e+300,
+   "where": "n",
+   "error": "n must be <= 10"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "cfg": {
+     "name": "x",
+     "tags": []
+    }
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "cfg": {
+     "name": "x"
+    }
+   },
+   "where": "",
+   "error": "cfg is missing ['tags']"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "cfg": {
+     "name": "x",
+     "tags": [],
+     "more": 1
+    }
+   },
+   "where": "",
+   "error": "unexpected argument 'cfg.more'"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "cfg": {
+     "name": 1,
+     "tags": []
+    }
+   },
+   "where": "",
+   "error": "cfg.name must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "rows": [
+     {
+      "id": 1
+     },
+     {
+      "id": -1
+     }
+    ]
+   },
+   "where": "",
+   "error": "rows[1].id must be >= 0"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "rows": [
+     {
+      "id": 1
+     },
+     {}
+    ]
+   },
+   "where": "",
+   "error": "rows[1] is missing ['id']"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "rows": [
+     {
+      "id": 1
+     },
+     "x"
+    ]
+   },
+   "where": "",
+   "error": "rows[1] must be of type object, got str"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "extra": null
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "extra": 0
+   },
+   "where": "",
+   "error": "extra must be of type null, got int"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "flag": true
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "flag": "yes"
+   },
+   "where": "",
+   "error": "flag must be of type boolean, got str"
+  },
+  {
+   "schema": {
+    "type": "object",
+    "properties": {
+     "cfg": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "tags": {
+        "type": "array"
+       }
+      },
+      "required": [
+       "name",
+       "tags"
+      ],
+      "additionalProperties": false
+     },
+     "rows": {
+      "type": "array",
+      "items": {
+       "type": "object",
+       "properties": {
+        "id": {
+         "type": "integer",
+         "minimum": 0
+        }
+       },
+       "required": [
+        "id"
+       ]
+      }
+     },
+     "extra": {
+      "type": "null"
+     }
+    },
+    "additionalProperties": {
+     "type": "boolean"
+    }
+   },
+   "value": {
+    "cfg": "x"
+   },
+   "where": "outer",
+   "error": "outer.cfg must be of type object, got str"
+  },
+  {
+   "schema": {
+    "type": [
+     "string",
+     "null"
+    ],
+    "properties": "not-a-dict",
+    "enum": "not-a-list"
+   },
+   "value": 5,
+   "where": "o",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": [
+     "string",
+     "null"
+    ],
+    "properties": "not-a-dict",
+    "enum": "not-a-list"
+   },
+   "value": {
+    "k": 1
+   },
+   "where": "o",
+   "error": null
+  },
+  {
+   "schema": {},
+   "value": {
+    "anything": [
+     1,
+     {
+      "a": null
+     }
+    ]
+   },
+   "where": "",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "object"
+   },
+   "value": [],
+   "where": "",
+   "error": "arguments must be of type object, got list"
+  },
+  {
+   "schema": {
+    "type": "array",
+    "items": {
+     "type": "string"
+    }
+   },
+   "value": [
+    "a",
+    "b",
+    3
+   ],
+   "where": "list",
+   "error": "list[2] must be of type string, got int"
+  },
+  {
+   "schema": {
+    "type": "integer"
+   },
+   "value": 100000000000000000000,
+   "where": "big",
+   "error": null
+  },
+  {
+   "schema": {
+    "type": "string"
+   },
+   "value": "quote'd \"x\"",
+   "where": "s",
+   "error": null
+  }
+ ],
+ "missing_required": [
+  {
+   "required": [
+    "path"
+   ],
+   "arguments": {},
+   "missing": [
+    "path"
+   ]
+  },
+  {
+   "required": [
+    "path",
+    "content"
+   ],
+   "arguments": {
+    "content": "x"
+   },
+   "missing": [
+    "path"
+   ]
+  },
+  {
+   "required": [
+    "b",
+    "a"
+   ],
+   "arguments": {},
+   "missing": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "required": [],
+   "arguments": {
+    "x": 1
+   },
+   "missing": []
+  },
+  {
+   "required": "not-a-list",
+   "arguments": {},
+   "missing": []
+  },
+  {
+   "required": [
+    1,
+    "a"
+   ],
+   "arguments": {
+    "a": 1
+   },
+   "missing": [
+    "1"
+   ]
+  }
+ ]
+}

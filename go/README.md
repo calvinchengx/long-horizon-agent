@@ -27,4 +27,12 @@ turn loop, compaction, the local runner), `internal/agents` (Planner, Replanner)
 `internal/pyfmt` (Python string semantics for byte-identical prompts) and `cmd/lha`. Not started:
 `internal/execution`, the approval gates, memory, persistence and the durable worker.
 
+decision log), `internal/verify`, `internal/governor`, `internal/obs` and `internal/execution`
+(the local and Docker sandboxes, the Docker egress proxy, path containment, the allow-list tool
+dispatcher and the tools; the E2B sandbox is not ported). Not started: `internal/agent`, the
+approval gates, memory, persistence, the durable worker and `cmd/lha`.
+
+The Docker sandbox tests against a real daemon are opt-in, like Python's integration tests:
+`LHA_IT_DOCKER=1 go test ./internal/execution/ -run Docker_IT`.
+
 Author: Calvin Cheng <calvin@calvinx.com>. MIT licensed.

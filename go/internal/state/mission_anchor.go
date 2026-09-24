@@ -255,6 +255,25 @@ func (a *GitMissionAnchor) AppendEvent(_ context.Context, event contracts.EventR
 	return nil
 }
 
+// RecordDecision queues record for the next checkpoint (in memory) and returns how many are
+// queued. The record_decision tool calls this mid-cycle (it is the anchor's
+// execution/tools.DecisionSink); the next CommitCheckpoint chains the queued records onto
+// decisions.ndjson — stamped with the checkpoint's cycle id if they have none — so they are
+// committed together with the cycle's work.
+func (a *GitMissionAnchor) RecordDecision(record contracts.DecisionRecord) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingDecisions = append(a.pendingDecisions, record)
+	return len(a.pendingDecisions)
+}
+
+// PendingDecisions returns a copy of the decisions queued since the last checkpoint.
+func (a *GitMissionAnchor) PendingDecisions() []contracts.DecisionRecord {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]contracts.DecisionRecord{}, a.pendingDecisions...)
+}
+
 // CommitCheckpoint restores .lha/ to HEAD, rewrites it from the checkpoint and commits
 // everything (work + anchor) atomically; it returns the new HEAD sha.
 func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Checkpoint) (string, error) {
@@ -325,23 +344,6 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 	a.pendingEvents = nil
 	a.pendingDecisions = nil
 	return sha, nil
-}
-
-// RecordDecision queues record for the next checkpoint (in memory) and returns how many are
-// queued. The next CommitCheckpoint chains it onto decisions.ndjson, stamped with the
-// checkpoint's cycle id if it has none, so it is committed together with the cycle's work.
-func (a *GitMissionAnchor) RecordDecision(record contracts.DecisionRecord) int {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	a.pendingDecisions = append(a.pendingDecisions, record)
-	return len(a.pendingDecisions)
-}
-
-// PendingDecisions are the decisions queued for the next checkpoint.
-func (a *GitMissionAnchor) PendingDecisions() []contracts.DecisionRecord {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	return append([]contracts.DecisionRecord{}, a.pendingDecisions...)
 }
 
 // RestoreFromHead restores tracked relpaths to their HEAD content; it returns the ones restored.
