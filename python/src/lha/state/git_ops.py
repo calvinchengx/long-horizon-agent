@@ -139,6 +139,25 @@ def commit_all(cwd: str | Path, message: str, *, force_paths: tuple[str, ...] = 
     return head_sha(cwd)
 
 
+def commit_paths(cwd: str | Path, message: str, paths: tuple[str, ...]) -> str:
+    """Commit ONLY ``paths`` (force-added, so ignored files count); return the HEAD sha.
+
+    Every other change in the work tree or the index is left exactly as it was (``git commit
+    --only``). A no-op returning the current HEAD when those paths are unchanged.
+    """
+    existing = [p for p in paths if (Path(cwd) / p).exists()]
+    if not existing:
+        return head_sha(cwd)
+    run_git(cwd, "add", "-f", "--", *existing)
+    staged = _run(cwd, ["diff", "--cached", "--quiet", "--", *existing])
+    if staged.returncode == 0:
+        return head_sha(cwd)
+    if staged.returncode != 1:
+        raise GitError(f"git diff --cached failed ({staged.returncode}): {staged.stderr.strip()}")
+    run_git(cwd, "commit", "--only", "-m", message, "--", *existing)
+    return head_sha(cwd)
+
+
 def exists_at_head(cwd: str | Path, relpath: str) -> bool:
     """True if ``relpath`` (relative to ``cwd``, not the repo root) exists in ``HEAD``."""
     if not has_commits(cwd):

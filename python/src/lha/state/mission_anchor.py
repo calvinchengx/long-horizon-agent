@@ -136,8 +136,20 @@ class GitMissionAnchor:
         """Return the immutable mission spec (``None`` for anchors created before it existed)."""
         return await asyncio.to_thread(self._read_mission)
 
+    async def read_events(self) -> list[EventRecord]:
+        """The committed episodic events, oldest first (unreadable lines are skipped)."""
+        return await asyncio.to_thread(self._read_events)
+
     async def append_event(self, event: EventRecord) -> None:
         await asyncio.to_thread(self._append_event_sync, event)
+
+    async def commit_anchor_update(self, checkpoint: Checkpoint) -> str:
+        """Like ``commit_checkpoint``, but the commit holds ONLY ``.lha/`` files.
+
+        For harness bookkeeping between cycles (e.g. a lease granted mid-wave): whatever else is
+        in the work tree or the index is neither committed nor discarded.
+        """
+        return await asyncio.to_thread(self._commit_sync, checkpoint, anchor_only=True)
 
     async def commit_checkpoint(self, checkpoint: Checkpoint) -> str:
         return await asyncio.to_thread(self._commit_sync, checkpoint)
@@ -226,7 +238,7 @@ class GitMissionAnchor:
             fh.write(event.model_dump_json() + "\n")
         self._pending_events.append(event)
 
-    def _commit_sync(self, checkpoint: Checkpoint) -> str:
+    def _commit_sync(self, checkpoint: Checkpoint, *, anchor_only: bool = False) -> str:
         # Verify the committed decision chain BEFORE touching anything: an altered history is
         # never extended (``DecisionChainError``).
         chain = self._load_decisions()
@@ -249,7 +261,7 @@ class GitMissionAnchor:
         events = [*self._pending_events, *checkpoint.events]
         self._rebuild_log(EVENTS_FILE, [e.model_dump_json() for e in events])
         message = checkpoint.commit_message or f"lha: checkpoint {checkpoint.cycle_id}"
-        sha = self._commit_all(message)
+        sha = self._commit_anchor(message) if anchor_only else self._commit_all(message)
         self._pending_events.clear()
         self._pending_decisions.clear()
         self._pending_ownership = None
@@ -258,6 +270,10 @@ class GitMissionAnchor:
     def _commit_all(self, message: str) -> str:
         force = tuple(f"{ANCHOR_DIR}/{name}" for name in ANCHOR_FILES)
         return git_ops.commit_all(self.workdir, message, force_paths=force)
+
+    def _commit_anchor(self, message: str) -> str:
+        paths = tuple(f"{ANCHOR_DIR}/{name}" for name in ANCHOR_FILES)
+        return git_ops.commit_paths(self.workdir, message, paths)
 
     def _committed_text(self, name: str) -> str:
         """The committed (``HEAD``) content of anchor file ``name``; ``""`` if not committed."""
@@ -327,6 +343,17 @@ class GitMissionAnchor:
     def _read_mission(self) -> MissionSpec | None:
         raw = self._read_anchor_file(MISSION_FILE)
         return None if raw is None else MissionSpec.model_validate_json(raw)
+
+    def _read_events(self) -> list[EventRecord]:
+        out: list[EventRecord] = []
+        for line in self._committed_text(EVENTS_FILE).split("\n"):
+            if not line.strip():
+                continue
+            try:
+                out.append(EventRecord.model_validate_json(line))
+            except ValueError:
+                continue
+        return out
 
     def _write_ownership(self, ownership: FileOwnershipMap) -> None:
         self._path(OWNERSHIP_FILE).write_text(ownership.model_dump_json(indent=2), "utf-8")

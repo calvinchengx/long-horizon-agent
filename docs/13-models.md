@@ -143,8 +143,10 @@ With the `claude` backend, `lha orchestrate` builds each role's model from its t
 | Sonnet | `claude-sonnet-4-6` | implementer |
 | Haiku | `claude-haiku-4-5-20251001` | researcher |
 
-The replanner, which splits a blocked item, uses the lead's model on every run path. The
-planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the router. Explicit
+The durable organization (`lha mission-start --review --max-parallel N`) routes its implementers
+and reviewer the same way; its researchers (`run_subagent`) and the Lead of its serial rounds
+use `LHA_MODEL_NAME`. The replanner, which splits a blocked item, uses the lead's model on every
+run path. The planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the router. Explicit
 `LHA_CLAUDE_PRICE_*` values apply only to calls whose model is `LHA_MODEL_NAME`; routed roles are
 priced from the table. With any other backend every role uses `LHA_MODEL_NAME`.
 
@@ -187,7 +189,7 @@ The engine's tools come in two modes, set by `LHA_CLAUDE_CODE_TOOLS`:
 | Mode | What Claude Code can use | Guardrails |
 |---|---|---|
 | `lha` (default) | LHA's tools only, served over MCP by an in-process server ([`agent/mcp_bridge.py`](../python/src/lha/agent/mcp_bridge.py)) on 127.0.0.1 with a per-session bearer token; its built-in tools are off | all of LHA's: the configured sandbox (Docker by default), the irreversible-command gate, path rules and the egress allow-list |
-| `native` | its own Read, Edit, Write, Glob, Grep and Bash, on the host workdir | none from LHA beyond a deny list for `git commit`/`push`/`reset`/`checkout` and similar, publishing commands, `gh`, `curl`, `wget`, WebFetch and WebSearch. Prefix rules are not a safety boundary (`sh -c 'git push'` is not caught). Requires `LHA_SANDBOX=local` and `LHA_ALLOW_UNSAFE_LOCAL=true`, and is refused under `lha orchestrate`'s ownership guard |
+| `native` | its own Read, Edit, Write, Glob, Grep and Bash, on the host workdir | none from LHA beyond a deny list for `git commit`/`push`/`reset`/`checkout` and similar, publishing commands, `gh`, `curl`, `wget`, WebFetch and WebSearch. Prefix rules are not a safety boundary (`sh -c 'git push'` is not caught). Requires `LHA_SANDBOX=local` and `LHA_ALLOW_UNSAFE_LOCAL=true`, and is refused under an ownership guard (`lha orchestrate`, or a durable mission with an ownership map) |
 
 In both modes the session also gets a `verify` tool. It runs the mission's checks and the item's
 witnesses exactly as the harness will, so Claude Code can iterate to green before it stops. It

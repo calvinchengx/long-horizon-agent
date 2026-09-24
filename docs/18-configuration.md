@@ -191,7 +191,7 @@ only; `go/internal/config` does not define them (see [Go port coverage](#go-port
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_MAX_PARALLEL_IMPLEMENTERS` | int | `3` | `lha orchestrate` only: the most checklist items one parallel wave runs at once, each by its own implementer in its own git worktree (items need disjoint write-sets assigned by the Planner); `1` (or less) disables parallel waves, so the Lead works every item serially |
+| `LHA_MAX_PARALLEL_IMPLEMENTERS` | int | `3` | `lha orchestrate` only (a durable mission takes `lha mission-start --max-parallel N` instead): the most checklist items one parallel wave runs at once, each by its own implementer in its own git worktree (items need disjoint write-sets assigned by the Planner); `1` (or less) disables parallel waves, so the Lead works every item serially |
 
 See [11-multi-agent-organization.md](11-multi-agent-organization.md).
 

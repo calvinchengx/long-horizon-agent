@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
 import json
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -37,13 +36,16 @@ import httpx
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from lha.agent.assembly import build_lead_loop, open_lead_sandbox
+from lha.agent.assembly import build_lead_loop, lead_dispatcher, open_lead_sandbox
 from lha.config import Settings, get_settings
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
-from lha.contracts.tools import ToolContext
+from lha.contracts.tools import ToolContext, ToolDispatcher
 from lha.contracts.verify import Check, checks_from_commands
 from lha.coordination.decision_log import DecisionChainError
+from lha.coordination.enforcement import OwnershipGuard, effective_ownership
+from lha.coordination.leases import finished_writers
+from lha.coordination.ownership import LEAD, writer_for_item
 from lha.durable.signals import (
     STATUS_ABORTED,
     STATUS_DONE,
@@ -80,6 +82,7 @@ from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.persistence.services import open_run_services
 from lha.persistence.store import GateEvent, StoreUnavailableError, open_store
 from lha.state import git_ops
+from lha.state.locks import CYCLE_LOCK, LOCK_WAIT_S, WorkdirBusyError, workdir_flock
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
 from lha.verify.verifier import default_python_checks
 
@@ -87,16 +90,9 @@ from lha.verify.verifier import default_python_checks
 ModelFactory = Callable[[Settings, SituationSnapshot], ModelProvider]
 
 HEARTBEAT_EVERY_S = 5.0
-LOCK_WAIT_S = 300.0
-_LOCK_POLL_S = 0.5
-_LOCK_FILE = "lha-cycle.lock"
 _SPEND_FILE = "lha/spend.ndjson"
 # How many trailing committed events to scan for an already-committed cycle id.
-_RECENT_EVENTS = 64
-
-
-class WorkdirBusyError(RuntimeError):
-    """Another attempt holds the workdir lock (retryable)."""
+_RECENT_EVENTS = 256
 
 
 def _default_model_factory(settings: Settings, _snapshot: SituationSnapshot) -> ModelProvider:
@@ -146,30 +142,14 @@ async def _with_heartbeat[T](awaitable: Awaitable[T], detail: str) -> T:
 
 
 @contextlib.asynccontextmanager
-async def workdir_lock(workdir: str, *, wait_s: float = LOCK_WAIT_S) -> AsyncIterator[None]:
-    """Exclusive, per-checkout lock (``flock`` on a file in ``.git/``), heartbeating while waiting."""
-    path = await asyncio.to_thread(git_ops.git_dir, workdir) / _LOCK_FILE
-    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        waited = 0.0
-        while True:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if waited >= wait_s:
-                    raise WorkdirBusyError(
-                        f"workdir {workdir} is locked by another cycle attempt"
-                    ) from None
-                _heartbeat("waiting for workdir lock")
-                await asyncio.sleep(_LOCK_POLL_S)
-                waited += _LOCK_POLL_S
-        try:
-            yield
-        finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+async def workdir_lock(
+    workdir: str, *, wait_s: float = LOCK_WAIT_S, name: str = CYCLE_LOCK
+) -> AsyncIterator[None]:
+    """Exclusive, per-checkout lock (``flock`` on ``.git/<name>``), heartbeating while waiting."""
+    async with workdir_flock(
+        workdir, name=name, wait_s=wait_s, on_wait=lambda: _heartbeat("waiting for workdir lock")
+    ):
+        yield
 
 
 # --- spend journal (outside the worktree; survives reset_to_head) --------------------------
@@ -252,8 +232,10 @@ def build_cycle_meter(settings: Settings, inp: CycleInput) -> CostMeter:
 
 
 # --- exactly-once per cycle id ------------------------------------------------------------
-def committed_cycle_event(workdir: str, cycle_id: str) -> dict[str, object] | None:
-    """The payload of ``cycle_id``'s checkpoint event if ``HEAD`` already contains it."""
+def committed_cycle_event(
+    workdir: str, cycle_id: str, *, kind: str = "cycle"
+) -> dict[str, object] | None:
+    """The payload of ``cycle_id``'s checkpoint event (of ``kind``) if ``HEAD`` contains it."""
     rel = f"{ANCHOR_DIR}/{EVENTS_FILE}"
     try:
         raw = git_ops.run_git(workdir, "show", f"HEAD:{rel}")
@@ -264,7 +246,7 @@ def committed_cycle_event(workdir: str, cycle_id: str) -> dict[str, object] | No
             event = EventRecord.model_validate_json(line)
         except ValueError:
             continue
-        if event.kind == "cycle" and event.cycle_id == cycle_id:
+        if event.kind == kind and event.cycle_id == cycle_id:
             return event.payload
     return None
 
@@ -282,6 +264,7 @@ def _result_from_snapshot(
     item_split: bool = False,
     pending_approvals: list[PendingApproval] | None = None,
     used_approvals: list[str] | None = None,
+    base_sha: str = "",
 ) -> CycleResult:
     return CycleResult(
         item_id=item_id,
@@ -299,6 +282,7 @@ def _result_from_snapshot(
         item_split=item_split,
         pending_approvals=list(pending_approvals or []),
         used_approvals=list(used_approvals or []),
+        base_sha=base_sha,
     )
 
 
@@ -314,7 +298,42 @@ def _anchor_text(snapshot: SituationSnapshot, inp: CycleInput) -> str:
             "An operator APPROVED these previously queued actions; each is allowed once, "
             f"exactly as requested:\n{approved}"
         )
+    active = snapshot.active_item.id if snapshot.active_item is not None else None
+    if inp.research_briefs and inp.research_item == active:
+        parts.append("Research briefs:\n" + "\n---\n".join(inp.research_briefs))
     return "\n\n".join(parts)
+
+
+def research_event(inp: CycleInput) -> EventRecord | None:
+    """The ``research`` event of the fan-out done before this cycle (failures included)."""
+    if inp.research_item is None:
+        return None
+    return EventRecord(
+        kind="research",
+        cycle_id=inp.cycle_id,
+        payload={
+            "item": inp.research_item,
+            "n": len(inp.research_briefs),
+            "failed": len(inp.research_failures),
+            "failures": [f[:500] for f in inp.research_failures],
+        },
+    )
+
+
+async def lead_guard(
+    settings: Settings, anchor: GitMissionAnchor, gate: DeferredApprovalGate, item_id: str | None
+) -> ToolDispatcher | None:
+    """The Lead's dispatcher behind an ``OwnershipGuard`` when the mission has an ownership map
+    (a durable mission with parallel waves), else ``None`` (the plain lead dispatcher).
+
+    As in ``orchestrate``'s serial rounds, the Lead may write unassigned space, shared files and
+    the active item's own files, never files leased to another open item."""
+    checklist = await anchor.read_checklist()
+    ownership = effective_ownership(await anchor.read_ownership(), finished_writers(checklist))
+    if not ownership.owners:
+        return None
+    writers = (LEAD, writer_for_item(item_id)) if item_id else (LEAD,)
+    return OwnershipGuard(lead_dispatcher(settings, gate), ownership, writers=writers)
 
 
 async def _execute_cycle(
@@ -388,8 +407,12 @@ async def _execute_cycle(
         gate = DeferredApprovalGate(approved=[a.fingerprint for a in inp.approved_actions])
         try:
             await services.tracker.running(head_sha=snapshot.head_sha)
+            event = research_event(inp)
+            if event is not None:
+                await anchor.append_event(event)  # committed with this cycle's checkpoint
             try:
                 try:
+                    active = snapshot.active_item.id if snapshot.active_item else None
                     loop = build_lead_loop(
                         settings,
                         model=model,
@@ -397,6 +420,7 @@ async def _execute_cycle(
                         workdir=inp.workdir,
                         gate=gate,
                         memory=services.memory,
+                        dispatcher=await lead_guard(settings, anchor, gate, active),
                     )
                 except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
                     raise _config_error(f"invalid configuration: {exc}", exc) from exc
@@ -445,6 +469,7 @@ async def _execute_cycle(
             item_split=outcome.item_split,
             pending_approvals=[PendingApproval(**p) for p in gate.pending],
             used_approvals=list(gate.used),
+            base_sha=snapshot.head_sha,
         )
 
 

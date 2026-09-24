@@ -119,22 +119,25 @@ cases are pinned in
   keeps recorded decisions in memory (`record_decision`), not in the working tree. The cycle's
   checkpoint chains them onto the committed log and gives any record without a `cycle_id` the
   checkpoint's id, so the decisions land in the same commit as the work they describe. A cycle
-  that ends without a checkpoint (for example a budget stop) drops them. In `orchestrate`,
-  parallel implementers record into their own buffer, and their decisions are committed only if
-  the integrator merges their branch.
+  that ends without a checkpoint (for example a budget stop) drops them. Parallel implementers
+  (in `orchestrate` and in a durable wave) record into their own buffer, and their decisions are
+  committed only if the integrator merges their branch.
 - **Reading.** The newest 5 records go into the situational snapshot (`last_decisions`). The
   Lead's prompt lists them under "Design decisions already recorded" on every cycle, and so do
-  the orchestrate implementers' prompts.
+  the parallel implementers' prompts.
 
 ### `ownership.json`
 
-The `FileOwnershipMap` for missions whose plan declares files (`lha orchestrate`): `owners` maps
-a normalized, case-folded path to its single writer (`implementer-<item id>`). Unlisted files
-belong to the lead. `initialize(ownership=...)` writes it. Without an ownership map no file is
-written (a re-initialization without a map deletes a stale one), and `read_ownership()` returns an
-empty map. The orchestrator stages changes with `stage_ownership()`. The next checkpoint writes
-them, after the `.lha/` restore, so agent edits to this file are discarded like any other anchor
-edit. See [file ownership](11-multi-agent-organization.md#file-ownership).
+The `FileOwnershipMap` for missions whose plan declares files (`lha orchestrate`, and
+`lha mission-start --max-parallel 2` or more): `owners` maps a normalized, case-folded path to
+its single writer (`implementer-<item id>`). Unlisted files belong to the lead.
+`initialize(ownership=...)` writes it. Without an ownership map no file is written (a
+re-initialization without a map deletes a stale one), and `read_ownership()` returns an empty
+map. Changes are staged with `stage_ownership()`; the next checkpoint writes them, after the
+`.lha/` restore, so agent edits to this file are discarded like any other anchor edit. A granted
+lease is written by a commit of its own that holds only `.lha/` files
+(`commit_anchor_update()`). See [file ownership](11-multi-agent-organization.md#file-ownership)
+and [leases](11-multi-agent-organization.md#leases).
 
 ### `events.ndjson`
 
@@ -142,9 +145,11 @@ edit. See [file ownership](11-multi-agent-organization.md#file-ownership).
 payloads, or `null`). Every cycle checkpoint appends a `cycle` event whose payload records the
 item, the verdict, the resulting status, the tool-call count, `split_into` (child ids, empty
 unless the item was split) and each check's name, pass/fail, gating flag, exit code and
-duration. An `orchestrate` integration checkpoint adds `writer` and `branch` to its `cycle`
+duration. An integration checkpoint of a parallel wave adds `writer` and `branch` to its `cycle`
 event and appends a `ticket` event (the ticket's id, item, role, write set, branch, status,
-status history and ownership violations). A human-approved retry after a deadlock appends an
+status history, ownership violations and leases). The multi-agent organization adds `research`,
+`review`, `lease`, `orchestrate`, `blackboard` and `reflection` events
+([wire contract](19-wire-contract.md#mission-anchor-lha)). A human-approved retry after a deadlock appends an
 `unblock` event. Every tool call that reached an approval gate appends a `tool_approval` event
 with the cycle's checkpoint (the tool, redacted arguments, reason, fingerprint, the decision
 `approve`, `reject` or `pending`, who resolved it and whether the default applied); the local
@@ -175,7 +180,8 @@ stateDiagram-v2
     blocked --> todo: unblock
     blocked --> split: replanner splits it
     split --> [*]: children id.1 .. id.n replace it
-    done --> todo: reviewer reopens (orchestrate only)
+    done --> todo: a blocking review reopens it
+    done --> blocked: 3rd blocking review in a row (durable review)
 ```
 
 - **Picking.** `next_actionable()` returns an `in_progress` item if there is one, otherwise the
@@ -235,8 +241,8 @@ A checkpoint is one commit containing both the code changes and the updated anch
 5. Stages everything with `git add -A`, then force-adds whichever of the six anchor files exist
    with `git add -f`, so they are committed even if the repository's `.gitignore` excludes
    `.lha/`.
-6. Commits, or returns the current `HEAD` if nothing changed. If a merge is in progress (an
-   `orchestrate` integration), this commit is the merge commit.
+6. Commits, or returns the current `HEAD` if nothing changed. If a merge is in progress (the
+   integration of a parallel wave), this commit is the merge commit.
 
 The agent is told not to edit `.lha/`, the dispatcher refuses tool writes to it, and the Docker
 sandbox mounts it read-only; the restore in step 2 covers anything that gets past those.

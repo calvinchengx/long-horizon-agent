@@ -24,7 +24,13 @@ older histories keep replaying down their old code path. The committed histories
 * ``mission_cancel_mid_cycle.json`` — a real mission cancelled (``lha mission-abort``) while its
   first cycle runs: the workflow waits for the cancelled cycle to acknowledge
   (``WAIT_CANCELLATION_COMPLETED``, the ``lha-cycle-wait-cancel-v1`` path) and only then writes
-  ABORTED. Every other history predates that patch and replays with the old cancellation type.
+  ABORTED. Every older history predates that patch and replays with the old cancellation type
+  (the org history below never reaches it: an org round always waits for a cancelled activity);
+* ``mission_org_wave_review.json`` — a real mission that opted into the organization
+  (``--research 1 --review --max-parallel 2``, the ``lha-durable-org-v1`` path): a parallel wave
+  of two implementers with researcher child workflows, two integrations each followed by a
+  review, then a serial round (research, Lead cycle, review). Every other history predates the
+  organization and never reaches its patch.
 """
 
 from __future__ import annotations
@@ -55,12 +61,14 @@ from tests.durability.test_durable_spine import (
 )
 from tests.durability.test_human_gates import gated_argv, gated_model, worker
 from tests.durability.test_mission_row import _FAST_BEAT, _late, _late_writing_cycle
+from tests.durability.test_org_workflow import init_org_mission, org_worker
 
 HISTORIES = Path(__file__).parent / "histories"
 RECORDED = HISTORIES / "mission_three_items.json"
 RECORDED_LADDER = HISTORIES / "mission_approval_ladder.json"
 RECORDED_ROW = HISTORIES / "mission_row_gate_retry.json"
 RECORDED_CANCEL = HISTORIES / "mission_cancel_mid_cycle.json"
+RECORDED_ORG = HISTORIES / "mission_org_wave_review.json"
 
 
 def _sanitized(history_json: str, workdir: Path, *more: Path) -> str:
@@ -260,6 +268,39 @@ async def test_fresh_cancel_mid_cycle_history_replays(tmp_path: Path) -> None:
     assert await replay_histories(str(out), object_store_root=tmp_path / "objects") == 1
 
 
+async def _record_org(tmp_path: Path) -> WorkflowHistory:
+    """A real 3-item mission with the organization on: items 01 and 02 own disjoint files (a
+    parallel wave), 03 owns none (a serial round); one researcher per item; every verified item
+    is reviewed."""
+    work = tmp_path / "work"
+    inp = await init_org_mission(work, 3, owned=2, research_per_item=1, review=True, max_parallel=2)
+    task_queue = "lha-replay-org"
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        org_worker(env, task_queue),
+    ):
+        handle = await env.client.start_workflow(
+            MissionWorkflow.run, inp, id=f"mission:{inp.mission_id}", task_queue=task_queue
+        )
+        result = await handle.result()
+        assert result.completed and result.cycles == 3
+        return await handle.fetch_history()
+
+
+@pytest.mark.asyncio
+async def test_fresh_org_history_replays(tmp_path: Path) -> None:
+    history = await _record_org(tmp_path)
+    out = tmp_path / "histories"
+    out.mkdir()
+    (out / "fresh.json").write_text(history.to_json(), encoding="utf-8")
+    if os.environ.get("LHA_RECORD_HISTORY") == "1":
+        HISTORIES.mkdir(exist_ok=True)
+        RECORDED_ORG.write_text(
+            _sanitized(history.to_json(), tmp_path / "work", tmp_path), encoding="utf-8"
+        )
+    assert await replay_histories(str(out), object_store_root=tmp_path / "objects") == 1
+
+
 @pytest.mark.asyncio
 async def test_recorded_histories_still_replay(tmp_path: Path) -> None:
     assert RECORDED.exists(), "record one with LHA_RECORD_HISTORY=1 (see module docstring)"
@@ -271,6 +312,7 @@ async def test_recorded_histories_still_replay(tmp_path: Path) -> None:
         "mission_approval_ladder.json",
         "mission_row_gate_retry.json",
         "mission_cancel_mid_cycle.json",
+        "mission_org_wave_review.json",
     } <= names
     replayed = await replay_histories(str(HISTORIES), object_store_root=tmp_path / "objects")
     assert replayed == len(names)
@@ -299,8 +341,8 @@ def _patches(path: Path) -> list[str]:
 
 
 def test_committed_histories_cover_what_they_claim() -> None:
-    """The legacy histories predate the ladder; the ladder history really went through it; only
-    the mission-row history went through ``record_mission_status``."""
+    """Each history went down the path it claims: the legacy ones predate the ladder, the ladder
+    one went through it, and the row, cancel and org histories each carry their own patch."""
     legacy_deadlock = HISTORIES / "mission_deadlock_gate_legacy.json"
     legacy_approval = HISTORIES / "mission_approval_gate_legacy.json"
     assert _patches(legacy_deadlock) == [] and "unblock_items" in _scheduled(legacy_deadlock)
@@ -312,11 +354,50 @@ def test_committed_histories_cover_what_they_claim() -> None:
         "notify_gate",
         "run_agent_cycle",
     ]
-    for older in (RECORDED, legacy_deadlock, legacy_approval, RECORDED_LADDER, RECORDED_ROW):
-        assert "lha-cycle-wait-cancel-v1" not in _patches(older)
+    for other in (
+        RECORDED,
+        legacy_deadlock,
+        legacy_approval,
+        RECORDED_LADDER,
+        RECORDED_ROW,
+        RECORDED_ORG,
+    ):
+        assert "lha-cycle-wait-cancel-v1" not in _patches(other)
     for older in (RECORDED, legacy_deadlock, legacy_approval, RECORDED_LADDER):
         assert "lha-mission-row-v1" not in _patches(older)
         assert "record_mission_status" not in _scheduled(older)
+    for other in (
+        RECORDED,
+        legacy_deadlock,
+        legacy_approval,
+        RECORDED_LADDER,
+        RECORDED_ROW,
+        RECORDED_CANCEL,
+    ):
+        assert "lha-durable-org-v1" not in _patches(other)
+        assert not {"plan_round", "run_implementer", "integrate_branch", "review_cycle"} & set(
+            _scheduled(other)
+        )
+    assert "lha-durable-org-v1" in _patches(RECORDED_ORG)
+    assert _scheduled(RECORDED_ORG) == [
+        "plan_round",
+        "run_implementer",  # the wave: two implementers at once
+        "run_implementer",
+        "integrate_branch",  # each integration commit is a checkpoint, then reviewed
+        "review_cycle",
+        "integrate_branch",
+        "review_cycle",
+        "plan_round",  # a serial round
+        "run_agent_cycle",
+        "review_cycle",
+        "record_mission_status",  # DONE
+    ]
+    children = [
+        e
+        for e in _events(RECORDED_ORG)
+        if "startChildWorkflowExecutionInitiatedEventAttributes" in e
+    ]
+    assert len(children) == 3  # one researcher per item, as child workflows
     assert _patches(RECORDED_ROW) == ["lha-gate-escalation-v1", "lha-mission-row-v1"]
     assert _scheduled(RECORDED_ROW) == [
         "run_agent_cycle",

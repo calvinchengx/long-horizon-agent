@@ -26,8 +26,8 @@ flowchart TB
         TS["Temporal server<br/>+ its Postgres"]
         PYW["Python worker<br/>lha worker"]
         GOW["Go worker<br/>(planned)"]
-        MW["MissionWorkflow<br/>run_agent_cycle, check_mission_health,<br/>notify_gate, declare_impossible,<br/>unblock_items, read_mission_snapshot"]
-        SUB["SubAgentWorkflow<br/>(registered, not started)"]
+        MW["MissionWorkflow<br/>run_agent_cycle, check_mission_health,<br/>notify_gate, declare_impossible,<br/>unblock_items, read_mission_snapshot,<br/>record_mission_status; opt-in organization:<br/>plan_round, run_implementer,<br/>integrate_branch, review_cycle"]
+        SUB["SubAgentWorkflow<br/>(researchers, with --research)"]
     end
 
     subgraph ext["Outside the process"]
@@ -77,7 +77,7 @@ flowchart TB
     MW -- "fetch_url, web_search<br/>(when LHA_WEB_ALLOW_HOSTS is set)" --> NET
 
     classDef planned stroke-dasharray: 5 5
-    class GOW,SUB,LF planned
+    class GOW,LF planned
 ```
 
 The Temporal server is the only component that must be running for durable missions; a local
@@ -91,9 +91,9 @@ initialized by one can be inspected with plain `git`.
 With the `observability` extra installed and an OTLP endpoint
 (`LHA_OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`) or the Langfuse keys set, the
 CLI and the worker install an OTLP/HTTP trace exporter at start
-([`obs/otel.py`](../python/src/lha/obs/otel.py)); missions, cycles, cycle activities, model calls
-and tool calls become spans. Export runs in the background and never blocks a run. See
-[observability](16-observability.md).
+([`obs/otel.py`](../python/src/lha/obs/otel.py)); missions, cycles, cycle activities, parallel
+implementers, model calls and tool calls become spans. Export runs in the background and never
+blocks a run. See [observability](16-observability.md).
 
 ## Four planes
 
@@ -274,36 +274,38 @@ flowchart LR
     V -- failed --> RF["Reflection<br/>fed into next attempt"]
     RV -- blocking --> A
     RV -- ok --> A
-    A -. "disjoint write-sets<br/>(orchestrate only)" .-> W["Implementers<br/>one git worktree each"]
+    A -. "disjoint write-sets" .-> W["Implementers<br/>one git worktree each"]
     W -- "verified branches" --> I["BranchIntegrator<br/>ownership check, merge, re-verify"]
     I --> RV
 ```
 
-In this diagram the dashed edge marks the path taken only by `lha orchestrate`, not a planned
-feature.
+In this diagram the dashed edge marks the path taken only when items have disjoint
+Planner-assigned write-sets (in `lha orchestrate`, or a durable mission started with
+`--max-parallel`). A durable mission runs the researchers, the reviewer and the waves only if it
+opts in.
 
 What runs where today:
 
-| Role | `lha mission` / `lha run-local` / durable | `lha orchestrate` (local only) |
-|---|---|---|
-| Planner | Yes (not in `run-local`, or when `--checklist` is given) | Yes |
-| Lead Engineer (the `AgentLoop`) | Yes | Yes |
-| Replanner (splits a blocked item) | Yes, unless `LHA_MAX_REPLANS=0` | Yes |
-| Researchers | No | 2 per item, concurrently, with read-only tools |
-| Reflection after a failed cycle | No | Yes |
-| Reviewer (can reopen a verified item) | No | Yes |
-| Parallel implementer waves, each in its own git worktree, merged by the `BranchIntegrator` | No | Yes, when two or more actionable items have disjoint write-sets (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3; below 2 disables waves) |
-| Write enforcement from `.lha/ownership.json` (`OwnershipGuard`) | No | Yes, for the lead and each implementer |
-| Tickets and blackboard | No | Yes |
-| `record_decision` and the chained decision log | Yes | Yes |
+| Role | `lha mission` / `lha run-local` | durable (`lha mission-start`) | `lha orchestrate` |
+|---|---|---|---|
+| Planner | Yes (not in `run-local`, or when `--checklist` is given) | Yes (not with `--checklist`) | Yes |
+| Lead Engineer (the `AgentLoop`) | Yes | Yes | Yes |
+| Replanner (splits a blocked item) | Yes, unless `LHA_MAX_REPLANS=0` | Yes | Yes |
+| Researchers | No | With `--research N`: N per item before each round, as child workflows | 2 per item, concurrently, with read-only tools |
+| Reflection after a failed cycle | No | No | Yes |
+| Reviewer (can reopen a verified item) | No | With `--review` | Yes |
+| Parallel implementer waves, each in its own git worktree, merged by the `BranchIntegrator` | No | With `--max-parallel N` (N of 2 to 8): one activity per implementer and per integration | Yes, when two or more actionable items have disjoint write-sets (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3; below 2 disables waves) |
+| Write enforcement from `.lha/ownership.json` (`OwnershipGuard`), lease granting | No | When planned with `--max-parallel`: the lead and each implementer | Yes, for the lead and each implementer |
+| Tickets | No | In waves | Yes |
+| Blackboard | No | No | Yes |
+| `record_decision` and the chained decision log | Yes | Yes | Yes |
 
-`lha orchestrate` starts a new mission every time; it does not resume an existing workspace.
-The ownership map records write-sets but has no lease granting: a `LeaseRequest` type exists and
-nothing grants one. The `BranchIntegrator` that `orchestrate` uses is deterministic code, not a
-model role, and the `librarian` label in the cost ledger is the memory consolidation model. Still
-not wired into any run path: `SubAgentWorkflow`, which the worker registers but `MissionWorkflow`
-does not start.
-See [the multi-agent organization](11-multi-agent-organization.md).
+`lha orchestrate --resume` continues the mission in an existing workspace; without it,
+`orchestrate` refuses a workspace that already holds one. An implementer that needs a file
+outside its write-set asks for a lease (`request_lease`), which is granted when the file is
+unowned (and not a shared or harness file) or its owner has finished. The `BranchIntegrator` is deterministic code, not a model
+role, and the `librarian` label in the cost ledger is the memory consolidation model. See
+[the multi-agent organization](11-multi-agent-organization.md).
 
 ## The model layer
 
@@ -320,7 +322,7 @@ from `LHA_MODEL_BACKEND`:
 
 Cost is computed from the token usage in each provider response. Under the `claude` backend,
 `lha orchestrate` routes roles to model tiers (planner, lead and reviewer to Opus, implementers
-to Sonnet, researchers to Haiku). With `LHA_FALLBACK_MODELS` set (`backend:model[@in/out]`
+to Sonnet, researchers to Haiku), and so do the durable organization's implementers and reviewer. With `LHA_FALLBACK_MODELS` set (`backend:model[@in/out]`
 entries), `build_provider` returns a `FailoverModel`
 ([`model/failover.py`](../python/src/lha/model/failover.py)) that tries the primary, then each
 fallback in order; each turn is priced by the provider that served it. Every member is built

@@ -11,7 +11,7 @@ What LHA records about a mission and where it goes. The code is in
 | Mission row (`missions`) | yes | yes, written by `mission-start`, each cycle activity and the workflow (`record_mission_status`) |
 | Cost ledger (`cost_ledger`) | every metered call | every metered call, plus `.git/lha/spend.ndjson` |
 | Gate webhook (`LHA_GATE_WEBHOOK_URL`) | gate events from `--approve-interactive` | every gate event |
-| OpenTelemetry spans (OTLP) | mission, cycle, model call and tool call spans, when an endpoint or Langfuse is configured and the `observability` extra is installed | cycle activity, cycle, model call and tool call spans, under the same conditions |
+| OpenTelemetry spans (OTLP) | mission, cycle, implementer, model call and tool call spans, when an endpoint or Langfuse is configured and the `observability` extra is installed | cycle activity, cycle, implementer, model call and tool call spans, under the same conditions |
 | Langfuse | the same spans, through Langfuse's OTLP endpoint | the same spans, through Langfuse's OTLP endpoint |
 | Cost summary | summary line on exit | `spent_usd` per cycle; `lha costs` for both |
 
@@ -122,16 +122,19 @@ Spans, on every run path:
 
 | Span | Where | Attributes |
 |---|---|---|
-| `lha.mission` | `run-local`, `mission` (`run_mission_local`) and `orchestrate` (`Orchestrator.run_mission`) | `lha.run_path`, `lha.title`, then `lha.mission_id`, `lha.stopped_reason`, `lha.completed`, `lha.cycles`, `lha.items_done`, `lha.items_total`, `lha.cost_usd` |
+| `lha.mission` | `run-local`, `mission` (`run_mission_local`) and `orchestrate` (`Orchestrator.run_mission`) | `lha.run_path`, `lha.title` (and `lha.resume` for `orchestrate`), then `lha.mission_id`, `lha.stopped_reason`, `lha.completed`, `lha.cycles`, `lha.items_done`, `lha.items_total`, `lha.cost_usd` |
 | `lha.activity.run_agent_cycle` | each attempt of the durable `run_agent_cycle` activity (the worker) | `lha.mission_id`, `lha.cycle_id`, `lha.attempt`, `lha.verdict`, `lha.advanced` |
 | `lha.cycle` | every `AgentLoop.run_cycle` (local, durable, the Lead in `orchestrate`) | `lha.mission_id`, `lha.cycle_id`, `lha.item_id`, `lha.verdict`, `lha.verified`, `lha.tool_calls`, `lha.turns`, `lha.head_sha` |
 | `chat <model>` | every metered model call (every role: planner, lead, researchers, reviewer, implementers, replanner, memory consolidation) | `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `lha.role`, `lha.cycle_id`, `lha.cost_usd` (absent when the cost is unknown) |
 | `invoke_agent <model>` | a whole `claude -p` session metered with `run_external` (the `claude_code` lead engine) | as `chat`, with the cost Claude Code reported |
 | `execute_tool <name>` | every tool call of the lead and of sub-agents (researchers, reviewer, implementers), including calls the policy refuses | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `lha.mission_id`, `lha.tool.ok`; status `ERROR` with the (redacted) error when the tool failed |
 
-The `orchestrate` Lead cycle and each implementer also keep their older `cycle` and `implement`
-spans (attributes `gen_ai.mission_id`, `gen_ai.item`). The workflow itself is not traced: the
-durable spans start in the activity, and the Temporal history is the record of the workflow.
+The `orchestrate` Lead cycle keeps its older `cycle` span, and every parallel implementer (in
+`orchestrate` and in the durable `run_implementer` activity) opens an `implement` span (attributes
+`gen_ai.mission_id`, `gen_ai.item`). The other organization activities (`plan_round`,
+`integrate_branch`, `review_cycle`) have no span of their own; their model and tool calls are
+traced as above. The workflow itself is not traced: the durable spans start in the activity, and
+the Temporal history is the record of the workflow.
 
 Spans carry metadata only. Prompts, model output, tool arguments and tool output are never
 attached, and every attribute passes through the redaction below.
@@ -153,6 +156,9 @@ primary view. Per workflow `mission:<mission_id>` it shows:
 
 - each `run_agent_cycle` activity: its `CycleInput`, its `CycleResult` (`item_id`, `advanced`,
   `verdict`, `items_done`/`items_total`, `head_sha`, `note`, `spent_usd`), attempts and failures;
+- for a mission that opted into the organization, each round's `plan_round`, `run_implementer`,
+  `integrate_branch` and `review_cycle` activities and its researcher child workflows
+  (`subagent:<mission_id>:researcher:<id>`);
 - durable timers and `check_mission_health` results while parked;
 - signals received (`human_decision_v1`, `steer_v1`) and Continue-As-New boundaries;
 - query results, including `status_v1`, `cycles_done`, `last_item`, `park_reason`.

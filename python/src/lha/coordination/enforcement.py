@@ -46,10 +46,14 @@ class OwnershipGuard:
         inner: ToolDispatcher,
         ownership: FileOwnershipMap,
         writers: Iterable[str],
+        *,
+        lease_tool: bool = False,
     ) -> None:
         self._inner = inner
         self._ownership = ownership
         self._writers = tuple(writers)
+        # The agent has the ``request_lease`` tool: say so in refusals.
+        self._lease_tool = lease_tool
 
     @property
     def writers(self) -> tuple[str, ...]:
@@ -97,11 +101,17 @@ class OwnershipGuard:
                 reason = "it is outside your write-set (unassigned files belong to the lead)"
             else:
                 reason = f"it is owned by {owner!r}"
-        return (
-            f"ownership: {who} may not write {norm!r}: {reason}. Write only the files you own; "
-            "if you really need this file, stop and say so in your summary (a lease request) "
-            "instead of writing it."
-        )
+        if self._lease_tool:
+            advice = (
+                "if you really need this file, call request_lease with the path and why; write "
+                "it only if the lease is granted"
+            )
+        else:
+            advice = (
+                "if you really need this file, stop and say so in your summary (a lease request) "
+                "instead of writing it"
+            )
+        return f"ownership: {who} may not write {norm!r}: {reason}. Write only the files you own; {advice}."
 
 
 def changed_paths(workdir: str | Path, base: str, head: str) -> list[str]:

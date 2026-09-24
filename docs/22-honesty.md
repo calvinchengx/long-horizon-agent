@@ -58,6 +58,8 @@ suites; see [20-testing.md](20-testing.md)):
 | An abort during a cycle ends with the row `ABORTED`: the workflow waits for the cancelled cycle, a cycle that completes anyway cannot swallow the abort, and the store never moves a terminal status back | `tests/durability/test_mission_row.py`, `tests/unit/test_persistence_store.py`, the `mission_cancel_mid_cycle.json` replay history |
 | Recorded decisions are hash-chained, shown in the next cycle's prompt, and an altered log stops the run | `tests/unit/test_decision_chain_wiring.py` |
 | Parallel implementers cannot write files they do not own, and only verified, owned, conflict-free, re-verified branches are merged | `tests/unit/test_ownership_integration.py` |
+| A durable mission that opts in runs researchers as child workflows (failures surfaced), parallel implementer waves as activities in their own worktrees merged one checkpoint at a time, and a review that reopens an item; the org activities are retry-safe, an implementer outage parks the mission, `lha mission-abort` during a wave waits for the implementers in flight and ends `ABORTED` (workflow and row), and the recorded organization history replays | `tests/durability/test_org_workflow.py`, `test_replay.py` |
+| A lease is granted only for an unowned file or one whose owner has finished, is refused otherwise, and is committed to `.lha/ownership.json` with a `lease` event; `lha orchestrate --resume` continues the same mission without losing committed work | `tests/unit/test_leases_and_resume.py` |
 | Tiered memory is recalled into the prompt, survives activity retries, and degrades to lexical-only retrieval instead of failing a cycle | `tests/unit/test_memory_service.py`, `test_persistence_wiring.py` |
 | A failing check is re-run; one that passes and fails on the same work tree is quarantined with a committed event, a consistent failure still gates, and a quarantined check never makes an item green | `tests/unit/test_flaky_retry_verifier.py` |
 | With an OTLP endpoint or Langfuse configured, the CLI and worker install an exporter at start; missions, cycles, cycle activities, model calls and tool calls are spans with redacted attributes; a dead backend does not block the run | `tests/unit/test_otel_tracing.py` |
@@ -74,29 +76,33 @@ a blocked item are.
   multi-day mission unattended. LHA's claim is narrower: the system can run for weeks (sleep,
   survive crashes, resume) while a model drives it in verified steps. Whether a given model makes
   useful progress over that span is an open question.
-- **The multi-agent organization helps.** `lha orchestrate` runs researchers, a lead, parallel
-  implementers with a branch integrator, and a reviewer, and is unit-tested with scripted models.
-  There is no measurement showing it beats the single-agent loop on real tasks.
-- **Library code that no command or workflow calls.** Sub-agent fan-out inside the durable
-  workflow (the worker registers `SubAgentWorkflow` and `research_children` is tested, but
-  `MissionWorkflow` never starts a child) is tested library code only (see
-  [23-roadmap.md](23-roadmap.md)). These, by contrast, are wired into the run paths: the
-  large-mission features, human approval gates with the escalation ladder and webhook, the
-  `SLEEPING` status, web tools under the egress policy and the Rule of Two, the fallback model
-  chain and health probe, SQLite/Postgres persistence of mission rows, the cost ledger and human
-  gates, tiered memory in the prompt, the hash-chained decision log, flaky-check quarantine in the
-  verifier, OpenTelemetry/Langfuse trace export, and, in `lha orchestrate` only, file ownership,
-  tickets, the blackboard, parallel implementer waves and the branch integrator. Saga compensation,
-  orphan-branch reconciliation, the Magentic-One ledgers, mutation testing, trust bootstrap,
-  offline prompt evolution with its judge and eval harness, the Claude Agent SDK lead, and the
-  Auditor, Librarian, Tester and model-backed Integrator runners were removed rather than kept
-  as uncalled code.
+- **The multi-agent organization helps.** `lha orchestrate`, and a durable mission started with
+  `--research`, `--review` or `--max-parallel`, run researchers, a lead, parallel implementers
+  with a branch integrator, and a reviewer; both are tested with scripted models. There is no
+  measurement showing either beats the single-agent loop on real tasks.
+- **Library code that no command or workflow calls.** The durable sub-agent fan-out, once
+  library code only, now runs as `SubAgentWorkflow` children of a durable mission that opts into
+  research. These are wired into the run paths: the large-mission features, human
+  approval gates with the escalation ladder and webhook, the `SLEEPING` status, web tools under
+  the egress policy and the Rule of Two, the fallback model chain and health probe,
+  SQLite/Postgres persistence of mission rows, the cost ledger and human gates, tiered memory in
+  the prompt, the hash-chained decision log, flaky-check quarantine in the verifier (also for
+  implementers and branch integration), OpenTelemetry/Langfuse trace export, file ownership with
+  lease granting, tickets, parallel implementer waves and the branch integrator (in
+  `lha orchestrate`, and in a durable mission that opts in), and, in `lha orchestrate` only, the
+  blackboard and reflection. Saga compensation, orphan-branch reconciliation, the Magentic-One
+  ledgers, mutation testing, trust bootstrap, offline prompt evolution with its judge and eval
+  harness, the Claude Agent SDK lead, and the Auditor, Librarian, Tester and model-backed
+  Integrator runners were removed rather than kept as uncalled code.
 - **Known gaps in wired features.** The mission row and the `hitl_gates` rows are best-effort
   copies that lag when the store is down, and a durable gate's row cannot name the person who
-  answered. A `LeaseRequest` for a foreign file is never granted. `lha orchestrate` does not
-  resume an earlier run. The default `hash` embedder is lexical, not semantic (`ollama` is
-  semantic but needs a running Ollama server). Every `openai_compat` model, primary or fallback,
-  uses the one endpoint in `LHA_OPENAI_BASE_URL`. The Go port has no Temporal worker yet.
+  answered. A contended lease is refused, not queued, and a lease lasts until its writer's item
+  is done. The implementers of one durable wave run concurrently, so the budget ceiling can be
+  overshot by up to one wave's spend. `lha orchestrate --resume` loses blackboard posts and
+  reflections made after the interrupted run's last checkpoint. The default `hash` embedder is
+  lexical, not semantic (`ollama` is semantic but needs a running Ollama server). Every
+  `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`. The
+  Go port has no Temporal worker yet.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama embedder are tested
   against mocked HTTP, not live endpoints, so no test shows how much a real embedding model
@@ -121,8 +127,8 @@ parts of the current code and do not match it everywhere:
   1,000), and shows a `phase0-placeholder` check name (check names are now derived from the check
   command).
 - `lsp-weeklong-run.txt` shows features the code does not have: a worker Build ID, a separate
-  `lha-research` task queue, research fan-out inside the durable run, a `--task @file` argument
-  form, and a log format that `lha` does not print.
+  `lha-research` task queue (durable research, with `--research`, runs on the mission's own task
+  queue), a `--task @file` argument form, and a log format that `lha` does not print.
 
 To produce a real run to compare against, configure a real model ([13-models.md](13-models.md))
 and run `lha mission` or `lha mission-start`; the git history and `.lha/` files it leaves are the
