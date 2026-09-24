@@ -102,7 +102,8 @@ a blocked item are.
   reflections made after the interrupted run's last checkpoint. The default `hash` embedder is
   lexical, not semantic (`ollama` is semantic but needs a running Ollama server). Every
   `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`. The
-  Go port has no Temporal worker yet.
+  Go CLI runs local single-agent missions only; it has no Temporal worker, orchestrator,
+  persistence or memory yet.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama embedder are tested
   against mocked HTTP, not live endpoints, so no test shows how much a real embedding model

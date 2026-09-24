@@ -2,7 +2,9 @@
 
 LHA has two implementations of the same system: Python in [`python/`](../python/) and Go in
 [`go/`](../go/). Python is the reference implementation and the only complete one.
-**Use Python for everything today.** The Go port has no CLI and no Temporal worker yet.
+The Go CLI runs single-agent missions locally (`lha run-local`, `lha mission`) in the local or
+Docker sandbox; everything durable or multi-agent (the Temporal worker and `mission-*` commands,
+`lha orchestrate`), persistence and memory, the `claude_code` engine and E2B are Python-only.
 
 ## What the two share
 
@@ -11,7 +13,7 @@ process can observe:
 
 | Surface | Shared definition |
 |---|---|
-| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). Only Python has a CLI today. |
+| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has `version`, `config`, `run-local`, `mission` and `decisions`. |
 | Settings | The `LHA_*` environment variables and `.env` file, with the same names and defaults ([`python/src/lha/config.py`](../python/src/lha/config.py), [`go/internal/config/`](../go/internal/config/)) |
 | Mission anchor | The `.lha/` files and their JSON shapes ([the mission anchor](06-mission-anchor.md)) |
 | Postgres schema | [`db/migrations/`](../db/migrations/) |
@@ -67,16 +69,41 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
 | `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local`. No `claude_code` lead engine and no tiered memory |
 | `agents` | `lha.agents.planner`, `lha.agents.replanner` | Committed (Planner with file ownership, Replanner); not the orchestrator or the other roles |
-| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions`. The other commands say they are not yet available and exit 2. Runs need the execution layer, which is linked in `go/cmd/lha/wiring.go` |
-| `execution` (sandboxes, egress proxy, tools including the web tools), `hitl` (approvals, escalation, webhook), `memory`, `persistence`, durable worker | | Not started |
+| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions` (and the hidden `egress-proxy`). The other commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
+| `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox |
+| `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's. No `DeferredApprovalGate` (it belongs to the durable workflow) |
+| `memory`, `persistence`, durable worker, orchestrator | | Not started |
 
-Consequences today:
+What the Go CLI can do today:
 
-- `cd go && go build -o lha ./cmd/lha` builds the Go CLI. Until the execution layer (sandboxes
-  and tools) is linked, `run-local` and `mission` stop with `error: execution layer not linked`
-  (exit 2), so use the Python implementation to run missions.
-- There is no Go Temporal worker and no Go persistence: Go runs do not write the mission store.
-- The Go packages can be tested with `cd go && go test ./...`.
+- `cd go && go build -o lha ./cmd/lha` builds it. `lha run-local` and `lha mission` run a mission
+  to completion, deadlock, budget refusal or loop detection in the `local` sandbox (with
+  `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) or the `docker` sandbox (`LHA_SANDBOX_IMAGE`,
+  `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible or Claude backend.
+- The lead gets the same tools as in Python (file IO, `run_command`, `record_decision`, and
+  `fetch_url` / `web_search` under `LHA_WEB_ALLOW_HOSTS` / `--allow-host`). An unsafe local sandbox
+  and a Rule-of-Two run are refused before the workspace is touched, with Python's messages and
+  exit code 2.
+- Irreversible commands are refused, or asked on the terminal with `--approve-interactive`
+  (reminders at `LHA_GATE_ESCALATION_SECONDS`, rejection after `LHA_CONSOLE_APPROVAL_TIMEOUT_S`,
+  the optional `LHA_GATE_WEBHOOK_URL`); the answers are committed as `tool_approval` and
+  `gate_reminder` events.
+- For the same inputs a Go run and a Python run leave the same checkpoint commits, the same
+  `.lha/` files and the same exit code; `go/cmd/lha/e2e_test.go` checks this by running both side
+  by side (event payload keys are written in a different order; the JSON is otherwise equal).
+
+What remains Python-only:
+
+- The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
+  `mission-abort`, `mission-snooze` and `missions` commands.
+- `lha orchestrate` (the multi-agent organization), `vendor` and `db`.
+- Persistence and memory: Go runs do not write the mission store or the persistent cost ledger
+  (so `lha costs` has nothing from them) and the lead has no tiered memory.
+- The `claude_code` model backend and lead engine, the E2B sandbox, re-running failing checks
+  (`LHA_FLAKY_RETRIES`), fallback model chains (`LHA_FALLBACK_MODELS`) and OTLP trace export.
+- The Docker sandbox's egress proxy container runs the Python proxy source by default in both
+  implementations; the Go proxy (`lha egress-proxy`) is used only when the sandbox is given a
+  proxy command and an image containing a Linux `lha` binary, which no setting selects yet.
 
 ## Known limitation: mixed Python/Go workers on one mission
 
@@ -98,7 +125,8 @@ each mission's workflow on workers of one implementation.
 
 | If you want to | Use |
 |---|---|
-| Run missions locally or on Temporal | Python |
+| Run missions on Temporal, or with persistence and memory | Python |
+| Run a single-agent mission locally from one static binary | Go (`lha run-local`, `lha mission`) or Python |
 | Run the multi-agent flow (`lha orchestrate`) | Python |
 | Contribute to the port or check conformance | Go packages plus `spec/` |
 

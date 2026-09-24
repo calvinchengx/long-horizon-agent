@@ -1,7 +1,8 @@
 // Command lha is the Go implementation of the LHA command line (python: lha.cli.main), built on
 // the standard library flag package. It implements version, config, run-local, mission and
 // decisions with the Python CLI's options, output and exit codes; every other Python command
-// prints that it is not yet available and exits 2.
+// prints that it is not yet available and exits 2. The hidden egress-proxy command serves the
+// Docker sandbox's allow-list egress proxy.
 //
 //	go build -o lha ./cmd/lha
 package main
@@ -15,14 +16,19 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/checklistimport"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -108,6 +114,8 @@ func (c *cli) run(args []string) int {
 		err = c.mission(rest)
 	case "decisions":
 		err = c.decisions(rest)
+	case "egress-proxy": // hidden: the Docker sandbox's allow-list egress proxy
+		err = c.egressProxy(rest)
 	default:
 		for _, np := range notPorted {
 			if name == np {
@@ -351,11 +359,13 @@ func mergeReferences(references, extra []string) []string {
 // refusal exits 3, anything else is an unexpected failure (exit 1).
 func runError(err error) error {
 	var budget *governor.BudgetExceeded
-	var rule *agent.RuleOfTwoViolation
+	var unsafeLocal *execution.UnsafeSandboxError
+	var e2b execution.E2BUnsupportedError
 	switch {
 	case errors.As(err, &budget):
 		return fail(3, "%s", err)
-	case errors.As(err, &rule), errors.Is(err, agent.ErrExecutionNotLinked):
+	case errors.Is(err, safety.ErrRuleOfTwoViolation), errors.As(err, &unsafeLocal),
+		errors.As(err, &e2b), errors.Is(err, agent.ErrExecutionNotLinked):
 		return fail(2, "%s", err)
 	}
 	return err
@@ -500,6 +510,29 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// --- egress-proxy (hidden) -------------------------------------------------------------------
+
+// egressProxy serves the Docker sandbox's allow-list egress proxy (python: python -m
+// lha.execution.egress_proxy), configured from LHA_PROXY_ALLOW, LHA_PROXY_PORT and LHA_PROXY_BIND,
+// until SIGINT/SIGTERM. It is not listed in the help: the Docker sandbox runs the proxy in its own
+// container, and by default that container runs the stdlib-only Python proxy source
+// (egressproxy.PythonSource); this command lets an image that ships the lha binary run the Go
+// proxy instead (DockerOptions.ProxyCommand = ["lha", "egress-proxy"]).
+func (c *cli) egressProxy(args []string) error {
+	if err := c.parse(c.newFlags("egress-proxy", "Serve the sandbox egress allow-list proxy."), args); err != nil {
+		return err
+	}
+	ctx, stop := signal.NotifyContext(c.ctx, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	logger := func(level, message string) {
+		fmt.Fprintf(c.stderr, "%s %s %s\n", time.Now().Format("2006-01-02 15:04:05,000"), level, message)
+	}
+	if err := egressproxy.ServeEnv(ctx, os.Getenv, logger); err != nil {
+		return fail(2, "%s", err)
+	}
+	return nil
 }
 
 // --- decisions -------------------------------------------------------------------------------

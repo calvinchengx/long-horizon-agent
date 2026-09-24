@@ -1,15 +1,20 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -132,14 +137,6 @@ func TestRuleOfTwoIsRefusedUpFront(t *testing.T) {
 	cleanEnv(t)
 	r := runCLI(t, nil, "run-local", "--item", "a", "--sandbox", "local", "--unsafe-local", "--allow-host", "Docs.Example.com")
 	if r.code != 2 || !strings.HasPrefix(r.stderr, "error: refusing to start: web tools are enabled (egress allow-list: docs.example.com)") {
-		t.Fatalf("%+v", r)
-	}
-}
-
-func TestRunLocalWithoutTheExecutionLayer(t *testing.T) {
-	cleanEnv(t)
-	r := runCLI(t, nil, "run-local", "--item", "a", "--sandbox", "local", "--unsafe-local", "--no-default-checks", "--check", "true")
-	if r.code != 2 || r.stderr != "error: execution layer not linked\n" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -396,5 +393,62 @@ asyncio.run(main())
 	}
 	if strings.Join(got.EventKinds, ",") != "cycle,cycle" {
 		t.Fatalf("events: %v", got.EventKinds)
+	}
+}
+
+// syncBuffer is a goroutine-safe bytes.Buffer.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func TestEgressProxyCommand(t *testing.T) {
+	cleanEnv(t, "LHA_PROXY_ALLOW=.example.org, docs.example.com", "LHA_PROXY_PORT=0", "LHA_PROXY_BIND=127.0.0.1")
+	if r := runCLI(t, nil, "--help"); strings.Contains(r.stdout, "egress-proxy") {
+		t.Fatal("egress-proxy is a hidden command")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var stderr syncBuffer
+	c := &cli{stdout: io.Discard, stderr: &stderr, ctx: ctx}
+	done := make(chan int)
+	go func() { done <- c.run([]string{"egress-proxy"}) }()
+	ready := regexp.MustCompile(`INFO lha-egress-proxy listening on 127\.0\.0\.1:(\d+) allow=\.example\.org,docs\.example\.com\n`)
+	deadline := time.Now().Add(5 * time.Second)
+	for !ready.MatchString(stderr.String()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("proxy not ready: %q", stderr.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	port := ready.FindStringSubmatch(stderr.String())[1]
+	conn, err := net.Dial("tcp", "127.0.0.1:"+port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Fprintf(conn, "CONNECT evil.example.net:443 HTTP/1.1\r\nHost: evil.example.net:443\r\n\r\n")
+	status, _ := bufio.NewReader(conn).ReadString('\n')
+	conn.Close()
+	if !strings.HasPrefix(status, "HTTP/1.1 403") {
+		t.Fatalf("a host outside the allow-list must be refused: %q", status)
+	}
+	cancel()
+	if code := <-done; code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	cleanEnv(t, "LHA_PROXY_PORT=nope")
+	if r := runCLI(t, nil, "egress-proxy"); r.code != 2 || r.stderr != "error: invalid literal for int() with base 10: 'nope'\n" {
+		t.Fatalf("%+v", r)
 	}
 }

@@ -232,15 +232,17 @@ so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` and its timeout are read b
 
 ## Go port coverage
 
-[`go/internal/config/config.go`](../go/internal/config/config.go) defines the model, Temporal,
-governor (including `LHA_APPROVAL_TIMEOUT_S`), sandbox (including `LHA_WEB_ALLOW_HOSTS`,
-`LHA_TRUSTED_CHECKS`, `LHA_HARNESS_PATHS`) and Langfuse settings, plus `LHA_POSTGRES_DSN`,
-`LHA_WORKSPACE_ROOT` and `LHA_OBJECT_STORE_ROOT`. It does not define `LHA_SQLITE_PATH`,
-`LHA_POSTGRES_FALLBACK_TO_SQLITE`, the `LHA_MEMORY_*` settings, the other web settings,
-`LHA_PRIVATE_DATA`, `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
-`LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS`, the human-gate settings,
-`LHA_LEAD_ENGINE`, the `LHA_CLAUDE_CODE_*` settings, `LHA_FLAKY_RETRIES` or the `LHA_OTEL_*`
-settings.
+[`go/internal/config/config.go`](../go/internal/config/config.go) defines every Python setting,
+with the same names, defaults and validation (`lha config` prints the same output). The Go CLI
+uses the model, governor, sandbox, web-tool, trusted-check, harness and human-gate settings
+(`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL`,
+`LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`). Settings of features that are Python-only are read but have
+no effect in a Go run: Temporal, persistence (`LHA_SQLITE_PATH`, `LHA_POSTGRES_*`), the
+`LHA_MEMORY_*` settings, `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
+`LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS`, `LHA_FLAKY_RETRIES`, the
+`LHA_CLAUDE_CODE_*` settings and the `LHA_OTEL_*` settings (`LHA_LEAD_ENGINE=claude_code` and
+`LHA_MODEL_BACKEND=claude_code` are refused). See
+[04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Secrets
 
