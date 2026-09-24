@@ -96,7 +96,10 @@ class MissionTracker:
         self._workflow_id = workflow_id
         self.failures = 0
 
-    async def set_status(self, status: str, *, head_sha: str | None = None) -> None:
+    async def set_status(
+        self, status: str, *, head_sha: str | None = None, reopen: bool = False
+    ) -> None:
+        """Upsert the row (a terminal status stays unless ``reopen``: see ``upsert_mission``)."""
         try:
             await self._store.upsert_mission(
                 mission_id=self.mission_id,
@@ -105,6 +108,7 @@ class MissionTracker:
                 status=status,
                 head_sha=head_sha or None,
                 workflow_id=self._workflow_id,
+                reopen=reopen,
             )
         except Exception as exc:
             self.failures += 1

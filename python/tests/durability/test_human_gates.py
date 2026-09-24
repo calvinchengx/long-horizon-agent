@@ -127,7 +127,10 @@ def worker(
     tq: str,
     cycle: object,
     webhook: Webhook | None = None,
+    **options: Any,
 ) -> Worker:
+    """``options`` go to ``Worker`` (e.g. a short ``max_heartbeat_throttle_interval`` so a
+    cancellation reaches a heartbeating activity in well under the default 60 s)."""
     settings, transport = SETTINGS, None
     if webhook is not None:
         settings = SETTINGS.model_copy(
@@ -147,6 +150,7 @@ def worker(
             _snapshot_activity,
             ROW_ACTIVITY,
         ],
+        **options,
     )
 
 

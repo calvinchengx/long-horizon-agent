@@ -1,6 +1,6 @@
 """Postgres backend of ``MissionStore`` (requires the ``postgres`` extra and ``lha db migrate``).
 
-Uses the tables from ``db/migrations`` (0001-0004); psycopg is imported only when a connection is
+Uses the tables from ``db/migrations`` (0001-0005); psycopg is imported only when a connection is
 opened. The cost-ledger insert and its idempotency key are the same as ``CostLedgerRepo``'s, so
 rows written by either are interchangeable. One autocommit connection per store, opened by
 ``open()`` (which also verifies that the required migrations are applied) and serialized with a
@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from typing import Any
 
 from lha.contracts.memory import MemoryRecord
@@ -22,12 +23,19 @@ from lha.memory.skills import Skill, SkillNotVerifiedError
 from lha.persistence.sqlite import cost_idempotency_key
 from lha.persistence.store import (
     BACKEND_POSTGRES,
+    GATE_DEFAULTED,
+    GATE_ESCALATED,
+    GATE_RESOLVED,
     REQUIRED_PG_MIGRATIONS,
     CostRow,
     CostSummary,
     EventRow,
+    GateEvent,
+    GateRow,
     MissionRow,
     StoreUnavailableError,
+    terminal_guard_sql,
+    validate_gate_event,
 )
 
 # Shared with ``CostLedgerRepo`` (``repositories.py``), so rows written by either are identical.
@@ -43,6 +51,35 @@ INSERT_COST_SQL = (
 def _ts(value: object) -> str:
     iso = getattr(value, "isoformat", None)
     return str(iso()) if callable(iso) else str(value or "")
+
+
+def _parse_ts(value: str) -> datetime:
+    """An ISO-8601 timestamp for a ``timestamptz`` parameter (naive = UTC)."""
+    moment = datetime.fromisoformat(value)
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+
+
+# Per gate event: the ON CONFLICT update (see ``SqliteStore`` for the rules).
+_PG_GATE_UPDATE = {
+    "opened": (
+        "kind = EXCLUDED.kind, question = EXCLUDED.question, risk = EXCLUDED.risk, "
+        "default_action = EXCLUDED.default_action, options = EXCLUDED.options, "
+        "request = EXCLUDED.request, status = EXCLUDED.status, deadline = EXCLUDED.deadline, "
+        "decision = NULL, resolved_by = NULL, resolved_at = NULL, reminders = 0, "
+        "created_at = EXCLUDED.created_at, updated_at = now() "
+        "WHERE hitl_gates.created_at IS DISTINCT FROM EXCLUDED.created_at"
+    ),
+    "reminder": (
+        "status = EXCLUDED.status, "
+        "reminders = GREATEST(hitl_gates.reminders, EXCLUDED.reminders), updated_at = now() "
+        "WHERE hitl_gates.status IN ('OPEN', 'ESCALATED')"
+    ),
+    "closed": (
+        "status = EXCLUDED.status, decision = EXCLUDED.decision, "
+        "resolved_by = EXCLUDED.resolved_by, resolved_at = EXCLUDED.resolved_at, "
+        "updated_at = now() WHERE hitl_gates.status IN ('OPEN', 'ESCALATED')"
+    ),
+}
 
 
 class PostgresStore:
@@ -113,18 +150,20 @@ class PostgresStore:
         description: str = "",
         head_sha: str | None = None,
         workflow_id: str | None = None,
+        reopen: bool = False,
     ) -> None:
+        status_sql = terminal_guard_sql("missions.status", "EXCLUDED.status", "%s")
         await self._execute(
             "INSERT INTO missions (mission_id, title, description, status, head_sha, workflow_id) "
             "VALUES (%s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (mission_id) DO UPDATE SET "
             "title = COALESCE(NULLIF(EXCLUDED.title, ''), missions.title), "
             "description = COALESCE(NULLIF(EXCLUDED.description, ''), missions.description), "
-            "status = EXCLUDED.status, "
+            f"status = {status_sql}, "
             "head_sha = COALESCE(NULLIF(EXCLUDED.head_sha, ''), missions.head_sha), "
             "workflow_id = COALESCE(EXCLUDED.workflow_id, missions.workflow_id), "
             "updated_at = now()",
-            (mission_id, title, description, status, head_sha, workflow_id),
+            (mission_id, title, description, status, head_sha, workflow_id, reopen),
         )
 
     _MISSION_COLS = (
@@ -157,6 +196,70 @@ class PostgresStore:
             (limit,),
         )
         return [self._mission(r) for r in rows]
+
+    # --- human gates (migration 0005) ----------------------------------------------------
+    async def record_gate_event(self, event: GateEvent) -> None:
+        status = validate_gate_event(event)
+        closing = status in (GATE_RESOLVED, GATE_DEFAULTED)
+        update = _PG_GATE_UPDATE[
+            "closed" if closing else "reminder" if status == GATE_ESCALATED else "opened"
+        ]
+        at = _parse_ts(event.at)
+        await self._execute(
+            "INSERT INTO hitl_gates (mission_id, gate_id, kind, question, risk, default_action, "
+            "options, request, status, deadline, decision, resolved_by, reminders, created_at, "
+            "resolved_at, updated_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, %s, %s, %s, %s, %s, "
+            f"now()) ON CONFLICT (mission_id, gate_id) DO UPDATE SET {update}",
+            (
+                event.mission_id,
+                event.gate_id,
+                event.kind,
+                event.question,
+                event.risk or event.kind,
+                event.default_action,
+                json.dumps(list(event.options)),
+                json.dumps(event.request, sort_keys=True) if event.request is not None else None,
+                status,
+                _parse_ts(event.deadline) if event.deadline else None,
+                (event.decision or None) if closing else None,
+                (event.resolved_by or None) if closing else None,
+                event.step if status == GATE_ESCALATED else 0,
+                at,
+                at if closing else None,
+            ),
+        )
+
+    async def list_gates(self, mission_id: str | None = None, *, limit: int = 50) -> list[GateRow]:
+        where, params = ("WHERE mission_id = %s ", [mission_id]) if mission_id else ("", [])
+        rows = await self._fetchall(
+            "SELECT mission_id, gate_id, kind, status, question, options, default_action, risk, "
+            "deadline, decision, resolved_by, reminders, request, created_at, resolved_at, "
+            f"updated_at FROM hitl_gates {where}"
+            "ORDER BY created_at DESC, mission_id, gate_id LIMIT %s",
+            [*params, limit],
+        )
+        return [
+            GateRow(
+                mission_id=str(r[0]),
+                gate_id=str(r[1]),
+                kind=str(r[2]),
+                status=str(r[3]),
+                question=str(r[4]),
+                options=[str(o) for o in (r[5] or [])],
+                default_action=str(r[6]),
+                risk=str(r[7]),
+                deadline=_ts(r[8]),
+                decision=r[9],
+                resolved_by=r[10],
+                reminders=int(r[11]),
+                request={str(k): str(v) for k, v in r[12].items()} if r[12] else None,
+                opened_at=_ts(r[13]),
+                resolved_at=_ts(r[14]),
+                updated_at=_ts(r[15]),
+            )
+            for r in rows
+        ]
 
     # --- cost ledger --------------------------------------------------------------------
     async def record_cost(self, mission_id: str, entry: CostEntry, *, call_key: str) -> bool:

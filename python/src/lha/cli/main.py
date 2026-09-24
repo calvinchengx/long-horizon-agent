@@ -2,7 +2,7 @@
 
 Run paths (``run-local`` / ``mission`` / ``orchestrate`` / ``mission-start``) persist the mission
 row and every metered model call to the mission store (SQLite by default, Postgres with
-``LHA_POSTGRES_DSN``); ``missions`` and ``costs`` read it back.
+``LHA_POSTGRES_DSN``); ``missions``, ``costs`` and ``gates`` read it back.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from lha.config import Settings, get_settings
 if TYPE_CHECKING:
     from lha.contracts.hitl import HITLGate
     from lha.durable.types import GateView
-    from lha.persistence.store import MissionStore
+    from lha.persistence.store import GateRow, MissionStore
     from lha.state.checklist_import import ImportedChecklist
 
 app = typer.Typer(
@@ -334,6 +334,49 @@ def costs(
         f"unknown-cost calls {summary.unknown_cost_calls}  "
         f"tokens in {summary.input_tokens} out {summary.output_tokens}"
     )
+
+
+def format_gate_row(row: GateRow) -> list[str]:
+    """Human-readable lines for one recorded gate (``lha gates``)."""
+    decided = (
+        f"{row.decision} by {row.resolved_by or '-'} at {row.resolved_at[:19]}"
+        if row.status in ("RESOLVED", "DEFAULTED")
+        else f"open, default {row.default_action or '-'} at {row.deadline[:19] or '-'}"
+    )
+    lines = [
+        f"{row.opened_at[:19]}  {row.mission_id}  {row.gate_id}  {row.kind:<9} "
+        f"{row.status:<9} reminders {row.reminders}  {decided}",
+        f"  question: {row.question}",
+        f"  options: {' | '.join(row.options)}",
+    ]
+    if row.request:
+        what = row.request.get("argv") or row.request.get("arguments") or ""
+        lines.append(f"  request: {row.request.get('tool', '')} {what}".rstrip())
+    return lines
+
+
+@app.command()
+def gates(
+    mission_id: str | None = typer.Argument(None, help="Mission id (default: every mission)."),
+    limit: int = typer.Option(50, min=1, help="How many gates (most recently opened first)."),
+) -> None:
+    """List recorded human gates: kind, question, options, reminders, decision, who and when.
+
+    Durable missions record every gate event (opened, reminder, resolved, defaulted) from the
+    notify_gate activity; local runs with --approve-interactive record the terminal approver's.
+    Reads the same mission store as `lha missions` (see `lha config` for its location).
+    """
+
+    async def _read(store: MissionStore) -> list[GateRow]:
+        return await store.list_gates(mission_id, limit=limit)
+
+    rows = _run(_with_store(_read))
+    if not rows:
+        typer.echo(f"no gates recorded{f' for mission {mission_id}' if mission_id else ''}")
+        return
+    for row in rows:
+        for line in format_gate_row(row):
+            typer.echo(line)
 
 
 @app.command(name="run-local")

@@ -185,6 +185,7 @@ class AllowListDispatcher:
             "arguments": repr(call.arguments)[:2000],
             "reason": reason,
             "fingerprint": action_fingerprint(call.name, call.arguments),
+            "mission_id": ctx.mission_id,
         }
         spec = self._tools[call.name].spec
         argv = call.arguments.get(spec.command_arg) if spec.command_arg else None

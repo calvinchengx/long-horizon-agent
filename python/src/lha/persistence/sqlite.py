@@ -1,6 +1,6 @@
 """SQLite backend of ``MissionStore`` (stdlib ``sqlite3``; the zero-infra default).
 
-The tables mirror ``db/migrations`` (0001-0004) with SQLite types: timestamps are ISO-8601 UTC
+The tables mirror ``db/migrations`` (0001-0005) with SQLite types: timestamps are ISO-8601 UTC
 text, ``jsonb`` is JSON text, vectors are JSON arrays of floats. The schema is created/upgraded on
 open and versioned in ``schema_migrations`` (versions prefixed ``sqlite_``).
 
@@ -27,10 +27,17 @@ from lha.ids import idempotency_key
 from lha.memory.skills import Skill, SkillNotVerifiedError
 from lha.persistence.store import (
     BACKEND_SQLITE,
+    GATE_DEFAULTED,
+    GATE_ESCALATED,
+    GATE_RESOLVED,
     CostRow,
     CostSummary,
     EventRow,
+    GateEvent,
+    GateRow,
     MissionRow,
+    terminal_guard_sql,
+    validate_gate_event,
 )
 
 BUSY_TIMEOUT_MS = 10_000
@@ -115,7 +122,55 @@ SQLITE_MIGRATIONS: tuple[tuple[str, str], ...] = (
         CREATE INDEX IF NOT EXISTS skills_namespace ON skills (namespace);
         """,
     ),
+    (
+        # The Postgres ``hitl_gates`` table (0001 + 0005): one row per (mission, gate).
+        "sqlite_0002_hitl_gates",
+        """
+        CREATE TABLE IF NOT EXISTS hitl_gates (
+            mission_id     TEXT NOT NULL,
+            gate_id        TEXT NOT NULL,
+            kind           TEXT NOT NULL DEFAULT '',
+            question       TEXT NOT NULL DEFAULT '',
+            risk           TEXT NOT NULL DEFAULT '',
+            default_action TEXT NOT NULL DEFAULT '',
+            options        TEXT NOT NULL DEFAULT '[]',
+            request        TEXT,
+            status         TEXT NOT NULL DEFAULT 'OPEN',
+            deadline       TEXT,
+            decision       TEXT,
+            resolved_by    TEXT,
+            reminders      INTEGER NOT NULL DEFAULT 0,
+            created_at     TEXT NOT NULL,
+            resolved_at    TEXT,
+            updated_at     TEXT NOT NULL,
+            PRIMARY KEY (mission_id, gate_id)
+        );
+        CREATE INDEX IF NOT EXISTS hitl_gates_opened ON hitl_gates (created_at);
+        """,
+    ),
 )
+
+# Per gate event: the ON CONFLICT update (``excluded`` = the incoming event's row). ``opened``
+# reopens the row unless it is a retry of the same opening; the others touch only an open row.
+_SQLITE_GATE_UPDATE = {
+    "opened": (
+        "kind = excluded.kind, question = excluded.question, risk = excluded.risk, "
+        "default_action = excluded.default_action, options = excluded.options, "
+        "request = excluded.request, status = excluded.status, deadline = excluded.deadline, "
+        "decision = NULL, resolved_by = NULL, resolved_at = NULL, reminders = 0, "
+        "created_at = excluded.created_at, updated_at = excluded.updated_at "
+        "WHERE hitl_gates.created_at != excluded.created_at"
+    ),
+    "reminder": (
+        "status = excluded.status, reminders = MAX(hitl_gates.reminders, excluded.reminders), "
+        "updated_at = excluded.updated_at WHERE hitl_gates.status IN ('OPEN', 'ESCALATED')"
+    ),
+    "closed": (
+        "status = excluded.status, decision = excluded.decision, "
+        "resolved_by = excluded.resolved_by, resolved_at = excluded.resolved_at, "
+        "updated_at = excluded.updated_at WHERE hitl_gates.status IN ('OPEN', 'ESCALATED')"
+    ),
+}
 
 
 def _now() -> str:
@@ -220,8 +275,10 @@ class SqliteStore:
         description: str = "",
         head_sha: str | None = None,
         workflow_id: str | None = None,
+        reopen: bool = False,
     ) -> None:
         now = _now()
+        status_sql = terminal_guard_sql("missions.status", "excluded.status", "?")
 
         def _upsert(conn: sqlite3.Connection) -> None:
             conn.execute(
@@ -231,11 +288,21 @@ class SqliteStore:
                 "title = CASE WHEN excluded.title != '' THEN excluded.title ELSE title END, "
                 "description = CASE WHEN excluded.description != '' "
                 "THEN excluded.description ELSE description END, "
-                "status = excluded.status, "
+                f"status = {status_sql}, "
                 "head_sha = COALESCE(NULLIF(excluded.head_sha, ''), head_sha), "
                 "workflow_id = COALESCE(excluded.workflow_id, workflow_id), "
                 "updated_at = excluded.updated_at",
-                (mission_id, title, description, status, head_sha, workflow_id, now, now),
+                (
+                    mission_id,
+                    title,
+                    description,
+                    status,
+                    head_sha,
+                    workflow_id,
+                    now,
+                    now,
+                    1 if reopen else 0,
+                ),
             )
 
         await self._run(_upsert)
@@ -268,6 +335,76 @@ class SqliteStore:
                 "SELECT * FROM missions ORDER BY updated_at DESC, mission_id LIMIT ?", (limit,)
             ).fetchall()
             return [self._mission(r) for r in rows]
+
+        return await self._run(_list)
+
+    # --- human gates --------------------------------------------------------------------
+    async def record_gate_event(self, event: GateEvent) -> None:
+        status = validate_gate_event(event)
+        closing = status in (GATE_RESOLVED, GATE_DEFAULTED)
+        update = _SQLITE_GATE_UPDATE[
+            "closed" if closing else "reminder" if status == GATE_ESCALATED else "opened"
+        ]
+        params = (
+            event.mission_id,
+            event.gate_id,
+            event.kind,
+            event.question,
+            event.risk or event.kind,
+            event.default_action,
+            json.dumps(list(event.options)),
+            json.dumps(event.request, sort_keys=True) if event.request is not None else None,
+            status,
+            event.deadline or None,
+            (event.decision or None) if closing else None,
+            (event.resolved_by or None) if closing else None,
+            event.step if status == GATE_ESCALATED else 0,
+            event.at,
+            event.at if closing else None,
+            _now(),
+        )
+
+        def _apply(conn: sqlite3.Connection) -> None:
+            conn.execute(
+                "INSERT INTO hitl_gates (mission_id, gate_id, kind, question, risk, "
+                "default_action, options, request, status, deadline, decision, resolved_by, "
+                "reminders, created_at, resolved_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                f"ON CONFLICT (mission_id, gate_id) DO UPDATE SET {update}",
+                params,
+            )
+
+        await self._run(_apply)
+
+    async def list_gates(self, mission_id: str | None = None, *, limit: int = 50) -> list[GateRow]:
+        def _list(conn: sqlite3.Connection) -> list[GateRow]:
+            where, params = ("WHERE mission_id = ? ", [mission_id]) if mission_id else ("", [])
+            rows = conn.execute(
+                f"SELECT * FROM hitl_gates {where}"
+                "ORDER BY created_at DESC, mission_id, gate_id LIMIT ?",
+                [*params, limit],
+            ).fetchall()
+            return [
+                GateRow(
+                    mission_id=r["mission_id"],
+                    gate_id=r["gate_id"],
+                    kind=r["kind"],
+                    status=r["status"],
+                    question=r["question"],
+                    options=[str(o) for o in json.loads(r["options"] or "[]")],
+                    default_action=r["default_action"],
+                    risk=r["risk"],
+                    deadline=r["deadline"] or "",
+                    decision=r["decision"],
+                    resolved_by=r["resolved_by"],
+                    reminders=int(r["reminders"]),
+                    request=json.loads(r["request"]) if r["request"] else None,
+                    opened_at=r["created_at"],
+                    resolved_at=r["resolved_at"] or "",
+                    updated_at=r["updated_at"],
+                )
+                for r in rows
+            ]
 
         return await self._run(_list)
 
