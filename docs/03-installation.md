@@ -30,7 +30,7 @@ Heavy or environment-specific dependencies are extras, declared in
 | Extra | Installs | Used by |
 |---|---|---|
 | `postgres` | `psycopg[binary,pool]`, `pgvector` | `lha db migrate`; the Postgres mission store (`LHA_POSTGRES_DSN`: mission rows, cost ledger, memory) and its pgvector index. Without it, runs use SQLite |
-| `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval |
+| `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval. Semantic memory without this extra: `LHA_MEMORY_EMBEDDER=ollama` and a local Ollama with `nomic-embed-text` pulled |
 | `observability` | `langfuse`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp` | OTel spans (`lha.obs.otel`) and the Langfuse client (`lha.obs.langfuse_exporter`); LHA installs no exporter and sends nothing to Langfuse itself |
 | `sandbox` | `docker` | The `docker` sandbox, which is the default |
 | `claude` | `claude-agent-sdk` | The optional Agent SDK lead in `lha.agents.claude_sdk_lead` (not used by any CLI command today) |

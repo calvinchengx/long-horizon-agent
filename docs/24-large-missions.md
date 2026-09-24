@@ -181,11 +181,12 @@ lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decis
   cycle costs around $1 on Claude Sonnet before caching, so a thousand-cycle mission is in the
   $1–2k range. Set the budget ceiling deliberately.
 - **Egress is by hostname.** TLS is not intercepted, so allowing a host allows everything on it.
-  `fetch_url` checks the resolved address before connecting, but the HTTP client resolves again,
-  so DNS rebinding between the two lookups remains possible.
-- **Status in the store lags the workflow.** `lha missions` shows what the last cycle wrote; it
-  does not show `SLEEPING`, `DEGRADED_PARK` or a waiting deadlock gate. Use `lha mission-status`
-  for the live state.
+  `fetch_url` connects only to addresses it checked, so DNS rebinding cannot redirect it to a
+  private address.
+- **Status in the store can lag the workflow.** The workflow writes `SLEEPING`,
+  `DEGRADED_PARK`, open gates and every ending to the row, but best effort: if the store is down
+  `lha missions` shows an older status. Use `lha mission-status` for the live state and
+  `lha gates` for the recorded gates.
 - **Witness schemes.** fabric-emulator's own manifest also uses `sdk:`, `py:` and `boundary:`
   witnesses; LHA rejects them, so translate them to `pytest:`, `cmd:` or `trusted:` first.
 - **Skipped Go tests fail their witness**: a `--- SKIP` is not a `--- PASS`. Tests that only run in

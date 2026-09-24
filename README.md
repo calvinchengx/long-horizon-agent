@@ -38,8 +38,9 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
   escalation ladder and an optional webhook; default-deny network egress, with an optional
   per-host allow-list for the sandbox and for the `fetch_url` tool; and a budget governor that
   refuses spend before it happens.
-- **A record of the run.** Every run keeps a mission row and a per-call cost ledger (SQLite by
-  default, Postgres optionally; `lha missions`, `lha costs`), recalls tiered memory into the
+- **A record of the run.** Every run keeps a mission row, a per-call cost ledger and its human
+  gates (SQLite by default, Postgres optionally; `lha missions`, `lha costs`, `lha gates`),
+  recalls tiered memory into the
   prompt, and appends design decisions to a hash-chained log (`lha decisions --verify`).
 
 ## Two implementations

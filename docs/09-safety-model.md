@@ -185,6 +185,14 @@ The egress policy is implemented in [egress.py](../python/src/lha/safety/egress.
   policy and re-resolved. The request's actual host and port must equal the checked ones. The tool
   ignores host proxy and netrc settings (`trust_env=False`), rejects `Host`/`Proxy-*` headers, and
   caps the body at 2 MB.
+- **Pinned connections (DNS rebinding).** `fetch_url`, `web_search` and `lha vendor` resolve
+  each hop's host once, check every address, and connect only to one of those addresses
+  ([pinned_http.py](../python/src/lha/safety/pinned_http.py)): a `PinnedNetworkBackend` under
+  httpx dials the pinned IP instead of the name, and never resolves anything itself (an
+  unpinned host or a non-public IP literal is refused). The `Host` header, the TLS SNI and the
+  certificate check still use the hostname. A server that answers the check with a public
+  address and a later lookup with `127.0.0.1` cannot move the connection
+  (`tests/unit/test_web_pinning.py`).
 - **Credential broker.** `CredentialBroker` maps placeholder tokens to real secrets bound to one
   or more hosts. `resolve_headers()` substitutes a secret only into requests to a bound host, so
   the agent sees only placeholders.
@@ -318,9 +326,9 @@ gate.
   privileges of the process running the mission ([verification](07-verification.md#trusted-checks)).
 - An approved action is allowed exactly as it was requested, but the approver sees only the tool
   and its arguments; what a `git push` sends is whatever the agent committed.
-- DNS rebinding: `fetch_url` and `web_search` resolve and check addresses, then httpx resolves
-  again when it connects. A 0-TTL rebinding server can race the check. The web tools run in the
-  worker process, not in the sandbox, so sandbox network isolation does not cover them.
+- The web tools run in the worker process, not in the sandbox, so sandbox network isolation does
+  not cover them; the egress policy and the pinned connections above are their only network
+  boundary.
 - An allow-listed host can still serve prompt injection. With web tools on, the Lead can act on
   what it read (edit files, run commands in the sandbox). The Rule of Two keeps private data out of
   such runs; it does not make the content safe.
