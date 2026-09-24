@@ -130,3 +130,37 @@ async def test_fs_tools_reject_parent_paths(tmp_path: Path) -> None:
     ):
         result = await dispatcher.dispatch(call, ctx)
         assert not result.ok, call
+
+
+@symlinks
+@pytest.mark.asyncio
+async def test_symlink_loop_is_a_tool_failure_not_a_crash(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    session = await LocalSandbox().open(workdir=str(work))
+    (work / "ok.txt").write_text("TOKEN=inside", encoding="utf-8")
+    (work / "loop1").symlink_to("loop2")
+    (work / "loop2").symlink_to("loop1")
+    ctx = ToolContext(mission_id="m", session=session)
+    dispatcher = AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True)
+
+    with pytest.raises(PathEscapeError, match=r"^Symlink loop from "):
+        resolve_within(work, "loop1")
+
+    for call in (
+        ToolCall(id="1", name="read_file", arguments={"path": "loop1"}),
+        ToolCall(id="2", name="list_files", arguments={"subdir": "loop1"}),
+        ToolCall(id="3", name="grep", arguments={"pattern": "TOKEN", "subdir": "loop1"}),
+    ):
+        result = await dispatcher.dispatch(call, ctx)
+        assert not result.ok, call
+        assert (result.error or "").startswith(
+            f"path not allowed for {call.name!r}: Symlink loop from "
+        ), result.error
+
+    # A loop elsewhere in the tree is skipped, not fatal, when walking the whole workspace.
+    listing = await dispatcher.dispatch(ToolCall(id="4", name="list_files", arguments={}), ctx)
+    assert listing.ok and "ok.txt" in listing.content and "loop1" not in listing.content
+    grep = await dispatcher.dispatch(
+        ToolCall(id="5", name="grep", arguments={"pattern": "TOKEN"}), ctx
+    )
+    assert grep.ok and "inside" in grep.content
