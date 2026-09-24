@@ -1,0 +1,734 @@
+{
+ "normalize_relpath": [
+  {
+   "path": "",
+   "normalized": ".",
+   "error": null
+  },
+  {
+   "path": ".",
+   "normalized": ".",
+   "error": null
+  },
+  {
+   "path": "./",
+   "normalized": ".",
+   "error": null
+  },
+  {
+   "path": "a",
+   "normalized": "a",
+   "error": null
+  },
+  {
+   "path": "a/./b/../c.txt",
+   "normalized": "a/c.txt",
+   "error": null
+  },
+  {
+   "path": "a//b/",
+   "normalized": "a/b",
+   "error": null
+  },
+  {
+   "path": "src\\pkg\\x.py",
+   "normalized": "src/pkg/x.py",
+   "error": null
+  },
+  {
+   "path": "../x",
+   "normalized": null,
+   "error": "path escapes the workspace: '../x'"
+  },
+  {
+   "path": "..",
+   "normalized": null,
+   "error": "path escapes the workspace: '..'"
+  },
+  {
+   "path": "a/../../x",
+   "normalized": null,
+   "error": "path escapes the workspace: 'a/../../x'"
+  },
+  {
+   "path": "a/b/../../..",
+   "normalized": null,
+   "error": "path escapes the workspace: 'a/b/../../..'"
+  },
+  {
+   "path": "a/..",
+   "normalized": ".",
+   "error": null
+  },
+  {
+   "path": "/etc/passwd",
+   "normalized": null,
+   "error": "absolute paths are not allowed: '/etc/passwd'"
+  },
+  {
+   "path": "\\\\srv\\share",
+   "normalized": null,
+   "error": "absolute paths are not allowed: '\\\\\\\\srv\\\\share'"
+  },
+  {
+   "path": "C:\\x",
+   "normalized": null,
+   "error": "absolute paths are not allowed: 'C:\\\\x'"
+  },
+  {
+   "path": "C:x",
+   "normalized": null,
+   "error": "absolute paths are not allowed: 'C:x'"
+  },
+  {
+   "path": "1:x",
+   "normalized": null,
+   "error": "absolute paths are not allowed: '1:x'"
+  },
+  {
+   "path": "é:x",
+   "normalized": null,
+   "error": "absolute paths are not allowed: 'é:x'"
+  },
+  {
+   "path": "a:b",
+   "normalized": null,
+   "error": "absolute paths are not allowed: 'a:b'"
+  },
+  {
+   "path": "a\u0000b",
+   "normalized": null,
+   "error": "path contains a NUL byte"
+  },
+  {
+   "path": ".lha/checklist.json",
+   "normalized": ".lha/checklist.json",
+   "error": null
+  },
+  {
+   "path": "./.git/hooks/pre-commit",
+   "normalized": ".git/hooks/pre-commit",
+   "error": null
+  },
+  {
+   "path": ".GIT/config",
+   "normalized": ".GIT/config",
+   "error": null
+  },
+  {
+   "path": ".Lha",
+   "normalized": ".Lha",
+   "error": null
+  },
+  {
+   "path": "a/../.git/config",
+   "normalized": ".git/config",
+   "error": null
+  },
+  {
+   "path": "src/.git_notes",
+   "normalized": "src/.git_notes",
+   "error": null
+  },
+  {
+   "path": ".github/workflows/ci.yml",
+   "normalized": ".github/workflows/ci.yml",
+   "error": null
+  },
+  {
+   "path": ".gitignore",
+   "normalized": ".gitignore",
+   "error": null
+  },
+  {
+   "path": "sub/.git/x",
+   "normalized": "sub/.git/x",
+   "error": null
+  },
+  {
+   "path": "'quoted'",
+   "normalized": "'quoted'",
+   "error": null
+  },
+  {
+   "path": "mixed\"'",
+   "normalized": "mixed\"'",
+   "error": null
+  },
+  {
+   "path": "tab\there",
+   "normalized": "tab\there",
+   "error": null
+  },
+  {
+   "path": "ünïcödé/файл.txt",
+   "normalized": "ünïcödé/файл.txt",
+   "error": null
+  }
+ ],
+ "is_protected": [
+  {
+   "path": "",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": ".",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "./",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "a",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "a/./b/../c.txt",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "a//b/",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "src\\pkg\\x.py",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "../x",
+   "protected": null,
+   "error": "path escapes the workspace: '../x'"
+  },
+  {
+   "path": "..",
+   "protected": null,
+   "error": "path escapes the workspace: '..'"
+  },
+  {
+   "path": "a/../../x",
+   "protected": null,
+   "error": "path escapes the workspace: 'a/../../x'"
+  },
+  {
+   "path": "a/b/../../..",
+   "protected": null,
+   "error": "path escapes the workspace: 'a/b/../../..'"
+  },
+  {
+   "path": "a/..",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "/etc/passwd",
+   "protected": null,
+   "error": "absolute paths are not allowed: '/etc/passwd'"
+  },
+  {
+   "path": "\\\\srv\\share",
+   "protected": null,
+   "error": "absolute paths are not allowed: '\\\\\\\\srv\\\\share'"
+  },
+  {
+   "path": "C:\\x",
+   "protected": null,
+   "error": "absolute paths are not allowed: 'C:\\\\x'"
+  },
+  {
+   "path": "C:x",
+   "protected": null,
+   "error": "absolute paths are not allowed: 'C:x'"
+  },
+  {
+   "path": "1:x",
+   "protected": null,
+   "error": "absolute paths are not allowed: '1:x'"
+  },
+  {
+   "path": "é:x",
+   "protected": null,
+   "error": "absolute paths are not allowed: 'é:x'"
+  },
+  {
+   "path": "a:b",
+   "protected": null,
+   "error": "absolute paths are not allowed: 'a:b'"
+  },
+  {
+   "path": "a\u0000b",
+   "protected": null,
+   "error": "path contains a NUL byte"
+  },
+  {
+   "path": ".lha/checklist.json",
+   "protected": true,
+   "error": null
+  },
+  {
+   "path": "./.git/hooks/pre-commit",
+   "protected": true,
+   "error": null
+  },
+  {
+   "path": ".GIT/config",
+   "protected": true,
+   "error": null
+  },
+  {
+   "path": ".Lha",
+   "protected": true,
+   "error": null
+  },
+  {
+   "path": "a/../.git/config",
+   "protected": true,
+   "error": null
+  },
+  {
+   "path": "src/.git_notes",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": ".github/workflows/ci.yml",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": ".gitignore",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "sub/.git/x",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "'quoted'",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "mixed\"'",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "tab\there",
+   "protected": false,
+   "error": null
+  },
+  {
+   "path": "ünïcödé/файл.txt",
+   "protected": false,
+   "error": null
+  }
+ ],
+ "contained_posix": [
+  {
+   "workdir": "/workspace",
+   "path": "",
+   "result": "/workspace",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "",
+   "result": "/home/user/workspace/",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": ".",
+   "result": "/workspace",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": ".",
+   "result": "/home/user/workspace/",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "./",
+   "result": "/workspace",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "./",
+   "result": "/home/user/workspace/",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a",
+   "result": "/workspace/a",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a",
+   "result": "/home/user/workspace/a",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a/./b/../c.txt",
+   "result": "/workspace/a/c.txt",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a/./b/../c.txt",
+   "result": "/home/user/workspace/a/c.txt",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a//b/",
+   "result": "/workspace/a/b",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a//b/",
+   "result": "/home/user/workspace/a/b",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "src\\pkg\\x.py",
+   "result": "/workspace/src/pkg/x.py",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "src\\pkg\\x.py",
+   "result": "/home/user/workspace/src/pkg/x.py",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "../x",
+   "result": null,
+   "error": "path escapes the workspace: '../x'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "../x",
+   "result": null,
+   "error": "path escapes the workspace: '../x'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "..",
+   "result": null,
+   "error": "path escapes the workspace: '..'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "..",
+   "result": null,
+   "error": "path escapes the workspace: '..'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a/../../x",
+   "result": null,
+   "error": "path escapes the workspace: 'a/../../x'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a/../../x",
+   "result": null,
+   "error": "path escapes the workspace: 'a/../../x'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a/b/../../..",
+   "result": null,
+   "error": "path escapes the workspace: 'a/b/../../..'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a/b/../../..",
+   "result": null,
+   "error": "path escapes the workspace: 'a/b/../../..'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a/..",
+   "result": "/workspace",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a/..",
+   "result": "/home/user/workspace/",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "/etc/passwd",
+   "result": null,
+   "error": "absolute paths are not allowed: '/etc/passwd'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "/etc/passwd",
+   "result": null,
+   "error": "absolute paths are not allowed: '/etc/passwd'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "\\\\srv\\share",
+   "result": null,
+   "error": "absolute paths are not allowed: '\\\\\\\\srv\\\\share'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "\\\\srv\\share",
+   "result": null,
+   "error": "absolute paths are not allowed: '\\\\\\\\srv\\\\share'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "C:\\x",
+   "result": null,
+   "error": "absolute paths are not allowed: 'C:\\\\x'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "C:\\x",
+   "result": null,
+   "error": "absolute paths are not allowed: 'C:\\\\x'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "C:x",
+   "result": null,
+   "error": "absolute paths are not allowed: 'C:x'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "C:x",
+   "result": null,
+   "error": "absolute paths are not allowed: 'C:x'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "1:x",
+   "result": null,
+   "error": "absolute paths are not allowed: '1:x'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "1:x",
+   "result": null,
+   "error": "absolute paths are not allowed: '1:x'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "é:x",
+   "result": null,
+   "error": "absolute paths are not allowed: 'é:x'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "é:x",
+   "result": null,
+   "error": "absolute paths are not allowed: 'é:x'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a:b",
+   "result": null,
+   "error": "absolute paths are not allowed: 'a:b'"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a:b",
+   "result": null,
+   "error": "absolute paths are not allowed: 'a:b'"
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a\u0000b",
+   "result": null,
+   "error": "path contains a NUL byte"
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a\u0000b",
+   "result": null,
+   "error": "path contains a NUL byte"
+  },
+  {
+   "workdir": "/workspace",
+   "path": ".lha/checklist.json",
+   "result": "/workspace/.lha/checklist.json",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": ".lha/checklist.json",
+   "result": "/home/user/workspace/.lha/checklist.json",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "./.git/hooks/pre-commit",
+   "result": "/workspace/.git/hooks/pre-commit",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "./.git/hooks/pre-commit",
+   "result": "/home/user/workspace/.git/hooks/pre-commit",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": ".GIT/config",
+   "result": "/workspace/.GIT/config",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": ".GIT/config",
+   "result": "/home/user/workspace/.GIT/config",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": ".Lha",
+   "result": "/workspace/.Lha",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": ".Lha",
+   "result": "/home/user/workspace/.Lha",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "a/../.git/config",
+   "result": "/workspace/.git/config",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "a/../.git/config",
+   "result": "/home/user/workspace/.git/config",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "src/.git_notes",
+   "result": "/workspace/src/.git_notes",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "src/.git_notes",
+   "result": "/home/user/workspace/src/.git_notes",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": ".github/workflows/ci.yml",
+   "result": "/workspace/.github/workflows/ci.yml",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": ".github/workflows/ci.yml",
+   "result": "/home/user/workspace/.github/workflows/ci.yml",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": ".gitignore",
+   "result": "/workspace/.gitignore",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": ".gitignore",
+   "result": "/home/user/workspace/.gitignore",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "sub/.git/x",
+   "result": "/workspace/sub/.git/x",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "sub/.git/x",
+   "result": "/home/user/workspace/sub/.git/x",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "'quoted'",
+   "result": "/workspace/'quoted'",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "'quoted'",
+   "result": "/home/user/workspace/'quoted'",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "mixed\"'",
+   "result": "/workspace/mixed\"'",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "mixed\"'",
+   "result": "/home/user/workspace/mixed\"'",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "tab\there",
+   "result": "/workspace/tab\there",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "tab\there",
+   "result": "/home/user/workspace/tab\there",
+   "error": null
+  },
+  {
+   "workdir": "/workspace",
+   "path": "ünïcödé/файл.txt",
+   "result": "/workspace/ünïcödé/файл.txt",
+   "error": null
+  },
+  {
+   "workdir": "/home/user/workspace/",
+   "path": "ünïcödé/файл.txt",
+   "result": "/home/user/workspace/ünïcödé/файл.txt",
+   "error": null
+  }
+ ]
+}

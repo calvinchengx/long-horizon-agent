@@ -21,6 +21,8 @@ the matching package is ported; it runs every file below except
 | `coordination/shared_paths.json` | files only the lead engineer may write |
 | `verify/harness_files.json` | test/harness files the agent may not weaken |
 | `model/pricing.json` | Claude price table and per-call cost |
+| `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
+| `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
 
 ## Changing behaviour
 
