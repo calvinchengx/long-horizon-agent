@@ -726,6 +726,7 @@ name = "long-horizon-agent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpcore" },
     { name = "httpx" },
     { name = "orjson" },
     { name = "pydantic" },
@@ -769,6 +770,7 @@ dev = [
 requires-dist = [
     { name = "claude-agent-sdk", marker = "extra == 'claude'", specifier = ">=0.1" },
     { name = "docker", marker = "extra == 'sandbox'", specifier = ">=7.1" },
+    { name = "httpcore", specifier = ">=1.0" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "langfuse", marker = "extra == 'observability'", specifier = ">=2.0" },
     { name = "opentelemetry-exporter-otlp", marker = "extra == 'observability'", specifier = ">=1.25" },
