@@ -69,7 +69,8 @@ flowchart TB
     RUN -- "gate events" --> HOOK
     MW -- "gate events (notify_gate)" --> HOOK
     PYW -- "ClaimCheck codec" --> OBJ
-    RUN -. "OTel spans (orchestrate only;<br/>no exporter configured by LHA)" .-> LF
+    RUN -. "OTLP spans (when configured)" .-> LF
+    PYW -. "OTLP spans (when configured)" .-> LF
     SB -- "allow-listed hosts only" --> PROXY
     PROXY --> NET
     RUN -- "fetch_url, web_search<br/>(when LHA_WEB_ALLOW_HOSTS is set)" --> NET
@@ -87,10 +88,12 @@ opened the run falls back to SQLite unless `LHA_POSTGRES_FALLBACK_TO_SQLITE=fals
 workspace git repository is the mission's source of truth in both modes, so a mission
 initialized by one can be inspected with plain `git`.
 
-LHA builds a Langfuse client ([`obs/langfuse_exporter.py`](../python/src/lha/obs/langfuse_exporter.py))
-but nothing calls it, and it does not configure an OpenTelemetry exporter: the spans
-`lha orchestrate` opens reach a collector only if the process has a tracer provider configured
-from outside. See [observability](16-observability.md).
+With the `observability` extra installed and an OTLP endpoint
+(`LHA_OTEL_EXPORTER_OTLP_ENDPOINT` or `OTEL_EXPORTER_OTLP_ENDPOINT`) or the Langfuse keys set, the
+CLI and the worker install an OTLP/HTTP trace exporter at start
+([`obs/otel.py`](../python/src/lha/obs/otel.py)); missions, cycles, cycle activities, model calls
+and tool calls become spans. Export runs in the background and never blocks a run. See
+[observability](16-observability.md).
 
 ## Four planes
 
@@ -210,7 +213,8 @@ See [memory](12-memory.md).
 - **Assembly** ([`agent/assembly.py`](../python/src/lha/agent/assembly.py)): the local
   runner, the durable cycle activity and `lha orchestrate` build the lead the same way from
   settings: sandbox image and egress allow-list, tools, human gate, a verifier that sends
-  `trusted:` checks to the trusted runner, protected harness paths and the replanner.
+  `trusted:` checks to the trusted runner and re-runs failing checks to quarantine proven
+  flakes, protected harness paths and the replanner.
 - **Sandboxes** ([`execution/factory.py`](../python/src/lha/execution/factory.py)): `docker`
   (default; image `LHA_SANDBOX_IMAGE`, no network unless `LHA_SANDBOX_EGRESS` lists hosts,
   dropped capabilities, read-only root and read-only `.git/` and `.lha/` mounts), `e2b`, and
@@ -288,11 +292,10 @@ What runs where today:
 
 `lha orchestrate` starts a new mission every time; it does not resume an existing workspace.
 The ownership map records write-sets but has no lease granting: a `LeaseRequest` type exists and
-nothing grants one. Still not wired into any run path: the `Integrator`, `Auditor` and
-`Librarian` role runners in [`agents/specialists.py`](../python/src/lha/agents/specialists.py)
-(the `BranchIntegrator` that `orchestrate` uses is deterministic code, not a model role; the
-`librarian` label in the cost ledger is the memory consolidation model), the prompt evolver and
-judge, and `SubAgentWorkflow`, which the worker registers but `MissionWorkflow` does not start.
+nothing grants one. The `BranchIntegrator` that `orchestrate` uses is deterministic code, not a
+model role, and the `librarian` label in the cost ledger is the memory consolidation model. Still
+not wired into any run path: `SubAgentWorkflow`, which the worker registers but `MissionWorkflow`
+does not start.
 See [the multi-agent organization](11-multi-agent-organization.md).
 
 ## The model layer
@@ -356,8 +359,10 @@ flowchart TD
    action (or native tool calls). Invalid or truncated replies get a corrective turn and never
    count as done.
 4. **Verify.** When the model signals done, the mission checks and the item's witnesses run
-   (`trusted:` witnesses on the trusted runner, outside the sandbox); a failure is fed back and
-   the loop continues while turns remain. The final verdict includes a failing
+   (`trusted:` witnesses on the trusted runner, outside the sandbox). A failing check is re-run
+   once (`LHA_FLAKY_RETRIES`); one that then passes is quarantined and stops counting as a gate
+   ([flaky-check quarantine](07-verification.md#flaky-check-quarantine)). A failure is fed back
+   and the loop continues while turns remain. The final verdict includes a failing
    `harness_integrity` check if pre-existing tests, test config or operator-protected paths were
    changed.
 5. **Replan.** If the failure just blocked the item and the replan budget allows, the replanner

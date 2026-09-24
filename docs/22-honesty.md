@@ -18,8 +18,10 @@ its tests show.
    `LHA_ALLOW_UNPRICED_MODELS=true` (see [10-cost-and-budget.md](10-cost-and-budget.md)).
 4. **The model never marks its own work done.** An item is `done` only when at least one gating
    check (a real command, run in the sandbox or, for an operator's trusted check, on the host)
-   passes, and every one of the item's witnesses passes. The model's "done" only ends its turn
-   (see [07-verification.md](07-verification.md)). Splitting a blocked item moves its witnesses to
+   passes, and every one of the item's witnesses passes. A check proven flaky (it passed and
+   failed on the same code) must still pass on the code under test and never counts as that
+   gating pass. The model's "done" only ends its turn (see
+   [07-verification.md](07-verification.md)). Splitting a blocked item moves its witnesses to
    the last child, so replanning cannot lower the bar.
 5. **Docs describe the code as it is.** Code that exists but that no command or workflow calls
    is labelled **library**; designed features with no code are labelled **planned**. These pages
@@ -54,6 +56,8 @@ suites; see [20-testing.md](20-testing.md)):
 | Recorded decisions are hash-chained, shown in the next cycle's prompt, and an altered log stops the run | `tests/unit/test_decision_chain_wiring.py` |
 | Parallel implementers cannot write files they do not own, and only verified, owned, conflict-free, re-verified branches are merged | `tests/unit/test_ownership_integration.py` |
 | Tiered memory is recalled into the prompt, survives activity retries, and degrades to lexical-only retrieval instead of failing a cycle | `tests/unit/test_memory_service.py`, `test_persistence_wiring.py` |
+| A failing check is re-run; one that passes and fails on the same work tree is quarantined with a committed event, a consistent failure still gates, and a quarantined check never makes an item green | `tests/unit/test_flaky_retry_verifier.py` |
+| With an OTLP endpoint or Langfuse configured, the CLI and worker install an exporter at start; missions, cycles, cycle activities, model calls and tool calls are spans with redacted attributes; a dead backend does not block the run | `tests/unit/test_otel_tracing.py` |
 
 These tests use the stub model (scripted, including the replanner's split and the approver's
 answer) and simulated failures. They prove that the system behaves correctly around the model;
@@ -69,18 +73,20 @@ a blocked item are.
 - **The multi-agent organization helps.** `lha orchestrate` runs researchers, a lead, parallel
   implementers with a branch integrator, and a reviewer, and is unit-tested with scripted models.
   There is no measurement showing it beats the single-agent loop on real tasks.
-- **Library code that no command or workflow calls.** Langfuse export (`build_langfuse` only
-  builds a client), an OpenTelemetry exporter (LHA installs no `TracerProvider`), sub-agent
-  fan-out inside the durable workflow (the worker registers `SubAgentWorkflow` and
-  `research_children` is tested, but `MissionWorkflow` never starts a child), saga compensation,
-  orphan-branch reconciliation, the durable ticket ledgers, flaky-test quarantine, mutation checks
-  and trust bootstrap, offline prompt evolution and the eval harness exist as tested library code
-  only (see [23-roadmap.md](23-roadmap.md)). These, by contrast, are wired into the run paths: the
+- **Library code that no command or workflow calls.** Sub-agent fan-out inside the durable
+  workflow (the worker registers `SubAgentWorkflow` and `research_children` is tested, but
+  `MissionWorkflow` never starts a child) is tested library code only (see
+  [23-roadmap.md](23-roadmap.md)). These, by contrast, are wired into the run paths: the
   large-mission features, human approval gates with the escalation ladder and webhook, the
   `SLEEPING` status, web tools under the egress policy and the Rule of Two, the fallback model
   chain and health probe, SQLite/Postgres persistence of mission rows and the cost ledger, tiered
-  memory in the prompt, the hash-chained decision log, and, in `lha orchestrate` only, file
-  ownership, tickets, the blackboard, parallel implementer waves and the branch integrator.
+  memory in the prompt, the hash-chained decision log, flaky-check quarantine in the verifier,
+  OpenTelemetry/Langfuse trace export, and, in `lha orchestrate` only, file ownership, tickets,
+  the blackboard, parallel implementer waves and the branch integrator. Saga compensation,
+  orphan-branch reconciliation, the Magentic-One ledgers, mutation testing, trust bootstrap,
+  offline prompt evolution with its judge and eval harness, the Claude Agent SDK lead, and the
+  Auditor, Librarian, Tester and model-backed Integrator runners were removed rather than kept
+  as uncalled code.
 - **Known gaps in wired features.** Gates are not written to the `hitl_gates` table; they live in
   the workflow state and as `gate_*` events in the anchor. A durable mission's row never shows
   `DEGRADED_PARK` or `SLEEPING`, nor `WAITING_ON_HUMAN` for the deadlock gate, nor the outcome
@@ -93,7 +99,8 @@ a blocked item are.
   Temporal worker yet.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends are tested against mocked HTTP, not
-  live endpoints.
+  live endpoints. Trace export is tested with an in-memory exporter and against a closed port,
+  never against a live collector or Langfuse server.
 
 ## Predicted runs
 

@@ -427,10 +427,3 @@ the interpreter becomes `python3`) so the committed history is portable. The cod
 configure worker versioning or Build IDs. Pinning builds is an operational step outside the
 repository. See [Running on Temporal](14-running-on-temporal.md) and the
 [operations runbook](15-operations-runbook.md).
-
-## Implemented but not wired into `MissionWorkflow`
-
-[`reconcile.py`](../python/src/lha/durable/reconcile.py) (adopt or re-spawn in-progress tickets
-from real git branch state), [`saga.py`](../python/src/lha/durable/saga.py) (LIFO compensation
-stack) and [`ledgers.py`](../python/src/lha/durable/ledgers.py) (`TaskLedger`, stall-detecting
-`ProgressLedger`) have tests, but no workflow calls them.

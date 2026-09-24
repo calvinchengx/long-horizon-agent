@@ -29,7 +29,8 @@ docker compose up -d
 Only `temporal` (and its database) is required by the durable path. The workflow itself never
 touches a database; the activities write mission rows, the cost ledger and tiered memory to
 `appdb` only when the workers have `LHA_POSTGRES_DSN` set, and otherwise to a local SQLite file
-(see [18-configuration.md](18-configuration.md)). Nothing sends traces to Langfuse (see
+(see [18-configuration.md](18-configuration.md)). Workers send traces to Langfuse only when
+the `LHA_LANGFUSE_*` settings are set and the `observability` extra is installed (see
 [16-observability.md](16-observability.md)). None of these
 services has authentication fit for a network: anyone who can reach port 7233 can start workflows
 and send gate decisions.

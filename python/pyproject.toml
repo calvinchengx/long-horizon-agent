@@ -22,9 +22,9 @@ dependencies = [
 [project.optional-dependencies]
 postgres = ["psycopg[binary,pool]>=3.2", "pgvector>=0.3"]
 embeddings = ["sentence-transformers>=3.0"]
-observability = ["langfuse>=2.0", "opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp>=1.25"]
+# OTLP/HTTP trace export (to any OTLP collector, and to Langfuse through its OTLP endpoint).
+observability = ["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp-proto-http>=1.25"]
 sandbox = ["docker>=7.1"]
-claude = ["claude-agent-sdk>=0.1"]
 
 [project.scripts]
 lha = "lha.cli.main:app"
@@ -36,6 +36,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "ty>=0.0.83",
     "pytest-cov>=5,<8",
+    # The tracing tests exercise the real OpenTelemetry SDK (the `observability` extra).
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
 
 [build-system]
@@ -53,8 +56,6 @@ branch = true
 omit = [
     # Needs the `e2b` SDK and an E2B account; nothing in the default install can exercise it.
     "src/lha/execution/sandbox_e2b.py",
-    # Thin adapter over the optional `langfuse` extra (no server in CI).
-    "src/lha/obs/langfuse_exporter.py",
 ]
 
 [tool.coverage.report]
@@ -102,9 +103,7 @@ allowed-unresolved-imports = [
     "cohere.**",
     "sentence_transformers.**",
     "dspy.**",
-    "langfuse.**",
     "opentelemetry.**",
-    "claude_agent_sdk.**",
 ]
 
 [tool.ty.terminal]

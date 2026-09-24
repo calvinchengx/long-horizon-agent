@@ -53,7 +53,13 @@ exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason
   recorded in `.lha/decisions.ndjson`; `--verify` checks the hash chain (exit 1 if it does not
   verify). A durable cycle that finds the chain altered fails the mission with a non-retryable
   `MissionConfigError`.
-- **Langfuse**: no LHA code sends data to Langfuse (see [16-observability.md](16-observability.md)).
+- **Traces**: with `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` (or `OTEL_EXPORTER_OTLP_ENDPOINT`) or the
+  `LHA_LANGFUSE_*` keys set and the `observability` extra installed, the worker exports one
+  `lha.activity.run_agent_cycle` span per cycle attempt with the cycle, model-call and tool-call
+  spans under it (see [16-observability.md](16-observability.md)).
+- **Flaky checks**: `check_quarantined` events in `.lha/events.ndjson` name the checks the
+  verifier stopped trusting as a gate, with the revision and pass/fail counts
+  ([07-verification.md](07-verification.md#flaky-check-quarantine)).
 
 ## How a mission ends
 
@@ -192,8 +198,12 @@ Memory degrades on its own: when the dense channel (pgvector with Postgres, or t
 index) fails, the memory service drops it for the rest of the run and retrieves lexically (BM25
 and `git grep`), recording a `memory_degraded` event; see [12-memory.md](12-memory.md).
 
-**Not implemented**: buffering spans when Langfuse is down (nothing is sent to Langfuse) and
-alerts on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` (see
+Trace export degrades on its own too: when the OTLP collector or Langfuse is down, the batch
+exporter drops spans after `LHA_OTEL_EXPORT_TIMEOUT_S` and the mission is unaffected
+([16-observability.md](16-observability.md)).
+
+**Not implemented**: buffering spans across a trace-backend outage (they are dropped) and alerts
+on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` (see
 [13-models.md](13-models.md#retries-and-failover)).
 
 ## Stuck items and gates
@@ -266,6 +276,6 @@ when it is back. Workers reconnect.
 there is no re-embed command: after changing `LHA_MEMORY_EMBEDDER` or `LHA_MEMORY_EMBEDDING_MODEL`,
 older rows are not found by the dense channel.
 
-**Orphaned sub-agent branches.** `durable/reconcile.py` (`reconcile_in_flight`: adopt a ticket
-branch with commits, re-spawn one that is missing or empty) and `durable/saga.py` (LIFO
-compensations) are tested library code; `MissionWorkflow` calls neither. **Planned.**
+**Orphaned sub-agent branches.** Nothing reconciles branches left behind by an interrupted
+`lha orchestrate` run; `orchestrate` prunes stale worktrees when it starts. **Planned** together
+with resuming `orchestrate`.

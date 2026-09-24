@@ -197,7 +197,11 @@ Within a cycle checkpoint, each tool call that reached an approval gate adds a `
 event: `tool`, `arguments` (redacted), `reason`, `fingerprint`, `decision` (`approve`, `reject`,
 or `pending` when a durable cycle queued it for the workflow), `approved`, `resolved_by`,
 `defaulted`. The local `TerminalApprover` also adds a `gate_reminder` event per reminder
-(`gate_id`, `gate: "tool_call"`, `step`, `tool`, `fingerprint`).
+(`gate_id`, `gate: "tool_call"`, `step`, `tool`, `fingerprint`). A flaky-check quarantine adds
+a `check_quarantined` event, and a quarantined check that failed every attempt a
+`quarantined_check_failed` event, each with `check`, `revision` (the work tree's git tree id),
+`passes` and `fails`. The set of quarantined checks is the `check` of every committed
+`check_quarantined` event.
 
 Commit messages: `lha: initialize mission anchor`,
 `lha: complete|attempt|block|split <id> (<description>)` (orchestrate appends

@@ -149,6 +149,11 @@ status history and ownership violations). A human-approved retry after a deadloc
 with the cycle's checkpoint (the tool, redacted arguments, reason, fingerprint, the decision
 `approve`, `reject` or `pending`, who resolved it and whether the default applied); the local
 terminal approver (`--approve-interactive`) also appends a `gate_reminder` event per reminder.
+When the verifier quarantines a flaky check during the cycle, a `check_quarantined` event
+(`check`, `revision`, `passes`, `fails`) goes in with the checkpoint, and a quarantined check that
+failed every attempt adds a `quarantined_check_failed` event. The verifier reads the committed
+`check_quarantined` events back at `HEAD` to know which checks are quarantined
+([07-verification.md](07-verification.md#flaky-check-quarantine)).
 
 On Temporal, human gates also commit to the anchor. Each gate event (opened, reminder, resolved,
 defaulted) is its own checkpoint with one event of kind `gate_opened`, `gate_reminder`,

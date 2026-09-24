@@ -75,7 +75,7 @@ and the [documentation site](https://calvinchengx.github.io/long-horizon-agent/)
 ## Optional extras
 
 ```bash
-uv sync --extra postgres --extra embeddings --extra observability --extra sandbox --extra claude
+uv sync --extra postgres --extra embeddings --extra observability --extra sandbox
 ```
 
 ## Reporting issues / security

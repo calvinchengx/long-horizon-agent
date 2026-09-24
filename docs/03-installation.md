@@ -31,17 +31,16 @@ Heavy or environment-specific dependencies are extras, declared in
 |---|---|---|
 | `postgres` | `psycopg[binary,pool]`, `pgvector` | `lha db migrate`; the Postgres mission store (`LHA_POSTGRES_DSN`: mission rows, cost ledger, memory) and its pgvector index. Without it, runs use SQLite |
 | `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval |
-| `observability` | `langfuse`, `opentelemetry-sdk`, `opentelemetry-exporter-otlp` | OTel spans (`lha.obs.otel`) and the Langfuse client (`lha.obs.langfuse_exporter`); LHA installs no exporter and sends nothing to Langfuse itself |
+| `observability` | `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http` | OTLP trace export to a collector or to Langfuse, configured at process start when an endpoint or the Langfuse keys are set ([16-observability.md](16-observability.md)) |
 | `sandbox` | `docker` | The `docker` sandbox, which is the default |
-| `claude` | `claude-agent-sdk` | The optional Agent SDK lead in `lha.agents.claude_sdk_lead` (not used by any CLI command today) |
 
 ```bash
 uv sync --extra sandbox                    # needed for the default docker sandbox
 uv sync --extra postgres --extra sandbox   # extras combine
 ```
 
-The `claude` model backend does not need the `claude` extra: it calls the Messages API over
-HTTP with `LHA_ANTHROPIC_API_KEY`. The `e2b` sandbox needs the `e2b-code-interpreter` package,
+The `claude` model backend needs no extra: it calls the Messages API over HTTP with
+`LHA_ANTHROPIC_API_KEY`. The `e2b` sandbox needs the `e2b-code-interpreter` package,
 which is not part of any extra, and an E2B account; it is not exercised in CI.
 
 If a command needs a module from a missing extra, it stops with an error naming the extra, for
@@ -173,6 +172,7 @@ mission row, cost ledger and memory to `appdb`; without it, they go to a local S
 set but unusable, runs fall back to SQLite with a warning unless
 `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`. `lha missions` and `lha costs` read the same store, so
 run them with the same settings as the run (for durable missions, as the worker and
-`mission-start`); `lha config` prints the resolved location. Nothing is sent to Langfuse; its settings are read only by an
-optional client builder. Temporal is the only service the CLI's durable commands need. See
+`mission-start`); `lha config` prints the resolved location. The Langfuse server receives
+traces only when the `LHA_LANGFUSE_*` settings point at it and the `observability` extra is
+installed ([16-observability.md](16-observability.md)). Temporal is the only service the CLI's durable commands need. See
 [running on Temporal](14-running-on-temporal.md).

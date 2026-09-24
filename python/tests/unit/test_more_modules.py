@@ -1,4 +1,4 @@
-"""Tests for failover, context compaction, the evolution gate, and doc-schema migrators."""
+"""Tests for failover, context compaction, and doc-schema migrators."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ import httpx
 import pytest
 
 from lha.agent.compaction import compact_messages
-from lha.agents.evolution import PromptEvalCase, evolve_and_gate
 from lha.contracts.model import ModelMessage, ModelProvider, TurnResult, Usage
 from lha.model.failover import FailoverModel
 from lha.model.stub import StubModel
@@ -73,29 +72,6 @@ async def test_compaction_noop_when_short() -> None:
     messages = [ModelMessage(role="system", content="sys"), ModelMessage(role="user", content="a")]
     out = await compact_messages(model=StubModel(), messages=messages, keep_last=4)
     assert out == messages
-
-
-@pytest.mark.asyncio
-async def test_evolution_gate_rejects_a_tie() -> None:
-    ok = TurnResult(text='{"pass": true, "score": 1.0, "rationale": "ok"}')
-    model = StubModel(
-        script=[
-            TurnResult(text="improved prompt"),  # proposal
-            TurnResult(text="baseline output"),
-            ok,
-            TurnResult(text="candidate output"),
-            ok,
-        ]
-    )
-    result = await evolve_and_gate(
-        model=model,
-        role="lead",
-        current_prompt="old",
-        failure_traces=[],
-        cases=[PromptEvalCase(name="a", task="do x", rubric="r")],
-    )
-    assert not result.promoted  # equal pass rates are NOT an improvement
-    assert result.candidate.prompt == "improved prompt"
 
 
 def test_doc_schema_migrators() -> None:

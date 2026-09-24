@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from lha.contracts.state import DecisionRecord, EventRecord
-from lha.contracts.verify import Check
 from lha.coordination.blackboard import Blackboard
 from lha.coordination.decision_log import DecisionLog
 from lha.memory.episodic import InMemoryEpisodicLog
@@ -43,14 +42,10 @@ async def test_episodic_log_append_tail() -> None:
     assert len(log) == 5
 
 
-def test_flaky_quarantine_partitions() -> None:
+def test_flaky_quarantine_needs_a_pass_and_a_fail_on_one_revision() -> None:
     quarantine = FlakyQuarantine()
     for passed in (True, False, True):  # flake evidence: pass+fail on the same revision
         quarantine.record("flaky_test", revision="abc", passed=passed)
     quarantine.mark_flaky("flaky_test")
-    gating, quarantined = quarantine.partition(
-        [Check(name="solid", command=["x"]), Check(name="flaky_test", command=["y"])]
-    )
-    assert [c.name for c in gating] == ["solid"]
-    assert [c.name for c in quarantined] == ["flaky_test"]
-    assert quarantined[0].gating is False
+    assert quarantine.is_flaky("flaky_test") and not quarantine.is_flaky("solid")
+    assert quarantine.counts("flaky_test", "abc") == (2, 1)

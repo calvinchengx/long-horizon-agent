@@ -6,10 +6,11 @@ finished only ends its turn loop; it has no effect on the item's status.
 
 Code: [`python/src/lha/contracts/verify.py`](../python/src/lha/contracts/verify.py) (types,
 verdict rules, check naming) and [`python/src/lha/verify/`](../python/src/lha/verify/)
-(`DeterministicVerifier`, witnesses, trusted checks, harness integrity, flaky quarantine). Go
-mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier, harness
-integrity and the flaky quarantine but not yet witnesses, trusted checks or extra protected
-paths (the Go `Check` type does accept `where`).
+(`DeterministicVerifier`, witnesses, trusted checks, harness integrity, flaky-check quarantine).
+Go mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier, harness
+integrity and the quarantine's evidence bookkeeping and `Partition` (not the re-running
+verifier), but not yet witnesses, trusted checks or extra protected paths (the Go `Check` type
+does accept `where`).
 
 ## Checks
 
@@ -218,19 +219,47 @@ New test files are always allowed. An item whose `allow_harness_edits` is `true`
 check. The Planner's prompt asks the model to set it only for steps that must modify existing
 tests or test configuration; `lha run-local` never sets it.
 
-## Flaky-test quarantine
+## Flaky-check quarantine
 
-[`verify/flaky_quarantine.py`](../python/src/lha/verify/flaky_quarantine.py) implements a
-quarantine that turns a flaky check into a non-gating one. It only accepts a check with
-evidence: the check must have both passed and failed on the same revision (at least once each,
-over at least 3 runs by default); `mark_flaky` otherwise raises `FlakeEvidenceError`. Even with
-every check quarantined, the verdict would be `unverified`, not `passed`.
+Every run path's verifier ([`lead_verifier`](../python/src/lha/agent/assembly.py): the local
+runners, the durable cycle activity, and in `orchestrate` the Lead, the implementers and the
+integrator) is wrapped in `FlakyRetryVerifier`
+([`verify/flaky_quarantine.py`](../python/src/lha/verify/flaky_quarantine.py)). Its rules:
 
-The quarantine (Python, and its Go port) is a tested library component but is not wired into
-any run path: no CLI command, local runner, orchestrator or activity records check history or
-marks checks flaky, so every configured check stays gating.
+1. **Re-run on failure.** A gating check that fails, and did not time out, is re-run on the same
+   work tree up to `LHA_FLAKY_RETRIES` more times (default 1, at most 5), stopping at the first
+   pass. A genuine failure therefore costs one extra run of that check by default.
+   `LHA_FLAKY_RETRIES=0` turns re-runs and quarantine off.
+2. **Evidence before quarantine.** A check is quarantined only after it both passed and failed on
+   the same revision: the git tree id of the work tree, uncommitted changes included. Failing on
+   one revision and passing on another is a change in behaviour, not a flake.
+3. **A consistent failure always gates.** A check that fails every attempt on the revision under
+   test is a failing gating check, whether or not it is quarantined. The item is red.
+4. **A quarantined check is never the evidence for green.** From the moment it is quarantined,
+   its results are recorded as non-gating, passes included. The item then needs at least one
+   other gating check to pass, and with none it is `unverified`. With rule 3 this means a
+   quarantined check must still pass at least once on the code under test, and something else
+   must gate: it can keep an item red, never make one green on its own.
+5. **Recorded, and for the rest of the mission.** Quarantining a check emits a
+   `check_quarantined` event (`check`, `revision`, `passes`, `fails`); a quarantined check that
+   fails every attempt emits `quarantined_check_failed`. The agent loop commits both to
+   `.lha/events.ndjson` with the cycle's checkpoint and records them as trace events. Later
+   cycles, including durable cycles in a new worker process, read the quarantined set from the
+   committed log at `HEAD`, so an uncommitted edit to `.lha/` cannot quarantine a check. Nothing
+   lifts a quarantine automatically.
 
-The same applies to the verifier-trust helpers in
-[`verify/trust_bootstrap.py`](../python/src/lha/verify/trust_bootstrap.py) (coverage
-measurement) and [`verify/mutation.py`](../python/src/lha/verify/mutation.py) (mutation-testing
-wrapper): implemented and tested, not called by the mission loop.
+A consequence of rule 4: if the only gating check of a mission is quarantined, no item can be
+verified any more. Items end `unverified`, block after 3 consecutive failed attempts (or are
+split by the replanner), and the mission reaches the deadlock gate, where an operator can fix
+the check (or add a second one) and retry. Configure more than one gating check if a flaky suite
+is likely.
+
+Timed-out checks are not re-run (a timeout would cost its full duration again). Advisory
+(non-gating) checks are not re-run. Witness checks follow the same rules as mission checks, so a
+witness that fails every attempt still fails its item. In `orchestrate`, a quarantine decided
+while verifying an implementer's worktree or the integrated result is logged (structlog
+`check_quarantined`) and applied to that verification, but only the Lead's cycles commit the
+event to the anchor.
+
+The cycle event's `checks` list shows each result's `gating` flag, so a quarantined check is
+visible in every checkpoint (`"gating": false`), and its output starts with `[flaky]`.

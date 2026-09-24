@@ -1,4 +1,4 @@
-"""Tests for durable-hardening: object store, ClaimCheck codec, saga, CAN reconciliation."""
+"""Tests for durable-hardening: object store and ClaimCheck codec."""
 
 from __future__ import annotations
 
@@ -8,14 +8,11 @@ import pytest
 from temporalio.api.common.v1 import Payload
 
 from lha.durable.codec import ClaimCheckCodec
-from lha.durable.reconcile import reconcile_in_flight
-from lha.durable.saga import Saga
 from lha.persistence.object_store import (
     InvalidObjectKeyError,
     LocalFileObjectStore,
     ObjectCorruptError,
 )
-from lha.state import git_ops
 
 
 @pytest.mark.asyncio
@@ -42,113 +39,6 @@ async def test_claimcheck_offloads_large_payloads(tmp_path: Path) -> None:
     assert decoded[0].data == b"x" * 100
     assert decoded[0].metadata["encoding"] == b"json/plain"
     assert decoded[1].data == b"tiny"
-
-
-@pytest.mark.asyncio
-async def test_saga_runs_compensations_lifo() -> None:
-    order: list[str] = []
-    saga = Saga()
-
-    async def undo_a() -> None:
-        order.append("a")
-
-    async def undo_b() -> None:
-        order.append("b")
-
-    saga.add("a", undo_a)
-    saga.add("b", undo_b)
-    ran = await saga.compensate()
-    assert ran == ["b", "a"]
-    assert order == ["b", "a"]
-
-
-@pytest.mark.asyncio
-async def test_saga_continues_on_undo_failure() -> None:
-    saga = Saga()
-
-    async def ok() -> None:
-        return None
-
-    async def boom() -> None:
-        raise RuntimeError("nope")
-
-    saga.add("ok", ok)
-    saga.add("boom", boom)
-    ran = await saga.compensate()
-    assert "ok" in ran
-    assert "boom" not in ran
-    assert saga.failures
-
-
-def test_reconcile_adopts_existing_respawns_missing(tmp_path: Path) -> None:
-    git_ops.init_repo(tmp_path)
-    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
-    git_ops.commit_all(tmp_path, "init")
-    git_ops.run_git(tmp_path, "checkout", "-q", "-b", "feature/t1")
-    (tmp_path / "work.txt").write_text("real work", encoding="utf-8")
-    git_ops.commit_all(tmp_path, "t1 work")
-    git_ops.run_git(tmp_path, "checkout", "-q", "main")
-
-    actions = reconcile_in_flight(
-        str(tmp_path),
-        [("t1", "feature/t1"), ("t2", "feature/missing"), ("t3", None)],
-    )
-    by_id = {a.ticket_id: a.action for a in actions}
-    assert by_id["t1"] == "adopt"
-    assert by_id["t2"] == "respawn"
-    assert by_id["t3"] == "respawn"
-
-
-def _repo_with_remote(tmp_path: Path) -> Path:
-    remote = tmp_path / "remote.git"
-    git_ops.run_git(tmp_path, "init", "-q", "--bare", str(remote))
-    work = tmp_path / "work"
-    git_ops.init_repo(work)
-    (work / "f.txt").write_text("x", encoding="utf-8")
-    git_ops.commit_all(work, "init")
-    git_ops.run_git(work, "remote", "add", "origin", str(remote))
-    git_ops.run_git(work, "push", "-q", "origin", "main")
-    return work
-
-
-def test_reconcile_adopts_remote_tracking_branch(tmp_path: Path) -> None:
-    work = _repo_with_remote(tmp_path)
-    git_ops.run_git(work, "checkout", "-q", "-b", "feature/t1")
-    (work / "t1.txt").write_text("pushed work", encoding="utf-8")
-    git_ops.commit_all(work, "t1 work")
-    git_ops.run_git(work, "push", "-q", "origin", "feature/t1")
-    git_ops.run_git(work, "checkout", "-q", "main")
-    git_ops.run_git(work, "branch", "-q", "-D", "feature/t1")  # only origin/feature/t1 remains
-
-    [action] = reconcile_in_flight(str(work), [("t1", "feature/t1")])
-    assert action.action == "adopt"
-    assert "origin/feature/t1" in action.detail
-
-
-def test_reconcile_respawns_branch_without_commits(tmp_path: Path) -> None:
-    git_ops.init_repo(tmp_path)
-    (tmp_path / "f.txt").write_text("x", encoding="utf-8")
-    git_ops.commit_all(tmp_path, "init")
-    git_ops.run_git(tmp_path, "branch", "feature/empty")  # created, never committed to
-
-    [action] = reconcile_in_flight(str(tmp_path), [("t1", "feature/empty")])
-    assert action.action == "respawn"
-    assert "no commits" in action.detail
-
-
-@pytest.mark.asyncio
-async def test_saga_compensate_is_idempotent() -> None:
-    calls: list[str] = []
-    saga = Saga()
-
-    async def undo() -> None:
-        calls.append("undo")
-
-    saga.add("a", undo)
-    assert await saga.compensate() == ["a"]
-    assert await saga.compensate() == []  # nothing left: no double compensation
-    assert calls == ["undo"]
-    assert len(saga) == 0
 
 
 @pytest.mark.asyncio

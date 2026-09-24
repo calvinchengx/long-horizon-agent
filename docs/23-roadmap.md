@@ -30,13 +30,17 @@ workflow calls it.
   `mission-abort`, plus the local `run-local` and `mission` ([17-cli.md](17-cli.md)).
 - Crash recovery, Continue-As-New and long-run tests on the Temporal test server.
 
-### Phase 1: deterministic verifier as the gate (done; measurement partly library)
+### Phase 1: deterministic verifier as the gate (done)
 
 - Done: `DeterministicVerifier`; an item is `done` only after a passing gating check; default
   Python checks; `--check` commands; harness-integrity checks that revert tampering with existing
   tests; auto-blocking after 3 consecutive failures ([07-verification.md](07-verification.md)).
-- Library: flaky-test quarantine, mutation-based checks and trust bootstrap
-  (`verify/flaky_quarantine.py`, `verify/mutation.py`, `verify/trust_bootstrap.py`).
+- Done, every run path: flaky-check quarantine. A failing gating check is re-run
+  (`LHA_FLAKY_RETRIES`, default 1); one that passes and fails on the same work tree is
+  quarantined with a committed `check_quarantined` event, and a quarantined check can keep an
+  item red but never make it green ([07-verification.md](07-verification.md#flaky-check-quarantine)).
+- Removed: the mutation-testing wrapper and the coverage "trust bootstrap". Both were
+  Python-specific (`mutmut`, `pytest --cov`) and no policy consumed their numbers.
 - Not done: measurements of how much the gate changes outcomes on real tasks.
 
 ### Large missions (done)
@@ -98,10 +102,11 @@ quality with real models.
 | Operator-configurable egress allow-list | done: `LHA_SANDBOX_EGRESS` (sandbox, via proxy) and `LHA_WEB_ALLOW_HOSTS` / `--allow-host` (web tools) |
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
 | Deadlock gate with "impossible", escalation ladder, gate webhook, `SLEEPING` | done: durable path |
-| Offline evolution: prompt evolver, judge, eval harness, promotion gate | library |
-| Observability: Langfuse export, OTel exporter setup | library: `build_langfuse` builds a client nobody calls; `orchestrate` opens OTel spans but LHA installs no exporter ([16-observability.md](16-observability.md)) |
-| Saga compensation, orphan-branch reconciliation, durable ticket ledgers | library (`durable/saga.py`, `durable/reconcile.py`, `durable/ledgers.py`) |
-| Auditor, Librarian, Tester and model-backed Integrator runners | library: thin role wrappers no run path calls |
+| Observability: OTLP trace export (any collector, and Langfuse through its OTLP endpoint) | done: the CLI and worker install an exporter at start when `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` or the Langfuse keys are set; mission, cycle, cycle-activity, model-call and tool-call spans on every run path ([16-observability.md](16-observability.md)) |
+| Offline prompt evolution (evolver, judge, eval harness, promotion gate) | removed: roles' prompts are code constants with no override store to promote into, and the repo has no gold eval set; rebuild it with both when it is needed |
+| Saga compensation, orphan-branch reconciliation, Magentic-One task/progress ledgers | removed: LHA itself pushes nothing, opens no PRs and deploys nothing (irreversible actions go to a human gate), `lha orchestrate` does not resume, and the checklist, tickets and loop detector already cover the ledgers |
+| Claude Agent SDK lead (`claude_sdk_lead.py`) | removed: superseded by the `claude_code` lead engine and model backend ([13-models.md](13-models.md)) |
+| Auditor, Librarian, Tester and model-backed Integrator runners | removed: harness integrity and the verifier are the deterministic auditor, memory consolidation is the librarian, and `BranchIntegrator` integrates |
 | Worker Build IDs / versioned deploys | planned |
 | Re-embedding after an embedding-model change | planned |
 

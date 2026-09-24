@@ -33,6 +33,15 @@ def _isolated_mission_store(tmp_path_factory: pytest.TempPathFactory) -> Iterato
     mp = pytest.MonkeyPatch()
     mp.setenv("LHA_SQLITE_PATH", str(path))
     mp.delenv("LHA_POSTGRES_DSN", raising=False)
+    # Never export the suite's spans to a collector configured in the developer's shell.
+    for name in (
+        "LHA_OTEL_EXPORTER_OTLP_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+        "LHA_LANGFUSE_HOST",
+        "LHA_LANGFUSE_PUBLIC_KEY",
+        "LHA_LANGFUSE_SECRET_KEY",
+    ):
+        mp.delenv(name, raising=False)
     get_settings.cache_clear()
     try:
         yield path

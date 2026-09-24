@@ -18,6 +18,7 @@ from lha.agent.prompt import ACTION_INSTRUCTIONS, render_tools
 from lha.agents.roles import RoleSpec
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall
 from lha.contracts.tools import ToolContext, ToolDispatcher, ToolResult, ToolSpec
+from lha.obs.otel import traced_dispatch
 
 _OBSERVATION_CAP = 4000
 _BRIEF_CAP = 8000
@@ -65,7 +66,7 @@ class SubAgent:
             return ToolResult.failure(
                 f"tool {call.name!r} is not available to the {self._role.name} role"
             )
-        return await self._dispatcher.dispatch(call, ctx)
+        return await traced_dispatch(self._dispatcher, call, ctx)
 
     async def run(
         self, *, objective: str, ctx: ToolContext, extra_context: str = ""

@@ -104,7 +104,8 @@ The project is early and under active development.
 | Tiered memory (episodic, semantic, skills) in the lead's prompt, with degradation to BM25 and `git grep` | Implemented and wired into every run path. The default `hash` embedder is not semantic |
 | Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
 | File ownership, tickets and blackboard, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` only (not the Temporal workflow); `orchestrate` does not resume an existing mission; no lease granting |
-| Langfuse export, the `SubAgentWorkflow` fan-out, the Auditor and Librarian roles, flaky-test quarantine, sagas and reconciliation | Library code with tests; not called by any run path |
+| Flaky-check quarantine in the verifier; OTLP trace export (a collector or Langfuse) | Implemented and wired into every Python run path; export is off until an endpoint or the Langfuse keys are set and needs the `observability` extra |
+| The `SubAgentWorkflow` fan-out | Library code with tests; `MissionWorkflow` does not start it |
 | Go port | Library packages (contracts, config, spec runner, model, safety, obs, state with the decision chain, verify, governor); no CLI (`go/cmd/lha`) or Temporal worker yet |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 

@@ -17,6 +17,10 @@ Persistence hook: set ``meter.on_record`` to an async callable (e.g.
 ``lha.persistence.tracking.LedgerSink``) and every recorded entry is also handed to it, so EVERY
 metered call reaches the persistent ``cost_ledger``. A failing hook is logged, never raised: the
 model call already happened and its spend is already in the in-memory ledger.
+
+Tracing: every metered call is an OpenTelemetry span (``chat <model>``, or ``invoke_agent
+<model>`` for ``run_external``) with the role, cycle, token usage and cost (``lha.obs.otel``;
+a no-op unless tracing is configured).
 """
 
 from __future__ import annotations
@@ -36,6 +40,7 @@ from lha.contracts.model import (
 )
 from lha.governor.cost import CostEntry, CostLedger
 from lha.governor.governor import BudgetGovernor, GovernorDecision
+from lha.obs.otel import span
 
 # Conservative chars-per-token for the pre-call input estimate (real text averages ~4; code and
 # non-English text run lower). Over-estimating only makes the hard stop trip slightly early.
@@ -142,6 +147,35 @@ class MeteredModel(ModelProvider):
         tools: list[dict[str, object]] | None = None,
         max_tokens: int | None = None,
     ) -> TurnResult:
+        with span(f"chat {self.name}", self._span_attributes("chat")) as traced:
+            result, entry = await self._complete(messages, tools=tools, max_tokens=max_tokens)
+            usage = result.usage
+            traced.set(
+                {
+                    "gen_ai.response.model": usage.model,
+                    "gen_ai.usage.input_tokens": usage.input_tokens,
+                    "gen_ai.usage.output_tokens": usage.output_tokens,
+                    "gen_ai.response.finish_reasons": result.stop_reason,
+                    "lha.cost_usd": entry.usd if entry.cost_known else None,
+                }
+            )
+            return result
+
+    def _span_attributes(self, operation: str) -> dict[str, object]:
+        return {
+            "gen_ai.operation.name": operation,
+            "gen_ai.request.model": self.name,
+            "lha.role": self.role,
+            "lha.cycle_id": self._meter.cycle_id,
+        }
+
+    async def _complete(
+        self,
+        messages: list[ModelMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+        max_tokens: int | None = None,
+    ) -> tuple[TurnResult, CostEntry]:
         meter = self._meter
         worst = self.worst_case_usd(messages, tools=tools, max_tokens=max_tokens)
         decision = meter.governor.authorize_call(
@@ -171,7 +205,7 @@ class MeteredModel(ModelProvider):
                 structlog.get_logger("lha.governor").warning(
                     "cost_hook_failed", error=f"{type(exc).__name__}: {exc}"
                 )
-        return result
+        return result, entry
 
     async def run_external[T](
         self, run: Callable[[], Awaitable[tuple[T, Usage]]], *, worst_case_usd: float
@@ -183,6 +217,21 @@ class MeteredModel(ModelProvider):
         on a timeout) is charged its full ``worst_case_usd``: conservative, never $0.
         ``run`` returns its result and the usage to record.
         """
+        with span(f"invoke_agent {self.name}", self._span_attributes("invoke_agent")) as traced:
+            result, usage = await self._run_external(run, worst_case_usd=worst_case_usd)
+            traced.set(
+                {
+                    "gen_ai.response.model": usage.model,
+                    "gen_ai.usage.input_tokens": usage.input_tokens,
+                    "gen_ai.usage.output_tokens": usage.output_tokens,
+                    "lha.cost_usd": usage.reported_cost_usd,
+                }
+            )
+            return result
+
+    async def _run_external[T](
+        self, run: Callable[[], Awaitable[tuple[T, Usage]]], *, worst_case_usd: float
+    ) -> tuple[T, Usage]:
         meter = self._meter
         decision = meter.governor.authorize_call(
             meter.ledger, worst_case_usd=worst_case_usd, reserved_usd=meter.reserved_usd
@@ -207,7 +256,7 @@ class MeteredModel(ModelProvider):
                 structlog.get_logger("lha.governor").warning(
                     "cost_hook_failed", error=f"{type(exc).__name__}: {exc}"
                 )
-        return result
+        return result, usage
 
     def estimate_cost_usd(self, usage: Usage) -> float:
         return self._provider.estimate_cost_usd(usage)

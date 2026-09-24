@@ -74,6 +74,7 @@ from lha.ids import idempotency_key
 from lha.model import build_provider
 from lha.model.health import probe_model
 from lha.obs.events import get_logger
+from lha.obs.otel import span
 from lha.obs.redact import redact_text
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.persistence.services import open_run_services
@@ -472,8 +473,8 @@ def make_cycle_activity(
 
     @activity.defn(name="run_agent_cycle")
     async def run_agent_cycle_bound(inp: CycleInput) -> CycleResult:
-        return await _refuse_tampered_chain(
-            _execute_cycle(inp, settings=settings, model_factory=model_factory)
+        return await _traced_cycle(
+            inp, _execute_cycle(inp, settings=settings, model_factory=model_factory)
         )
 
     return run_agent_cycle_bound
@@ -482,7 +483,19 @@ def make_cycle_activity(
 @activity.defn
 async def run_agent_cycle(inp: CycleInput) -> CycleResult:
     """Activity wrapper around one retry-safe agent cycle (worker settings, configured model)."""
-    return await _refuse_tampered_chain(_execute_cycle(inp))
+    return await _traced_cycle(inp, _execute_cycle(inp))
+
+
+async def _traced_cycle(inp: CycleInput, cycle: Awaitable[CycleResult]) -> CycleResult:
+    """One ``lha.activity.run_agent_cycle`` span per activity ATTEMPT (retries are visible)."""
+    attempt = activity.info().attempt if activity.in_activity() else 1
+    with span(
+        "lha.activity.run_agent_cycle",
+        {"lha.mission_id": inp.mission_id, "lha.cycle_id": inp.cycle_id, "lha.attempt": attempt},
+    ) as traced:
+        result = await _refuse_tampered_chain(cycle)
+        traced.set({"lha.verdict": result.verdict, "lha.advanced": result.advanced})
+        return result
 
 
 async def _refuse_tampered_chain(cycle: Awaitable[CycleResult]) -> CycleResult:

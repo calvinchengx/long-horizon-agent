@@ -246,6 +246,7 @@ async def test_loop_detector_counts_consecutive_failures_only(tmp_path: Path) ->
         budget_usd_ceiling=100.0,
         max_cycles=20,
         stall_limit=2,
+        flaky_retries=0,  # the check flips on purpose; quarantine would change the scenario
     )
     orchestrator = Orchestrator(
         settings,

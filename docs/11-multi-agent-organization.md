@@ -104,8 +104,9 @@ status `todo`, `verified_by` cleared, the review notes attached, and a checkpoin
    contains the contract, the mission spec, the item's last failure and reflection, the
    recorded decisions, the research briefs and the blackboard.
 4. The worktree is verified the way a Lead cycle would verify the item. The mission checks and
-   the item's witnesses run on the Lead's verifier (trusted checks outside the sandbox), and an
-   invalid witness counts as a failing check. The harness-integrity check (including
+   the item's witnesses run on the Lead's verifier (trusted checks outside the sandbox, and
+   the [flaky-check quarantine](07-verification.md#flaky-check-quarantine)), and an invalid
+   witness counts as a failing check. The harness-integrity check (including
    `LHA_HARNESS_PATHS`) is added unless the item sets `allow_harness_edits`. The work is
    committed on the branch, with `.lha/` restored first so harness files never travel. The files
    the branch changed (`git diff --name-only base..head`, excluding `.lha`) are checked against
@@ -157,11 +158,6 @@ other backend uses the single configured model for all roles.
 | Integrator (`BranchIntegrator`, [integrator.py](../python/src/lha/agents/integrator.py)) | none (deterministic) | merges only | Verified, owned, conflict-free, re-verified merge of an implementer branch | `orchestrate` (parallel waves) |
 | Reviewer ([reviewer.py](../python/src/lha/agents/reviewer.py)) | opus | no | Fresh-context review that returns JSON `verdict` / `blocking_issues` / `advisory`. An unparseable reply counts as blocking, and "approve" with issues counts as "block" | `orchestrate` |
 | Reflection ([reflection.py](../python/src/lha/agents/reflection.py)) | lead's model | no tools | Short post-mortem (at most 2,000 chars) prepended to the next attempt | `orchestrate` |
-| Tester (`reviewer.py`) | sonnet | yes | Asks a `SubAgent` to add new test files | no |
-| `Integrator`, Auditor, Librarian runners ([specialists.py](../python/src/lha/agents/specialists.py)) | sonnet | integrator yes | Thin `SubAgent` wrappers with the role prompt. The model-backed `Integrator` runner is not used; integration is `BranchIntegrator` | no |
-| Judge ([judge.py](../python/src/lha/agents/judge.py)) | caller's model | no tools | Strict JSON `{pass, score, rationale}`. Anything malformed is a fail | no (used by `evals/harness.py` and the evolution gate) |
-| Evolver + gate ([evolver.py](../python/src/lha/agents/evolver.py), [evolution.py](../python/src/lha/agents/evolution.py)) | caller's model | no tools | Proposes a new system prompt from failure traces. Promotes only if the judged pass rate on the held-out cases beats baseline by more than `min_improvement`. Refuses an empty case set | no (library) |
-| `ClaudeSdkLead` ([claude_sdk_lead.py](../python/src/lha/agents/claude_sdk_lead.py)) | configurable | SDK tools | Runs a prompt through `claude_agent_sdk.query` and folds the streamed messages into text, session id and cost | no |
 
 `SubAgent` ([subagent.py](../python/src/lha/agents/subagent.py)) is the shared loop for
 non-Lead roles. It shows the role only the tools that pass both the dispatcher and the role
@@ -170,8 +166,11 @@ as the text action protocol. An implementer's turn budget is `LHA_MAX_TURNS_PER_
 no "verification failed, try again" turn inside the wave. A failed attempt is retried in a later
 round with the failure report and a reflection.
 
-`ClaudeSdkLead` uses the Agent SDK's own tools. It does not go through `AllowListDispatcher`,
-the sandbox or the `CostMeter`. It is not wired into any run path.
+The Auditor, Librarian, Tester and model-backed Integrator runners, the prompt evolver with its
+judge and eval harness, and the Claude Agent SDK lead were removed: none had a caller. Their
+jobs are done by deterministic code (the verifier and harness integrity audit the lead's claims;
+`BranchIntegrator` integrates), by memory consolidation (the `librarian` label in the cost
+ledger), and by the `claude_code` lead engine ([13-models.md](13-models.md)).
 
 ## File ownership
 
@@ -243,8 +242,7 @@ serial item's files (they are released in memory before any use).
   ticket moves `created → in_progress` (worktree ready) `→ awaiting_verify` (implementer done)
   `→ awaiting_merge` (verified) `→ done` (merged), or to `failed` at the step that failed. The
   final status and the full history are committed as a `ticket` event in the item's checkpoint.
-  A retry is a new ticket. `durable/ledgers.py` also uses `Ticket`, but it is library code that
-  no workflow calls.
+  A retry is a new ticket.
 - [blackboard.py](../python/src/lha/coordination/blackboard.py): entries posted during a round go
   to a response board. `commit_round()` promotes them to the main board, so agents in the same
   round do not see each other's output. In `orchestrate`, research briefs, implementer
@@ -292,7 +290,6 @@ run durably, but have no implementation:
   the durable Temporal workflow (only `lha orchestrate` has them; `SubAgentWorkflow` exists but
   `MissionWorkflow` never starts it);
 - resuming an interrupted `lha orchestrate` run (the blackboard is in memory, and the next
-  invocation re-initializes the anchor);
-- the Auditor, Librarian, Tester and model-backed Integrator runners in any run path.
+  invocation re-initializes the anchor).
 
 Related: [Architecture](05-architecture.md), [CLI](17-cli.md).

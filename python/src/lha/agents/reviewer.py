@@ -1,7 +1,7 @@
-"""The independent Reviewer + Tester role wrappers.
+"""The independent Reviewer role wrapper.
 
-Both run in FRESH context (no shared trace with the author) — the highest-leverage reliability
-investment. They're thin wrappers over ``SubAgent`` with the role's prompt and a scoped dispatcher.
+It runs in FRESH context (no shared trace with the author) — the highest-leverage reliability
+investment. It is a thin wrapper over ``SubAgent`` with the role's prompt and a scoped dispatcher.
 
 The Reviewer returns a STRUCTURED verdict parsed from JSON (``verdict`` + ``blocking_issues`` +
 ``advisory``). Free-text substring matching is not used ("No blocking issues" is not a block). If
@@ -11,9 +11,9 @@ approved), unless explicit ``BLOCK:`` lines were given, which are then the block
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 
-from lha.agents.judge import extract_json_object
 from lha.agents.roles import ROLES
 from lha.agents.subagent import SubAgent
 from lha.contracts.model import ModelProvider
@@ -23,6 +23,20 @@ _DIFF_CAP = 8000
 
 _APPROVE = frozenset({"approve", "approved", "pass", "lgtm", "accept", "ok"})
 _BLOCK = frozenset({"block", "blocked", "blocking", "reject", "request_changes", "fail"})
+
+
+def extract_json_object(text: str) -> dict[str, object] | None:
+    """The outermost ``{...}`` in ``text`` parsed as a JSON object, or ``None``."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        return None
+    try:
+        parsed = json.loads(text[start : end + 1])
+    except ValueError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
 
 _REVIEW_OBJECTIVE = (
     "Review the diff against the acceptance criteria. Identify correctness, security, and scope "
@@ -106,20 +120,3 @@ class Reviewer:
             blocking_issues=issues,
             advisory=advisory,
         )
-
-
-class Tester:
-    """Generates adversarial/property tests independent of the implementation."""
-
-    def __init__(self, model: ModelProvider, dispatcher: ToolDispatcher) -> None:
-        self._agent = SubAgent(role=ROLES["tester"], model=model, dispatcher=dispatcher)
-
-    async def add_tests(self, *, feature: str, ctx: ToolContext) -> str:
-        result = await self._agent.run(
-            objective=(
-                f"Write adversarial/property tests for: {feature}. Use the write_file tool to add "
-                "NEW test files only; never edit the existing harness."
-            ),
-            ctx=ctx,
-        )
-        return result.brief

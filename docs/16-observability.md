@@ -1,6 +1,6 @@
 # Observability
 
-What LHA records about a mission, where it goes, and what is only a hook. The code is in
+What LHA records about a mission and where it goes. The code is in
 [`python/src/lha/obs/`](../python/src/lha/obs/).
 
 | Signal | Local runs (`run-local`, `mission`, `orchestrate`) | Durable runs (`lha worker`) |
@@ -11,8 +11,8 @@ What LHA records about a mission, where it goes, and what is only a hook. The co
 | Mission row (`missions`) | yes | yes, written by `mission-start`, each cycle activity and the workflow (`record_mission_status`) |
 | Cost ledger (`cost_ledger`) | every metered call | every metered call, plus `.git/lha/spend.ndjson` |
 | Gate webhook (`LHA_GATE_WEBHOOK_URL`) | gate events from `--approve-interactive` | every gate event |
-| OpenTelemetry spans | `orchestrate` only, if a tracer provider is installed | no |
-| Langfuse | not sent | not sent |
+| OpenTelemetry spans (OTLP) | mission, cycle, model call and tool call spans, when an endpoint or Langfuse is configured and the `observability` extra is installed | cycle activity, cycle, model call and tool call spans, under the same conditions |
+| Langfuse | the same spans, through Langfuse's OTLP endpoint | the same spans, through Langfuse's OTLP endpoint |
 | Cost summary | summary line on exit | `spent_usd` per cycle; `lha costs` for both |
 
 ## Structured events
@@ -36,6 +36,7 @@ Event kinds emitted today:
 | `tool_call` | `AgentLoop` | `tool`, `ok` |
 | `invalid_reply` | `AgentLoop` | `reason` |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict` |
+| `check_quarantined`, `quarantined_check_failed` | `AgentLoop` (from the verifier) | `check`, `revision`, `passes`, `fails` (also committed to `.lha/events.ndjson`; see [07-verification.md](07-verification.md#flaky-check-quarantine)) |
 | `governor_block` | runner, orchestrator | `reason` |
 | `deadlocked` | runner, orchestrator | `reason` |
 | `loop_detected` | runner | `item_id` |
@@ -93,29 +94,56 @@ the Go port (`go/internal/obs`) both run it.
 `lha config` masks every `SecretStr` setting (`***` when set, `None` when unset). See
 [18-configuration.md](18-configuration.md).
 
-## OpenTelemetry
+## OpenTelemetry and Langfuse
 
-`agent_span(name, **attributes)` in [`obs/otel.py`](../python/src/lha/obs/otel.py) opens a span
-whose redacted attributes are prefixed `gen_ai.`. If `opentelemetry` is not installed it does
-nothing. Install it with the `observability` extra:
+[`obs/otel.py`](../python/src/lha/obs/otel.py) exports traces over OTLP/HTTP. Install the
+`observability` extra (`opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http`):
 
 ```bash
-cd python && uv sync --extra observability   # langfuse, opentelemetry-sdk, opentelemetry-exporter-otlp
+cd python && uv sync --extra observability
 ```
 
-The only caller is the orchestrator (`lha orchestrate`), which opens one `cycle` span per item
-attempt with `mission_id` and `item`. LHA never installs a `TracerProvider` or exporter, so with
-the CLI the spans are no-ops. To export them, embed the orchestrator in a process that configures
-the OpenTelemetry SDK (for example an OTLP exporter pointed at a collector or at Langfuse's OTLP
-endpoint).
+and set at least one destination:
 
-## Langfuse
+| Setting | Destination |
+|---|---|
+| `LHA_OTEL_EXPORTER_OTLP_ENDPOINT`, or the standard `OTEL_EXPORTER_OTLP_ENDPOINT` | an OTLP collector (Tempo, Jaeger, Datadog, Honeycomb, ...). `/v1/traces` is appended to the base URL. `OTEL_EXPORTER_OTLP_HEADERS` is passed to the collector |
+| `LHA_LANGFUSE_HOST` + `LHA_LANGFUSE_PUBLIC_KEY` + `LHA_LANGFUSE_SECRET_KEY` | Langfuse, at `<host>/api/public/otel/v1/traces` with HTTP Basic auth (public key : secret key). No Langfuse SDK is needed |
 
-[`obs/langfuse_exporter.py`](../python/src/lha/obs/langfuse_exporter.py) has one function,
-`build_langfuse()`, which returns a `Langfuse` client when `LHA_LANGFUSE_HOST`,
-`LHA_LANGFUSE_PUBLIC_KEY` and `LHA_LANGFUSE_SECRET_KEY` are all set and the `langfuse` package is
-installed, else `None`. Nothing calls it, and no event is mirrored to Langfuse. The compose stack
-runs a Langfuse server on port 3000; it stays empty unless you send data to it yourself.
+With both set, every span goes to both. At process start the CLI (every `lha` command, including
+`lha worker`) and `python -m lha.durable.worker` call `configure_tracing`, which installs a
+`TracerProvider` (resource `service.name` = `LHA_OTEL_SERVICE_NAME`, default `lha`, and
+`lha.component` = `cli` or `worker`) with one batch exporter per destination. With no
+destination, with `OTEL_SDK_DISABLED=true`, or without the extra, it installs nothing (the
+missing extra is logged as a warning) and every span is a no-op.
+
+Spans, on every run path:
+
+| Span | Where | Attributes |
+|---|---|---|
+| `lha.mission` | `run-local`, `mission` (`run_mission_local`) and `orchestrate` (`Orchestrator.run_mission`) | `lha.run_path`, `lha.title`, then `lha.mission_id`, `lha.stopped_reason`, `lha.completed`, `lha.cycles`, `lha.items_done`, `lha.items_total`, `lha.cost_usd` |
+| `lha.activity.run_agent_cycle` | each attempt of the durable `run_agent_cycle` activity (the worker) | `lha.mission_id`, `lha.cycle_id`, `lha.attempt`, `lha.verdict`, `lha.advanced` |
+| `lha.cycle` | every `AgentLoop.run_cycle` (local, durable, the Lead in `orchestrate`) | `lha.mission_id`, `lha.cycle_id`, `lha.item_id`, `lha.verdict`, `lha.verified`, `lha.tool_calls`, `lha.turns`, `lha.head_sha` |
+| `chat <model>` | every metered model call (every role: planner, lead, researchers, reviewer, implementers, replanner, memory consolidation) | `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens`, `gen_ai.response.finish_reasons`, `lha.role`, `lha.cycle_id`, `lha.cost_usd` (absent when the cost is unknown) |
+| `invoke_agent <model>` | a whole `claude -p` session metered with `run_external` (the `claude_code` lead engine) | as `chat`, with the cost Claude Code reported |
+| `execute_tool <name>` | every tool call of the lead and of sub-agents (researchers, reviewer, implementers), including calls the policy refuses | `gen_ai.tool.name`, `gen_ai.tool.call.id`, `lha.mission_id`, `lha.tool.ok`; status `ERROR` with the (redacted) error when the tool failed |
+
+The `orchestrate` Lead cycle and each implementer also keep their older `cycle` and `implement`
+spans (attributes `gen_ai.mission_id`, `gen_ai.item`). The workflow itself is not traced: the
+durable spans start in the activity, and the Temporal history is the record of the workflow.
+
+Spans carry metadata only. Prompts, model output, tool arguments and tool output are never
+attached, and every attribute passes through the redaction below.
+
+Tracing never blocks or stops the agent. Spans are handed to a `BatchSpanProcessor` (a bounded
+background queue that drops spans when full), an export gives up after
+`LHA_OTEL_EXPORT_TIMEOUT_S` (default 5), and an unreachable backend is logged by the exporter and
+otherwise ignored. At exit the provider flushes, bounded by the same timeout. An exception
+inside the tracing code is swallowed; an exception from the traced work is recorded on its span
+and re-raised unchanged.
+
+The compose stack runs a Langfuse server on port 3000. Create a project in it and set the three
+`LHA_LANGFUSE_*` settings to send spans there.
 
 ## Temporal UI
 

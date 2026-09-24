@@ -3,7 +3,8 @@
 The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha/cli/main.py)
 (Typer). Run it from `python/` with `uv run lha <command>`, or install the package and run `lha`.
 `lha` with no arguments prints help. Every command also reads the `LHA_*` settings described in
-[18-configuration.md](18-configuration.md).
+[18-configuration.md](18-configuration.md), and before it runs installs the OTLP trace exporter
+when one is configured ([16-observability.md](16-observability.md)).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
 ported. Today there is no `go/cmd/lha` and no Go binary can be built; see [23-roadmap.md](23-roadmap.md).
