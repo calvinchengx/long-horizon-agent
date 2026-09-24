@@ -56,27 +56,26 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | Package | Mirrors | State |
 |---|---|---|
 | `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
-| `config` | `lha.config` | Committed, including `sandbox_image`, `sandbox_egress`, `web_allow_hosts`, `trusted_checks`, `harness_paths`, `max_replans`, `max_split_depth` and `approval_timeout_s` |
-| `spec` | conformance harness | Committed: contracts (check names, checklist transitions and splits), model, safety, state, obs and `coordination/decision_chain.json` cases |
+| `config` | `lha.config` | Committed: every Python setting, with the same names, defaults and validation; `lha config` output is byte-identical |
+| `spec` | conformance harness | Committed: runs every file in `spec/`, including `agent/prompts.json` and `coordination/shared_paths.json` |
 | `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, failover, retry, pricing) | Committed. `BuildProvider` does not build a fallback chain from settings, and there is no health probe |
 | `safety` | `lha.safety` (command classifier, egress policy with credential broker, Rule of Two) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
 | `obs` | `lha.obs` (events, redaction) | Committed |
-| `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint) and carrying `.lha/ownership.json` along; no checklist import or `vendor` |
-| `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine) | Committed; no witnesses, trusted runner or extra protected paths |
+| `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, and carrying `.lha/ownership.json` along; no `vendor` |
+| `checklistimport` | `lha.state.checklist_import` | Committed (`.json` and `.md` checklists) |
+| `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`); no mutation testing or trust bootstrap |
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
-| `execution` (sandboxes, egress proxy, tools including the web tools), `agent` (loop, replanner), `hitl` (approvals, escalation, webhook), `memory`, `persistence`, `coordination`, `agents`, durable worker, `cmd/lha` | | Not started |
-
-The Go config reads the settings listed above, but nothing in Go uses the large-mission ones
-(`sandbox_image` through `approval_timeout_s`) yet. It does not read the newer settings at all:
-`LHA_FALLBACK_MODELS`, `LHA_SQLITE_PATH`, the memory settings, the web credential and search
-settings, `LHA_PRIVATE_DATA`, the gate escalation and webhook settings, the deadlock gate default,
-`LHA_CYCLE_PAUSE_SECONDS` and `LHA_MAX_PARALLEL_IMPLEMENTERS`. The Go suite runs
-`coordination/decision_chain.json` but not `coordination/shared_paths.json`.
+| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local`. No `claude_code` lead engine and no tiered memory |
+| `agents` | `lha.agents.planner`, `lha.agents.replanner` | Committed (Planner with file ownership, Replanner); not the orchestrator or the other roles |
+| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions`. The other commands say they are not yet available and exit 2. Runs need the execution layer, which is linked in `go/cmd/lha/wiring.go` |
+| `execution` (sandboxes, egress proxy, tools including the web tools), `hitl` (approvals, escalation, webhook), `memory`, `persistence`, durable worker | | Not started |
 
 Consequences today:
 
-- There is no `go/cmd/lha` directory, so there is no Go binary to build.
-- There is no Go sandbox, agent loop or Temporal worker, so Go cannot run a mission.
+- `cd go && go build -o lha ./cmd/lha` builds the Go CLI. Until the execution layer (sandboxes
+  and tools) is linked, `run-local` and `mission` stop with `error: execution layer not linked`
+  (exit 2), so use the Python implementation to run missions.
+- There is no Go Temporal worker and no Go persistence: Go runs do not write the mission store.
 - The Go packages can be tested with `cd go && go test ./...`.
 
 ## Known limitation: mixed Python/Go workers on one mission
