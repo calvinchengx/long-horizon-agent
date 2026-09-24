@@ -62,6 +62,9 @@ type GitMissionAnchor struct {
 	// Events appended (uncommitted) via AppendEvent; re-applied after the .lha restore in
 	// CommitCheckpoint so they are not lost.
 	pendingEvents []contracts.EventRecord
+	// Decisions queued mid-cycle by the record_decision tool (RecordDecision); chained onto
+	// decisions.ndjson by the next CommitCheckpoint.
+	pendingDecisions []contracts.DecisionRecord
 	// skipRestore disables the .lha restore (tests prove the log rebuild is idempotent anyway).
 	skipRestore bool
 }
@@ -102,10 +105,19 @@ func (a *GitMissionAnchor) Initialize(ctx context.Context, title, description st
 // InitializeWithAcceptance writes the mission spec (with its definition of done) + the initial
 // anchor and commits; a checklist with dependency errors is rejected before anything is written.
 func (a *GitMissionAnchor) InitializeWithAcceptance(ctx context.Context, title, description, acceptance string, items contracts.Checklist) (string, error) {
+	return a.InitializeSpec(ctx, contracts.MissionSpec{Title: title, Description: description, Acceptance: acceptance}, items)
+}
+
+// InitializeSpec writes spec (title, description, acceptance and the vendored references) + the
+// initial anchor and commits (python: initialize(..., acceptance=, references=)). The spec's
+// schema version is always 1; a checklist with dependency errors is rejected before anything is
+// written.
+func (a *GitMissionAnchor) InitializeSpec(ctx context.Context, spec contracts.MissionSpec, items contracts.Checklist) (string, error) {
 	if errs := items.DependencyErrors(); len(errs) > 0 {
 		return "", errors.New("invalid checklist: " + strings.Join(errs, "; "))
 	}
-	spec := contracts.MissionSpec{Title: title, Description: description, Acceptance: acceptance, SchemaVersion: 1}
+	spec.References = append([]string{}, spec.References...)
+	spec.SchemaVersion = 1
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if err := InitRepo(ctx, a.workdir); err != nil {
@@ -136,6 +148,7 @@ func (a *GitMissionAnchor) InitializeWithAcceptance(ctx context.Context, title, 
 		}
 	}
 	a.pendingEvents = nil
+	a.pendingDecisions = nil
 	return a.commitAll(ctx, "lha: initialize mission anchor")
 }
 
@@ -275,8 +288,9 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 	// duplicated. Decisions are chained onto the verified committed chain; a record without a
 	// cycle id gets the checkpoint's.
 	prev := chain.LastHash
-	lines := make([]string, 0, len(cp.Decisions))
-	for _, d := range cp.Decisions {
+	queued := append(append([]contracts.DecisionRecord{}, a.pendingDecisions...), cp.Decisions...)
+	lines := make([]string, 0, len(queued))
+	for _, d := range queued {
 		if d.CycleID == "" {
 			d.CycleID = cp.CycleID
 		}
@@ -309,7 +323,25 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 		return "", err
 	}
 	a.pendingEvents = nil
+	a.pendingDecisions = nil
 	return sha, nil
+}
+
+// RecordDecision queues record for the next checkpoint (in memory) and returns how many are
+// queued. The next CommitCheckpoint chains it onto decisions.ndjson, stamped with the
+// checkpoint's cycle id if it has none, so it is committed together with the cycle's work.
+func (a *GitMissionAnchor) RecordDecision(record contracts.DecisionRecord) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingDecisions = append(a.pendingDecisions, record)
+	return len(a.pendingDecisions)
+}
+
+// PendingDecisions are the decisions queued for the next checkpoint.
+func (a *GitMissionAnchor) PendingDecisions() []contracts.DecisionRecord {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]contracts.DecisionRecord{}, a.pendingDecisions...)
 }
 
 // RestoreFromHead restores tracked relpaths to their HEAD content; it returns the ones restored.

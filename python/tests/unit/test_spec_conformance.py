@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from lha.contracts.model import Usage
-from lha.contracts.state import Checklist, ChecklistItem
+from lha.agent.loop import parse_action
+from lha.agent.prompt import build_messages, corrective_message, render_memory_block, render_tools
+from lha.agents.planner import Planner, assign_ownership, parse_plan
+from lha.agents.replanner import Replanner
+from lha.contracts.model import ModelMessage, TurnResult, Usage
+from lha.contracts.state import Checklist, ChecklistItem, SituationSnapshot
+from lha.contracts.tools import ToolSpec
 from lha.contracts.verify import checks_from_commands, derive_check_name
 from lha.coordination.decision_log import _canonical, _chain_hash, parse_chain, verify_chain
 from lha.coordination.ownership import is_shared
 from lha.model.pricing import lookup_claude_price
+from lha.model.stub import StubModel
 from lha.obs.redact import is_secret_key, redact_text
 from lha.safety.commands import classify_command
 from lha.safety.egress import (
@@ -159,3 +166,74 @@ def test_pricing() -> None:
         for cost in case["costs"]:
             assert price is not None
             assert price.cost(Usage(**cost["usage"])) == pytest.approx(cost["usd"], rel=1e-12)
+
+
+class _Recording(StubModel):
+    """Records the messages of every call (and answers with an empty plan)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.seen: list[dict[str, str]] = []
+
+    async def complete(
+        self,
+        messages: list[ModelMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+        max_tokens: int | None = None,
+    ) -> TurnResult:
+        self.seen.extend({"role": m.role, "content": m.content} for m in messages)
+        return TurnResult(text="[]")
+
+
+def test_agent_prompts() -> None:
+    spec = _load("agent/prompts.json")
+    for case in spec["build_messages"]:
+        messages = build_messages(
+            anchor_text=case["anchor_text"],
+            mission_text=case["mission_text"],
+            snapshot=SituationSnapshot.model_validate(case["snapshot"]),
+            item=ChecklistItem.model_validate(case["item"]),
+            specs=[ToolSpec.model_validate(s) for s in case["specs"]],
+            memory_text=case["memory_text"],
+            engine=case["engine"],
+        )
+        got = [{"role": m.role, "content": m.content} for m in messages]
+        assert got == case["messages"], case["name"]
+    lead = spec["lead_tools"]
+    assert render_tools([ToolSpec.model_validate(s) for s in lead["specs"]]) == lead["rendered"]
+    for case in spec["render_memory_block"]:
+        sections = [(s["title"], s["lines"]) for s in case["sections"]]
+        weights = tuple(case["weights"]) if case["weights"] is not None else None
+        rendered = render_memory_block(sections, budget_chars=case["budget_chars"], weights=weights)
+        assert rendered == case["rendered"]
+    assert corrective_message("no JSON object found in reply").content == spec["corrective"]
+
+
+def test_agent_reply_protocol_and_planning() -> None:
+    spec = _load("agent/prompts.json")
+    for case in spec["parse_action"]:
+        action = parse_action(case["text"], [], stop_reason=case["stop_reason"])
+        got = [action.done, action.tool, action.arguments, action.summary, action.error]
+        assert got == [case[k] for k in ("done", "tool", "arguments", "summary", "error")]
+    for case in spec["parse_plan"]:
+        items, files = parse_plan(case["text"])
+        owners = assign_ownership(items, files).owners
+        assert [i.model_dump(mode="json") for i in items] == case["items"], case["text"]
+        assert (files, owners) == (case["files"], case["owners"]), case["text"]
+
+    model = _Recording()
+    asyncio.run(Planner(model).plan_mission(title="T", description="Build the thing."))
+    assert model.seen == spec["planner_messages"]
+    model = _Recording()
+    asyncio.run(
+        Planner(model).plan_mission(
+            title="T", description="Build the thing.", acceptance="all tests pass"
+        )
+    )
+    assert model.seen == spec["planner_messages_acceptance"]
+    replan = spec["replanner"]
+    model = _Recording()
+    item = ChecklistItem.model_validate(replan["item"])
+    asyncio.run(Replanner(model).split(mission_text=replan["mission_text"], item=item))
+    assert model.seen == replan["messages"]

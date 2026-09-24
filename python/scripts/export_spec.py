@@ -9,6 +9,7 @@ a behaviour change is intended, and review the diff:
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib
 import json
@@ -20,8 +21,23 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "spec"
 sys.path.insert(0, str(ROOT / "python"))  # so ``tests.unit.*`` corpora import
 
-from lha.contracts.model import Usage  # noqa: E402
-from lha.contracts.state import Checklist, ChecklistItem, DecisionRecord  # noqa: E402
+from lha.agent.loop import parse_action  # noqa: E402
+from lha.agent.prompt import (  # noqa: E402
+    build_messages,
+    corrective_message,
+    render_memory_block,
+    render_tools,
+)
+from lha.agents.planner import Planner, assign_ownership, parse_plan  # noqa: E402
+from lha.agents.replanner import Replanner  # noqa: E402
+from lha.contracts.model import ModelMessage, TurnResult, Usage  # noqa: E402
+from lha.contracts.state import (  # noqa: E402
+    Checklist,
+    ChecklistItem,
+    DecisionRecord,
+    SituationSnapshot,
+)
+from lha.contracts.tools import ToolSpec  # noqa: E402
 from lha.contracts.verify import checks_from_commands, derive_check_name  # noqa: E402
 from lha.coordination.decision_log import (  # noqa: E402
     _canonical,
@@ -30,7 +46,10 @@ from lha.coordination.decision_log import (  # noqa: E402
     verify_chain,
 )
 from lha.coordination.ownership import is_shared  # noqa: E402
+from lha.execution.tools import default_local_tools  # noqa: E402
+from lha.execution.tools.decisions import DecisionBuffer, RecordDecisionTool  # noqa: E402
 from lha.model.pricing import CLAUDE_PRICES, lookup_claude_price  # noqa: E402
+from lha.model.stub import StubModel  # noqa: E402
 from lha.obs.redact import is_secret_key, redact_text  # noqa: E402
 from lha.safety.commands import classify_command  # noqa: E402
 from lha.safety.egress import (  # noqa: E402
@@ -552,6 +571,300 @@ def export_pricing() -> None:
     _write("model/pricing.json", {"claude": cases})
 
 
+# --- agent/prompts ----------------------------------------------------------------------------
+# The lead's prompts, the JSON reply protocol and the Planner/Replanner prompts: Go must produce
+# byte-identical strings for the same inputs. Inputs are recorded as model dumps (tool specs keep
+# their ``parameters`` key order, which ``render_tools`` shows as a Python dict repr).
+
+_LONG_UNICODE = "".join(f"ligne {n} é🙂 " for n in range(1500))  # > 8000 code points
+
+
+def _spec(name: str, description: str, properties: dict[str, object]) -> ToolSpec:
+    return ToolSpec(
+        name=name, description=description, parameters={"type": "object", "properties": properties}
+    )
+
+
+_SPECS = [
+    _spec(
+        "write_file",
+        "Write a file.",
+        {"path": {"type": "string"}, "content": {"type": "string", "description": 'it\'s "new"'}},
+    ),
+    _spec(
+        "run",
+        "Run argv.",
+        {
+            "argv": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+            "timeout_s": {"type": "number", "default": 60.0, "maximum": 1e16},
+            "check": {"type": "boolean", "default": True, "nullable": None},
+        },
+    ),
+    ToolSpec(name="noop", description="No arguments."),
+]
+
+
+def _decisions() -> list[DecisionRecord]:
+    return [
+        DecisionRecord(decision="use SQLite", rationale="zero ops", cycle_id="c1"),
+        DecisionRecord(
+            decision="REST over gRPC",
+            rationale="clients",
+            alternatives_rejected="gRPC",
+            affected=["api/", "docs/api.md"],
+        ),
+        DecisionRecord(decision="x" * 300, rationale="ü" * 400, cycle_id="c9"),
+    ]
+
+
+def _prompt_cases() -> list[dict[str, Any]]:
+    base_item = ChecklistItem(id="01", description="Add the model")
+    failing = ChecklistItem(
+        id="02.1",
+        description="Wire the API",
+        witnesses=["go:TestAPI@./internal/...", "cmd:make check"],
+        attempts=2,
+        last_failure="FAILED ✗ " * 500,
+    )
+    commits = [f"{n:07x} lha: attempt {n}" for n in range(12)]
+    cases: list[dict[str, Any]] = [
+        {"name": "mission_only", "mission_text": "Mission: M\n\nBuild it.", "item": base_item},
+        {
+            "name": "anchor_only",
+            "anchor_text": "  Mission: from the progress file  \n",
+            "item": base_item,
+        },
+        {
+            "name": "mission_with_long_context",
+            "mission_text": "Mission: M",
+            "anchor_text": _LONG_UNICODE,
+            "item": base_item,
+            "commits": commits,
+        },
+        {
+            "name": "context_equal_to_mission",
+            "mission_text": "Mission: M",
+            "anchor_text": " Mission: M ",
+            "item": base_item,
+        },
+        {"name": "witnesses_and_failure", "mission_text": "Mission: M", "item": failing},
+        {
+            "name": "memory_and_decisions",
+            "mission_text": "Mission: M",
+            "item": base_item,
+            "memory_text": "\n  " + "mémoire " * 3000 + "  \n",
+            "decisions": _decisions(),
+        },
+        {"name": "engine", "mission_text": "Mission: M", "item": failing, "engine": True},
+        {"name": "no_tools", "mission_text": "Mission: M", "item": base_item, "specs": []},
+    ]
+    out = []
+    for case in cases:
+        specs = case.get("specs", _SPECS)
+        assert isinstance(specs, list)
+        snapshot = SituationSnapshot(
+            head_sha="abc",
+            recent_commits=case.get("commits", []),
+            last_decisions=case.get("decisions", []),
+        )
+        item = case["item"]
+        assert isinstance(item, ChecklistItem)
+        messages = build_messages(
+            anchor_text=str(case.get("anchor_text", "")),
+            mission_text=str(case.get("mission_text", "")),
+            snapshot=snapshot,
+            item=item,
+            specs=specs,
+            memory_text=str(case.get("memory_text", "")),
+            engine=bool(case.get("engine", False)),
+        )
+        out.append(
+            {
+                "name": case["name"],
+                "anchor_text": case.get("anchor_text", ""),
+                "mission_text": case.get("mission_text", ""),
+                "memory_text": case.get("memory_text", ""),
+                "engine": case.get("engine", False),
+                "snapshot": snapshot.model_dump(mode="json"),
+                "item": item.model_dump(mode="json"),
+                "specs": [s.model_dump(mode="json") for s in specs],
+                "messages": [{"role": m.role, "content": m.content} for m in messages],
+            }
+        )
+    return out
+
+
+def _memory_cases() -> list[dict[str, Any]]:
+    sections = [
+        ("Past attempts", ["attempt one failed because of X " * 3, "attempt two é" * 20]),
+        ("Skills", []),
+        ("Repository", [f"src/file_{n}.py: def f{n}(): ..." for n in range(30)]),
+    ]
+    cases = []
+    for budget, weights in [
+        (4000, None),
+        (600, None),
+        (1200, (3.0, 1.0, 1.0)),
+        (100, None),
+        (50_000, (0.0, 0.0, 1.0)),
+    ]:
+        cases.append(
+            {
+                "sections": [{"title": t, "lines": lines} for t, lines in sections],
+                "budget_chars": budget,
+                "weights": list(weights) if weights is not None else None,
+                "rendered": render_memory_block(sections, budget_chars=budget, weights=weights),
+            }
+        )
+    return cases
+
+
+_REPLIES = [
+    ('{"tool": "read_file", "arguments": {"path": "x"}}', None),
+    ('Sure: {"tool": "run", "arguments": {"argv": ["ls", "-la"], "n": 2}} ok', None),
+    ('{"done": true, "summary": "ok"}', None),
+    ('{"done": true, "summary": [1, "a", null, 2.50, {"k": false}]}', None),
+    ('{"done": true}', None),
+    ('{"done": "yes"}', None),
+    ('{"tool": "", "arguments": {}}', None),
+    ('{"tool": "x", "arguments": [1]}', None),
+    ("I am finished.", None),
+    ("{not json}", None),
+    ('{"done": true}', "max_tokens"),
+    ('{"done": true}', "LENGTH"),
+    ('{"done": true}', "end_turn"),
+    ("x" * 300, None),
+]
+
+
+def _action_cases() -> list[dict[str, Any]]:
+    cases = []
+    for text, stop in _REPLIES:
+        action = parse_action(text, [], stop_reason=stop)
+        cases.append(
+            {
+                "text": text,
+                "stop_reason": stop,
+                "done": action.done,
+                "tool": action.tool,
+                "arguments": action.arguments,
+                "summary": action.summary,
+                "error": action.error,
+            }
+        )
+    return cases
+
+
+_PLANS = [
+    '[{"description": "a"}, {"description": "b", "depends_on": ["1"]}, '
+    '{"description": "c", "depends_on": [1, "step 2", "#2"]}]',
+    '[{"description": "a", "depends_on": ["2"]}, {"description": "b", "depends_on": ["2"]}, '
+    '{"description": "c", "depends_on": ["99", "setup"]}]',
+    'Plan:\n["plain step", {"step": "via step", "depends_on": [1.0, true, null, "", 7, 1.5]}, 42]',
+    '[{"description": "a", "files": ["src/a.py", "src/A2.py"]}, '
+    '{"description": "b", "files": ["src/b.py", "pyproject.toml"]}, '
+    '{"description": "c", "files": ["SRC/a.py"]}, {"description": "d", "files": ["../x.py"]}, '
+    '{"description": "e", "files": ".lha/checklist.json"}, {"description": "f", '
+    '"allow_harness_edits": true, "depends_on": "1"}]',
+    "no json here",
+    '{"description": "not a list"}',
+]
+
+
+def _plan_cases() -> list[dict[str, Any]]:
+    cases = []
+    for text in _PLANS:
+        items, files = parse_plan(text)
+        ownership = assign_ownership(items, files)
+        cases.append(
+            {
+                "text": text,
+                "items": [i.model_dump(mode="json") for i in items],
+                "files": files,
+                "owners": ownership.owners,
+            }
+        )
+    return cases
+
+
+def export_agent_prompts() -> None:
+    blocked = ChecklistItem(
+        id="03",
+        description="OneLake data plane",
+        witnesses=["trusted:e2e"],
+        consecutive_failures=3,
+        last_failure="boom " * 1000,
+    )
+    _write(
+        "agent/prompts.json",
+        {
+            "build_messages": _prompt_cases(),
+            "lead_tools": {
+                "specs": [
+                    t.spec.model_dump(mode="json")
+                    for t in [*default_local_tools(), RecordDecisionTool(DecisionBuffer())]
+                ],
+                "rendered": render_tools(
+                    [t.spec for t in [*default_local_tools(), RecordDecisionTool(DecisionBuffer())]]
+                ),
+            },
+            "render_memory_block": _memory_cases(),
+            "corrective": corrective_message("no JSON object found in reply").content,
+            "parse_action": _action_cases(),
+            "parse_plan": _plan_cases(),
+            "planner_messages": [
+                {"role": m.role, "content": m.content}
+                for m in _planner_messages("T", "Build the thing.", "")
+            ],
+            "planner_messages_acceptance": [
+                {"role": m.role, "content": m.content}
+                for m in _planner_messages("T", "Build the thing.", "all tests pass")
+            ],
+            "replanner": {
+                "mission_text": "Mission: M",
+                "item": blocked.model_dump(mode="json"),
+                "messages": [
+                    {"role": m.role, "content": m.content}
+                    for m in _replanner_messages("Mission: M", blocked)
+                ],
+            },
+        },
+    )
+
+
+def _planner_messages(title: str, description: str, acceptance: str) -> list[ModelMessage]:
+    """The messages ``Planner.plan_mission`` sends (captured through a recording model)."""
+    return asyncio.run(
+        _capture(
+            lambda m: Planner(m).plan_mission(
+                title=title, description=description, acceptance=acceptance
+            )
+        )
+    )
+
+
+def _replanner_messages(mission_text: str, item: ChecklistItem) -> list[ModelMessage]:
+    return asyncio.run(_capture(lambda m: Replanner(m).split(mission_text=mission_text, item=item)))
+
+
+async def _capture(call: Any) -> list[ModelMessage]:
+    seen: list[ModelMessage] = []
+
+    class _Recording(StubModel):
+        async def complete(
+            self,
+            messages: list[ModelMessage],
+            *,
+            tools: list[dict[str, object]] | None = None,
+            max_tokens: int | None = None,
+        ) -> TurnResult:
+            seen.extend(messages)
+            return TurnResult(text="[]")
+
+    await call(_Recording())
+    return seen
+
+
 def main() -> None:
     export_classifier()
     export_egress()
@@ -562,6 +875,7 @@ def main() -> None:
     export_ownership()
     export_harness_files()
     export_pricing()
+    export_agent_prompts()
 
 
 if __name__ == "__main__":
