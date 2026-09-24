@@ -118,8 +118,8 @@ type Settings struct {
 	MemoryEpisodicK          int    `env:"memory_episodic_k" default:"4"`
 	MemorySemanticK          int    `env:"memory_semantic_k" default:"4"`
 	MemorySkillsK            int    `env:"memory_skills_k" default:"2"`
-	MemoryEmbedder           string `env:"memory_embedder" default:"hash" choices:"hash,sentence_transformers,none"`
-	MemoryEmbeddingModel     string `env:"memory_embedding_model" default:"BAAI/bge-m3"`
+	MemoryEmbedder           string `env:"memory_embedder" default:"hash" choices:"hash,sentence_transformers,ollama,none"`
+	MemoryEmbeddingModel     string `env:"memory_embedding_model" default:""`
 	MemoryRerank             string `env:"memory_rerank" default:"none" choices:"none,cross_encoder"`
 	MemoryConsolidateEvery   int    `env:"memory_consolidate_every" default:"5"`
 	MemoryConsolidation      string `env:"memory_consolidation" default:"extractive" choices:"extractive,model"`

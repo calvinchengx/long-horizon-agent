@@ -44,7 +44,7 @@ func TestNewFieldDefaults(t *testing.T) {
 		"MemorySemanticK":           {s.MemorySemanticK, 4},
 		"MemorySkillsK":             {s.MemorySkillsK, 2},
 		"MemoryEmbedder":            {s.MemoryEmbedder, "hash"},
-		"MemoryEmbeddingModel":      {s.MemoryEmbeddingModel, "BAAI/bge-m3"},
+		"MemoryEmbeddingModel":      {s.MemoryEmbeddingModel, ""},
 		"MemoryRerank":              {s.MemoryRerank, "none"},
 		"MemoryConsolidateEvery":    {s.MemoryConsolidateEvery, 5},
 		"MemoryConsolidation":       {s.MemoryConsolidation, "extractive"},
