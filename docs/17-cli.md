@@ -187,12 +187,19 @@ role uses its tier's model ([13-models.md](13-models.md#per-role-routing-lha-orc
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--task TEXT` | required | mission description |
+| `--task TEXT` | `""` | mission description (required unless `--resume`) |
 | `--title TEXT` | `mission` | mission title |
 | `--workdir TEXT` | `.lha/workspaces/org` | workspace |
+| `--resume` | off | continue the mission already anchored in `--workdir` instead of planning a new one |
 
-`orchestrate` has no `--checklist` option; it always plans. Output and exit codes as for
-`run-local`.
+`orchestrate` has no `--checklist` option; without `--resume` it always plans. A workdir that
+already holds a mission (`.lha/mission.json` committed) is refused without `--resume` (exit `2`),
+so a second invocation never replaces a mission's checklist; `--resume` on a workdir without one
+is refused too. With `--resume` there is no planning, and `--task`, `--title` and `--reference`
+are ignored: the committed spec, checklist, ownership map, decisions and events are used, and
+uncommitted residue from the interrupted run is discarded
+([Resuming](11-multi-agent-organization.md#resuming-lha-orchestrate)). Output and exit codes as
+for `run-local`.
 
 ## `lha decisions`
 
@@ -302,7 +309,9 @@ reminders only raise the count of an open gate, and a closed gate stays closed. 
 ## `lha worker`
 
 Connects to `LHA_TEMPORAL_ADDRESS` / `LHA_TEMPORAL_NAMESPACE` and serves `MissionWorkflow` and
-`SubAgentWorkflow` on `LHA_TASK_QUEUE` until interrupted. No options. The model, sandbox, egress,
+`SubAgentWorkflow`, with every activity they use (including the organization's `plan_round`,
+`run_implementer`, `integrate_branch` and `review_cycle`), on `LHA_TASK_QUEUE` until
+interrupted. No options. The model, sandbox, egress,
 trusted checks, protected paths, replanning limits and budget used by durable missions come from
 this process's settings. See
 [14-running-on-temporal.md](14-running-on-temporal.md).
@@ -326,6 +335,15 @@ Plans the task (or imports `--checklist`), initializes the anchor at `--workdir`
 | `--approval-timeout-hours FLOAT` | `LHA_APPROVAL_TIMEOUT_S` (24 h) | how long a queued irreversible action waits for approval before it is rejected |
 | `--cycle-pause-seconds INTEGER` (>= 0) | `LHA_CYCLE_PAUSE_SECONDS` (0) | durable pause between cycles (status `SLEEPING`) |
 | `--start-in-seconds INTEGER` (>= 0) | `0` | sleep (status `SLEEPING`) before the first cycle |
+| `--research INTEGER` (0 to 4) | `0` | read-only researcher child workflows per item before each round |
+| `--review` / `--no-review` | off | an independent reviewer after every verified item; a blocking review reopens it |
+| `--max-parallel INTEGER` (0 to 8) | `0` | parallel implementer waves of up to N items with disjoint Planner-assigned files, each in its own git worktree; below 2 never |
+
+With `--max-parallel 2` or more the Planner also assigns file ownership (`plan_mission`), which
+is written to `.lha/ownership.json`. An imported `--checklist` has no file ownership, so it runs
+serially (the command says so on stderr). The three organization options are off by default, so
+a mission runs the Lead loop alone unless it opts in
+([Durable execution](08-durable-execution.md#the-multi-agent-organization-opt-in)).
 
 Plus `--check` and `--no-default-checks`. The check commands and the gate / sleep settings travel
 in the workflow input (with `LHA_GATE_ESCALATION_SECONDS` and `LHA_IMPOSSIBLE_AFTER_FAILURES`);
@@ -384,5 +402,7 @@ lha mission-abort MISSION_ID
 ```
 
 Requests cancellation of workflow `mission:MISSION_ID` and prints `cancelled mission <id>`. The
-workflow waits for a cycle in flight to acknowledge the cancellation, then writes `ABORTED` to
-the mission row and closes as Cancelled; the interrupted cycle is not committed.
+workflow waits for a cycle in flight (or, in a mission started with `--research`, `--review` or
+`--max-parallel`, every activity of the round in flight: implementers, integrations, reviews) to
+acknowledge the cancellation, then writes `ABORTED` to the mission row and closes as Cancelled;
+the interrupted cycle is not committed, and an interrupted wave's branches are not integrated.

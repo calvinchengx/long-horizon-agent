@@ -2,11 +2,14 @@
 
 LHA's organization is asymmetric. By default one Lead Engineer makes all coupled code writes on a
 single thread. Other agents run for work that parallelizes without write conflicts: reading the
-codebase, reviewing work in a fresh context, and, in `lha orchestrate`, implementing checklist
-items whose files the Planner has proven disjoint. Those parallel implementers never write the
-mission branch themselves; a deterministic integrator merges their verified branches. Code:
+codebase, reviewing work in a fresh context, and implementing checklist items whose files the
+Planner has proven disjoint. Those parallel implementers never write the mission branch
+themselves; a deterministic integrator merges their verified branches. `lha orchestrate` runs
+this organization locally; a durable mission (`lha mission-start`) runs it on Temporal when it
+opts in with `--research`, `--review` or `--max-parallel`. Code:
 [`python/src/lha/agents/`](../python/src/lha/agents/),
-[`python/src/lha/coordination/`](../python/src/lha/coordination/).
+[`python/src/lha/coordination/`](../python/src/lha/coordination/),
+[`python/src/lha/durable/org_round.py`](../python/src/lha/durable/org_round.py).
 
 ## Why asymmetric
 
@@ -18,8 +21,9 @@ trusted. The code enforces this split:
 
 - `research_fanout` refuses a role that can mutate.
 - The reviewer's dispatcher is read-only.
-- Only the Lead and the orchestrate implementers get mutating dispatchers. In `orchestrate`
-  both write through an `OwnershipGuard`, and implementers work in separate git worktrees.
+- Only the Lead and the implementers get mutating dispatchers. Implementers always write through
+  an `OwnershipGuard` in their own git worktree; so does the Lead whenever the mission has an
+  ownership map (`orchestrate`, and a durable mission planned with `--max-parallel`).
 - Only the integrator changes the mission branch with another agent's work, and only after
   verification.
 
@@ -30,14 +34,18 @@ trusted. The code enforces this split:
 | `lha run-local` | Lead (checklist given with `--item` or `--checklist`), Replanner when an item blocks |
 | `lha mission` | Planner (skipped with `--checklist`), then Lead, Replanner when an item blocks |
 | `lha orchestrate` | Planner (checklist + file ownership), then rounds. A serial round runs 2 Researchers, then the Lead on one item. A parallel wave runs 2 Researchers per item, then one Implementer per item in its own worktree, then the Integrator. Reflection runs on failure, the Reviewer on success, and the Replanner when an item blocks |
-| `lha mission-start` + `lha worker` | Planner (at start, in the CLI process; skipped with `--checklist`), then Lead cycles inside `MissionWorkflow`, Replanner when an item blocks |
+| `lha mission-start` + `lha worker` | Planner (at start, in the CLI process; skipped with `--checklist`), then Lead cycles inside `MissionWorkflow`, Replanner when an item blocks. Opt-in, per mission: `--research N` Researchers per item before each round (child workflows), `--review` the Reviewer after every verified item, `--max-parallel N` parallel waves of Implementers (one activity each, in its own worktree) and the Integrator (one activity per branch); see [Durable execution](08-durable-execution.md#the-multi-agent-organization-opt-in) |
 
 All run paths build the Lead the same way ([agent/assembly.py](../python/src/lha/agent/assembly.py)),
 so the Replanner runs, and the `record_decision` tool is available
-([mission anchor](06-mission-anchor.md#decisionsndjson)), wherever the Lead runs. The durable
-workflow otherwise runs only the Lead loop. Research fan-out, parallel implementers,
-integration, review and reflection exist only in the local `orchestrate` flow
-([Durable execution](08-durable-execution.md)).
+([mission anchor](06-mission-anchor.md#decisionsndjson)), wherever the Lead runs. Both
+organization paths build a wave from the same code
+([waves.py](../python/src/lha/agents/waves.py): the batch, the ticket, the implementer in its
+worktree, the integration checkpoint), so a wave means the same thing on either path. What only
+`orchestrate` has: reflection after a failure and the blackboard. What only the durable path
+has: every step is a journaled activity
+(crash-safe and retried), and researcher and review spend counts against the mission's
+spend journal.
 
 ### `lha orchestrate` wiring
 
@@ -45,7 +53,8 @@ integration, review and reflection exist only in the local `orchestrate` flow
 `Planner.plan_mission()` (checklist plus `FileOwnershipMap`), and calls
 `Orchestrator.run_mission(..., ownership=...)`
 ([orchestrator.py](../python/src/lha/agents/orchestrator.py)) with the same meter. The
-orchestrator initializes the anchor with the ownership map (`.lha/ownership.json`) and removes
+orchestrator initializes the anchor with the ownership map (`.lha/ownership.json`), or, with
+`--resume`, keeps the existing one (see [Resuming](#resuming-lha-orchestrate)), and removes
 implementer worktrees and `lha/implementer-*` branches left behind by an interrupted run. Each
 round then:
 
@@ -97,9 +106,10 @@ status `todo`, `verified_by` cleared, the review notes attached, and a checkpoin
    session is opened on that worktree the same way as the Lead's (`open_lead_sandbox`: the
    configured image and sandbox egress allow-list).
 3. An `Implementer` ([specialists.py](../python/src/lha/agents/specialists.py)) runs. Its
-   dispatcher has three layers: `record_decision` (into the implementer's own buffer), then an
-   `OwnershipGuard` (writer: its implementer id), then the Lead's dispatcher (`lead_dispatcher`:
-   the same tools and the same human gate). The implementer role does not set `allow_egress`, so
+   dispatcher has four layers: `record_decision` (into the implementer's own buffer), then
+   `request_lease` ([Leases](#leases)), then an `OwnershipGuard` (writer: its implementer id),
+   then the Lead's dispatcher (`lead_dispatcher`: the same tools and the same human gate). The
+   implementer role does not set `allow_egress`, so
    the implementer is never shown the web tools, even when the allow-list is set. The prompt
    contains the contract, the mission spec, the item's last failure and reflection, the
    recorded decisions, the research briefs and the blackboard.
@@ -110,7 +120,7 @@ status `todo`, `verified_by` cleared, the review notes attached, and a checkpoin
    `LHA_HARNESS_PATHS`) is added unless the item sets `allow_harness_edits`. The work is
    committed on the branch, with `.lha/` restored first so harness files never travel. The files
    the branch changed (`git diff --name-only base..head`, excluding `.lha`) are checked against
-   the map.
+   the map (as it is after any lease the implementer was granted).
 
 Then the integrator ([integrator.py](../python/src/lha/agents/integrator.py),
 `BranchIntegrator`) takes the items one at a time, in checklist order, and commits one
@@ -137,8 +147,31 @@ one setting, `LHA_MAX_PARALLEL_IMPLEMENTERS`. With a non-empty web allow-list th
 Researchers get the web tools; the Reviewer and the implementers are not shown them because
 their roles do not set `allow_egress`. A run with web tools and private data
 (`LHA_PRIVATE_DATA=true` or `--sandbox local`) is refused before planning (Rule of Two).
-`orchestrate` re-initializes the anchor at the start of every invocation, so it does not resume
-an earlier `orchestrate` run.
+
+### Resuming `lha orchestrate`
+
+Resuming is explicit: `lha orchestrate --resume --workdir DIR` continues the mission anchored in
+`DIR`, and without `--resume` `orchestrate` refuses a workdir that already holds a mission
+(`.lha/mission.json` committed) rather than replacing its checklist. `--resume` on a workdir with
+no anchor is refused too. A resumed run
+([`run_mission(resume=True)`](../python/src/lha/agents/orchestrator.py)):
+
+- does not plan and does not re-initialize: the committed mission spec, checklist, ownership map
+  (with its leases), decision chain and events are used as they are (the decision chain is
+  verified first). `--task`, `--title` and `--reference` are ignored;
+- discards what the interrupted run left uncommitted: a half-finished merge is aborted, tracked
+  edits and untracked (not ignored) files are removed (`git_ops.discard_changes`), and leftover
+  implementer worktrees and branches are pruned. Nothing that was committed is lost;
+- keeps the mission id (from the newest committed `orchestrate` event), so `lha missions` shows
+  one mission; its ledger keys get a `run<N>` prefix so the new run's spend is recorded;
+- rebuilds the blackboard's main board from the committed `blackboard` events and the latest
+  reflection of each open item from the committed `reflection` events;
+- continues the cycle ids after the highest committed `c<N>`.
+
+Every run records an `orchestrate` event (`mission_id`, `resumed`, `run`). Board posts and
+reflections are recorded as events when they are made and committed with the next checkpoint, so
+a post made after the last checkpoint of an interrupted run is lost with it. The budget ceiling
+and `LHA_MAX_CYCLES` apply to each invocation.
 
 ## Roles
 
@@ -150,13 +183,13 @@ other backend uses the single configured model for all roles.
 
 | Role / module | Tier | Mutating | What the code does | Used by a CLI path |
 |---|---|---|---|---|
-| Planner ([planner.py](../python/src/lha/agents/planner.py)) | opus | no | One model call. It parses a JSON array into `ChecklistItem`s with ids `01`, `02`, … and keeps only dependencies on earlier steps (dropped ones are noted). `plan_mission` also reads each step's `files` and assigns ownership (see below). If nothing parses, it creates a single serial item from the description | `mission`, `orchestrate`, `mission-start` (only `orchestrate` uses the ownership map) |
+| Planner ([planner.py](../python/src/lha/agents/planner.py)) | opus | no | One model call. It parses a JSON array into `ChecklistItem`s with ids `01`, `02`, … and keeps only dependencies on earlier steps (dropped ones are noted). `plan_mission` also reads each step's `files` and assigns ownership (see below). If nothing parses, it creates a single serial item from the description | `mission`, `orchestrate`, `mission-start` (the ownership map is used by `orchestrate` and by `mission-start --max-parallel 2` or more) |
 | Lead (`AgentLoop`, [agent/loop.py](../python/src/lha/agent/loop.py)) | opus | yes | Works one item per cycle: tools (plus `record_decision`), gating checks and witnesses, checkpoint commit | all |
 | Replanner ([replanner.py](../python/src/lha/agents/replanner.py)) | lead's model | no tools | One model call when an item has just become `blocked`: given the mission, the item, its witnesses and the latest failure report (last 3,000 chars), returns a JSON array of 2 to 6 smaller steps. `Checklist.split` replaces the item with them; fewer than 2 usable steps means no split. Bounded by `LHA_MAX_REPLANS` and `LHA_MAX_SPLIT_DEPTH`. In `orchestrate` it also splits items blocked in a parallel wave | all (unless `LHA_MAX_REPLANS=0`) |
-| Researcher ([team.py](../python/src/lha/agents/team.py)) | haiku | no | Read-only `SubAgent` that returns a brief (capped at 8,000 chars); sees the web tools when the allow-list is set | `orchestrate` |
-| Implementer ([specialists.py](../python/src/lha/agents/specialists.py)) | sonnet | yes | `SubAgent` with the implementer prompt, run in its own worktree behind an `OwnershipGuard` | `orchestrate` (parallel waves) |
-| Integrator (`BranchIntegrator`, [integrator.py](../python/src/lha/agents/integrator.py)) | none (deterministic) | merges only | Verified, owned, conflict-free, re-verified merge of an implementer branch | `orchestrate` (parallel waves) |
-| Reviewer ([reviewer.py](../python/src/lha/agents/reviewer.py)) | opus | no | Fresh-context review that returns JSON `verdict` / `blocking_issues` / `advisory`. An unparseable reply counts as blocking, and "approve" with issues counts as "block" | `orchestrate` |
+| Researcher ([team.py](../python/src/lha/agents/team.py)) | haiku | no | Read-only `SubAgent` that returns a brief (capped at 8,000 chars); sees the web tools when the allow-list is set | `orchestrate`, `mission-start --research N` (one `SubAgentWorkflow` child each) |
+| Implementer ([specialists.py](../python/src/lha/agents/specialists.py)) | sonnet | yes | `SubAgent` with the implementer prompt, run in its own worktree behind an `OwnershipGuard`, with `request_lease` | `orchestrate` (parallel waves), `mission-start --max-parallel N` (one `run_implementer` activity each) |
+| Integrator (`BranchIntegrator`, [integrator.py](../python/src/lha/agents/integrator.py)) | none (deterministic) | merges only | Verified, owned, conflict-free, re-verified merge of an implementer branch | `orchestrate` (parallel waves), `mission-start --max-parallel N` (`integrate_branch`) |
+| Reviewer ([reviewer.py](../python/src/lha/agents/reviewer.py)) | opus | no | Fresh-context review that returns JSON `verdict` / `blocking_issues` / `advisory`. An unparseable reply counts as blocking, and "approve" with issues counts as "block" | `orchestrate`, `mission-start --review` (`review_cycle`) |
 | Reflection ([reflection.py](../python/src/lha/agents/reflection.py)) | lead's model | no tools | Short post-mortem (at most 2,000 chars) prepended to the next attempt | `orchestrate` |
 
 `SubAgent` ([subagent.py](../python/src/lha/agents/subagent.py)) is the shared loop for
@@ -199,8 +232,7 @@ ledger), and by the `claude_code` lead engine ([13-models.md](13-models.md)).
   `OwnershipConflictError`. Only `reassign()` transfers ownership, and it returns the previous
   owner. `release(writer)` explicitly returns all of a writer's files to the lead.
 - `violations(writer, paths)` lists writes to paths the writer does not own. `LeaseRequest` is
-  the typed request for a foreign file. No code grants leases. An implementer that needs a
-  foreign file is told to stop and say so in its summary.
+  the typed request for a foreign file; see [Leases](#leases).
 
 **Assignment** (`assign_ownership` in [planner.py](../python/src/lha/agents/planner.py)). The
 Planner asks for a `files` list per step. Each item's files go to `implementer-<id>`, all or
@@ -219,7 +251,8 @@ when:
 - `OwnershipGuard` wraps a `ToolDispatcher`. A mutating tool with `path_args` (`write_file`)
   aimed at a path its writer identities may not write is refused before it runs. The message
   names the owner (or says the file is shared or outside the write-set) and tells the agent to
-  request a lease instead. The guard is a wrapper, so `AllowListDispatcher` is unchanged.
+  call `request_lease` (an implementer) or to stop and say so in its summary (the Lead, which
+  has no lease tool). The guard is a wrapper, so `AllowListDispatcher` is unchanged.
 - `run_command` names no paths, so the guard cannot check it. Shell writes are caught at the git
   layer: `changed_paths` lists what a branch or cycle changed, and `violations` checks it. For
   implementers a violation blocks the merge. For the serial Lead it is recorded as a trace event.
@@ -229,6 +262,37 @@ A finished item's lease is released explicitly. After a parallel merge the relea
 in the same checkpoint. After a serial cycle it is staged at the start of the next round and
 committed with that round's checkpoint, so the committed map can still list a just-finished
 serial item's files (they are released in memory before any use).
+
+## Leases
+
+An implementer that finds it needs a file outside its write-set calls the `request_lease` tool
+(`path`, `reason`; [execution/tools/leases.py](../python/src/lha/execution/tools/leases.py)).
+The `LeaseBroker` ([coordination/leases.py](../python/src/lha/coordination/leases.py)) decides
+it against the COMMITTED checklist and ownership map (`decide_lease`):
+
+| The file is | Decision |
+|---|---|
+| unassigned (the lead's space; the lead never writes during a wave) | granted |
+| already the requester's | granted (no change) |
+| owned by a finished writer (its item is `done` or `split`) | granted |
+| owned by another writer whose item is still open | refused |
+| a shared file (build manifest, lockfile, `__init__.py`, ...) | refused |
+| under `.lha/` or `.git/`, absolute, or escaping the repository | refused |
+| requested by the lead | refused (the lead needs no lease) |
+
+Each decision is committed at once, by itself, as a `lease` event (`writer`, `path`, `reason`,
+`granted`, `previous_owner`, `why`); a grant also rewrites `.lha/ownership.json` in that commit
+(`reassign`). The commit holds only `.lha/` files (`GitMissionAnchor.commit_anchor_update`), so
+nothing else in the checkout is committed or discarded. Decisions are serialized by an
+in-process lock and the checkout's `flock` (`.git/lha-cycle.lock`), so two implementers are never
+both granted one file. A grant is applied to the implementer's live map at once, so its
+`OwnershipGuard` lets it write the file and its git-layer check accepts the change; the
+integrator's check reads the committed map, which has the lease. The tool's reply tells the
+agent the decision and why; after a refusal it must not write the file and says what still needs
+it in its summary. A leased file is released with the writer's other files when its item is done.
+In `orchestrate` every decision is also a `lease` trace event, and the ticket event lists the
+run's leases. `ownership.json` keeps its format (`{"owners": {...}}`), so the Go anchor reader is
+unaffected.
 
 ## Tickets and blackboard
 
@@ -242,14 +306,17 @@ serial item's files (they are released in memory before any use).
   ticket moves `created → in_progress` (worktree ready) `→ awaiting_verify` (implementer done)
   `→ awaiting_merge` (verified) `→ done` (merged), or to `failed` at the step that failed. The
   final status and the full history are committed as a `ticket` event in the item's checkpoint.
-  A retry is a new ticket.
+  A retry is a new ticket. A durable wave keeps the same lifecycle: `run_implementer` advances
+  the ticket to `awaiting_verify` and returns it, and `integrate_branch` finishes it and commits
+  the `ticket` event.
 - [blackboard.py](../python/src/lha/coordination/blackboard.py): entries posted during a round go
   to a response board. `commit_round()` promotes them to the main board, so agents in the same
   round do not see each other's output. In `orchestrate`, research briefs, implementer
   summaries and blocking review notes are posted to the response board. The orchestrator
   promotes them after every round, and the newest 6 main-board entries (each capped at 1,500
-  chars) go into the context of later rounds' Lead and implementers. The board is in memory and
-  lasts for one `orchestrate` invocation.
+  chars) go into the context of later rounds' Lead and implementers. The board is in memory; each
+  post is also recorded as a `blackboard` event (capped at 1,500 chars) so `--resume` can rebuild
+  the main board. The durable organization has no blackboard.
 
 ## Hash-chained decision log
 
@@ -283,13 +350,13 @@ every read ([Mission anchor](06-mission-anchor.md#decisionsndjson)).
 These are described in role prompts or docstrings, or would be needed for the organization to
 run durably, but have no implementation:
 
-- lease handling (granting a `LeaseRequest`);
 - a model-backed integrator that resolves merge conflicts or rebases outstanding work (the
   integrator refuses a conflicting branch instead);
-- research fan-out, parallel implementers, integration, review, tickets and the blackboard in
-  the durable Temporal workflow (only `lha orchestrate` has them; `SubAgentWorkflow` exists but
-  `MissionWorkflow` never starts it);
-- resuming an interrupted `lha orchestrate` run (the blackboard is in memory, and the next
-  invocation re-initializes the anchor).
+- reflection, the blackboard and tiered memory for the implementers in the durable organization
+  (only `orchestrate` has reflection and the blackboard; tiered memory reaches only the Lead);
+- a lease that is released before its writer's item is done, or one that waits for a busy file
+  (a contended request is refused, not queued);
+- Auditor, Librarian and Tester roles (their runners were removed rather than kept as uncalled
+  code).
 
 Related: [Architecture](05-architecture.md), [CLI](17-cli.md).

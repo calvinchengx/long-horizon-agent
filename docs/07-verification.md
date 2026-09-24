@@ -59,7 +59,8 @@ Within a cycle (see [architecture](05-architecture.md#the-cycle)):
    `record_failure`, which blocks the item after 3 consecutive failures; a newly blocked item
    may then be split by the replanner ([item lifecycle](06-mission-anchor.md#item-lifecycle)).
 
-In an `lha orchestrate` parallel wave, each implementer's branch is verified in its own git
+In a parallel wave (`lha orchestrate`, or a durable mission started with `--max-parallel`), each
+implementer's branch is verified in its own git
 worktree with the same checks and witnesses. The `BranchIntegrator` merges a verified branch
 into the mission branch only after checking that the branch changed no file its writer does
 not own, then runs the checks again on the merged result; the item becomes `done` only if that

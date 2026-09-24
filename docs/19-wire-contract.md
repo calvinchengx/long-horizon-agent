@@ -21,7 +21,12 @@ spec'd behaviours today; it has no CLI and no Temporal worker yet (see [23-roadm
 | Activity | `read_mission_snapshot`: `HealthInput` -> `CycleResult` | same |
 | Activity | `notify_gate`: `GateNotice` -> `NoticeResult` | same |
 | Activity | `declare_impossible`: `FinalizeInput` -> `CycleResult` | same |
+| Activity | `record_mission_status`: `MissionStatusInput` -> bool | same |
 | Activity | `run_subagent`: `SubAgentInput` -> `SubAgentOutput` | [`durable/agent_activities.py`](../python/src/lha/durable/agent_activities.py) |
+| Activity | `plan_round`: `RoundInput` -> `RoundPlan` | [`durable/org_activities.py`](../python/src/lha/durable/org_activities.py) |
+| Activity | `run_implementer`: `ImplementerInput` -> `ImplementerOutput` | same |
+| Activity | `integrate_branch`: `IntegrateInput` -> `CycleResult` | same |
+| Activity | `review_cycle`: `ReviewInput` -> `CycleResult` | same |
 | Signal | `human_decision_v1` (string) | [`durable/signals.py`](../python/src/lha/durable/signals.py) |
 | Signal | `steer_v1` (string) | same |
 | Signal | `snooze_v1` (int seconds; `0` wakes a sleeping mission) | same |
@@ -43,7 +48,10 @@ Identifiers:
 | mission id | `mission_<12 hex>` (`ids.new_id("mission")`) |
 | mission workflow id | `mission:<mission_id>` |
 | sub-agent child workflow id | `subagent:<mission_id>:<role>:<12 hex from workflow.uuid4()>` |
-| cycle id | `c<n>` where `n = cycles_done + 1` |
+| cycle id | `c<n>` where `n = cycles_done + 1`; a parallel wave of k items uses `c<n>` ... `c<n+k-1>` in checklist order |
+| review checkpoint cycle id | `<cycle id>-review` |
+| researcher `SubAgentInput.cycle_id` | `<cycle id of the round>-research` |
+| implementer branch | `lha/implementer-<item id>/<cycle id>` (worktree `.git/lha-worktrees/lha_implementer-<item id>_<cycle id>`) |
 | unblock id | `u<n>` where `n` is the deadlock-retry count |
 | approval gate id | `approval-<first 12 hex of the action fingerprint>` |
 | deadlock gate id | `deadlock-<cycles_done>` |
@@ -94,10 +102,10 @@ Continue-As-New rides inside `MissionInput.state`.
 
 | Type | Fields (default) |
 |---|---|
-| `MissionInput` | `mission_id: str`, `workdir: str`, `max_cycles: int (1000)`, `cycles_before_can: int (200)`, `check_commands: list[list[str]] \| null (null)`, `budget_usd: float \| null (null)`, `park_initial_seconds: int (60)`, `park_max_seconds: int (3600)`, `deadlock_gate_seconds: int (0)`, `approval_timeout_seconds: int (86400)`, `gate_escalation_seconds: list[int] ([900, 2700, 14400, 43200])`, `deadlock_gate_default: str ("abort")`, `impossible_after_failures: int (3)`, `cycle_pause_seconds: int (0)`, `resume_at: float (0.0)` (epoch seconds; scheduled start), `state: MissionState \| null (null)` |
+| `MissionInput` | `mission_id: str`, `workdir: str`, `max_cycles: int (1000)`, `cycles_before_can: int (200)`, `check_commands: list[list[str]] \| null (null)`, `budget_usd: float \| null (null)`, `park_initial_seconds: int (60)`, `park_max_seconds: int (3600)`, `deadlock_gate_seconds: int (0)`, `approval_timeout_seconds: int (86400)`, `gate_escalation_seconds: list[int] ([900, 2700, 14400, 43200])`, `deadlock_gate_default: str ("abort")`, `impossible_after_failures: int (3)`, `cycle_pause_seconds: int (0)`, `resume_at: float (0.0)` (epoch seconds; scheduled start), `research_per_item: int (0)` (0 to 4), `review: bool (false)`, `max_parallel: int (0)` (0 to 8), `state: MissionState \| null (null)` |
 | `MissionState` | `cycles_done: int (0)`, `status: str ("RUNNING")`, `head_sha: str ("")`, `items_done: int (0)`, `items_total: int (0)`, `last_item: str \| null`, `pending_decision: str \| null`, `steer_notes: list[str] ([])`, `parks: int (0)`, `deadlock_retries: int (0)`, `approved_actions: list[ApprovedAction] ([])`, `rejected_actions: list[str] ([])` (fingerprints), `fail_item: str \| null (null)`, `fail_streak: int (0)`, `resume_at: float (0.0)`, `escalations: int (0)`, `gate_log: list[str] ([])` |
-| `CycleInput` | `mission_id`, `workdir`, `cycle_id: str`, `check_commands: list[list[str]] \| null`, `budget_usd: float \| null`, `max_cycles: int (1000)`, `steer_notes: list[str] ([])`, `approved_actions: list[ApprovedAction] ([])` |
-| `CycleResult` | `item_id: str \| null`, `advanced: bool`, `head_sha: str`, `is_complete: bool`, `items_done: int`, `items_total: int`, `note: str ("")`, `verdict: str ("")`, `is_deadlocked: bool (false)`, `item_blocked: bool (false)`, `reason: str ("")`, `spent_usd: float (0.0)`, `item_split: bool (false)`, `pending_approvals: list[PendingApproval] ([])`, `used_approvals: list[str] ([])` (fingerprints) |
+| `CycleInput` | `mission_id`, `workdir`, `cycle_id: str`, `check_commands: list[list[str]] \| null`, `budget_usd: float \| null`, `max_cycles: int (1000)`, `steer_notes: list[str] ([])`, `approved_actions: list[ApprovedAction] ([])`, `research_item: str \| null (null)`, `research_briefs: list[str] ([])`, `research_failures: list[str] ([])` |
+| `CycleResult` | `item_id: str \| null`, `advanced: bool`, `head_sha: str`, `is_complete: bool`, `items_done: int`, `items_total: int`, `note: str ("")`, `verdict: str ("")` (`passed`, `failed`, ..., and `review_blocked` from `review_cycle`), `is_deadlocked: bool (false)`, `item_blocked: bool (false)`, `reason: str ("")`, `spent_usd: float (0.0)`, `item_split: bool (false)`, `pending_approvals: list[PendingApproval] ([])`, `used_approvals: list[str] ([])` (fingerprints), `base_sha: str ("")` (`HEAD` before the cycle or the merge) |
 | `PendingApproval` | `fingerprint: str`, `tool: str`, `reason: str`, `arguments: str ("")` (the `repr` of the arguments, at most 2000 chars) |
 | `ApprovedAction` | `fingerprint: str`, `summary: str` (`<tool> <arguments>`, at most 500 chars) |
 | `GateView` | `gate_id: str`, `kind: str` (`tool_call` \| `deadlock`), `question: str`, `options: list[str]`, `default_action: str`, `opened_at: str ("")`, `deadline: str ("")`, `escalations_sent: int (0)`, `next_escalation_at: str ("")`, `recommended: str ("")`, `request: PendingApproval \| null (null)`; times are ISO 8601 UTC to the second |
@@ -108,12 +116,21 @@ Continue-As-New rides inside `MissionInput.state`.
 | `HealthReport` | `healthy: bool`, `reason: str ("")`, `degraded: list[str] ([])` |
 | `UnblockInput` | `mission_id`, `workdir`, `cycle_id` |
 | `MissionResult` | `mission_id`, `completed: bool`, `cycles: int`, `head_sha`, `items_done`, `items_total`, `outcome: str ("completed")`, `reason: str ("")`, `status: str ("")` |
-| `SubAgentInput` | `role_name: str`, `objective: str`, `workdir`, `mission_id`, `allow_egress: bool (false)` |
+| `SubAgentInput` | `role_name: str`, `objective: str`, `workdir`, `mission_id`, `allow_egress: bool (false)`, `budget_usd: float \| null (null)`, `cycle_id: str ("")` |
 | `SubAgentOutput` | `role: str`, `brief: str`, `tool_calls: int`, `turns: int` |
 | `FanOutResult` | `outputs: list[SubAgentOutput]`, `failures: list[str]` (returned in workflow code, not a Temporal payload) |
+| `MissionStatusInput` | `mission_id`, `workdir`, `status: str`, `head_sha: str \| null (null)`, `reason: str ("")` |
+| `RoundInput` | `mission_id`, `workdir`, `max_parallel: int (0)` |
+| `RoundItem` | `item_id: str`, `description: str` |
+| `RoundPlan` | `head_sha: str`, `items: list[RoundItem] ([])` (checklist order), `parallel: bool (false)`, `is_complete: bool (false)`, `is_deadlocked: bool (false)` |
+| `ImplementerInput` | `mission_id`, `workdir`, `cycle_id`, `item_id`, `base_sha: str`, `check_commands`, `budget_usd`, `max_cycles: int (1000)`, `steer_notes`, `approved_actions`, `research_briefs: list[str] ([])`, `research_failures: list[str] ([])` |
+| `ImplementerOutput` | `item_id`, `cycle_id`, `branch: str ("")`, `head: str ("")`, `brief: str ("")` (at most 8000 chars), `tool_calls: int (0)`, `error: str ("")`, `verification_json: str ("")` (`VerificationResult`), `decisions_json: list[str] ([])` (one `DecisionRecord` each), `ticket_json: str ("")` (`Ticket`), `ticket_history: list[{status, note}] ([])`, `leases: list[str] ([])` (one lease decision each, as in the [`lease` event](#mission-anchor-lha)), `spent_usd: float (0.0)`, `pending_approvals`, `used_approvals` |
+| `IntegrateInput` | `mission_id`, `workdir`, `cycle_id`, `item_id`, `base_sha: str`, `output: ImplementerOutput \| null (null)`, `error: str ("")` (the implementer activity failed), `check_commands`, `budget_usd`, `max_cycles: int (1000)`, `research_briefs: int (0)` (a count), `research_failures: list[str] ([])` |
+| `ReviewInput` | `mission_id`, `workdir`, `cycle_id` (of the reviewed cycle), `item_id`, `head_sha: str`, `base_sha: str ("")` (`""` = the head's first parent), `budget_usd`, `max_cycles: int (1000)` |
 
 `check_commands: null` means the default Python checks; an explicit empty list is rejected with
-`MissionConfigError`, as are `cycles_before_can < 1` and `max_cycles < 0`. `items_total` counts
+`MissionConfigError`, as are `cycles_before_can < 1`, `max_cycles < 0`, and `research_per_item`
+or `max_parallel` outside their ranges. `items_total` counts
 work items: `split` parents are excluded. `gate_escalation_seconds` offsets outside
 `(0, gate timeout)` are dropped; the rest are sorted and de-duplicated
 ([`hitl/escalation.py`](../python/src/lha/hitl/escalation.py)).
@@ -182,11 +199,27 @@ tree. The files are force-added so a `.gitignore` cannot exclude them.
 
 A cycle checkpoint writes an event with `kind: "cycle"` and payload `item_id`, `verified`,
 `verdict`, `status`, `tool_calls`, `split_into` (child ids, `[]` unless split), `checks` (each
-`name`, `passed`, `gating`, `exit_code`, `duration_s`). An `orchestrate` integration
-checkpoint's `cycle` event adds `writer` and `branch`, and it is followed by a `kind: "ticket"`
-event (`ticket_id`, `item_id`, `role`, `write_set`, `branch`, `status`, `history` (list of
-`{status, note}`), `ownership_violations`). The exactly-once check looks for the `cycle` event
-among the last 64 lines of `events.ndjson` at `HEAD`.
+`name`, `passed`, `gating`, `exit_code`, `duration_s`). An integration checkpoint (a parallel
+wave in `orchestrate` or in a durable mission) has a `cycle` event that adds `writer` and
+`branch`, followed by a `kind: "ticket"` event (`ticket_id`, `item_id`, `role`, `write_set`,
+`branch`, `status`, `history` (list of `{status, note}`), `ownership_violations`, `leases` (list
+of `{path, granted, why}`)). The exactly-once checks look for the `cycle` (or `review`) event
+among the last 256 lines of `events.ndjson` at `HEAD`.
+
+Events of the multi-agent organization:
+
+| `kind` | Written by | Payload |
+|---|---|---|
+| `research` | durable organization, with the round's checkpoint | `item`, `n` (briefs), `failed`, `failures` (each at most 500 chars) |
+| `review` | `review_cycle`, checkpoint `<cycle id>-review` | `item_id`, `verdict`, `blocking`, `blocking_issues`, `advisory`, `reopened`, `blocked`, `base`, `head` |
+| `lease` | `LeaseBroker`, a commit of its own | `writer`, `path`, `reason`, `granted`, `previous_owner`, `why` |
+| `orchestrate` | every `orchestrate` run, with its first checkpoint | `mission_id`, `resumed`, `run` |
+| `blackboard` | `orchestrate`, per board post | `author`, `text` (at most 1500 chars) |
+| `reflection` | `orchestrate`, per reflection or blocking review | `item`, `text` (at most 2000 chars) |
+
+A lease commit holds only `.lha/` files: `ownership.json` (a grant `reassign`s the path to the
+writer), `events.ndjson`, and `progress.md` for a grant. Its format is unchanged: a lease is an
+ordinary `owners` entry.
 
 Durable gates add their own checkpoints (the checklist is rewritten unchanged). Each
 `notify_gate` call commits one event with `kind` `gate_opened`, `gate_reminder`,
@@ -210,14 +243,16 @@ a `check_quarantined` event, and a quarantined check that failed every attempt a
 Commit messages: `lha: initialize mission anchor`,
 `lha: complete|attempt|block|split <id> (<description>)` (orchestrate appends
 ` [merged <branch>]` to an integration commit, which is a two-parent merge commit),
-`lha: review reopened <id>`, `lha: unblock <ids> (human retry)`,
+`lha: review reopened <id>` (`orchestrate`), `lha: review approved|reopened|blocked <id>`
+(`review_cycle`), `lha: lease granted|refused: <path> (<writer>)`,
+`lha: unblock <ids> (human retry)`,
 `lha: gate <event> (<kind> <gate id>)`, `lha: mission declared impossible`.
 
 Decisions reach `decisions.ndjson` two ways: the agent's `record_decision` tool queues a
 `DecisionRecord` in memory (`GitMissionAnchor.record_decision`), and a `Checkpoint` can carry
 `decisions`. At the next checkpoint both are chained onto the committed log, and a record with an
 empty `cycle_id` gets the checkpoint's. The queue lives in memory, so a cycle that ends without
-a checkpoint (a crash) loses it. In `orchestrate`, each parallel implementer records into its own
+a checkpoint (a crash) loses it. In a parallel wave, each implementer records into its own
 buffer, and only merged work has its decisions committed.
 
 Fields added since the first release (`references`, `witnesses`, status `split`) have empty

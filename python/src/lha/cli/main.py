@@ -504,7 +504,7 @@ def mission(
 
 @app.command()
 def orchestrate(
-    task: str = typer.Option(..., help="The mission / task description."),
+    task: str = typer.Option("", help="The mission / task description (required unless --resume)."),
     title: str = typer.Option("mission", help="Mission title."),
     reference: list[str] = typer.Option([], "--reference", help=_REFERENCE_HELP),
     approve_interactive: bool = typer.Option(False, "--approve-interactive", help=_APPROVE_HELP),
@@ -516,19 +516,42 @@ def orchestrate(
     sandbox: str | None = typer.Option(None, "--sandbox", help=_SANDBOX_HELP),
     unsafe_local: bool = typer.Option(False, "--unsafe-local", help=_UNSAFE_LOCAL_HELP),
     allow_host: list[str] = typer.Option([], "--allow-host", help=_ALLOW_HOST_HELP),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Continue the mission already anchored in --workdir (no planning; its checklist, "
+        "ownership map and decisions are kept).",
+    ),
 ) -> None:
     """Plan, then run the FULL multi-agent org (research, Lead or parallel waves, review) locally."""
     from lha.agent.runner import MissionSummary, aclose_provider, build_meter
-    from lha.agents.orchestrator import Orchestrator
+    from lha.agents.orchestrator import Orchestrator, anchor_exists
     from lha.agents.planner import Planner
     from lha.contracts.verify import checks_from_commands
     from lha.model import build_provider
 
+    has_anchor = anchor_exists(workdir)
+    if resume and not has_anchor:
+        _fail(f"--resume: no mission anchor in {workdir!r} (start one without --resume)")
+    if not resume and has_anchor:
+        _fail(
+            f"{workdir!r} already holds a mission: pass --resume to continue it, or use a new "
+            "--workdir (starting over would replace its checklist)"
+        )
+    if not resume and not task.strip():
+        _fail("give --task (or --resume to continue an existing mission)")
     checks = checks_from_commands(resolve_check_commands(check, no_default_checks))
     settings = _run_settings(sandbox, unsafe_local, allow_host)
 
     async def _mission() -> MissionSummary:
         meter = build_meter(settings)  # planner + every org role share one budget
+        if resume:
+            return await Orchestrator(settings, meter=meter).run_mission(
+                workdir=workdir,
+                checks=checks,
+                gate=_gate(approve_interactive, settings),
+                resume=True,
+            )
         planner_model = build_provider(settings)
         try:
             planner = Planner(meter.wrap(planner_model, role="planner"))
@@ -651,6 +674,26 @@ def mission_start(
     start_in_seconds: int = typer.Option(
         0, "--start-in-seconds", min=0, help="Sleep (status SLEEPING) before the first cycle."
     ),
+    research: int = typer.Option(
+        0,
+        "--research",
+        min=0,
+        max=4,
+        help="Read-only researcher child workflows per item before each round (0 = none).",
+    ),
+    review: bool = typer.Option(
+        False,
+        "--review/--no-review",
+        help="An independent reviewer after every verified item; a blocking review reopens it.",
+    ),
+    max_parallel: int = typer.Option(
+        0,
+        "--max-parallel",
+        min=0,
+        max=8,
+        help="Parallel implementer waves of up to N items with disjoint Planner-assigned files, "
+        "each in its own git worktree (below 2 = never).",
+    ),
 ) -> None:
     """Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."""
     import os
@@ -693,6 +736,7 @@ def mission_start(
         settings = get_settings()
         references = list(reference)
         planner_spend: list[CostEntry] = []
+        ownership = None
         if imported is not None:
             checklist = imported.checklist
             mission_title = title or imported.title or "mission"
@@ -704,13 +748,21 @@ def mission_start(
             planner_model = build_provider(settings)
             try:
                 planner = Planner(meter.wrap(planner_model, role="planner"))
-                checklist = await planner.plan(title=mission_title, description=task)
+                if max_parallel >= 2:  # waves need the Planner's single-writer file ownership
+                    plan = await planner.plan_mission(title=mission_title, description=task)
+                    checklist, ownership = plan.checklist, plan.ownership
+                else:
+                    checklist = await planner.plan(title=mission_title, description=task)
             finally:
                 await aclose_provider(planner_model)
             planner_spend = list(meter.ledger.entries)
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(
-            title=mission_title, description=description, items=checklist, references=references
+            title=mission_title,
+            description=description,
+            items=checklist,
+            references=references,
+            ownership=ownership,
         )
         client = await connect_client(settings)
         mission_id = new_id("mission")
@@ -747,6 +799,9 @@ def mission_start(
                         impossible_after_failures=settings.impossible_after_failures,
                         cycle_pause_seconds=pause,
                         resume_at=resume_at,
+                        research_per_item=research,
+                        review=review,
+                        max_parallel=max_parallel,
                     ),
                     id=f"mission:{mission_id}",
                     task_queue=settings.task_queue,
@@ -758,6 +813,12 @@ def mission_start(
             await store.close()
         return mission_id
 
+    if imported is not None and max_parallel >= 2:
+        typer.echo(
+            "note: an imported checklist declares no file ownership, so no parallel wave can run "
+            "(items are worked serially)",
+            err=True,
+        )
     mission_id = _run(_start())
     typer.echo(f"started mission {mission_id} (workflow id: mission:{mission_id})")
 
