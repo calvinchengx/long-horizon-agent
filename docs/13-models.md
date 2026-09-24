@@ -301,6 +301,6 @@ for an unknown Claude model) is reported as DOWN with the reason. See
 `go/internal/model` ports the stub, OpenAI-compatible and Claude backends, pricing, retry and
 failover, and runs the shared `spec/model/pricing.json` cases. The Go settings do not yet read
 `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS` or `LHA_MODEL_PROBE_TIMEOUT_S`, there is no Go
-health probe, and there is no Go CLI to run a mission with. The `claude_code` backend and lead engine are
+health probe; the Go CLI (`lha run-local`, `lha mission`) runs missions with the other backends. The `claude_code` backend and lead engine are
 Python-only; the Go settings reject `LHA_MODEL_BACKEND=claude_code`. See
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).

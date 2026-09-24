@@ -61,9 +61,9 @@ cd go
 go test ./...
 ```
 
-The Go implementation is being ported in phases. Today `go/` contains library packages and their
-tests; `go/cmd/lha` does not exist yet, so there is no Go CLI or Temporal worker to build or
-install. See
+The Go implementation is being ported in phases. `go build -o lha ./cmd/lha` (from `go/`) builds
+a CLI that runs single-agent missions locally (`lha run-local`, `lha mission`) in the local or
+Docker sandbox; there is no Go Temporal worker yet. See
 [choosing an implementation](04-choosing-an-implementation.md) for what exists.
 
 ## Docker image (Python worker)

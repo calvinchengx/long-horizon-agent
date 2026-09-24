@@ -14,8 +14,9 @@ Each layer assumes the others can fail.
 Code: [`python/src/lha/safety/`](../python/src/lha/safety/),
 [`python/src/lha/execution/`](../python/src/lha/execution/),
 [`python/src/lha/hitl/`](../python/src/lha/hitl/). The Go port has equivalents of the classifier
-and egress checks in `go/internal/safety/`, which run the same `spec/` cases; it has no
-sandboxes, egress proxy or approval gates yet.
+and egress checks in `go/internal/safety/`, which run the same `spec/` cases, the local and Docker
+sandboxes, egress proxy, dispatcher and tools in `go/internal/execution/`, and the console
+approval gate in `go/internal/hitl/`; it has no E2B sandbox and no durable (Temporal) gates.
 
 ## 1. Sandboxes
 
