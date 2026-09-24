@@ -28,8 +28,8 @@ import (
 // verification.
 const DecisionChainStop = "decision log failed verification"
 
-// ErrExecutionNotLinked is what the CLI's toolbox opener returns until the execution layer
-// (sandboxes, tools, dispatcher) is linked into the Go build.
+// ErrExecutionNotLinked is returned when a run has no toolbox opener (RunOptions.OpenToolbox is
+// nil). The CLI links the execution layer in cmd/lha/wiring.go.
 var ErrExecutionNotLinked = errors.New("execution layer not linked")
 
 // Toolbox is the execution layer of one run: the lead's sandbox session and its tool dispatcher
