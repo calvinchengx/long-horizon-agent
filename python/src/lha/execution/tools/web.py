@@ -12,8 +12,11 @@ only through ``lha.execution.tools.toolset`` when ``LHA_EGRESS_ALLOW_HOSTS`` is 
   request through a ``CredentialBroker`` bound to the endpoint's host, so it can never be sent
   anywhere else.
 
-HTTP clients: pass ``client`` to share one (the caller owns it), otherwise each call opens and
-closes its own client (``transport`` lets tests inject an ``httpx.MockTransport``).
+HTTP clients: each call opens and closes its own client over a ``PinnedTransport``: a host is
+resolved once, every address is vetted, and the socket connects to a vetted address while the
+``Host`` header and TLS (SNI and certificate verification) use the hostname, for the first request
+and every redirect hop. ``transport`` lets tests inject an ``httpx.MockTransport`` and
+``network_backend`` a fake socket layer under the pinning.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import Literal
 
+import httpcore
 import httpx
 
 from lha.contracts.tools import ToolContext, ToolResult, ToolSpec
@@ -41,6 +45,7 @@ from lha.safety.egress import (
     parse_url,
     system_resolver,
 )
+from lha.safety.pinned_http import PinnedNetworkBackend, PinnedTransport
 
 WebProvider = Literal["tavily", "exa"]
 
@@ -54,30 +59,50 @@ _SEARCH_KEY_PLACEHOLDER = "{{LHA_WEB_SEARCH_API_KEY}}"
 
 
 class _Http:
-    """Either a caller-owned shared client or a fresh client per call (closed after it)."""
+    """A fresh client per call whose connections go only to addresses the caller pinned.
+
+    Each ``open()`` builds a ``PinnedNetworkBackend`` (wrapping ``network_backend``, the real
+    socket layer by default) and a client over it. The tool resolves and vets a host once, pins
+    the vetted addresses, and the connection dials exactly those, so a second DNS answer (DNS
+    rebinding) is never consulted. ``transport`` is a test seam (an ``httpx.MockTransport``, which
+    opens no sockets); when it is set, there is nothing to pin.
+    """
 
     def __init__(
         self,
-        client: httpx.AsyncClient | None,
         transport: httpx.AsyncBaseTransport | None,
         timeout_s: float,
+        network_backend: httpcore.AsyncNetworkBackend | None = None,
     ) -> None:
-        self._client = client
         self._transport = transport
         self._timeout_s = timeout_s
+        self._network_backend = network_backend
 
     @contextlib.asynccontextmanager
-    async def open(self) -> AsyncIterator[httpx.AsyncClient]:
-        if self._client is not None:
-            yield self._client
-            return
+    async def open(self) -> AsyncIterator[_Session]:
+        backend: PinnedNetworkBackend | None = None
+        transport = self._transport
+        if transport is None:
+            backend = PinnedNetworkBackend(self._network_backend)
+            transport = PinnedTransport(backend)
         async with httpx.AsyncClient(
             timeout=self._timeout_s,
             follow_redirects=False,
             trust_env=False,
-            transport=self._transport,
+            transport=transport,
         ) as client:
-            yield client
+            yield _Session(client, backend)
+
+
+class _Session:
+    def __init__(self, client: httpx.AsyncClient, backend: PinnedNetworkBackend | None) -> None:
+        self.client = client
+        self.backend = backend
+
+    def pin(self, host: str, addresses: list[str]) -> None:
+        """Connections to ``host`` in this session may reach only ``addresses`` (vetted)."""
+        if self.backend is not None:
+            self.backend.pin(host, addresses)
 
 
 class WebSearchTool:
@@ -104,10 +129,10 @@ class WebSearchTool:
         *,
         api_key: str,
         provider: WebProvider = "tavily",
-        client: httpx.AsyncClient | None = None,
         endpoint: str | None = None,
         resolver: Resolver | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        network_backend: httpcore.AsyncNetworkBackend | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         max_response_bytes: int = DEFAULT_MAX_RESPONSE_BYTES,
     ) -> None:
@@ -123,7 +148,7 @@ class WebSearchTool:
         self._broker = CredentialBroker()
         self._broker.register(_SEARCH_KEY_PLACEHOLDER, api_key, hosts=[target.host])
         self._resolver = resolver or system_resolver
-        self._http = _Http(client, transport, timeout_s)
+        self._http = _Http(transport, timeout_s, network_backend)
         self._max_response_bytes = max_response_bytes
 
     def _request(self, query: str, n: int) -> tuple[dict[str, str], dict[str, object]]:
@@ -138,7 +163,7 @@ class WebSearchTool:
         n = raw_n if isinstance(raw_n, int) and raw_n > 0 else 5
         try:
             parsed = self._policy.check(self._endpoint)
-            await check_resolved_addresses(parsed.host, parsed.port, self._resolver)
+            addresses = await check_resolved_addresses(parsed.host, parsed.port, self._resolver)
         except EgressDenied as exc:
             return ToolResult.failure(f"egress blocked by policy: {exc}")
         headers, payload = self._request(query, n)
@@ -146,7 +171,9 @@ class WebSearchTool:
         headers = self._broker.resolve_headers(headers, host=parsed.host)
         body = self._broker.resolve(json.dumps(payload), host=parsed.host)
         try:
-            async with self._http.open() as client:
+            async with self._http.open() as session:
+                session.pin(parsed.host, addresses)
+                client = session.client
                 request = client.build_request(
                     "POST",
                     self._endpoint,
@@ -192,10 +219,10 @@ class FetchUrlTool:
     - ``egress_policy=None`` denies everything (fail closed).
     - Redirects are NOT auto-followed: each hop (max ``MAX_REDIRECTS``) is re-checked against the
       policy and re-resolved, so an allowed host cannot bounce the request to an internal one.
-    - Every hop's host must resolve only to public addresses (``resolver`` is injectable for
-      tests). Residual risk: the HTTP client resolves again when connecting, so a DNS-rebinding
-      server with a 0 TTL can still race this check — sandbox-level network isolation is the
-      backstop.
+    - Every hop's host is resolved once and must resolve only to public addresses (``resolver``
+      is injectable for tests). The connection then dials one of exactly those vetted addresses
+      (``PinnedNetworkBackend``) while the ``Host`` header, TLS SNI and certificate check keep
+      the hostname, so DNS rebinding between the check and the connection cannot redirect it.
     - ``trust_env=False``: proxy / netrc settings from the host environment are ignored.
     - Brokered credentials are substituted only into requests to the host they are bound to.
     - The response body is read up to ``max_response_bytes`` (default ``MAX_RESPONSE_BYTES``).
@@ -227,16 +254,16 @@ class FetchUrlTool:
     def __init__(
         self,
         *,
-        client: httpx.AsyncClient | None = None,
         egress_policy: EgressPolicy | None = None,
         broker: CredentialBroker | None = None,
         resolver: Resolver | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        network_backend: httpcore.AsyncNetworkBackend | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         max_response_bytes: int | None = None,
         placeholders: dict[str, list[str]] | None = None,
     ) -> None:
-        self._http = _Http(client, transport, timeout_s)
+        self._http = _Http(transport, timeout_s, network_backend)
         self._egress_policy = egress_policy
         self._broker = broker
         self._resolver = resolver or system_resolver
@@ -272,13 +299,18 @@ class FetchUrlTool:
             return ToolResult.failure("egress blocked: no egress policy configured (default-deny)")
         limit = self._max_response_bytes or self.MAX_RESPONSE_BYTES
 
-        async with self._http.open() as client:
+        async with self._http.open() as session:
+            client = session.client
             for _hop in range(self.MAX_REDIRECTS + 1):
                 try:
                     parsed = self._egress_policy.check(url)
-                    await check_resolved_addresses(parsed.host, parsed.port, self._resolver)
+                    addresses = await check_resolved_addresses(
+                        parsed.host, parsed.port, self._resolver
+                    )
                 except EgressDenied as exc:
                     return ToolResult.failure(f"egress blocked by policy: {exc} ({url!r})")
+                # The connection may reach only the addresses just vetted (no second lookup).
+                session.pin(parsed.host, addresses)
                 headers = dict(raw_headers)
                 if self._broker is not None:
                     headers = self._broker.resolve_headers(headers, host=parsed.host)

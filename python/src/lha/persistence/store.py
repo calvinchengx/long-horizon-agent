@@ -3,6 +3,7 @@
 Everything a run persists outside git goes through ``MissionStore``:
 
 * ``missions`` — one row per mission with its status transitions (RUNNING → DONE / ABORTED / ...);
+* ``hitl_gates`` — one row per human gate: opened, reminders, resolved or defaulted, by whom;
 * ``cost_ledger`` — EVERY metered model call (``usd`` is NULL when the cost is unknown), written
   idempotently by key so a retried/replayed write never double-counts;
 * ``episodic_events`` — cycle outcomes and memory bookkeeping (the episodic memory tier);
@@ -40,6 +41,7 @@ REQUIRED_PG_MIGRATIONS = (
     "0002_idempotent_ledger",
     "0003_cost_unknown_usd_null",
     "0004_memory_skills",
+    "0005_hitl_gates",
 )
 
 
@@ -92,6 +94,89 @@ class EventRow:
     ts: str = ""
 
 
+#: ``missions.status`` values a mission ends in; the store never moves a row out of one to a
+#: non-terminal status (see ``MissionStore.upsert_mission``). Mirrors ``lha.durable.signals``.
+TERMINAL_STATUSES = ("DONE", "IMPOSSIBLE", "ABORTED")
+
+
+def terminal_guard_sql(existing: str, incoming: str, reopen: str) -> str:
+    """SQL for the status an upsert stores: ``existing`` stays when it is terminal, the
+    ``incoming`` status is not, and ``reopen`` (a boolean SQL expression) is false."""
+    terminal = ", ".join(f"'{s}'" for s in TERMINAL_STATUSES)
+    return (
+        f"CASE WHEN {existing} IN ({terminal}) AND {incoming} NOT IN ({terminal}) "
+        f"AND NOT {reopen} THEN {existing} ELSE {incoming} END"
+    )
+
+
+#: ``hitl_gates.status`` values. ``ESCALATED`` = open, at least one reminder sent.
+GATE_OPEN = "OPEN"
+GATE_ESCALATED = "ESCALATED"
+GATE_RESOLVED = "RESOLVED"
+GATE_DEFAULTED = "DEFAULTED"
+#: Gate event -> the status it moves the row to.
+GATE_EVENT_STATUS = {
+    "opened": GATE_OPEN,
+    "reminder": GATE_ESCALATED,
+    "resolved": GATE_RESOLVED,
+    "defaulted": GATE_DEFAULTED,
+}
+
+
+@dataclass
+class GateEvent:
+    """One human-gate event, as written to ``hitl_gates`` (``record_gate_event``).
+
+    ``at`` is when it happened (ISO-8601 UTC). The durable workflow stamps it from workflow time,
+    so a retried write carries the same value and the write is idempotent.
+    """
+
+    mission_id: str
+    gate_id: str
+    kind: str  # "tool_call" | "deadlock"
+    event: str  # "opened" | "reminder" | "resolved" | "defaulted"
+    at: str
+    question: str = ""
+    options: list[str] = field(default_factory=list)
+    default_action: str = ""
+    deadline: str = ""
+    decision: str = ""
+    resolved_by: str = ""
+    step: int = 0
+    risk: str = ""
+    request: dict[str, str] | None = None
+
+
+@dataclass
+class GateRow:
+    """One gate's current state (``hitl_gates``): ``opened_at`` is its latest opening."""
+
+    mission_id: str
+    gate_id: str
+    kind: str
+    status: str
+    question: str = ""
+    options: list[str] = field(default_factory=list)
+    default_action: str = ""
+    risk: str = ""
+    deadline: str = ""
+    decision: str | None = None
+    resolved_by: str | None = None
+    reminders: int = 0
+    request: dict[str, str] | None = None
+    opened_at: str = ""
+    resolved_at: str = ""
+    updated_at: str = ""
+
+
+def validate_gate_event(event: GateEvent) -> str:
+    """The row status ``event`` moves to (raises ``ValueError`` for an unknown event)."""
+    try:
+        return GATE_EVENT_STATUS[event.event]
+    except KeyError:
+        raise ValueError(f"unknown gate event {event.event!r}") from None
+
+
 @runtime_checkable
 class MissionStore(Protocol):
     """Backend-neutral persistence for missions, spend, and the memory tiers."""
@@ -110,14 +195,37 @@ class MissionStore(Protocol):
         description: str = "",
         head_sha: str | None = None,
         workflow_id: str | None = None,
+        reopen: bool = False,
     ) -> None:
-        """Insert or update; ``None``/empty fields keep the stored values (never null them)."""
+        """Insert or update; ``None``/empty fields keep the stored values (never null them).
+
+        Monotonic: a terminal status (``TERMINAL_STATUSES``) is never replaced by a non-terminal
+        one, so a late write from a cycle that was still finishing when the mission ended
+        (``lha mission-abort`` mid-cycle) cannot turn ``ABORTED`` back into ``RUNNING``. The
+        other fields are still updated. ``reopen=True`` is the explicit exception, for a caller
+        that deliberately resumes an ended mission under the same id.
+        """
         ...
 
     async def get_mission(self, mission_id: str) -> MissionRow | None: ...
 
     async def list_missions(self, *, limit: int = 20) -> list[MissionRow]:
         """Most recently updated first."""
+        ...
+
+    # --- human gates --------------------------------------------------------------------
+    async def record_gate_event(self, event: GateEvent) -> None:
+        """Apply one gate event to its ``hitl_gates`` row (key: mission id + gate id).
+
+        Idempotent: ``opened`` (re)opens the row unless it repeats the same opening (same ``at``);
+        ``reminder`` raises the reminder count on an open row; ``resolved`` / ``defaulted``
+        close an open row and are no-ops on a closed one. An event whose row is missing inserts
+        it, so a lost earlier write never loses the outcome.
+        """
+        ...
+
+    async def list_gates(self, mission_id: str | None = None, *, limit: int = 50) -> list[GateRow]:
+        """Gates of ``mission_id`` (every mission when ``None``), most recently opened first."""
         ...
 
     # --- cost ledger --------------------------------------------------------------------

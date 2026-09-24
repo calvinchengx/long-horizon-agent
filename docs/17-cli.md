@@ -23,6 +23,7 @@ ported. Today there is no `go/cmd/lha` and no Go binary can be built; see [23-ro
 | [`decisions`](#lha-decisions) | print or verify a mission's decision log | a mission workspace |
 | [`missions`](#lha-missions) | list persisted missions with status and recorded spend | the mission store |
 | [`costs`](#lha-costs) | print a mission's persisted cost ledger | the mission store |
+| [`gates`](#lha-gates) | list recorded human gates: question, options, reminders, decision, who and when | the mission store |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
@@ -243,8 +244,9 @@ with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`).
 
 The status is the mission row's, written by the run paths; for a durable mission the workflow
 also writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and the final
-outcome. Those writes are best effort, so [`mission-status`](#lha-mission-status) is the live
-source.
+outcome. A row that reached `DONE`, `IMPOSSIBLE` or `ABORTED` keeps it (a late write from a
+cycle that was still finishing cannot turn it back to `RUNNING`). Those writes are best effort,
+so [`mission-status`](#lha-mission-status) is the live source.
 
 ## `lha costs`
 
@@ -262,6 +264,40 @@ tokens. Exits `1` with `error: no cost ledger rows for mission <id>` when the le
 
 It reads the same store as [`missions`](#lha-missions). See
 [10-cost-and-budget.md](10-cost-and-budget.md).
+
+## `lha gates`
+
+```
+lha gates [MISSION_ID] [--limit N]
+```
+
+Lists the human gates recorded in the mission store's `hitl_gates` table, most recently opened
+first; with `MISSION_ID`, only that mission's. Each gate prints three or four lines:
+
+```
+<opened at>  <mission_id>  <gate_id>  <kind>  <status>  reminders <n>  <decision> by <who> at <time>
+  question: <the question, secrets redacted>
+  options: approve | reject
+  request: <tool> <argv or arguments>
+```
+
+An open gate shows `open, default <action> at <deadline>` instead of the decision. `kind` is
+`tool_call` (an irreversible action) or `deadlock`; `status` is `OPEN`, `ESCALATED` (open, with at
+least one reminder sent), `RESOLVED` (a human answered) or `DEFAULTED` (the default applied).
+Who: `human (human_decision signal)` for a durable decision (the signal carries no identity),
+`default (timeout)`, `terminal:<login>` for a local `--approve-interactive` answer, `timeout`,
+`end of input` or `non-interactive (stdin is not a TTY)`. Prints `no gates recorded` when there
+are none.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--limit INTEGER` (>= 1) | `50` | how many gates |
+
+Durable missions record each gate event from the `notify_gate` activity; local runs record the
+terminal approver's. One row per gate: an event repeated by a retried activity changes nothing,
+reminders only raise the count of an open gate, and a closed gate stays closed. The anchor's
+`gate_*` events and the workflow history remain the complete record. It reads the same store as
+[`missions`](#lha-missions).
 
 ## `lha worker`
 
@@ -348,5 +384,5 @@ lha mission-abort MISSION_ID
 ```
 
 Requests cancellation of workflow `mission:MISSION_ID` and prints `cancelled mission <id>`. The
-workflow writes `ABORTED` to the mission row and closes as Cancelled; the interrupted cycle is
-not committed.
+workflow waits for a cycle in flight to acknowledge the cancellation, then writes `ABORTED` to
+the mission row and closes as Cancelled; the interrupted cycle is not committed.

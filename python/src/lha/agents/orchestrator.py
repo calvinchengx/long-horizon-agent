@@ -86,6 +86,7 @@ from lha.execution.tools import DecisionBuffer, with_decision_tool
 from lha.execution.tools.toolset import build_run_dispatcher, preflight_run_tools
 from lha.governor.governor import LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
+from lha.hitl.approvals import bind_gate_store
 from lha.ids import new_id
 from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import agent_span, span
@@ -314,6 +315,8 @@ class _MissionRun:
             )
             stack.push_async_callback(self.services.close)
             await self.services.tracker.running()
+            if self.hitl_gate is not None:
+                bind_gate_store(self.hitl_gate, self.services.store)
             # The Lead writes through an ownership guard: unassigned space, shared files and the
             # active item's own files — never another open item's leased files.
             self.lead_guard = OwnershipGuard(

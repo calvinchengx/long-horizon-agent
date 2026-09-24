@@ -51,13 +51,17 @@ suites; see [20-testing.md](20-testing.md)):
 | Migrations, the idempotent cost ledger and the pgvector index work on real Postgres; the Docker sandbox enforces its limits; one mission exercises every large-mission feature together on real Docker | `tests/integration/` (CI job `python-services-integration`), including `test_large_mission_e2e.py` |
 | Human gates escalate with reminders and then apply their default; the deadlock gate accepts retry, abort and impossible; a scheduled start and the pause between cycles report `SLEEPING` | `tests/durability/test_human_gates.py`, `tests/unit/test_hitl_ladder.py` |
 | Web tools are registered only with an allow-list, deny other hosts and private addresses, bind brokered credentials to their hosts, fence their output as untrusted, and a run holding web tools plus private data is refused before it starts | `tests/unit/test_web_wiring.py`, `test_web_tools.py` |
+| Web tools and `lha vendor` resolve each host once and connect only to the checked addresses: a DNS-rebinding resolver cannot reach a private IP, on the first request or any redirect hop; TLS SNI and the `Host` header keep the hostname | `tests/unit/test_web_pinning.py` |
 | The fallback chain fails over on transient errors only; the health probe contacts the configured provider | `tests/unit/test_model_failover_health.py` |
 | Every run path writes the mission row and every metered model call to the store; `lha missions` and `lha costs` read them back | `tests/unit/test_persistence_wiring.py`, `tests/integration/test_postgres_store.py` |
+| Every human gate event is written idempotently to `hitl_gates` (durable `notify_gate` and the local terminal approver); `lha gates` lists them | `tests/unit/test_persistence_store.py`, `test_hitl_ladder.py`, `test_persistence_postgres_fake.py`, `tests/integration/test_postgres_store.py` |
+| An abort during a cycle ends with the row `ABORTED`: the workflow waits for the cancelled cycle, a cycle that completes anyway cannot swallow the abort, and the store never moves a terminal status back | `tests/durability/test_mission_row.py`, `tests/unit/test_persistence_store.py`, the `mission_cancel_mid_cycle.json` replay history |
 | Recorded decisions are hash-chained, shown in the next cycle's prompt, and an altered log stops the run | `tests/unit/test_decision_chain_wiring.py` |
 | Parallel implementers cannot write files they do not own, and only verified, owned, conflict-free, re-verified branches are merged | `tests/unit/test_ownership_integration.py` |
 | Tiered memory is recalled into the prompt, survives activity retries, and degrades to lexical-only retrieval instead of failing a cycle | `tests/unit/test_memory_service.py`, `test_persistence_wiring.py` |
 | A failing check is re-run; one that passes and fails on the same work tree is quarantined with a committed event, a consistent failure still gates, and a quarantined check never makes an item green | `tests/unit/test_flaky_retry_verifier.py` |
 | With an OTLP endpoint or Langfuse configured, the CLI and worker install an exporter at start; missions, cycles, cycle activities, model calls and tool calls are spans with redacted attributes; a dead backend does not block the run | `tests/unit/test_otel_tracing.py` |
+| The Ollama embedder gates vectors by model and digest, pads to pgvector's width, and an absent or failing Ollama means lexical-only memory, not a failed cycle | `tests/unit/test_memory_ollama.py` (mocked Ollama API) |
 
 These tests use the stub model (scripted, including the replanner's split and the approver's
 answer) and simulated failures. They prove that the system behaves correctly around the model;
@@ -79,27 +83,24 @@ a blocked item are.
   [23-roadmap.md](23-roadmap.md)). These, by contrast, are wired into the run paths: the
   large-mission features, human approval gates with the escalation ladder and webhook, the
   `SLEEPING` status, web tools under the egress policy and the Rule of Two, the fallback model
-  chain and health probe, SQLite/Postgres persistence of mission rows and the cost ledger, tiered
-  memory in the prompt, the hash-chained decision log, flaky-check quarantine in the verifier,
-  OpenTelemetry/Langfuse trace export, and, in `lha orchestrate` only, file ownership, tickets,
-  the blackboard, parallel implementer waves and the branch integrator. Saga compensation,
+  chain and health probe, SQLite/Postgres persistence of mission rows, the cost ledger and human
+  gates, tiered memory in the prompt, the hash-chained decision log, flaky-check quarantine in the
+  verifier, OpenTelemetry/Langfuse trace export, and, in `lha orchestrate` only, file ownership,
+  tickets, the blackboard, parallel implementer waves and the branch integrator. Saga compensation,
   orphan-branch reconciliation, the Magentic-One ledgers, mutation testing, trust bootstrap,
   offline prompt evolution with its judge and eval harness, the Claude Agent SDK lead, and the
   Auditor, Librarian, Tester and model-backed Integrator runners were removed rather than kept
   as uncalled code.
-- **Known gaps in wired features.** Gates are not written to the `hitl_gates` table; they live in
-  the workflow state and as `gate_*` events in the anchor. A durable mission's row never shows
-  `DEGRADED_PARK` or `SLEEPING`, nor `WAITING_ON_HUMAN` for the deadlock gate, nor the outcome
-  the workflow reaches after a gate decision or at `max_cycles`: it shows what the last cycle
-  activity wrote. A `LeaseRequest` for a foreign file is never granted. `lha orchestrate` does not
-  resume an earlier run. The default `hash` embedder is lexical, not semantic. Every
-  `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`.
-  `fetch_url` checks the resolved address before connecting, but the HTTP client resolves again,
-  so DNS rebinding between the two lookups is a residual risk. The Go port has no CLI and no
-  Temporal worker yet.
+- **Known gaps in wired features.** The mission row and the `hitl_gates` rows are best-effort
+  copies that lag when the store is down, and a durable gate's row cannot name the person who
+  answered. A `LeaseRequest` for a foreign file is never granted. `lha orchestrate` does not
+  resume an earlier run. The default `hash` embedder is lexical, not semantic (`ollama` is
+  semantic but needs a running Ollama server). Every `openai_compat` model, primary or fallback,
+  uses the one endpoint in `LHA_OPENAI_BASE_URL`. The Go port has no Temporal worker yet.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
-  run in CI. The Ollama, OpenAI-compatible and Claude backends are tested against mocked HTTP, not
-  live endpoints. Trace export is tested with an in-memory exporter and against a closed port,
+  run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama embedder are tested
+  against mocked HTTP, not live endpoints, so no test shows how much a real embedding model
+  improves recall. Trace export is tested with an in-memory exporter and against a closed port,
   never against a live collector or Langfuse server.
 
 ## Predicted runs

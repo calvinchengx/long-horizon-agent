@@ -175,10 +175,14 @@ class Settings(BaseSettings):
     memory_semantic_k: int = 4  # repo chunks / facts / progress / decisions recalled per cycle
     memory_skills_k: int = 2  # verified skills recalled per cycle
     # Dense channel of hybrid retrieval. "hash" = the built-in offline HashEmbedder (lexical
-    # hashing, no extra needed); "sentence_transformers" needs the ``embeddings`` extra (falls
-    # back to lexical-only retrieval if missing); "none" = lexical-only (BM25 + git grep).
-    memory_embedder: Literal["hash", "sentence_transformers", "none"] = "hash"
-    memory_embedding_model: str = "BAAI/bge-m3"  # for memory_embedder=sentence_transformers
+    # hashing, no extra needed; the default because it needs nothing running); "ollama" = real
+    # semantic embeddings from a local Ollama (``LHA_OLLAMA_BASE_URL``, POST /api/embed, $0);
+    # "sentence_transformers" needs the ``embeddings`` extra. Either semantic choice falls back
+    # to lexical-only retrieval when unavailable; "none" = lexical-only (BM25 + git grep).
+    memory_embedder: Literal["hash", "ollama", "sentence_transformers", "none"] = "hash"
+    # The embedding model; empty = "nomic-embed-text" for ollama, "BAAI/bge-m3" for
+    # sentence_transformers (unused by hash / none).
+    memory_embedding_model: str = ""
     # Second-stage rerank: "none" keeps fusion order; "cross_encoder" needs the embeddings extra.
     memory_rerank: Literal["none", "cross_encoder"] = "none"
     # Consolidate episodic -> semantic every N recorded cycles (0 disables). "extractive" is

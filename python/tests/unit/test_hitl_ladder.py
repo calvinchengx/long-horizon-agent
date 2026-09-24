@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +31,7 @@ from lha.execution.tools import default_local_tools
 from lha.hitl.approvals import (
     DeferredApprovalGate,
     TerminalApprover,
+    bind_gate_store,
     console_gate,
     describe,
     request_argv,
@@ -39,6 +41,7 @@ from lha.hitl.approvals import (
 from lha.hitl.escalation import Rung, escalation_schedule, next_rung
 from lha.hitl.notify import post_webhook, post_webhook_sync
 from lha.model.stub import StubModel
+from lha.persistence.store import GateEvent, GateRow, open_store
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 
@@ -282,6 +285,10 @@ async def test_local_run_asks_and_commits_the_decision(tmp_path: Path, answer: s
     assert marker.exists() is approved
     (event,) = [e for e in _events(work) if e.kind == "tool_approval"]
     assert event.payload["approved"] is approved and event.cycle_id == "c1"
+    # The local run bound the approver to its mission store: the gate is in hitl_gates.
+    (row,) = await _gates(summary.mission_id)
+    assert row.status == "RESOLVED" and row.decision == ("approve" if approved else "reject")
+    assert (row.resolved_by or "").startswith("terminal:")
 
 
 # --- webhook -------------------------------------------------------------------------------
@@ -370,7 +377,7 @@ async def test_notify_gate_records_in_the_anchor_and_posts(tmp_path: Path) -> No
         request=PENDING,
     )
     result = await _notify_gate(notice, settings=settings, transport=httpx.MockTransport(hook))
-    assert result.recorded and result.webhook == "sent"
+    assert result.recorded and result.webhook == "sent" and result.stored
     assert posts[0]["request"]["fingerprint"] == "fp-push"
     (event,) = [e for e in _events(workdir) if e.kind == "gate_opened"]
     assert event.payload["gate_id"] == "approval-fp"
@@ -380,6 +387,189 @@ async def test_notify_gate_records_in_the_anchor_and_posts(tmp_path: Path) -> No
     )
     off = await _notify_gate(missing, settings=Settings(_env_file=None))  # type: ignore[call-arg]
     assert not off.recorded and off.webhook == "off"
+
+
+async def _gates(mission_id: str | None = None) -> list[GateRow]:
+    store = await open_store(Settings(_env_file=None))  # type: ignore[call-arg]
+    try:
+        return await store.list_gates(mission_id)
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_notify_gate_writes_the_hitl_gates_row_idempotently(tmp_path: Path) -> None:
+    workdir = await _mission(tmp_path)
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+    secret = "Authorization: Bearer sk-ant-abcdefghijklmnopqrstu"
+    request = PendingApproval(fingerprint="fp", tool="run_command", reason="r", arguments=secret)
+    base = GateNotice(
+        mission_id="m",
+        workdir=str(workdir),
+        gate_id="approval-fp",
+        kind=GATE_TOOL_CALL,
+        event="opened",
+        question=f"Run curl -H '{secret}'?",
+        options=["approve", "reject"],
+        default_action="reject",
+        deadline="2026-01-01T01:00:00+00:00",
+        request=request,
+        at="2026-01-01T00:00:00+00:00",
+    )
+    for notice in (
+        base,
+        base,  # an activity retry writes the same row again
+        replace(base, event="reminder", step=1, at="2026-01-01T00:15:00+00:00"),
+        replace(base, event="resolved", decision="approve", at="2026-01-01T00:20:00+00:00"),
+    ):
+        assert (await _notify_gate(notice, settings=settings)).stored
+    (row,) = await _gates("m")
+    assert (row.status, row.decision, row.reminders, row.kind) == (
+        "RESOLVED",
+        "approve",
+        1,
+        GATE_TOOL_CALL,
+    )
+    assert row.resolved_by == "human (human_decision signal)" and row.risk == "irreversible"
+    assert row.opened_at == "2026-01-01T00:00:00+00:00"
+    assert row.resolved_at == "2026-01-01T00:20:00+00:00"
+    assert row.request is not None and row.request["fingerprint"] == "fp"
+    assert "sk-ant" not in json.dumps(row.request) and "sk-ant" not in row.question
+
+    deadlock = GateNotice(
+        mission_id="m", workdir=str(workdir), gate_id="deadlock-2", kind=GATE_DEADLOCK,
+        event="defaulted", options=["retry", "abort", "impossible"], default_action="abort",
+        decision="abort",
+    )  # fmt: skip
+    assert (await _notify_gate(deadlock, settings=settings)).stored  # no "at": the activity's clock
+    closed = {r.gate_id: r for r in await _gates()}["deadlock-2"]
+    assert (closed.status, closed.resolved_by, closed.risk) == (
+        "DEFAULTED",
+        "default (timeout)",
+        GATE_DEADLOCK,
+    )
+    assert closed.opened_at and closed.request is None
+
+
+@pytest.mark.asyncio
+async def test_notify_gate_survives_a_broken_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workdir = await _mission(tmp_path)
+
+    async def broken(*_a: object, **_k: object) -> object:
+        raise OSError("disk on fire")
+
+    monkeypatch.setattr("lha.durable.activities.open_store", broken)
+    notice = GateNotice(
+        mission_id="m", workdir=str(workdir), gate_id="g", kind=GATE_DEADLOCK, event="opened"
+    )
+    result = await _notify_gate(notice, settings=Settings(_env_file=None))  # type: ignore[call-arg]
+    assert result.recorded and not result.stored
+
+
+@pytest.mark.asyncio
+async def test_terminal_approver_records_each_gate_in_the_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("lha.hitl.approvals.getpass.getuser", lambda: "alice")
+    store = await open_store(Settings(_env_file=None))  # type: ignore[call-arg]
+    try:
+        approved, _, _ = _approver([None, "y\n"], steps=(5,))
+        approved.bind_store(store)
+        secret_argv = ["curl", "-H", "Authorization: Bearer sk-ant-abcdefghijklmnopqrstu", "x"]
+        await approved.request(_request(secret_argv, mission_id="m1"))
+        timed_out, _, _ = _approver([None, None, None], steps=(10, 30))
+        timed_out.bind_store(store)
+        await timed_out.request(GateRequest(gate_id="m2:tool:c9", question="Allow?"))
+        no_tty, _, _ = _approver([], tty=False)
+        no_tty.bind_store(store)
+        await no_tty.request(GateRequest(gate_id="m3:tool:c1", question="Allow?"))
+        rows = {r.mission_id: r for r in await store.list_gates()}
+    finally:
+        await store.close()
+    one = rows["m1"]
+    assert (one.status, one.decision, one.resolved_by, one.reminders) == (
+        "RESOLVED",
+        "approve",
+        "terminal:alice",
+        1,
+    )
+    assert one.gate_id == "m:tool:c1" and one.options == ["approve", "reject"]
+    assert one.request is not None and one.request["tool"] == "run_command"
+    assert "sk-ant" not in json.dumps(one.request)
+    two = rows["m2"]  # the mission id comes from the gate id when the context has none
+    assert (two.status, two.decision, two.resolved_by, two.reminders) == (
+        "DEFAULTED",
+        "reject",
+        "timeout",
+        2,
+    )
+    three = rows["m3"]
+    assert three.status == "DEFAULTED" and "not a TTY" in (three.resolved_by or "")
+
+
+@pytest.mark.asyncio
+async def test_terminal_approver_never_fails_on_a_store_error() -> None:
+    class Broken:
+        async def record_gate_event(self, _event: object) -> None:
+            raise RuntimeError("store down")
+
+    approver, _, _ = _approver(["y\n"])
+    approver.bind_store(Broken())  # type: ignore[arg-type]
+    result = await approver.request(_request())
+    assert result.decision is GateDecision.APPROVE
+    assert approver.store_failures == 2  # opened + resolved; the answer is unaffected
+    bind_gate_store(object(), Broken())  # type: ignore[arg-type]  # a gate without a store: no-op
+
+
+def test_gates_cli_lists_recorded_gates(tmp_path: Path) -> None:
+    import asyncio
+
+    async def seed() -> None:
+        store = await open_store(Settings(_env_file=None))  # type: ignore[call-arg]
+        try:
+            deadlock = GateEvent(
+                mission_id="m1",
+                gate_id="deadlock-2",
+                kind=GATE_DEADLOCK,
+                event="opened",
+                at="2026-01-01T00:00:00+00:00",
+                question="Retry, abort or impossible?",
+                options=["retry", "abort", "impossible"],
+                default_action="abort",
+                deadline="2026-01-01T01:00:00+00:00",
+            )
+            approval = GateEvent(
+                mission_id="m2",
+                gate_id="approval-fp",
+                kind=GATE_TOOL_CALL,
+                event="resolved",
+                at="2026-01-02T00:00:00+00:00",
+                question="Push?",
+                options=["approve", "reject"],
+                decision="approve",
+                resolved_by="terminal:alice",
+                request={"tool": "run_command", "argv": "git push"},
+            )
+            await store.record_gate_event(deadlock)
+            await store.record_gate_event(approval)
+        finally:
+            await store.close()
+
+    empty = runner.invoke(cli.app, ["gates"])
+    assert empty.exit_code == 0 and "no gates recorded" in empty.output
+    assert "for mission zz" in runner.invoke(cli.app, ["gates", "zz"]).output
+    asyncio.run(seed())
+    listed = runner.invoke(cli.app, ["gates"])
+    assert listed.exit_code == 0, listed.output
+    first, second = listed.output.index("m2"), listed.output.index("m1")
+    assert first < second  # most recently opened first
+    assert "open, default abort" in listed.output and "RESOLVED" in listed.output
+    assert "approve by terminal:alice" in listed.output
+    assert "request: run_command git push" in listed.output
+    one = runner.invoke(cli.app, ["gates", "m1", "--limit", "5"])
+    assert "deadlock-2" in one.output and "m2" not in one.output
 
 
 @pytest.mark.asyncio

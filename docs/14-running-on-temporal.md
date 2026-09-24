@@ -156,12 +156,15 @@ Statuses the workflow sets:
 | `ABORTED` | budget exhausted, `max_cycles` reached, "abort" at the deadlock gate, or a non-retryable failure |
 
 These are the workflow's `status_v1` values. The mission row that `lha missions` lists follows
-them: the cycle activity writes what a cycle sees (`RUNNING`, `DONE`, `IMPOSSIBLE` when
-deadlocked, `WAITING_ON_HUMAN` for a queued approval, `ABORTED` on budget), and the workflow
-writes the rest through the `record_mission_status` activity: `SLEEPING`, `DEGRADED_PARK`,
-`WAITING_ON_HUMAN` when a gate opens, and the final status of every ending (a deadlock-gate
-decision, `max_cycles`, a failure, `mission-abort`). Those writes are best effort (30 s, three
-attempts); if the store is down the mission goes on and the row lags until the next write.
+them: the cycle activity writes what a cycle sees (`RUNNING`, also for a deadlocked
+checklist, `DONE`, `WAITING_ON_HUMAN` for a queued approval, `ABORTED` on budget), and the
+workflow writes the rest through the `record_mission_status` activity: `SLEEPING`,
+`DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending
+(`IMPOSSIBLE` for a deadlock, a deadlock-gate decision, `max_cycles`, a failure,
+`mission-abort`). A row in `DONE`, `IMPOSSIBLE` or `ABORTED` never goes back to a non-terminal
+status. Those writes are best effort (30 s, three attempts); if the store is down the mission
+goes on and the row lags until the next write. Gate events are written to `hitl_gates` by the
+`notify_gate` activity (`lha gates`).
 
 The Temporal UI at <http://localhost:8080> shows each workflow's event history: every activity
 with its input, result, attempts and failures, the timers of a park, and each Continue-As-New.
@@ -209,10 +212,15 @@ as a `gate_opened` / `gate_reminder` / `gate_resolved` / `gate_defaulted` event,
 `SLEEPING`) before its next cycle; `--seconds 0` wakes it. A cycle already running finishes first.
 
 `mission-abort` requests cancellation of the workflow. Temporal delivers it to a running
-`run_agent_cycle` at its next heartbeat (every 5 s); a cancelled cycle never parks the mission.
-The workflow sets its status to `ABORTED`, writes `ABORTED` to the mission row
-(`record_mission_status`) and closes as *Cancelled*. Work of the interrupted cycle is not
-committed; uncommitted files may remain in the working tree.
+`run_agent_cycle` with the response to a heartbeat (the activity heartbeats every 5 s; the SDK
+sends one to the server at most every 60 s by default); a cancelled cycle never parks the mission.
+The workflow waits until the cycle has acknowledged the cancellation (or finished anyway: that
+does not undo the abort), then sets its status to `ABORTED`, writes `ABORTED` to the mission row
+(`record_mission_status`) and closes as *Cancelled*. Because the cycle's last row write lands
+first, and the store never moves a row out of `ABORTED`, `lha missions` ends at `ABORTED`. Work
+of the interrupted cycle is not committed; uncommitted files may remain in the working tree.
+Workflows started before this behaviour (`workflow.patched("lha-cycle-wait-cancel-v1")`) keep the
+old one: they write `ABORTED` without waiting, and only the store's rule protects the row.
 
 The `steer_v1` signal appends an operator note (at most 2000 characters; the last 20 are kept)
 that every following cycle's prompt includes. No CLI command sends it; use `temporal workflow

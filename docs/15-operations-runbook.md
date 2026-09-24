@@ -21,11 +21,13 @@ The durable `MissionWorkflow` exposes its status through the `status_v1` query
 
 The workflow's status lives in the workflow. The mission row in the store (`lha missions`; SQLite
 by default, Postgres with `LHA_POSTGRES_DSN`; `lha config` prints where) is written by
-`mission-start`, the cycle activities (`RUNNING`, `WAITING_ON_HUMAN` for a queued approval,
-`DONE`, `IMPOSSIBLE` when deadlocked, `ABORTED` on budget) and the workflow (`SLEEPING`,
-`DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending,
-including a gate decision, `max_cycles` and `mission-abort`). The workflow's writes are best
-effort; `lha mission-status` is the live source.
+`mission-start`, the cycle activities (`RUNNING`, also when the checklist is deadlocked,
+`WAITING_ON_HUMAN` for a queued approval, `DONE`, `ABORTED` on budget) and the workflow
+(`SLEEPING`, `DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens, and the final status of every
+ending, including `IMPOSSIBLE` for a deadlock, a gate decision, `max_cycles` and
+`mission-abort`). The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` back to a
+non-terminal status, so a cycle still finishing after an abort cannot overwrite `ABORTED`. The
+workflow's writes are best effort; `lha mission-status` is the live source.
 
 Local runs (`run-local`, `mission`, `orchestrate`) have no status query. They print a summary and
 exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason>`,
@@ -122,7 +124,9 @@ next cycle; `--seconds 0` wakes it. `--cycle-pause-seconds` and `--start-in-seco
 --name steer_v1 --input '"..."'`). Following cycles include it in the prompt.
 
 **Stop.** `lha mission-abort <id>` cancels the workflow (see
-[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-sleep-and-abort)).
+[14-running-on-temporal.md](14-running-on-temporal.md#5-gates-sleep-and-abort)). A cycle in
+flight is cancelled at its next heartbeat and the workflow waits for it before it writes
+`ABORTED`, so the abort can take up to about a minute (the heartbeat throttle) to show.
 
 **Change the budget ceiling.** A CLI-started mission uses the worker's `LHA_BUDGET_USD_CEILING`,
 read once per worker process and applied per cycle attempt. Change it and restart the worker; the
@@ -220,8 +224,13 @@ on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` (see
 - The deadlock gate recommends "impossible" when `ops.lifecycle.should_declare_impossible` says
   the blocked item failed `LHA_IMPOSSIBLE_AFTER_FAILURES` (3) cycles in a row.
 - `MissionOutcome` in `ops/lifecycle.py` and the `AutoPolicyGate` / `CallbackGate` classes in
-  `hitl/gate.py` have no caller in a run path. Gates are not persisted to the `hitl_gates` table
-  (**planned**); their record is the anchor events and the workflow history.
+  `hitl/gate.py` have no caller in a run path.
+- Every gate event (opened, reminder, resolved, defaulted) is written to the `hitl_gates` table
+  of the mission store, by the `notify_gate` activity on the durable path and by the terminal
+  approver on local runs. `lha gates [MISSION_ID]` lists them: kind, question, options,
+  reminders, decision, who (`human (human_decision signal)`, `default (timeout)`,
+  `terminal:<login>`, ...) and when. The writes are best effort; the anchor's `gate_*` events and
+  the workflow history remain the full record.
 
 ## Safe deploys during an in-flight mission
 
@@ -273,8 +282,15 @@ when it is back. Workers reconnect.
 
 **Re-embedding memory.** **Planned.** Every `semantic_memory` row records `embedding_model` and
 `embedding_version`, and dense queries only compare vectors of the same model and version, but
-there is no re-embed command: after changing `LHA_MEMORY_EMBEDDER` or `LHA_MEMORY_EMBEDDING_MODEL`,
-older rows are not found by the dense channel.
+there is no re-embed command: after changing `LHA_MEMORY_EMBEDDER` or `LHA_MEMORY_EMBEDDING_MODEL`
+(or re-pulling an Ollama model whose digest changed), older rows are not found by the dense
+channel.
+
+**Semantic memory with Ollama.** Set `LHA_MEMORY_EMBEDDER=ollama` (model:
+`LHA_MEMORY_EMBEDDING_MODEL`, default `nomic-embed-text`; server: `LHA_OLLAMA_BASE_URL`) on every
+process that runs cycles, and `ollama pull` the model there. If the server is down or the model
+is missing, memory runs lexical-only and logs `memory_degraded` with the reason; the mission is
+not affected. See [12-memory.md](12-memory.md#embedders).
 
 **Orphaned sub-agent branches.** Nothing reconciles branches left behind by an interrupted
 `lha orchestrate` run; `orchestrate` prunes stale worktrees when it starts. **Planned** together

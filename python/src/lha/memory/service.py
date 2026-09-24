@@ -35,13 +35,21 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+import httpx
+
 from lha.agent.prompt import render_memory_block
 from lha.config import Settings
 from lha.contracts.memory import Embedder, MemoryRecord, RetrievalHit, SemanticIndex
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import ChecklistItem, SituationSnapshot
 from lha.memory.consolidation import consolidate
-from lha.memory.embeddings import HashEmbedder, SentenceTransformerEmbedder
+from lha.memory.embeddings import (
+    HashEmbedder,
+    OllamaEmbedder,
+    OllamaUnavailableError,
+    PaddedEmbedder,
+    SentenceTransformerEmbedder,
+)
 from lha.memory.hybrid import BM25Index, reciprocal_rank_fusion
 from lha.memory.rerank import CrossEncoderReranker, NoopReranker
 from lha.memory.semantic_memory import cosine
@@ -53,8 +61,11 @@ from lha.persistence.store import BACKEND_POSTGRES, MissionStore
 EPISODE_KIND = "cycle_outcome"
 CONSOLIDATION_KIND = "memory_consolidation"
 
-#: Width of pgvector's ``semantic_memory.embedding`` column (``vector(1024)``).
+#: Width of pgvector's ``semantic_memory.embedding`` column (``vector(1024)``). Narrower
+#: embedders are zero-padded to it (``PaddedEmbedder``); wider ones run lexical-only.
 PG_EMBEDDING_DIM = 1024
+#: HTTP timeout of the Ollama embedder (probe and every embed call).
+OLLAMA_TIMEOUT_S = 30.0
 SKILL_TTL_DAYS = 90
 
 _CHUNK_LINES = 40
@@ -318,6 +329,8 @@ class MissionMemory:
         self.config = config
         self.mode = mode
         self.embedder = embedder if mode.dense else None
+        # Closed by ``close`` even after a degradation dropped it (an Ollama HTTP client).
+        self._embedder_owned = embedder
         self.reranker: _Reranker = reranker or NoopReranker()
         self.model = model
         self.recorder = recorder
@@ -699,6 +712,10 @@ class MissionMemory:
             if close is not None:
                 await close()
         self._dense.clear()
+        aclose = getattr(self._embedder_owned, "aclose", None)
+        self._embedder_owned = None
+        if aclose is not None:
+            await aclose()
 
 
 def _extractive_facts(episodes: list[Any]) -> list[tuple[str, str]]:
@@ -734,15 +751,38 @@ def _extractive_facts(episodes: list[Any]) -> list[tuple[str, str]]:
 
 
 # --- construction -------------------------------------------------------------------------------
-def _build_embedder(settings: Settings, backend: str) -> tuple[Embedder | None, DependencyStatus]:
+#: ``LHA_MEMORY_EMBEDDING_MODEL`` when it is empty, per embedder.
+DEFAULT_EMBEDDING_MODELS = {"ollama": "nomic-embed-text", "sentence_transformers": "BAAI/bge-m3"}
+
+
+def embedding_model(settings: Settings) -> str:
+    """The configured embedding model, or the embedder's default."""
+    configured = settings.memory_embedding_model.strip()
+    return configured or DEFAULT_EMBEDDING_MODELS.get(settings.memory_embedder, "")
+
+
+async def _build_embedder(
+    settings: Settings, backend: str, *, transport: httpx.AsyncBaseTransport | None = None
+) -> tuple[Embedder | None, DependencyStatus]:
     choice = settings.memory_embedder
     if choice == "none":
         return None, DependencyStatus(
             "embeddings", Health.DEGRADED, "disabled (LHA_MEMORY_EMBEDDER=none)"
         )
+    if choice == "ollama":
+        try:
+            ollama = await OllamaEmbedder.connect(
+                model=embedding_model(settings),
+                base_url=settings.ollama_base_url,
+                transport=transport,
+                timeout_s=OLLAMA_TIMEOUT_S,
+            )
+        except OllamaUnavailableError as exc:
+            return None, DependencyStatus("embeddings", Health.DOWN, str(exc))
+        return ollama, DependencyStatus("embeddings", Health.OK)  # closed by MissionMemory.close
     if choice == "sentence_transformers":
         try:
-            embedder: Embedder = SentenceTransformerEmbedder(settings.memory_embedding_model)
+            embedder: Embedder = SentenceTransformerEmbedder(embedding_model(settings))
         except Exception as exc:  # ModuleNotFoundError without the `embeddings` extra
             return None, DependencyStatus(
                 "embeddings",
@@ -763,22 +803,31 @@ async def open_mission_memory(
     mission_id: str,
     model: ModelProvider | None = None,
     recorder: TraceRecorder | None = None,
+    embedder_transport: httpx.AsyncBaseTransport | None = None,
 ) -> MissionMemory | None:
-    """The run's memory plane per settings (``None`` when ``memory_enabled`` is false)."""
+    """The run's memory plane per settings (``None`` when ``memory_enabled`` is false).
+
+    ``embedder_transport`` is a test seam for the Ollama embedder's HTTP client.
+    """
     if not settings.memory_enabled:
         return None
     statuses: list[DependencyStatus] = []
     if store.degraded_reason:
         statuses.append(DependencyStatus("postgres", Health.DOWN, store.degraded_reason))
-    embedder, embed_status = _build_embedder(settings, store.backend)
+    embedder, embed_status = await _build_embedder(
+        settings, store.backend, transport=embedder_transport
+    )
     statuses.append(embed_status)
     if store.backend == BACKEND_POSTGRES and embedder is not None:
+        if embedder.dim < PG_EMBEDDING_DIM:
+            # e.g. nomic-embed-text (768): zero-padding keeps cosine similarity unchanged.
+            embedder = PaddedEmbedder(embedder, PG_EMBEDDING_DIM)
         if embedder.dim != PG_EMBEDDING_DIM:
             statuses.append(
                 DependencyStatus(
                     "pgvector",
                     Health.DOWN,
-                    f"embedder dim {embedder.dim} != vector({PG_EMBEDDING_DIM}) column",
+                    f"embedder dim {embedder.dim} > vector({PG_EMBEDDING_DIM}) column",
                 )
             )
         else:

@@ -71,9 +71,13 @@ matched case-insensitively against the open gate's options; a non-matching value
 
 `workflow.patched` ids, for behaviour added after histories were recorded:
 `lha-gate-escalation-v1` (gates walk the escalation ladder and emit `notify_gate`; the deadlock
-gate offers `impossible`) and `lha-sleeping-v1` (the SLEEPING timer before a cycle, and
-`cycle_pause_seconds`). A worker in another language must branch on the same ids to replay
-histories from either side of the change.
+gate offers `impossible`), `lha-sleeping-v1` (the SLEEPING timer before a cycle, and
+`cycle_pause_seconds`), `lha-mission-row-v1` (the workflow's `record_mission_status` writes) and
+`lha-cycle-wait-cancel-v1` (the `run_agent_cycle` activity is scheduled with cancellation type
+`WAIT_CANCELLATION_COMPLETED` instead of `TRY_CANCEL`, so a cancelled workflow waits for the cycle
+to acknowledge before it writes `ABORTED`; a cycle that completes anyway does not cancel the
+cancellation). A worker in another language must branch on the same ids to replay histories from
+either side of the change.
 
 Timeouts and retry policies are part of the workflow's recorded commands, so they must match for
 replay: see [14-running-on-temporal.md](14-running-on-temporal.md#how-a-cycle-runs). The
@@ -97,8 +101,8 @@ Continue-As-New rides inside `MissionInput.state`.
 | `PendingApproval` | `fingerprint: str`, `tool: str`, `reason: str`, `arguments: str ("")` (the `repr` of the arguments, at most 2000 chars) |
 | `ApprovedAction` | `fingerprint: str`, `summary: str` (`<tool> <arguments>`, at most 500 chars) |
 | `GateView` | `gate_id: str`, `kind: str` (`tool_call` \| `deadlock`), `question: str`, `options: list[str]`, `default_action: str`, `opened_at: str ("")`, `deadline: str ("")`, `escalations_sent: int (0)`, `next_escalation_at: str ("")`, `recommended: str ("")`, `request: PendingApproval \| null (null)`; times are ISO 8601 UTC to the second |
-| `GateNotice` | `mission_id`, `workdir`, `gate_id`, `kind`, `event: str` (`opened` \| `reminder` \| `resolved` \| `defaulted`), `question: str ("")`, `options: list[str] ([])`, `default_action: str ("")`, `decision: str ("")`, `step: int (0)`, `deadline: str ("")`, `request: PendingApproval \| null (null)` |
-| `NoticeResult` | `recorded: bool`, `webhook: str ("off")` (`off` \| `sent` \| `failed: <reason>`) |
+| `GateNotice` | `mission_id`, `workdir`, `gate_id`, `kind`, `event: str` (`opened` \| `reminder` \| `resolved` \| `defaulted`), `question: str ("")`, `options: list[str] ([])`, `default_action: str ("")`, `decision: str ("")`, `step: int (0)`, `deadline: str ("")`, `request: PendingApproval \| null (null)`, `at: str ("")` (when the event happened, workflow time, ISO 8601 UTC to the second; empty from older workflows, and the activity then uses its own clock) |
+| `NoticeResult` | `recorded: bool`, `webhook: str ("off")` (`off` \| `sent` \| `failed: <reason>`), `stored: bool (false)` (the `hitl_gates` row was written) |
 | `FinalizeInput` | `mission_id`, `workdir`, `cycle_id`, `reason: str ("")` |
 | `HealthInput` | `mission_id`, `workdir` |
 | `HealthReport` | `healthy: bool`, `reason: str ("")`, `degraded: list[str] ([])` |
@@ -270,8 +274,9 @@ Migrations are plain SQL in [`db/migrations/`](../db/migrations/), one file per 
 | `0002_idempotent_ledger` | `cost_ledger` gains `idempotency_key` (unique index), `role`, `cost_known`; `semantic_memory.id` becomes `text` |
 | `0003_cost_unknown_usd_null` | `cost_ledger.usd` becomes nullable with no default; unknown-cost rows set to `NULL` |
 | `0004_memory_skills` | additive only (`IF NOT EXISTS`): `semantic_memory` gains `kind text NOT NULL DEFAULT 'semantic'` and `metadata jsonb NOT NULL DEFAULT '{}'`, plus index `semantic_memory_mission` (`mission_id`); new table `skills` with index `skills_namespace` (`namespace`) |
+| `0005_hitl_gates` | `hitl_gates` is keyed by (`mission_id`, `gate_id`) instead of `gate_id` (a gate id such as `deadlock-3` recurs across missions; nothing wrote the table before); gains `kind text NOT NULL DEFAULT ''`, `options jsonb NOT NULL DEFAULT '[]'`, `request jsonb`, `reminders int NOT NULL DEFAULT 0`, `updated_at timestamptz`, plus index `hitl_gates_opened` (`created_at`) |
 
-Tables after all four:
+Tables after all five:
 
 | Table | Columns |
 |---|---|
@@ -282,7 +287,7 @@ Tables after all four:
 | `skills` | `id` text PK, `namespace` (default `global`, indexed), `name`, `description`, `code` (default `''`), `preconditions` jsonb (default `[]`), `provenance` (default `''`), `expires_at` text (ISO date), `verified` (default false), `uses` (default 0), `created_at`, `updated_at`, `schema_version` |
 | `idempotency_keys` | `key` PK, `result_ref`, `created_at` |
 | `cost_ledger` | `id` bigserial PK, `mission_id`, `cycle_id`, `ts`, `model`, `input_tokens`, `output_tokens`, `usd` numeric(12,6) nullable, `idempotency_key` unique, `role`, `cost_known` |
-| `hitl_gates` | `gate_id` PK, `mission_id`, `question`, `risk`, `default_action`, `status` (`OPEN`), `deadline`, `decision`, `resolved_by`, `created_at`, `resolved_at` |
+| `hitl_gates` | PK (`mission_id`, `gate_id`), `kind` (`tool_call` \| `deadlock`), `question`, `risk` (`irreversible` for a tool call, else the kind), `default_action`, `options` jsonb, `request` jsonb (`fingerprint`, `tool`, `arguments`, `reason`, and `argv` from the terminal approver; secrets redacted), `status` (`OPEN` \| `ESCALATED` \| `RESOLVED` \| `DEFAULTED`), `deadline`, `decision`, `resolved_by`, `reminders`, `created_at` (when the gate opened), `resolved_at`, `updated_at` |
 | `snapshots` | `snapshot_id` PK, `mission_id`, `sandbox_kind`, `meta` jsonb, `created_at` |
 | `schema_registry` | PK (`artifact`, `version`), `applied_at`, `notes` |
 | `schema_migrations` | `version` text PK (the file stem), `applied_at` |
@@ -300,7 +305,7 @@ Each file also inserts its own row, so a database initialized by Postgres'
 Every run path persists through one `MissionStore` interface
 ([`persistence/store.py`](../python/src/lha/persistence/store.py)), opened by `open_store`:
 `PostgresStore` when `LHA_POSTGRES_DSN` is set, otherwise `SqliteStore`. `PostgresStore` refuses
-to open unless `schema_migrations` lists all four versions above (run `lha db migrate` first).
+to open unless `schema_migrations` lists all five versions above (run `lha db migrate` first).
 If Postgres is configured but unusable and `LHA_POSTGRES_FALLBACK_TO_SQLITE` is true (the
 default), the run falls back to SQLite and the store's `degraded_reason` says why; with the
 fallback off, the durable cycle activity fails with a non-retryable `MissionConfigError`.
@@ -309,21 +314,22 @@ fallback off, the durable cycle activity fails with a non-retryable `MissionConf
 file `LHA_SQLITE_PATH` (unset: a per-user file every process shares: `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` on macOS or `~/.local/share/lha/lha.sqlite3` on Linux; a relative path resolves against the current
 directory, with a warning; a path inside the mission checkout is moved to
 `<workdir>/.git/lha/<name>`), WAL mode, and creates
-its schema on open from its own migration list (`sqlite_0001_init`, recorded in its own
-`schema_migrations`). It has the same `missions`, `cost_ledger`, `episodic_events`,
-`semantic_memory` and `skills` columns as Postgres after `0004`, with SQLite types: JSON as
-text, booleans as integers, timestamps as ISO 8601 text, and `semantic_memory.embedding` as JSON
-text instead of `vector(1024)`, with no `tsv` column. It has no `checklist_items`,
-`idempotency_keys`, `hitl_gates` or `snapshots` tables.
+its schema on open from its own migration list (`sqlite_0001_init`, `sqlite_0002_hitl_gates`,
+recorded in its own `schema_migrations`). It has the same `missions`, `hitl_gates`,
+`cost_ledger`, `episodic_events`, `semantic_memory` and `skills` columns as Postgres after
+`0005`, with SQLite types: JSON as text, booleans as integers, timestamps as ISO 8601 text, and
+`semantic_memory.embedding` as JSON text instead of `vector(1024)`, with no `tsv` column. It has
+no `checklist_items`, `idempotency_keys` or `snapshots` tables.
 
 What is written, and by whom:
 
 | Table | Written by |
 |---|---|
-| `missions` | `MissionTracker` ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)) and the `record_mission_status` activity, an upsert on `mission_id` (an empty title or description keeps the stored one) |
+| `missions` | `MissionTracker` ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)) and the `record_mission_status` activity, an upsert on `mission_id` (an empty title or description keeps the stored one). The status is monotonic: a row in `DONE`, `IMPOSSIBLE` or `ABORTED` keeps it when a non-terminal status arrives (the other columns still update), unless the caller passes `reopen=True` |
+| `hitl_gates` | `record_gate_event`: the `notify_gate` activity (durable gates; `resolved_by` is `human (human_decision signal)` or `default (timeout)`) and the local `TerminalApprover` (`terminal:<login>`, `timeout`, `end of input`, `non-interactive (stdin is not a TTY)`). An upsert on (`mission_id`, `gate_id`): `opened` (re)opens the row unless it repeats the stored opening time, `reminder` raises `reminders` (never lowers it) on an open row, `resolved` / `defaulted` close an open row and are no-ops on a closed one; an event for a missing row inserts it |
 | `cost_ledger` | `LedgerSink`, installed as `CostMeter.on_record`: one row per metered model call, keyed by an idempotency key derived from mission id, cycle id and `<key prefix>#<sequence number>`, so a repeated write is a no-op. Key prefixes: `<cycle id>@<attempt>` for a durable cycle (a retried attempt's calls are new rows), `sub:<workflow id>:<activity id>@<attempt>` for a durable sub-agent, `planner` for the Planner's calls in `lha mission-start`; a local runner uses an empty prefix and backfills the calls its meter recorded before the store opened |
 | `episodic_events`, `semantic_memory`, `skills` | the memory plane ([`memory/service.py`](../python/src/lha/memory/service.py)) when `LHA_MEMORY_ENABLED` is true |
-| `checklist_items`, `idempotency_keys`, `hitl_gates`, `snapshots` | nothing; the tables exist in Postgres only |
+| `checklist_items`, `idempotency_keys`, `snapshots` | nothing; the tables exist in Postgres only |
 
 Mission row statuses actually written: a local runner (`run-local`, `mission`, `orchestrate`)
 writes `RUNNING` at start and, at the end, `DONE` (complete), `IMPOSSIBLE` (deadlocked) or
@@ -331,17 +337,19 @@ writes `RUNNING` at start and, at the end, `DONE` (complete), `IMPOSSIBLE` (dead
 `--start-in-seconds`) with the workflow id before starting the workflow, and `ABORTED` if the
 start fails. In a durable run the cycle activity writes `RUNNING` when a cycle starts, `ABORTED`
 when the budget is exceeded, and after the checkpoint `DONE` (checklist complete),
-`WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval), `IMPOSSIBLE`
-(deadlocked) or `RUNNING`. The workflow writes the statuses only it decides through the
+`WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval) or `RUNNING`
+(including a deadlocked checklist: the workflow decides that ending). The workflow writes the statuses only it decides through the
 `record_mission_status` activity (`MissionStatusInput`: `mission_id`, `workdir`, `status`,
 `head_sha`, `reason`; the reason is logged, not stored): `SLEEPING`, `DEGRADED_PARK`,
 `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending (`DONE`,
 `IMPOSSIBLE`, `ABORTED` for abort at the deadlock gate, `max_cycles`, budget, a non-retryable
-failure or a cancellation). Those writes are best effort; `status_v1` stays the live source. Gates are not written to `hitl_gates`; their history
-is in the anchor's `gate_*` events and the `gate_log_v1` query.
+failure or a cancellation). Those writes are best effort; `status_v1` stays the live source.
+Every gate event is also written to `hitl_gates` (above); the anchor's `gate_*` events and the
+`gate_log_v1` query remain the full history.
 
-`lha missions` lists mission rows with their cost summary, and `lha costs <mission id>` prints a
-mission's cost summary and its most recent ledger rows, from the same store.
+`lha missions` lists mission rows with their cost summary, `lha costs <mission id>` prints a
+mission's cost summary and its most recent ledger rows, and `lha gates [mission id]` lists the
+recorded gates, from the same store.
 
 ## Conformance cases (`spec/`)
 

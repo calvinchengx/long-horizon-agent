@@ -19,6 +19,7 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
+import httpcore
 import httpx
 
 from lha.execution.tools.web import _html_to_text
@@ -30,6 +31,7 @@ from lha.safety.egress import (
     parse_url,
     system_resolver,
 )
+from lha.safety.pinned_http import PinnedNetworkBackend, PinnedTransport
 
 MANIFEST = "MANIFEST.json"
 MAX_BYTES = 10_000_000
@@ -73,18 +75,32 @@ async def vendor_urls(
     *,
     client: httpx.AsyncClient | None = None,
     resolver: Resolver | None = None,
+    network_backend: httpcore.AsyncNetworkBackend | None = None,
 ) -> list[VendoredFile]:
-    """Fetch ``urls`` into ``into`` and (re)write its ``MANIFEST.json``; return what was saved."""
+    """Fetch ``urls`` into ``into`` and (re)write its ``MANIFEST.json``; return what was saved.
+
+    Without a ``client`` (a test seam), connections go through a ``PinnedNetworkBackend``: each
+    hop's host is resolved once, checked, and only a checked address is dialled (no DNS
+    rebinding). ``network_backend`` replaces the socket layer under the pinning (tests).
+    """
     root = Path(into)
     root.mkdir(parents=True, exist_ok=True)
     allowed = {parse_url(u).host for u in urls}  # the operator's own URLs define the allow-list
     policy = EgressPolicy(allow_hosts=allowed)
     owned = client is None
-    http = client or httpx.AsyncClient(timeout=60.0, follow_redirects=False, trust_env=False)
+    backend = PinnedNetworkBackend(network_backend) if owned else None
+    http = client or httpx.AsyncClient(
+        timeout=60.0,
+        follow_redirects=False,
+        trust_env=False,
+        transport=PinnedTransport(backend) if backend is not None else None,
+    )
     saved: list[VendoredFile] = []
     try:
         for url in urls:
-            saved.append(await _vendor_one(http, policy, resolver or system_resolver, url, root))
+            saved.append(
+                await _vendor_one(http, policy, resolver or system_resolver, url, root, backend)
+            )
     finally:
         if owned:
             await http.aclose()
@@ -93,15 +109,22 @@ async def vendor_urls(
 
 
 async def _vendor_one(
-    http: httpx.AsyncClient, policy: EgressPolicy, resolver: Resolver, url: str, root: Path
+    http: httpx.AsyncClient,
+    policy: EgressPolicy,
+    resolver: Resolver,
+    url: str,
+    root: Path,
+    backend: PinnedNetworkBackend | None = None,
 ) -> VendoredFile:
     current = url
     for _hop in range(MAX_REDIRECTS + 1):
         try:
             parsed = policy.check(current)
-            await check_resolved_addresses(parsed.host, parsed.port, resolver)
+            addresses = await check_resolved_addresses(parsed.host, parsed.port, resolver)
         except EgressDenied as exc:
             raise VendorError(f"{current}: {exc}") from exc
+        if backend is not None:
+            backend.pin(parsed.host, addresses)  # the connection dials only these
         try:
             async with http.stream("GET", current) as resp:
                 if resp.is_redirect:

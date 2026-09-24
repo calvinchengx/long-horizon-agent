@@ -35,7 +35,7 @@ async def _ctx(tmp_path: Path) -> ToolContext:
 
 def _fetch(handler: Callable[[httpx.Request], httpx.Response]) -> FetchUrlTool:
     return FetchUrlTool(
-        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        transport=httpx.MockTransport(handler),
         egress_policy=EgressPolicy(allow_hosts={"a.test", "b.test"}),
         resolver=_public,
     )
@@ -122,7 +122,7 @@ def _search(provider: str, handler: Callable[[httpx.Request], httpx.Response]) -
     return WebSearchTool(
         api_key="key",
         provider=provider,  # type: ignore[arg-type]
-        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        transport=httpx.MockTransport(handler),
         resolver=_public,
     )
 

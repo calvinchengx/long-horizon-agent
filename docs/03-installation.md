@@ -30,7 +30,7 @@ Heavy or environment-specific dependencies are extras, declared in
 | Extra | Installs | Used by |
 |---|---|---|
 | `postgres` | `psycopg[binary,pool]`, `pgvector` | `lha db migrate`; the Postgres mission store (`LHA_POSTGRES_DSN`: mission rows, cost ledger, memory) and its pgvector index. Without it, runs use SQLite |
-| `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval |
+| `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval. Semantic memory without this extra: `LHA_MEMORY_EMBEDDER=ollama` and a local Ollama with `nomic-embed-text` pulled |
 | `observability` | `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http` | OTLP trace export to a collector or to Langfuse, configured at process start when an endpoint or the Langfuse keys are set ([16-observability.md](16-observability.md)) |
 | `sandbox` | `docker` | The `docker` sandbox, which is the default |
 

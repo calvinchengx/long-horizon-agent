@@ -26,7 +26,7 @@ The worker registers both workflows and these activities (Temporal activity type
 | `run_agent_cycle` | `MissionWorkflow`, every cycle | start-to-close 1 h, heartbeat 2 min, retry policy below | Advances the mission by one checklist item |
 | `check_mission_health` | `MissionWorkflow`, while parked | start-to-close 2 min, 1 attempt | Probes git, model config and sandbox |
 | `unblock_items` | `MissionWorkflow`, after a human "retry" | start-to-close 5 min, 3 attempts | Resets every `blocked` item to `todo` and commits |
-| `notify_gate` | `MissionWorkflow`, on every gate event | start-to-close 3 min, 3 attempts | Commits a `gate_<event>` event to the anchor and POSTs it to the optional webhook |
+| `notify_gate` | `MissionWorkflow`, on every gate event | start-to-close 3 min, 3 attempts | Commits a `gate_<event>` event to the anchor, writes the gate's `hitl_gates` row (`lha gates`) and POSTs it to the optional webhook |
 | `declare_impossible` | `MissionWorkflow`, after an "impossible" decision | start-to-close 5 min, 3 attempts | Final checkpoint: `mission_impossible` event, progress entry, commit `lha: mission declared impossible` |
 | `read_mission_snapshot` | `MissionWorkflow`, terminal path | start-to-close 2 min, 3 attempts | Reads checklist counts and HEAD when no cycle has reported yet |
 | `run_subagent` | `SubAgentWorkflow` | start-to-close 15 min, heartbeat 2 min, 3 attempts | Runs one role as a `SubAgent` |
@@ -74,14 +74,17 @@ The activity also opens the mission store (SQLite, or Postgres when `LHA_POSTGRE
 [Configuration](18-configuration.md)) and the tiered memory service. Every metered call of the
 attempt is written to the cost ledger under the key prefix `<cycle id>@<attempt>`, and the mission
 row's status is set from the committed checklist after the cycle: `DONE`, `WAITING_ON_HUMAN` (the
-cycle queued an approval), `IMPOSSIBLE` (deadlocked) or `RUNNING`, and `ABORTED` when the budget
-is exhausted. The workflow itself never touches a database: the statuses only it knows reach
-the row through the `record_mission_status` activity, which opens the store the same way and
-upserts the row (idempotent): `SLEEPING`, `DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens,
-and the final status of every ending, including a gate decision, `max_cycles`, a non-retryable
-failure and a cancellation (written from a handler that runs after the cancel). It is best
-effort: 30 s per attempt, three attempts within two minutes, then the workflow logs a warning and
-goes on. An unusable Postgres store falls back to SQLite with a warning; with
+cycle queued an approval) or `RUNNING` (also when deadlocked: whether that ends the mission is
+the workflow's decision), and `ABORTED` when the budget is exhausted. The workflow itself never
+touches a database: the statuses only it knows reach the row through the `record_mission_status`
+activity, which opens the store the same way and upserts the row (idempotent): `SLEEPING`,
+`DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending,
+including `IMPOSSIBLE` for a deadlock, a gate decision, `max_cycles`, a non-retryable failure and
+a cancellation (written from a handler that runs after the cancel; a cycle in flight is waited
+for first, `lha-cycle-wait-cancel-v1`). The store never moves a row from `DONE`, `IMPOSSIBLE` or
+`ABORTED` back to a non-terminal status, so a late write from a finishing cycle cannot undo an
+abort. It is best effort: 30 s per attempt, three attempts within two minutes, then the workflow
+logs a warning and goes on. An unusable Postgres store falls back to SQLite with a warning; with
 `LHA_POSTGRES_FALLBACK_TO_SQLITE=false` it is a non-retryable `MissionConfigError` instead.
 
 ```mermaid
@@ -256,9 +259,12 @@ the anchor as `gate_opened` / `gate_reminder` / `gate_resolved` / `gate_defaulte
 `lha: gate <event> (<kind> <gate id>)`, secrets in the question and arguments redacted) and POSTs
 the same JSON to `LHA_GATE_WEBHOOK_URL` when the worker has it set (off by default; timeout
 `LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`, default 5 s). The webhook is sent from the activity, never
-from workflow code. A notification problem never fails the gate or changes its decision: the
-activity reports `recorded` / `webhook` outcomes instead of raising, and an activity error only
-adds a `gate_log` line.
+from workflow code. The activity also writes the gate's row in the mission store's
+`hitl_gates` table (kind, question, options, request, reminders, decision, who and when; `lha
+gates`), idempotently: the workflow stamps each event with its own time (`GateNotice.at`), so a
+retried activity writes the same row. A notification problem never fails the gate or changes its
+decision: the activity reports `recorded` / `stored` / `webhook` outcomes instead of raising, and
+an activity error only adds a `gate_log` line.
 
 ### Deadlock gate
 
@@ -395,11 +401,14 @@ has these tests:
   [`histories/`](../python/tests/durability/histories/): `mission_three_items.json`,
   `mission_deadlock_gate_legacy.json` and `mission_approval_gate_legacy.json` (a deadlock gate
   answered "retry" and an approval gate answered "approve", recorded with the workflow code from
-  before the escalation ladder), `mission_approval_ladder.json` and `mission_row_gate_retry.json`
-  (a deadlock gate answered "retry", then done, with the workflow's mission-row writes);
+  before the escalation ladder), `mission_approval_ladder.json`, `mission_row_gate_retry.json`
+  (a deadlock gate answered "retry", then done, with the workflow's mission-row writes) and
+  `mission_cancel_mid_cycle.json` (a mission aborted while its first cycle runs);
 - `test_committed_histories_cover_what_they_claim`: the legacy histories carry no patch marker, the
   ladder history carries `lha-gate-escalation-v1` and its `notify_gate` activities, only the
-  mission-row history carries `lha-mission-row-v1` and schedules `record_mission_status`;
+  mission-row history carries `lha-mission-row-v1` and schedules `record_mission_status`, and
+  only the cancel history carries `lha-cycle-wait-cancel-v1`, with the cycle's cancellation
+  acknowledged before `ABORTED` is written;
 - `test_replay_detects_a_changed_workflow`: renames `run_agent_cycle` in a copy of the history and
   expects a non-determinism error.
 
@@ -411,6 +420,7 @@ Behaviour added to `MissionWorkflow` after histories were recorded is guarded by
 | `lha-gate-escalation-v1` | gates with the escalation ladder and `notify_gate`, and the deadlock gate's `impossible` option (the older `await_human_gate`, with `approve`/`reject` or `retry`/`abort`, is kept for replay) |
 | `lha-sleeping-v1` | the `SLEEPING` durable timer (scheduled start, pause between cycles, snooze) |
 | `lha-mission-row-v1` | the `record_mission_status` activity: the workflow writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and every final status to the mission row |
+| `lha-cycle-wait-cancel-v1` | the cycle activity's cancellation type `WAIT_CANCELLATION_COMPLETED`: after `lha mission-abort`, the workflow waits for the cycle to acknowledge (or finish) before it writes `ABORTED`, and re-raises a cancellation that a cycle finishing normally would otherwise swallow |
 
 Without the `lha-gate-escalation-v1` guard both legacy histories fail replay with a
 non-determinism error (`notify_gate` issued where `run_agent_cycle` / `unblock_items` was

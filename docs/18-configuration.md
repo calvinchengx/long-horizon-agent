@@ -38,7 +38,7 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 |---|---|---|---|
 | `LHA_MODEL_BACKEND` | `stub` \| `ollama` \| `openai_compat` \| `claude` \| `claude_code` | `stub` (`claude_code` when `LHA_LEAD_ENGINE=claude_code`) | which backend `build_provider` constructs |
 | `LHA_MODEL_NAME` | string | `stub-1` | model id sent to the backend |
-| `LHA_OLLAMA_BASE_URL` | string | `http://localhost:11434` | Ollama server; `/v1` is appended |
+| `LHA_OLLAMA_BASE_URL` | string | `http://localhost:11434` | Ollama server; `/v1` is appended for the model backend. `LHA_MEMORY_EMBEDDER=ollama` uses the same server (`/api/tags`, `/api/embed`) |
 | `LHA_OPENAI_BASE_URL` | string | unset | chat-completions base URL; required for `openai_compat` |
 | `LHA_OPENAI_API_KEY` | secret | unset | bearer token for `openai_compat` |
 | `LHA_ANTHROPIC_API_KEY` | secret | unset | API key; required for `claude` |
@@ -77,10 +77,10 @@ See [13-models.md](13-models.md).
 | `LHA_OBJECT_STORE_ROOT` | string | `.lha/objects` | ClaimCheck blob directory (resolved to an absolute path); client, workers and replay must share it |
 
 Every run path persists the mission row (status transitions), every metered model call (the cost
-ledger), episodic events, semantic memory and skills to the mission store: SQLite when
-`LHA_POSTGRES_DSN` is unset, Postgres (after `lha db migrate`) when it is set. The mission's
-checklist and progress still live in git (the anchor). `lha missions` and `lha costs` read the
-store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
+ledger), human gates (`hitl_gates`), episodic events, semantic memory and skills to the mission
+store: SQLite when `LHA_POSTGRES_DSN` is unset, Postgres (after `lha db migrate`, which applies
+`0005_hitl_gates` for the gate table) when it is set. The mission's checklist and progress still
+live in git (the anchor). `lha missions`, `lha costs` and `lha gates` read the store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
 
 `missions.status` as the run paths write it:
 
@@ -89,14 +89,18 @@ store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
 - `mission-start`: `RUNNING` (`SLEEPING` with `--start-in-seconds`), with `workflow_id`, before
   it starts the workflow; `ABORTED` if the workflow cannot be started;
 - each `run_agent_cycle` activity: `RUNNING` while it works, then from the committed checklist
-  `DONE` (complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval),
-  `IMPOSSIBLE` (deadlocked) or `RUNNING` (including an item split by the replanner); `ABORTED`
-  when the budget refuses a call;
+  `DONE` (complete), `WAITING_ON_HUMAN` (the cycle queued an irreversible action for approval)
+  or `RUNNING` (including an item split by the replanner, and a deadlocked checklist, whose
+  outcome the workflow decides); `ABORTED` when the budget refuses a call;
 - the workflow, through the `record_mission_status` activity: `SLEEPING`, `DEGRADED_PARK`,
   `WAITING_ON_HUMAN` when a gate opens, and the final status of every ending (`DONE`,
   `IMPOSSIBLE`, or `ABORTED` for a deadlock-gate abort, the cycle ceiling, the budget, a
   non-retryable failure or `lha mission-abort`). Best effort: 30 s per attempt, three attempts,
   then a logged warning; the mission never waits longer or fails because of it.
+
+The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` to a non-terminal status (the
+other columns, such as `head_sha`, still update), so a cycle that was still finishing when the
+mission was aborted cannot turn `ABORTED` back into `RUNNING`.
 
 `lha mission-status` queries the live status from Temporal.
 
@@ -109,8 +113,8 @@ store. See [10-cost-and-budget.md](10-cost-and-budget.md#the-persistent-ledger).
 | `LHA_MEMORY_EPISODIC_K` | int | `4` | past outcomes of the active item recalled per cycle |
 | `LHA_MEMORY_SEMANTIC_K` | int | `4` | facts / progress / decisions / repo chunks recalled per cycle |
 | `LHA_MEMORY_SKILLS_K` | int | `2` | verified skills recalled per cycle |
-| `LHA_MEMORY_EMBEDDER` | `hash` \| `sentence_transformers` \| `none` | `hash` | dense channel; `sentence_transformers` needs the `embeddings` extra (lexical-only without it), `none` is lexical-only |
-| `LHA_MEMORY_EMBEDDING_MODEL` | string | `BAAI/bge-m3` | model for `sentence_transformers` (1024-wide to use pgvector) |
+| `LHA_MEMORY_EMBEDDER` | `hash` \| `ollama` \| `sentence_transformers` \| `none` | `hash` | dense channel. `hash` is lexical and needs nothing; `ollama` is semantic, from the Ollama server at `LHA_OLLAMA_BASE_URL` ($0, no extra); `sentence_transformers` is semantic and needs the `embeddings` extra; `none` is lexical-only. `ollama` or `sentence_transformers` that cannot be used falls back to lexical-only. The default stays `hash` because `ollama` without a running server means no dense channel at all |
+| `LHA_MEMORY_EMBEDDING_MODEL` | string | unset | the embedding model; unset: `nomic-embed-text` for `ollama`, `BAAI/bge-m3` for `sentence_transformers`. On Postgres a model narrower than 1024 is zero-padded to the `vector(1024)` column; a wider one runs lexical-only |
 | `LHA_MEMORY_RERANK` | `none` \| `cross_encoder` | `none` | second-stage rerank; `cross_encoder` needs the `embeddings` extra |
 | `LHA_MEMORY_CONSOLIDATE_EVERY` | int | `5` | consolidate episodes into facts every N recorded cycles; `0` disables |
 | `LHA_MEMORY_CONSOLIDATION` | `extractive` \| `model` | `extractive` | `extractive` is deterministic and free; `model` asks the metered lead model |
@@ -270,7 +274,7 @@ keys do not reach agent-run commands. Keep `.env` out of version control (`.giti
 | `LHA_IT_POSTGRES_DSN` | `tests/integration/conftest.py` | admin DSN for a Postgres with `vector` available; each test creates and drops its own database. Unset: Postgres tests are skipped |
 | `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine`, and the egress tests need internet access). Otherwise skipped |
 | `LHA_IT_SANDBOX_IMAGE` | `tests/integration/test_large_mission_e2e.py` | the polyglot sandbox image built from `sandbox/Dockerfile` (default `lha-sandbox:dev`) |
-| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json`, `mission_approval_ladder.json` and `mission_row_gate_retry.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
+| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json`, `mission_approval_ladder.json`, `mission_row_gate_retry.json` and `mission_cancel_mid_cycle.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
 | `LHA_APPDB_PASSWORD` | `docker-compose.yml` | `appdb` password (default `lha`) |
 | `LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_SALT` | `docker-compose.yml` | required by the Langfuse service; compose refuses to start without them |
 

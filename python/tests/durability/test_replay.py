@@ -20,11 +20,16 @@ older histories keep replaying down their old code path. The committed histories
 * ``mission_row_gate_retry.json`` — a real mission that deadlocks, is retried by a human at the
   deadlock gate and completes, writing the ``missions`` row from the workflow
   (``record_mission_status``, the ``lha-mission-row-v1`` path). Every older history above
-  predates that patch and replays without those activities.
+  predates that patch and replays without those activities;
+* ``mission_cancel_mid_cycle.json`` — a real mission cancelled (``lha mission-abort``) while its
+  first cycle runs: the workflow waits for the cancelled cycle to acknowledge
+  (``WAIT_CANCELLATION_COMPLETED``, the ``lha-cycle-wait-cancel-v1`` path) and only then writes
+  ABORTED. Every other history predates that patch and replays with the old cancellation type.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import os
@@ -32,7 +37,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from temporalio.client import WorkflowHistory
+from temporalio.client import WorkflowFailureError, WorkflowHistory
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -48,12 +53,14 @@ from tests.durability.test_durable_spine import (
     _snapshot_activity,
     _unblock_activity,
 )
-from tests.durability.test_human_gates import gated_argv, gated_model
+from tests.durability.test_human_gates import gated_argv, gated_model, worker
+from tests.durability.test_mission_row import _FAST_BEAT, _late, _late_writing_cycle
 
 HISTORIES = Path(__file__).parent / "histories"
 RECORDED = HISTORIES / "mission_three_items.json"
 RECORDED_LADDER = HISTORIES / "mission_approval_ladder.json"
 RECORDED_ROW = HISTORIES / "mission_row_gate_retry.json"
+RECORDED_CANCEL = HISTORIES / "mission_cancel_mid_cycle.json"
 
 
 def _sanitized(history_json: str, workdir: Path, *more: Path) -> str:
@@ -217,6 +224,42 @@ async def test_fresh_mission_row_history_replays(tmp_path: Path) -> None:
     assert await replay_histories(str(out), object_store_root=tmp_path / "objects") == 1
 
 
+async def _record_cancel_mid_cycle(tmp_path: Path) -> WorkflowHistory:
+    """A real 1-item mission aborted (``lha mission-abort`` = a workflow cancel) while its first
+    cycle runs: the workflow waits for the cancelled cycle, then writes ABORTED."""
+    _late["started"] = asyncio.Event()
+    _late["mode"] = "acknowledge"
+    work = tmp_path / "work"
+    inp = await init_mission(work, n=1)
+    task_queue = "lha-replay-cancel"
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        worker(env, task_queue, _late_writing_cycle, max_heartbeat_throttle_interval=_FAST_BEAT),
+    ):
+        handle = await env.client.start_workflow(
+            MissionWorkflow.run, inp, id=f"mission:{inp.mission_id}", task_queue=task_queue
+        )
+        await asyncio.wait_for(_late["started"].wait(), 120)
+        await handle.cancel()
+        with pytest.raises(WorkflowFailureError):
+            await asyncio.wait_for(handle.result(), 120)
+        return await handle.fetch_history()
+
+
+@pytest.mark.asyncio
+async def test_fresh_cancel_mid_cycle_history_replays(tmp_path: Path) -> None:
+    history = await _record_cancel_mid_cycle(tmp_path)
+    out = tmp_path / "histories"
+    out.mkdir()
+    (out / "fresh.json").write_text(history.to_json(), encoding="utf-8")
+    if os.environ.get("LHA_RECORD_HISTORY") == "1":
+        HISTORIES.mkdir(exist_ok=True)
+        RECORDED_CANCEL.write_text(
+            _sanitized(history.to_json(), tmp_path / "work", tmp_path), encoding="utf-8"
+        )
+    assert await replay_histories(str(out), object_store_root=tmp_path / "objects") == 1
+
+
 @pytest.mark.asyncio
 async def test_recorded_histories_still_replay(tmp_path: Path) -> None:
     assert RECORDED.exists(), "record one with LHA_RECORD_HISTORY=1 (see module docstring)"
@@ -227,6 +270,7 @@ async def test_recorded_histories_still_replay(tmp_path: Path) -> None:
         "mission_approval_gate_legacy.json",
         "mission_approval_ladder.json",
         "mission_row_gate_retry.json",
+        "mission_cancel_mid_cycle.json",
     } <= names
     replayed = await replay_histories(str(HISTORIES), object_store_root=tmp_path / "objects")
     assert replayed == len(names)
@@ -268,6 +312,8 @@ def test_committed_histories_cover_what_they_claim() -> None:
         "notify_gate",
         "run_agent_cycle",
     ]
+    for older in (RECORDED, legacy_deadlock, legacy_approval, RECORDED_LADDER, RECORDED_ROW):
+        assert "lha-cycle-wait-cancel-v1" not in _patches(older)
     for older in (RECORDED, legacy_deadlock, legacy_approval, RECORDED_LADDER):
         assert "lha-mission-row-v1" not in _patches(older)
         assert "record_mission_status" not in _scheduled(older)
@@ -283,6 +329,14 @@ def test_committed_histories_cover_what_they_claim() -> None:
         "run_agent_cycle",
         "record_mission_status",  # DONE
     ]
+    # Cancelled mid-cycle: the workflow waited for the cycle to acknowledge, then wrote ABORTED.
+    assert _patches(RECORDED_CANCEL) == ["lha-cycle-wait-cancel-v1", "lha-mission-row-v1"]
+    assert _scheduled(RECORDED_CANCEL) == ["run_agent_cycle", "record_mission_status"]
+    kinds = [next(k for k in e if k.endswith("EventAttributes")) for e in _events(RECORDED_CANCEL)]
+    canceled = kinds.index("activityTaskCanceledEventAttributes")  # the cycle acknowledged
+    scheduled = [i for i, k in enumerate(kinds) if k == "activityTaskScheduledEventAttributes"]
+    assert scheduled[0] < canceled < scheduled[1]  # ...before ABORTED was written
+    assert kinds[-1] == "workflowExecutionCanceledEventAttributes"
 
 
 @pytest.mark.asyncio

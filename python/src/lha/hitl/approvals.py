@@ -20,6 +20,7 @@ not approve ``git push --force`` or a push to another remote.
 from __future__ import annotations
 
 import asyncio
+import getpass
 import hashlib
 import json
 import select
@@ -27,14 +28,19 @@ import shlex
 import sys
 import time
 from collections.abc import Callable, Iterable
-from typing import Any, TextIO
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any, TextIO
 
 from lha.config import Settings, get_settings
 from lha.contracts.hitl import GateDecision, GateRequest, GateResolution
 from lha.contracts.state import EventRecord
 from lha.hitl.escalation import escalation_schedule, next_rung
 from lha.hitl.notify import post_webhook_sync
+from lha.obs.events import get_logger
 from lha.obs.redact import redact_text
+
+if TYPE_CHECKING:
+    from lha.persistence.store import GateEvent, MissionStore
 
 #: ``GateResolution.resolved_by`` for a request that was queued for a later human decision.
 PENDING = "pending-approval"
@@ -123,6 +129,21 @@ def _is_tty(stream: TextIO) -> Callable[[], bool]:
     return check
 
 
+def _user() -> str:
+    """Who answered at the terminal (the OS login name; ``unknown`` if it cannot be read)."""
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "unknown"
+
+
+def bind_gate_store(gate: object, store: MissionStore) -> None:
+    """Point a gate that records its events (``TerminalApprover``) at the run's mission store."""
+    bind = getattr(gate, "bind_store", None)
+    if callable(bind):
+        bind(store)
+
+
 def _denied(req: GateRequest, by: str, *, defaulted: bool) -> GateResolution:
     return GateResolution(
         gate_id=req.gate_id, decision=GateDecision.REJECT, resolved_by=by, defaulted=defaulted
@@ -161,16 +182,84 @@ class TerminalApprover:
         self._clock = clock
         self._lock = asyncio.Lock()
         self._events: list[EventRecord] = []
+        self._store: MissionStore | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        #: Gate-row writes that failed (logged; never a reason to change the answer).
+        self.store_failures = 0
 
     def drain_events(self) -> list[EventRecord]:
         events, self._events = self._events, []
         return events
 
+    def bind_store(self, store: MissionStore | None) -> None:
+        """Record every gate event in ``store``'s ``hitl_gates`` table (``None`` stops it)."""
+        self._store = store
+
     async def request(self, req: GateRequest) -> GateResolution:
+        self._loop = asyncio.get_running_loop()
         if not self._is_tty():
-            return _denied(req, "non-interactive (stdin is not a TTY)", defaulted=True)
+            by = "non-interactive (stdin is not a TTY)"
+            await self._write(self._gate_event(req, "defaulted", decision="reject", by=by))
+            return _denied(req, by, defaulted=True)
         async with self._lock:
             return await asyncio.to_thread(self._prompt, req)
+
+    # --- the hitl_gates row --------------------------------------------------------------
+    def _gate_event(
+        self, req: GateRequest, event: str, *, decision: str = "", by: str = "", step: int = 0
+    ) -> GateEvent:
+        from lha.persistence.store import GateEvent
+
+        mission_id = req.context.get("mission_id") or req.gate_id.split(":tool:", 1)[0]
+        request = {
+            key: redact_text(req.context[key]) if key == "arguments" else req.context[key]
+            for key in ("fingerprint", "tool", "arguments", "reason")
+            if req.context.get(key)
+        }
+        argv = request_argv(req)
+        if argv:
+            request["argv"] = json.dumps([redact_text(token) for token in argv])
+        return GateEvent(
+            mission_id=mission_id,
+            gate_id=req.gate_id,
+            kind="tool_call",
+            event=event,
+            at=datetime.now(UTC).isoformat(timespec="microseconds"),
+            question=redact_text(req.question),
+            options=["approve", "reject"],
+            default_action="reject",
+            decision=decision,
+            resolved_by=by,
+            step=step,
+            risk=str(req.risk.value) if hasattr(req.risk, "value") else str(req.risk),
+            request=request or None,
+        )
+
+    async def _write(self, event: GateEvent) -> None:
+        if self._store is None:
+            return
+        try:
+            await self._store.record_gate_event(event)
+        except Exception as exc:
+            self.store_failures += 1
+            get_logger("lha.hitl").warning(
+                "gate_row_write_failed",
+                gate_id=event.gate_id,
+                gate_event=event.event,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+
+    def _persist(self, req: GateRequest, event: str, **fields: Any) -> None:
+        """From the prompt's worker thread: write the gate row on the run's event loop."""
+        if self._store is None or self._loop is None:
+            return
+        future = asyncio.run_coroutine_threadsafe(
+            self._write(self._gate_event(req, event, **fields)), self._loop
+        )
+        try:
+            future.result(timeout=30)
+        except Exception:  # a timeout: the write may still land; never block the answer
+            self.store_failures += 1
 
     # --- internals (run in a worker thread) --------------------------------------------
     def _say(self, text: str) -> None:
@@ -206,6 +295,7 @@ class TerminalApprover:
             "Allow this exact call? [y/N]: "
         )
         self._send(req, "opened")
+        self._persist(req, "opened")
         start = self._clock()
         sent = 0
         while True:
@@ -215,6 +305,7 @@ class TerminalApprover:
                 if rung.step == 0:
                     self._say("\n[lha] no answer before the timeout: rejected.\n")
                     self._send(req, "defaulted", decision="reject")
+                    self._persist(req, "defaulted", decision="reject", by="timeout")
                     return _denied(req, "timeout", defaulted=True)
                 sent = rung.step
                 remaining = max(0, int(self._timeout - (self._clock() - start)))
@@ -235,13 +326,17 @@ class TerminalApprover:
                     )
                 )
                 self._send(req, "reminder", step=sent)
+                self._persist(req, "reminder", step=sent)
                 continue
             if line == "":
                 self._say("\n[lha] end of input: rejected.\n")
                 self._send(req, "defaulted", decision="reject")
+                self._persist(req, "defaulted", decision="reject", by="end of input")
                 return _denied(req, "end of input", defaulted=True)
             approved = line.strip().lower() in ("y", "yes")
-            self._send(req, "resolved", decision="approve" if approved else "reject")
+            decision = "approve" if approved else "reject"
+            self._send(req, "resolved", decision=decision)
+            self._persist(req, "resolved", decision=decision, by=f"terminal:{_user()}")
             if approved:
                 return GateResolution(
                     gate_id=req.gate_id, decision=GateDecision.APPROVE, resolved_by="human"

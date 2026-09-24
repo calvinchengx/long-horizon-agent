@@ -273,7 +273,8 @@ async def test_cycle_activity_unusable_store_without_fallback_is_a_config_error(
 def test_cycle_status_mapping() -> None:
     base = {"head_sha": "h"}
     assert acts.cycle_status(SituationSnapshot(**base, is_complete=True)) == "DONE"  # type: ignore[arg-type]
-    assert acts.cycle_status(SituationSnapshot(**base, is_deadlocked=True)) == "IMPOSSIBLE"  # type: ignore[arg-type]
+    # A deadlock is the workflow's to decide (IMPOSSIBLE, or a gate that may retry): RUNNING here.
+    assert acts.cycle_status(SituationSnapshot(**base, is_deadlocked=True)) == "RUNNING"  # type: ignore[arg-type]
     assert acts.cycle_status(SituationSnapshot(**base)) == "RUNNING"  # type: ignore[arg-type]
     waiting = acts.cycle_status(SituationSnapshot(**base), awaiting_approval=True)  # type: ignore[arg-type]
     assert waiting == "WAITING_ON_HUMAN"
