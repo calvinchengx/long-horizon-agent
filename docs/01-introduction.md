@@ -106,7 +106,7 @@ The project is early and under active development.
 | File ownership, tickets and blackboard, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` only (not the Temporal workflow); `orchestrate` does not resume an existing mission; no lease granting |
 | Flaky-check quarantine in the verifier; OTLP trace export (a collector or Langfuse) | Implemented and wired into every Python run path; export is off until an endpoint or the Langfuse keys are set and needs the `observability` extra |
 | The `SubAgentWorkflow` fan-out | Library code with tests; `MissionWorkflow` does not start it |
-| Go port | Library packages (contracts, config, spec runner, model, safety, obs, state with the decision chain, verify, governor); no CLI (`go/cmd/lha`) or Temporal worker yet |
+| Go port | A `go/cmd/lha` binary that runs single-agent missions locally (`run-local`, `mission`) in the local or Docker sandbox, with the same tools, gates and `.lha/` anchor as Python; no Temporal worker, orchestrator, persistence or memory ([04](04-choosing-an-implementation.md)) |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 
 ## Where to go next

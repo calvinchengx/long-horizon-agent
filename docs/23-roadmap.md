@@ -125,7 +125,7 @@ These limitations are in the current code:
 - Lease granting: a `LeaseRequest` for another writer's file is never granted.
 - Parallel implementer waves, tickets and the blackboard exist only in `lha orchestrate`, not in
   the Temporal workflow.
-- The Go port has no CLI (`go/cmd/lha`) and no Temporal worker, and Temporal histories with
+- The Go CLI runs local single-agent missions only (no Temporal worker), and Temporal histories with
   timers do not replay across the two languages (see [Go phase 2](#go-phase-2-temporal-not-started)).
 - `lha orchestrate` re-initializes the anchor and does not resume an earlier run.
 - The default memory embedder (`hash`) is lexical, not semantic; `sentence_transformers` needs the
@@ -146,18 +146,18 @@ use the Python implementation for that feature
 
 | Component | Package | State |
 |---|---|---|
-| `LHA_*` settings and `.env` | `internal/config` | present, including the large-mission settings (read, not yet used). Not yet read: the gate, `SLEEPING`, web-tool, fallback-chain, health-probe, persistence, memory and parallel-implementer settings |
+| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, `claude_code`, OTLP, `LHA_FLAKY_RETRIES`) are read but have no effect in Go runs |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
 | Model backends: stub, OpenAI-compatible, Claude, pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
 | Budget governor, cost ledger, metering | `internal/governor` | present |
 | Git mission anchor and git operations | `internal/state` | present; cross-implementation tests read Python anchors and vice versa |
-| Verifier, harness integrity, flaky quarantine | `internal/verify` | present; `spec/verify/harness_files.json` passes. No witnesses, trusted runner or `LHA_HARNESS_PATHS` yet |
+| Verifier, harness integrity, flaky quarantine, witnesses, trusted runner | `internal/verify` | present; `spec/verify/harness_files.json` passes. The lead does not yet re-run failing checks (`LHA_FLAKY_RETRIES`) |
 | Redaction and structured events | `internal/obs` | present; `spec/obs/redact.json` passes |
-| Checklist import, `vendor` | `internal/state` | not started |
-| Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | not started |
-| Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | not started |
-| CLI | `cmd/lha` | not started (`go/cmd/lha` does not exist) |
+| Checklist import, `vendor` | `internal/checklistimport` | checklist import present; `vendor` not started |
+| Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
+| Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, and the console approval gate (`--approve-interactive`). No `claude_code` lead engine |
+| CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `decisions`; `run-local` and `mission` run real missions (end-to-end tests compare them with Python) |
 
 `go test ./...` passes for the present packages. No CI job runs the Go tests yet.
 

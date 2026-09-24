@@ -7,7 +7,9 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 when one is configured ([16-observability.md](16-observability.md)).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. Today there is no `go/cmd/lha` and no Go binary can be built; see [23-roadmap.md](23-roadmap.md).
+ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission` and `decisions`; the
+other commands print that they are not yet available in Go and exit 2; see
+[04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
 

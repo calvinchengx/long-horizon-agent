@@ -95,8 +95,8 @@ a blocked item are.
   resume an earlier run. The default `hash` embedder is lexical, not semantic. Every
   `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`.
   `fetch_url` checks the resolved address before connecting, but the HTTP client resolves again,
-  so DNS rebinding between the two lookups is a residual risk. The Go port has no CLI and no
-  Temporal worker yet.
+  so DNS rebinding between the two lookups is a residual risk. The Go CLI runs local single-agent
+  missions only; it has no Temporal worker, orchestrator, persistence or memory yet.
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends are tested against mocked HTTP, not
   live endpoints. Trace export is tested with an in-memory exporter and against a closed port,
