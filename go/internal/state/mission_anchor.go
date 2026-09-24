@@ -62,6 +62,9 @@ type GitMissionAnchor struct {
 	// Events appended (uncommitted) via AppendEvent; re-applied after the .lha restore in
 	// CommitCheckpoint so they are not lost.
 	pendingEvents []contracts.EventRecord
+	// Decisions queued mid-cycle via RecordDecision (the record_decision tool); the next
+	// CommitCheckpoint chains them onto decisions.ndjson before the checkpoint's own.
+	pendingDecisions []contracts.DecisionRecord
 	// skipRestore disables the .lha restore (tests prove the log rebuild is idempotent anyway).
 	skipRestore bool
 }
@@ -136,6 +139,7 @@ func (a *GitMissionAnchor) InitializeWithAcceptance(ctx context.Context, title, 
 		}
 	}
 	a.pendingEvents = nil
+	a.pendingDecisions = nil
 	return a.commitAll(ctx, "lha: initialize mission anchor")
 }
 
@@ -242,6 +246,25 @@ func (a *GitMissionAnchor) AppendEvent(_ context.Context, event contracts.EventR
 	return nil
 }
 
+// RecordDecision queues record for the next checkpoint (in memory) and returns how many are
+// queued. The record_decision tool calls this mid-cycle (it is the anchor's
+// execution/tools.DecisionSink); the next CommitCheckpoint chains the queued records onto
+// decisions.ndjson — stamped with the checkpoint's cycle id if they have none — so they are
+// committed together with the cycle's work.
+func (a *GitMissionAnchor) RecordDecision(record contracts.DecisionRecord) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingDecisions = append(a.pendingDecisions, record)
+	return len(a.pendingDecisions)
+}
+
+// PendingDecisions returns a copy of the decisions queued since the last checkpoint.
+func (a *GitMissionAnchor) PendingDecisions() []contracts.DecisionRecord {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return append([]contracts.DecisionRecord{}, a.pendingDecisions...)
+}
+
 // CommitCheckpoint restores .lha/ to HEAD, rewrites it from the checkpoint and commits
 // everything (work + anchor) atomically; it returns the new HEAD sha.
 func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Checkpoint) (string, error) {
@@ -275,8 +298,9 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 	// duplicated. Decisions are chained onto the verified committed chain; a record without a
 	// cycle id gets the checkpoint's.
 	prev := chain.LastHash
-	lines := make([]string, 0, len(cp.Decisions))
-	for _, d := range cp.Decisions {
+	decisions := append(append([]contracts.DecisionRecord(nil), a.pendingDecisions...), cp.Decisions...)
+	lines := make([]string, 0, len(decisions))
+	for _, d := range decisions {
 		if d.CycleID == "" {
 			d.CycleID = cp.CycleID
 		}
@@ -309,6 +333,7 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 		return "", err
 	}
 	a.pendingEvents = nil
+	a.pendingDecisions = nil
 	return sha, nil
 }
 

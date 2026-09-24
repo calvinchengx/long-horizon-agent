@@ -76,6 +76,43 @@ type Settings struct {
 	LangfuseHost      *string `env:"langfuse_host"`
 	LangfusePublicKey *string `env:"langfuse_public_key"`
 	LangfuseSecretKey *Secret `env:"langfuse_secret_key"`
+
+	// --- Web tools (fetch_url / web_search; the allow-list is WebAllowHosts) -----------
+	// Extra ports fetch_url may use beyond 80/443 (comma-separated).
+	WebAllowPorts string `env:"web_allow_ports" default:""`
+	// Brokered credentials for fetch_url: a JSON object mapping a placeholder the agent may use
+	// in headers to {"value": "<secret>", "hosts": [...]} (each host must be allow-listed).
+	WebCredentials *Secret `env:"web_credentials"`
+	// web_search backend; registered only with a provider AND a key (and a non-empty
+	// WebAllowHosts). The endpoint defaults to the provider's public API.
+	WebSearchProvider   *string `env:"web_search_provider" choices:"tavily,exa"`
+	WebSearchAPIKey     *Secret `env:"web_search_api_key"`
+	WebSearchEndpoint   *string `env:"web_search_endpoint"`
+	WebTimeoutS         float64 `env:"web_timeout_s" default:"30.0" gt:"0"`
+	WebMaxResponseBytes int     `env:"web_max_response_bytes" default:"2000000" gt:"0"`
+	// Declare that the workspace/sandbox exposes secrets or customer data (Rule of Two: a run
+	// with web tools may not also hold private data). Sandbox=local always counts as private.
+	PrivateData bool `env:"private_data" default:"false"`
+}
+
+// SandboxEgressHosts is SandboxEgress parsed (python: Settings.sandbox_egress_hosts()).
+func (s *Settings) SandboxEgressHosts() []string { return CSV(s.SandboxEgress) }
+
+// WebHosts is WebAllowHosts parsed (python: Settings.web_hosts()).
+func (s *Settings) WebHosts() []string { return CSV(s.WebAllowHosts) }
+
+// WebPorts is WebAllowPorts parsed; a non-integer entry is an error (python:
+// Settings.web_ports()).
+func (s *Settings) WebPorts() ([]int, error) {
+	ports := []int{}
+	for _, raw := range CSV(s.WebAllowPorts) {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("LHA_WEB_ALLOW_PORTS must be integers: invalid literal for int() with base 10: '%s'", raw)
+		}
+		ports = append(ports, n)
+	}
+	return ports, nil
 }
 
 // Load reads settings from the process environment and ./.env (if present).
@@ -114,6 +151,19 @@ func LoadFrom(environ []string, dotenv string) (*Settings, error) {
 		}
 		if err := assign(rv.Field(i), raw); err != nil {
 			return nil, fmt.Errorf("LHA_%s: %w", strings.ToUpper(name), err)
+		}
+		if gt, ok := f.Tag.Lookup("gt"); ok {
+			bound, _ := strconv.ParseFloat(gt, 64)
+			var v float64
+			switch x := rv.Field(i).Interface().(type) {
+			case int:
+				v = float64(x)
+			case float64:
+				v = x
+			}
+			if !(v > bound) {
+				return nil, fmt.Errorf("LHA_%s: input should be greater than %s", strings.ToUpper(name), gt)
+			}
 		}
 	}
 	return s, nil

@@ -391,3 +391,7 @@ func isIPLiteral(host string) bool {
 	_, err := parseIPAddress(host)
 	return err == nil
 }
+
+// IsIPLiteral reports whether Python's ipaddress.ip_address accepts host. A "%zone" suffix is
+// not handled: callers split it off first, as the Python egress proxy does.
+func IsIPLiteral(host string) bool { return isIPLiteral(host) }
