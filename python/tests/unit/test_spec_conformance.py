@@ -13,6 +13,8 @@ from lha.contracts.state import Checklist, ChecklistItem
 from lha.contracts.verify import checks_from_commands, derive_check_name
 from lha.coordination.decision_log import _canonical, _chain_hash, parse_chain, verify_chain
 from lha.coordination.ownership import is_shared
+from lha.execution.dispatcher import _missing_required, validate_arguments
+from lha.execution.paths import PathEscapeError, contained_posix, is_protected, normalize_relpath
 from lha.model.pricing import lookup_claude_price
 from lha.obs.redact import is_secret_key, redact_text
 from lha.safety.commands import classify_command
@@ -159,3 +161,38 @@ def test_pricing() -> None:
         for cost in case["costs"]:
             assert price is not None
             assert price.cost(Usage(**cost["usage"])) == pytest.approx(cost["usd"], rel=1e-12)
+
+
+def test_execution_paths() -> None:
+    spec = _load("execution/paths.json")
+    for case in spec["normalize_relpath"]:
+        if case["error"] is None:
+            assert str(normalize_relpath(case["path"])) == case["normalized"], case
+        else:
+            with pytest.raises(PathEscapeError) as info:
+                normalize_relpath(case["path"])
+            assert str(info.value) == case["error"], case
+    for case in spec["is_protected"]:
+        if case["error"] is None:
+            assert is_protected(case["path"]) == case["protected"], case
+        else:
+            with pytest.raises(PathEscapeError) as info:
+                is_protected(case["path"])
+            assert str(info.value) == case["error"], case
+    for case in spec["contained_posix"]:
+        if case["error"] is None:
+            assert contained_posix(case["workdir"], case["path"]) == case["result"], case
+        else:
+            with pytest.raises(PathEscapeError) as info:
+                contained_posix(case["workdir"], case["path"])
+            assert str(info.value) == case["error"], case
+
+
+def test_execution_arguments() -> None:
+    spec = _load("execution/arguments.json")
+    for case in spec["validate"]:
+        got = validate_arguments(case["schema"], case["value"], case["where"])
+        assert got == case["error"], case
+    for case in spec["missing_required"]:
+        missing = _missing_required({"required": case["required"]}, case["arguments"])
+        assert sorted(missing) == case["missing"], case

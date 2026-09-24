@@ -19,8 +19,12 @@ Layout mirrors the Python packages. Present today: `internal/contracts` (shared 
 `internal/config` (`LHA_*` settings), `internal/spec` (the conformance runner),
 `internal/safety` (command classifier, egress policy, Rule of Two), `internal/model` (backends,
 pricing, retry, failover), `internal/state` (git ops, the mission anchor and the hash-chained
-decision log), `internal/verify`, `internal/governor` and `internal/obs`. Not started:
-`internal/execution`, `internal/agent`, the approval gates, memory, persistence, the durable
-worker and `cmd/lha`.
+decision log), `internal/verify`, `internal/governor`, `internal/obs` and `internal/execution`
+(the local and Docker sandboxes, the Docker egress proxy, path containment, the allow-list tool
+dispatcher and the tools; the E2B sandbox is not ported). Not started: `internal/agent`, the
+approval gates, memory, persistence, the durable worker and `cmd/lha`.
+
+The Docker sandbox tests against a real daemon are opt-in, like Python's integration tests:
+`LHA_IT_DOCKER=1 go test ./internal/execution/ -run Docker_IT`.
 
 Author: Calvin Cheng <calvin@calvinx.com>. MIT licensed.
