@@ -32,6 +32,7 @@ from lha.execution.tools.toolset import preflight_run_tools
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor, LoopDetector
 from lha.governor.metering import BudgetExceeded, CostMeter
+from lha.hitl.approvals import bind_gate_store
 from lha.ids import new_id
 from lha.model import build_provider
 from lha.obs.events import TraceRecorder, configure_logging
@@ -149,6 +150,8 @@ async def run_mission_local(
             recorder=recorder,
         )
         await services.tracker.running()
+        if gate is not None:
+            bind_gate_store(gate, services.store)  # a terminal approver writes hitl_gates rows
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(
             title=title, description=description, items=checklist, references=references

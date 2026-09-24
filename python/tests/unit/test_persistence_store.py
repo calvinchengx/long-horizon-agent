@@ -19,6 +19,7 @@ from lha.model.stub import StubModel
 from lha.persistence.sqlite import SqliteStore
 from lha.persistence.store import (
     BACKEND_SQLITE,
+    GateEvent,
     MissionStore,
     StoreUnavailableError,
     default_sqlite_path,
@@ -58,8 +59,15 @@ async def test_sqlite_store_is_wal_and_schema_is_versioned(store: SqliteStore) -
     versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     conn.close()
-    assert versions == ["sqlite_0001_init"]
-    assert {"missions", "cost_ledger", "episodic_events", "semantic_memory", "skills"} <= tables
+    assert versions == ["sqlite_0001_init", "sqlite_0002_hitl_gates"]
+    assert {
+        "missions",
+        "hitl_gates",
+        "cost_ledger",
+        "episodic_events",
+        "semantic_memory",
+        "skills",
+    } <= tables
 
     # Re-opening an existing file applies nothing twice and keeps the data.
     await store.upsert_mission(mission_id="m1", title="t", status="RUNNING")
@@ -84,6 +92,108 @@ async def test_mission_upsert_tracks_status_and_keeps_head(store: SqliteStore) -
     await store.upsert_mission(mission_id="m2", title="second", status="RUNNING")
     assert [m.mission_id for m in await store.list_missions()] == ["m2", "m1"]
     assert [m.mission_id for m in await store.list_missions(limit=1)] == ["m2"]
+
+
+@pytest.mark.parametrize("terminal", ["DONE", "IMPOSSIBLE", "ABORTED"])
+async def test_a_terminal_status_is_never_overwritten_by_a_non_terminal_one(
+    store: SqliteStore, terminal: str
+) -> None:
+    await store.upsert_mission(mission_id="m1", title="T", status="RUNNING")
+    await store.upsert_mission(mission_id="m1", title="", status=terminal)
+    # A late write from a cycle that was still finishing (e.g. after mission-abort).
+    for late in ("RUNNING", "WAITING_ON_HUMAN", "SLEEPING", "DEGRADED_PARK"):
+        await store.upsert_mission(mission_id="m1", title="", status=late, head_sha="late")
+    row = await store.get_mission("m1")
+    assert row is not None and row.status == terminal
+    assert row.head_sha == "late"  # the other fields still update
+    # Terminal to terminal is allowed (the workflow's final word), and so is an explicit reopen.
+    await store.upsert_mission(mission_id="m1", title="", status="ABORTED")
+    row = await store.get_mission("m1")
+    assert row is not None and row.status == "ABORTED"
+    await store.upsert_mission(mission_id="m1", title="", status="RUNNING", reopen=True)
+    row = await store.get_mission("m1")
+    assert row is not None and row.status == "RUNNING"
+
+
+# --- human gates ------------------------------------------------------------------------------
+def _gate(event: str, at: str, *, step: int = 0, decision: str = "", by: str = "") -> GateEvent:
+    return GateEvent(
+        mission_id="m1",
+        gate_id="deadlock-3",
+        kind="deadlock",
+        event=event,
+        at=at,
+        question="Mission m1 is deadlocked. Retry, abort or impossible?",
+        options=["retry", "abort", "impossible"],
+        default_action="abort",
+        deadline="2026-01-01T02:00:00+00:00",
+        decision=decision,
+        resolved_by=by,
+        step=step,
+    )
+
+
+async def test_gate_lifecycle_is_recorded_idempotently(store: SqliteStore) -> None:
+    opened = _gate("opened", "2026-01-01T01:00:00+00:00")
+    await store.record_gate_event(opened)
+    await store.record_gate_event(opened)  # a retried write
+    (row,) = await store.list_gates("m1")
+    assert (row.status, row.kind, row.reminders, row.decision) == ("OPEN", "deadlock", 0, None)
+    assert row.options == ["retry", "abort", "impossible"] and row.default_action == "abort"
+    assert row.opened_at == "2026-01-01T01:00:00+00:00" and row.risk == "deadlock"
+
+    for step in (1, 2, 1):  # the last is an out-of-order retry: the count never goes down
+        await store.record_gate_event(_gate("reminder", "2026-01-01T01:10:00+00:00", step=step))
+    (row,) = await store.list_gates("m1")
+    assert (row.status, row.reminders) == ("ESCALATED", 2)
+
+    resolved = _gate("resolved", "2026-01-01T01:30:00+00:00", decision="retry", by="human")
+    await store.record_gate_event(resolved)
+    await store.record_gate_event(resolved)
+    # A late reminder or a second, different close never changes a closed gate.
+    await store.record_gate_event(_gate("reminder", "2026-01-01T01:40:00+00:00", step=3))
+    await store.record_gate_event(_gate("defaulted", "2026-01-01T02:00:00+00:00", decision="abort"))
+    (row,) = await store.list_gates()
+    assert (row.status, row.decision, row.resolved_by) == ("RESOLVED", "retry", "human")
+    assert (row.reminders, row.resolved_at) == (2, "2026-01-01T01:30:00+00:00")
+
+    # The same gate id opened again later (e.g. the same action asked for again) reopens it.
+    await store.record_gate_event(_gate("opened", "2026-01-02T00:00:00+00:00"))
+    (row,) = await store.list_gates("m1")
+    assert (row.status, row.decision, row.reminders) == ("OPEN", None, 0)
+
+
+async def test_a_close_without_an_opening_still_records_the_outcome(store: SqliteStore) -> None:
+    request = {"fingerprint": "f" * 32, "tool": "run_command", "argv": '["make", "release"]'}
+    await store.record_gate_event(
+        GateEvent(
+            mission_id="m2",
+            gate_id="approval-ffff",
+            kind="tool_call",
+            event="defaulted",
+            at="2026-01-01T00:00:00+00:00",
+            options=["approve", "reject"],
+            default_action="reject",
+            decision="reject",
+            resolved_by="default (timeout)",
+            risk="irreversible",
+            request=request,
+        )
+    )
+    await store.record_gate_event(_gate("opened", "2026-01-03T00:00:00+00:00"))
+    rows = await store.list_gates()
+    assert [r.mission_id for r in rows] == ["m1", "m2"]  # most recently opened first
+    assert [r.mission_id for r in await store.list_gates(limit=1)] == ["m1"]
+    (m2,) = await store.list_gates("m2")
+    assert (m2.status, m2.decision, m2.request, m2.risk) == (
+        "DEFAULTED",
+        "reject",
+        request,
+        "irreversible",
+    )
+    assert await store.list_gates("nope") == []
+    with pytest.raises(ValueError, match="unknown gate event"):
+        await store.record_gate_event(_gate("exploded", "2026-01-01T00:00:00+00:00"))
 
 
 # --- cost ledger ------------------------------------------------------------------------------

@@ -48,6 +48,60 @@ def _settings(dsn: str, tmp_path: Path, **overrides: object) -> Settings:
     return Settings(_env_file=None, **base)  # type: ignore[call-arg, arg-type]
 
 
+async def test_postgres_gates_and_monotonic_mission_status(pg_dsn: str) -> None:
+    from dataclasses import replace
+
+    from lha.persistence.postgres import PostgresStore
+    from lha.persistence.store import GateEvent
+
+    await _migrate(pg_dsn)
+    store = PostgresStore(pg_dsn)
+    await store.open()
+    try:
+        await store.upsert_mission(mission_id="m1", title="T", status="ABORTED")
+        await store.upsert_mission(mission_id="m1", title="", status="RUNNING", head_sha="h")
+        row = await store.get_mission("m1")
+        assert row is not None and (row.status, row.head_sha) == ("ABORTED", "h")
+        await store.upsert_mission(mission_id="m1", title="", status="RUNNING", reopen=True)
+        row = await store.get_mission("m1")
+        assert row is not None and row.status == "RUNNING"
+
+        opened = GateEvent(
+            mission_id="m1",
+            gate_id="deadlock-3",  # the same gate id in another mission is another gate
+            kind="deadlock",
+            event="opened",
+            at="2026-01-01T01:00:00+00:00",
+            question="Q?",
+            options=["retry", "abort", "impossible"],
+            default_action="abort",
+            deadline="2026-01-01T02:00:00+00:00",
+        )
+        await store.record_gate_event(opened)
+        await store.record_gate_event(opened)
+        await store.record_gate_event(replace(opened, mission_id="m2"))
+        await store.record_gate_event(replace(opened, event="reminder", step=1))
+        closed = replace(
+            opened,
+            event="resolved",
+            at="2026-01-01T01:30:00+00:00",
+            decision="retry",
+            resolved_by="human (human_decision signal)",
+            request={"tool": "run_command"},
+        )
+        await store.record_gate_event(closed)
+        await store.record_gate_event(closed)
+        await store.record_gate_event(replace(opened, event="reminder", step=2))
+        (gate,) = await store.list_gates("m1")
+        assert (gate.status, gate.decision, gate.reminders) == ("RESOLVED", "retry", 1)
+        assert gate.resolved_by == "human (human_decision signal)"
+        assert gate.resolved_at.startswith("2026-01-01T01:30:00")
+        assert gate.options == ["retry", "abort", "impossible"] and gate.request is None
+        assert {g.mission_id for g in await store.list_gates()} == {"m1", "m2"}
+    finally:
+        await store.close()
+
+
 async def test_postgres_store_round_trips_everything(pg_dsn: str) -> None:
     from lha.persistence.postgres import PostgresStore
 

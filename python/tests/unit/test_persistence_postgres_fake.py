@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import sys
 import types
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,7 +15,7 @@ from lha.contracts.memory import MemoryRecord
 from lha.governor.cost import CostEntry
 from lha.memory.skills import Skill, SkillNotVerifiedError
 from lha.persistence.postgres import PostgresStore
-from lha.persistence.store import REQUIRED_PG_MIGRATIONS, StoreUnavailableError
+from lha.persistence.store import REQUIRED_PG_MIGRATIONS, GateEvent, StoreUnavailableError
 
 _TS = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 
@@ -93,7 +94,8 @@ async def test_missions_sql_and_mapping() -> None:
     await store.upsert_mission(mission_id="m1", title="T", status="DONE", head_sha="abc")
     sql, params = conn.calls[0]
     assert "ON CONFLICT (mission_id)" in sql and "COALESCE(NULLIF(EXCLUDED.head_sha" in sql
-    assert params == ("m1", "T", "", "DONE", "abc", None)
+    assert params == ("m1", "T", "", "DONE", "abc", None, False)
+    assert "NOT IN ('DONE', 'IMPOSSIBLE', 'ABORTED')" in sql  # monotonic status
     got = await store.get_mission("m1")
     assert got is not None and got.head_sha == "abc" and got.updated_at.startswith("2026-01-02")
     assert await store.get_mission("missing") is None
@@ -157,3 +159,48 @@ async def test_events_memory_and_skills_sql() -> None:
         await store.put_skill(Skill(id="u", name="n", description="d", code="c"))
     skills = await store.list_skills("/r")
     assert skills[0].preconditions == ["pre"] and skills[0].verified
+
+
+async def test_gate_sql_parameters_and_mapping() -> None:
+    row = (
+        "m1", "deadlock-3", "deadlock", "RESOLVED", "Q?", ["retry", "abort"], "abort",
+        "deadlock", _TS, "retry", "human", 2, None, _TS, _TS, _TS,
+    )  # fmt: skip
+    store, conn = _store(_Cursor([]), _Cursor([]), _Cursor([]), _Cursor([row]), _Cursor([]))
+    opened = GateEvent(
+        mission_id="m1",
+        gate_id="deadlock-3",
+        kind="deadlock",
+        event="opened",
+        at="2026-01-02T03:04:05+00:00",
+        question="Q?",
+        options=["retry", "abort"],
+        default_action="abort",
+        deadline="2026-01-02T04:04:05",  # naive = UTC
+    )
+    await store.record_gate_event(opened)
+    sql, params = conn.calls[0]
+    assert "ON CONFLICT (mission_id, gate_id)" in sql and "IS DISTINCT FROM" in sql
+    assert params[8] == "OPEN" and params[9] == datetime(2026, 1, 2, 4, 4, 5, tzinfo=UTC)
+    assert params[13] == _TS and params[14] is None  # opened at; not resolved
+    await store.record_gate_event(replace(opened, event="reminder", step=2))
+    sql, params = conn.calls[1]
+    assert "GREATEST(hitl_gates.reminders" in sql and params[8] == "ESCALATED" and params[12] == 2
+    await store.record_gate_event(
+        replace(opened, event="resolved", decision="retry", resolved_by="human", request={"a": "b"})
+    )
+    sql, params = conn.calls[2]
+    assert "WHERE hitl_gates.status IN ('OPEN', 'ESCALATED')" in sql
+    assert (params[8], params[10], params[11], params[14]) == ("RESOLVED", "retry", "human", _TS)
+    assert params[7] == '{"a": "b"}'
+    (got,) = await store.list_gates("m1", limit=5)
+    assert conn.calls[3][1] == ["m1", 5]
+    assert (got.status, got.decision, got.reminders, got.options) == (
+        "RESOLVED",
+        "retry",
+        2,
+        ["retry", "abort"],
+    )
+    assert got.opened_at.startswith("2026-01-02") and got.request is None
+    assert await store.list_gates() == []
+    assert conn.calls[4][1] == [50] and "WHERE" not in conn.calls[4][0]

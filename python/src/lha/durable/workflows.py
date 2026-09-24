@@ -141,6 +141,7 @@ _NOTIFY_TIMEOUT = timedelta(minutes=3)
 PATCH_GATE_LADDER = "lha-gate-escalation-v1"
 PATCH_SLEEPING = "lha-sleeping-v1"
 PATCH_MISSION_ROW = "lha-mission-row-v1"
+PATCH_CYCLE_CANCEL = "lha-cycle-wait-cancel-v1"
 
 # ``record_mission_status`` is best effort: a short timeout and a few quick retries, then the
 # mission goes on without the row update (logged).
@@ -174,6 +175,19 @@ def _config_failure(message: str) -> ApplicationError:
 
 def _iso(moment: datetime) -> str:
     return moment.astimezone(UTC).isoformat(timespec="seconds")
+
+
+def _raise_if_cancel_requested() -> None:
+    """Re-raise a workflow cancellation that a waited-for activity swallowed.
+
+    With ``WAIT_CANCELLATION_COMPLETED``, an activity that finishes successfully although it was
+    asked to cancel hands its result back and the SDK drops the ``CancelledError``; the pending
+    request is still counted on the workflow task (``Task.cancelling()``), so an abort is never
+    lost that way.
+    """
+    task = asyncio.current_task()
+    if task is not None and task.cancelling():
+        raise asyncio.CancelledError("mission cancelled while its cycle was finishing")
 
 
 @workflow.defn
@@ -234,6 +248,8 @@ class MissionWorkflow:
 
             await self._sleep_until_resume(inp)
             state.status = STATUS_RUNNING
+            # A cancelled cycle is waited for (its last row write lands before ABORTED).
+            wait_cancel = workflow.patched(PATCH_CYCLE_CANCEL)
             try:
                 result = await workflow.execute_activity(
                     run_agent_cycle,
@@ -250,7 +266,14 @@ class MissionWorkflow:
                     start_to_close_timeout=CYCLE_START_TO_CLOSE,
                     heartbeat_timeout=CYCLE_HEARTBEAT_TIMEOUT,
                     retry_policy=_CYCLE_RETRY,
+                    cancellation_type=(
+                        workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED
+                        if wait_cancel
+                        else workflow.ActivityCancellationType.TRY_CANCEL
+                    ),
                 )
+                if wait_cancel:
+                    _raise_if_cancel_requested()
             except ActivityError as err:
                 if is_cancelled_exception(err):
                     raise  # the mission was cancelled: never park on it
@@ -438,6 +461,7 @@ class MissionWorkflow:
                     step=step,
                     deadline=view.deadline,
                     request=view.request,
+                    at=_iso(workflow.now()),
                 ),
                 start_to_close_timeout=_NOTIFY_TIMEOUT,
                 retry_policy=_SHORT_RETRY,
