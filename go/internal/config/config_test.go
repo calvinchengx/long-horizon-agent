@@ -79,7 +79,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 72 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 77 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -429,5 +429,28 @@ func TestConfigOutputMatchesPython(t *testing.T) {
 				t.Errorf("python and go `lha config` differ\n--- python\n%s--- go\n%s", got, want)
 			}
 		})
+	}
+}
+
+func TestOTelAliasesAndPrecedence(t *testing.T) {
+	s, err := LoadFrom([]string{"OTEL_EXPORTER_OTLP_ENDPOINT=http://std:4318", "OTEL_SDK_DISABLED=true"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.OTelExporterOTLPEndpoint == nil || *s.OTelExporterOTLPEndpoint != "http://std:4318" || !s.OTelSDKDisabled {
+		t.Fatalf("standard OTel variables not read: %+v", s)
+	}
+	s, err = LoadFrom([]string{"OTEL_EXPORTER_OTLP_ENDPOINT=http://std:4318", "LHA_OTEL_EXPORTER_OTLP_ENDPOINT=http://lha:4318", "LHA_OTEL_SDK_DISABLED=true"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *s.OTelExporterOTLPEndpoint != "http://lha:4318" {
+		t.Fatalf("LHA_ spelling must win, got %s", *s.OTelExporterOTLPEndpoint)
+	}
+	if s.OTelSDKDisabled {
+		t.Fatal("otel_sdk_disabled is read only as OTEL_SDK_DISABLED (as in Python)")
+	}
+	if _, err := LoadFrom([]string{"LHA_FLAKY_RETRIES=6"}, ""); err == nil {
+		t.Fatal("flaky_retries > 5 must be rejected")
 	}
 }

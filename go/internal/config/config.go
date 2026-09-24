@@ -94,14 +94,21 @@ type Settings struct {
 	WebAllowHosts    string `env:"web_allow_hosts" default:""`
 	TrustedChecks    string `env:"trusted_checks" default:""`
 	HarnessPaths     string `env:"harness_paths" default:""`
+	FlakyRetries     int    `env:"flaky_retries" default:"1" ge:"0" le:"5"`
 
 	// --- Multi-agent coordination
 	MaxParallelImplementers int `env:"max_parallel_implementers" default:"3"`
 
-	// --- Observability
-	LangfuseHost      *string `env:"langfuse_host"`
-	LangfusePublicKey *string `env:"langfuse_public_key"`
-	LangfuseSecretKey *Secret `env:"langfuse_secret_key"`
+	// --- Observability. ``envalias`` names are also read WITHOUT the LHA_ prefix (the standard
+	// OpenTelemetry variables); ``noprefix`` fields are read ONLY by their alias (python:
+	// validation_alias=AliasChoices(...)). When both spellings are set the LHA_ one wins.
+	OTelExporterOTLPEndpoint *string `env:"otel_exporter_otlp_endpoint" envalias:"OTEL_EXPORTER_OTLP_ENDPOINT"`
+	OTelSDKDisabled          bool    `env:"otel_sdk_disabled" default:"false" envalias:"OTEL_SDK_DISABLED" noprefix:"true"`
+	OTelServiceName          string  `env:"otel_service_name" default:"lha"`
+	OTelExportTimeoutS       int     `env:"otel_export_timeout_s" default:"5"`
+	LangfuseHost             *string `env:"langfuse_host"`
+	LangfusePublicKey        *string `env:"langfuse_public_key"`
+	LangfuseSecretKey        *Secret `env:"langfuse_secret_key"`
 
 	// --- Persistence backend + tiered memory
 	SQLitePathSetting        string `env:"sqlite_path" default:""`
@@ -150,6 +157,7 @@ func Load() (*Settings, error) { return LoadFrom(os.Environ(), ".env") }
 // LoadFrom reads settings from environ (KEY=VALUE pairs) layered over the dotenv file (optional).
 func LoadFrom(environ []string, dotenv string) (*Settings, error) {
 	values := map[string]string{}
+	aliases := map[string]string{} // upper-cased unprefixed env name -> value
 	if dotenv != "" {
 		if err := readDotenv(dotenv, values); err != nil {
 			return nil, err
@@ -160,6 +168,9 @@ func LoadFrom(environ []string, dotenv string) (*Settings, error) {
 		if ok && strings.HasPrefix(strings.ToUpper(k), "LHA_") {
 			values[strings.ToLower(k[4:])] = v // environment variables win over .env
 		}
+		if ok {
+			aliases[strings.ToUpper(k)] = v
+		}
 	}
 	s := &Settings{}
 	rv := reflect.ValueOf(s).Elem()
@@ -169,6 +180,14 @@ func LoadFrom(environ []string, dotenv string) (*Settings, error) {
 		name := f.Tag.Get("env")
 		envName := "LHA_" + strings.ToUpper(name)
 		raw, set := values[name]
+		if f.Tag.Get("noprefix") == "true" {
+			raw, set = "", false
+		}
+		if alias := f.Tag.Get("envalias"); !set && alias != "" {
+			if v, ok := aliases[alias]; ok {
+				raw, set, envName = v, true, alias
+			}
+		}
 		if !set {
 			def, hasDef := f.Tag.Lookup("default")
 			if !hasDef {
@@ -415,6 +434,7 @@ func (s *Settings) Clone() *Settings {
 	c.ClaudePriceOutPerMTok = cloneF(s.ClaudePriceOutPerMTok)
 	c.PostgresDSN = cloneSecret(s.PostgresDSN)
 	c.LangfuseHost = cloneStr(s.LangfuseHost)
+	c.OTelExporterOTLPEndpoint = cloneStr(s.OTelExporterOTLPEndpoint)
 	c.LangfusePublicKey = cloneStr(s.LangfusePublicKey)
 	c.LangfuseSecretKey = cloneSecret(s.LangfuseSecretKey)
 	c.WebCredentials = cloneSecret(s.WebCredentials)
