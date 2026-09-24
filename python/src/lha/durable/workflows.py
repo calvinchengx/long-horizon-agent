@@ -24,8 +24,8 @@ Human gates (status ``WAITING_ON_HUMAN``): an irreversible tool call a cycle que
 reject, default reject) and, when ``deadlock_gate_seconds > 0``, a deadlock (retry / abort /
 impossible, default ``deadlock_gate_default``). Every gate has a timeout, a default action and an
 escalation ladder: reminders at ``gate_escalation_seconds`` after it opens, each recorded in the
-anchor and sent to the optional webhook by the ``notify_gate`` activity (never from workflow
-code), then the default. ``ops.lifecycle.should_declare_impossible`` drives the deadlock gate's
+anchor and the ``hitl_gates`` table and sent to the optional webhook by the ``notify_gate``
+activity (never from workflow code), then the default. ``ops.lifecycle.should_declare_impossible`` drives the deadlock gate's
 "impossible" recommendation.
 
 ``SLEEPING`` is the status while the workflow waits on a durable timer by design: a scheduled
@@ -34,11 +34,13 @@ operator ``snooze``. It is distinct from ``DEGRADED_PARK`` (a dependency is down
 ``WAITING_ON_HUMAN`` (a gate is open).
 
 The ``missions`` row (``lha missions``): the cycle activity writes what a cycle observes (RUNNING,
-DONE, IMPOSSIBLE when deadlocked, WAITING_ON_HUMAN for a queued approval); the workflow writes
-the statuses only it knows through the ``record_mission_status`` activity — SLEEPING,
+also when deadlocked, DONE, WAITING_ON_HUMAN for a queued approval); the workflow writes the
+statuses only it knows through the ``record_mission_status`` activity — SLEEPING,
 DEGRADED_PARK, WAITING_ON_HUMAN when a gate opens, and the final status of every ending
 (including a failure and a cancellation by ``lha mission-abort``). Those writes are best effort:
-a short timeout and retry, then the mission goes on.
+a short timeout and retry, then the mission goes on. On a cancellation the workflow waits for the
+cycle in flight to acknowledge it (``WAIT_CANCELLATION_COMPLETED``) before it writes ABORTED, and
+the store never moves a terminal status back, so an abort mid-cycle ends ABORTED.
 
 Determinism: behaviour added after histories were recorded is guarded by ``workflow.patched``
 (``PATCH_*`` below), so a history recorded by an older build replays down its old code path.
