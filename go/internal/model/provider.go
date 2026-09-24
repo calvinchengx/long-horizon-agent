@@ -77,6 +77,9 @@ func BuildProvider(settings *config.Settings, name string, client *http.Client) 
 		}
 		return asProvider(NewClaude(ClaudeOptions{APIKey: apiKey, ModelName: name, Client: client, Price: price}))
 
+	case "claude_code":
+		return nil, errors.New("the 'claude_code' model backend (claude -p) is not yet available in the Go implementation; use the Python lha")
+
 	default:
 		return nil, fmt.Errorf("Unknown model backend: %s", contracts.PyRepr(backend))
 	}

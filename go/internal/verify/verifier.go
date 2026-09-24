@@ -84,6 +84,15 @@ func (v *DeterministicVerifier) Verify(ctx context.Context, session contracts.Sa
 
 func (v *DeterministicVerifier) runOne(ctx context.Context, session contracts.SandboxSession, check contracts.Check) (contracts.CheckResult, error) {
 	started := time.Now()
+	if check.Where == "trusted" {
+		// Never run an operator's trusted check inside the agent's sandbox (it would not have
+		// what it needs, and passing it here would be meaningless): fail it loudly instead.
+		return contracts.CheckResult{
+			Name: check.Name, Passed: false, ExitCode: -1, Gating: check.Gating,
+			OutputTail: "[verifier] trusted check needs a trusted runner, and none is configured " +
+				"for this run (see lha.verify.trusted)",
+		}, nil
+	}
 	timeout := v.DefaultTimeoutS
 	if check.TimeoutS != nil && *check.TimeoutS != 0 {
 		timeout = *check.TimeoutS
