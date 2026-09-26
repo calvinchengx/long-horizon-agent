@@ -3,8 +3,9 @@
 LHA has two implementations of the same system: Python in [`python/`](../python/) and Go in
 [`go/`](../go/). Python is the reference implementation and the only complete one.
 The Go CLI runs single-agent missions locally (`lha run-local`, `lha mission`) in the local or
-Docker sandbox; everything durable or multi-agent (the Temporal worker and `mission-*` commands,
-`lha orchestrate`), persistence and memory, the `claude_code` engine and E2B are Python-only.
+Docker sandbox, with the mission store, the persistent cost ledger and tiered memory; everything
+durable or multi-agent (the Temporal worker and `mission-*` commands, `lha orchestrate`), the
+`claude_code` engine and E2B are Python-only.
 
 ## What the two share
 
@@ -13,10 +14,10 @@ process can observe:
 
 | Surface | Shared definition |
 |---|---|
-| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has `version`, `config`, `run-local`, `mission` and `decisions`. |
+| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has `version`, `config`, `run-local`, `mission`, `decisions`, `missions`, `costs`, `gates` and `db migrate`. |
 | Settings | The `LHA_*` environment variables and `.env` file, with the same names and defaults ([`python/src/lha/config.py`](../python/src/lha/config.py), [`go/internal/config/`](../go/internal/config/)) |
 | Mission anchor | The `.lha/` files and their JSON shapes ([the mission anchor](06-mission-anchor.md)) |
-| Postgres schema | [`db/migrations/`](../db/migrations/) |
+| Mission store | The SQLite file (same tables, migration ids and JSON columns) and the Postgres schema in [`db/migrations/`](../db/migrations/), with the same `schema_migrations` bookkeeping |
 | Temporal contract | Workflow, activity, signal and query names, the task queue, and the JSON payload shapes ([wire contract](19-wire-contract.md)) |
 | Behaviour | The language-neutral cases in [`spec/`](../spec/), which both test suites load |
 
@@ -40,11 +41,16 @@ payloads to the object store.
 artifacts: read and write the same `.lha/` anchor, the same database, and the same Temporal task
 queue. The Go state package has cross-implementation tests
 ([`go/internal/state/crossimpl_test.go`](../go/internal/state/crossimpl_test.go)) in which Go
-writes an anchor that Python reads back identically, and the reverse.
+writes an anchor that Python reads back identically, and the reverse. The mission store has the
+same kind of tests ([`go/internal/persistence/crossimpl_test.go`](../go/internal/persistence/crossimpl_test.go)):
+the same writes leave byte-identical rows in a SQLite file, each implementation reads (and
+replays ledger writes into) the other's file, and on Postgres each sees the other's `lha db
+migrate` as already applied.
 
 `spec/` pins behaviour that must match exactly: which commands need human approval, which URLs
 may be fetched, redaction, checklist transitions, check naming, the decision-log hash chain,
-shared-path ownership, protected harness files and model pricing. Python is the reference: a
+shared-path ownership, protected harness files, model pricing, and memory retrieval (hash
+embedder vectors, BM25 scores, fusion order and the memory block recalled for a fixture). Python is the reference: a
 behaviour change is made in Python, the cases are regenerated with
 `cd python && uv run python scripts/export_spec.py`, and Go is then made to pass them. See
 [`spec/README.md`](../spec/README.md).
@@ -67,12 +73,14 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `checklistimport` | `lha.state.checklist_import` | Committed (`.json` and `.md` checklists) |
 | `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`); no mutation testing or trust bootstrap |
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
-| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local`. No `claude_code` lead engine and no tiered memory |
+| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local` with the mission row, the persistent cost ledger and tiered memory in the lead prompt. No `claude_code` lead engine |
 | `agents` | `lha.agents.planner`, `lha.agents.replanner` | Committed (Planner with file ownership, Replanner); not the orchestrator or the other roles |
-| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions` (and the hidden `egress-proxy`). The other commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
+| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions`, `missions`, `costs`, `gates`, `db migrate` (and the hidden `egress-proxy`). The other commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
 | `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox |
-| `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's. No `DeferredApprovalGate` (it belongs to the durable workflow) |
-| `memory`, `persistence`, durable worker, orchestrator | | Not started |
+| `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's; every gate event is written to `hitl_gates`. No `DeferredApprovalGate` (it belongs to the durable workflow) |
+| `persistence` | `lha.persistence` (store, SQLite, Postgres, tracking, services, `db migrate`) | Committed: one `Store` interface with a pure-Go SQLite backend and a pgx Postgres backend on Python's schemas, the fallback from Postgres to SQLite, monotonic terminal statuses, the idempotent cost ledger, `hitl_gates`, `MissionTracker`, `LedgerSink` on the `CostMeter`, and run services. No object store (it has its own port) |
+| `memory`, `ops` | `lha.memory`, `lha.ops.degradation` | Committed: episodic recall, BM25 + dense retrieval fused with RRF, skills, extractive and model consolidation, the hash and Ollama embedders (padded for pgvector), pgvector on Postgres, stored vectors on SQLite, and the degradation to BM25 + `git grep`. `sentence_transformers` and the `cross_encoder` reranker are Python-only extras: Go falls back exactly as Python does without the extra |
+| durable worker, orchestrator | | Not started |
 
 What the Go CLI can do today:
 
@@ -91,14 +99,20 @@ What the Go CLI can do today:
 - For the same inputs a Go run and a Python run leave the same checkpoint commits, the same
   `.lha/` files and the same exit code; `go/cmd/lha/e2e_test.go` checks this by running both side
   by side (event payload keys are written in a different order; the JSON is otherwise equal).
+- A run writes its mission row (RUNNING, then DONE / IMPOSSIBLE / ABORTED) and every metered
+  model call to the mission store (the per-user SQLite file, or Postgres with
+  `LHA_POSTGRES_DSN`), and the lead gets the same tiered memory block as in Python. `lha
+  missions`, `lha costs` and `lha gates` read the store with Python's output; `lha db migrate`
+  applies `db/migrations/`. Either implementation reads what the other wrote.
 
 What remains Python-only:
 
 - The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
-  `mission-abort`, `mission-snooze` and `missions` commands.
-- `lha orchestrate` (the multi-agent organization), `vendor` and `db`.
-- Persistence and memory: Go runs do not write the mission store or the persistent cost ledger
-  (so `lha costs` has nothing from them) and the lead has no tiered memory.
+  `mission-abort` and `mission-snooze` commands.
+- `lha orchestrate` (the multi-agent organization) and `vendor`.
+- The `sentence_transformers` embedder and the `cross_encoder` reranker (Python extras): the Go
+  memory plane falls back to lexical retrieval, and keeps fusion order, as Python does when the
+  extra is not installed.
 - The `claude_code` model backend and lead engine, the E2B sandbox, re-running failing checks
   (`LHA_FLAKY_RETRIES`), fallback model chains (`LHA_FALLBACK_MODELS`) and OTLP trace export.
 - The Docker sandbox's egress proxy container runs the Python proxy source by default in both
@@ -125,8 +139,9 @@ each mission's workflow on workers of one implementation.
 
 | If you want to | Use |
 |---|---|
-| Run missions on Temporal, or with persistence and memory | Python |
-| Run a single-agent mission locally from one static binary | Go (`lha run-local`, `lha mission`) or Python |
+| Run missions on Temporal | Python |
+| Run a single-agent mission locally from one static binary, with persistence and memory | Go (`lha run-local`, `lha mission`) or Python |
+| Use `sentence_transformers` embeddings or a cross-encoder reranker | Python |
 | Run the multi-agent flow (`lha orchestrate`) | Python |
 | Contribute to the port or check conformance | Go packages plus `spec/` |
 

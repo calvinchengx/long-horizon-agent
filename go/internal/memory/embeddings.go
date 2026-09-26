@@ -97,7 +97,7 @@ type OllamaUnavailableError struct{ Message string }
 func (e *OllamaUnavailableError) Error() string { return e.Message }
 
 // OllamaBatch is the number of texts per /api/embed request.
-const OllamaBatch = 64
+var OllamaBatch = 64
 
 // OllamaEmbedder is a local semantic embedder served by Ollama. Build it with ConnectOllama.
 type OllamaEmbedder struct {
