@@ -5,7 +5,7 @@ planned into a checklist, and an agent works through it one item per cycle, comm
 cycle to git. The goal is that a mission survives process crashes, reboots, provider outages and
 context-window limits without losing track of what it was doing or claiming work it did not do.
 
-The repository contains a Python implementation ([`python/`](../python/)), an in-progress Go port
+The repository contains a Python implementation ([`python/`](../python/)), a Go port
 ([`go/`](../go/)), language-neutral conformance cases shared by both ([`spec/`](../spec/)), the
 Postgres schema ([`db/migrations/`](../db/migrations/)) and a local service stack
 ([`docker-compose.yml`](../docker-compose.yml)).
@@ -107,7 +107,7 @@ The project is early and under active development.
 | Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
 | File ownership with lease granting, tickets, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` and into durable missions started with `--max-parallel`; the blackboard and reflection only in `orchestrate` |
 | Flaky-check quarantine in the verifier; OTLP trace export (a collector or Langfuse) | Implemented and wired into every Python run path (the Lead's cycle, parallel implementers and branch integration alike); export is off until an endpoint or the Langfuse keys are set and needs the `observability` extra |
-| Go port | A `go/cmd/lha` binary with every `lha` command: missions run locally (`run-local`, `mission`, and the organization with `orchestrate`) in the local or Docker sandbox, and single-agent missions durably on Temporal (`worker`, `mission-*`), with the same tools, gates, `.lha/` anchor, mission store and tiered memory as Python; no durable organization rounds or E2B, and its worker cannot share a task queue with Python workers ([04](04-choosing-an-implementation.md)) |
+| Go port | A `go/cmd/lha` binary with every `lha` command: missions run locally (`run-local`, `mission`, and the organization with `orchestrate`) in the local or Docker sandbox, and missions durably on Temporal (`worker`, `mission-*`, the durable organization's research / review / parallel rounds included), with the same tools, gates, `.lha/` anchor, mission store and tiered memory as Python; everything except E2B, the `sentence_transformers` / `cross_encoder` extras and `VoyageEmbedder`, and its worker cannot share a task queue with Python workers ([04](04-choosing-an-implementation.md)) |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 
 ## Where to go next

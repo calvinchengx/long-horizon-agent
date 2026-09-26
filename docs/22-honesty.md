@@ -101,9 +101,9 @@ a blocked item are.
   overshot by up to one wave's spend. `lha orchestrate --resume` loses blackboard posts and
   reflections made after the interrupted run's last checkpoint. The default `hash` embedder is
   lexical, not semantic (`ollama` is semantic but needs a running Ollama server). Every
-  `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`. The
-  Go worker serves single-agent durable missions only (no durable organization rounds or
-  `run_subagent` yet), Go has no E2B sandbox, and a Go and a Python worker cannot serve the same
+  `openai_compat` model, primary or fallback, uses the one endpoint in `LHA_OPENAI_BASE_URL`. Go
+  implements everything except the E2B sandbox, the `sentence_transformers` / `cross_encoder`
+  extras and the library-only `VoyageEmbedder`, and a Go and a Python worker cannot serve the same
   mission (each refuses a task queue the other polls).
 - **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
   run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama embedder are tested

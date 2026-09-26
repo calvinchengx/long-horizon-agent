@@ -44,8 +44,15 @@ import (
 // cycle in flight to acknowledge it (WaitForCancellation, python's WAIT_CANCELLATION_COMPLETED)
 // before ABORTED is written.
 //
-// The behaviour is Python's latest (every workflow.patched() branch taken); see the package doc
-// for how the Go workflow is versioned.
+// The multi-agent organization (opt-in per mission: MissionInput.ResearchPerItem, Review,
+// MaxParallel) replaces the single cycle activity with one round of org_round.go: researcher
+// child workflows before the round, a serial Lead cycle or a parallel implementer wave (one
+// activity per implementer, in its own git worktree, then one integration activity per branch),
+// and an independent review after every verified item. With all three off the workflow issues
+// exactly the commands it always did.
+//
+// The behaviour is Python's latest (every workflow.patched() branch taken); behaviour added to the
+// Go workflow later is guarded by workflow.GetVersion (VersionOrg); see the package doc.
 func MissionWorkflow(ctx workflow.Context, inp MissionInput) (MissionResult, error) {
 	w := newMissionRun(ctx, inp)
 	result, err := w.runMission(ctx)
@@ -111,6 +118,7 @@ type missionRun struct {
 	rejectedDecisions []string
 	openQuestion      string
 	gate              *GateView
+	children          int // sub-agent children started by this run (their ids)
 
 	decisionCh workflow.ReceiveChannel
 	steerCh    workflow.ReceiveChannel
@@ -287,8 +295,14 @@ func (w *missionRun) runMission(ctx workflow.Context) (MissionResult, error) {
 	if msg := OrgConfigError(inp); msg != "" {
 		return MissionResult{}, configError(msg, nil)
 	}
+	org := false
 	if OrgEnabled(inp) {
-		return MissionResult{}, configError(ErrOrgNotPorted, nil)
+		// The organization is new in the Go workflow: a history recorded before it refused the
+		// options (DefaultVersion) and must replay down that path.
+		if workflow.GetVersion(ctx, VersionOrg, workflow.DefaultVersion, 1) == workflow.DefaultVersion {
+			return MissionResult{}, configError(ErrOrgNotPorted, nil)
+		}
+		org = true
 	}
 
 	for {
@@ -299,30 +313,36 @@ func (w *missionRun) runMission(ctx workflow.Context) (MissionResult, error) {
 			return MissionResult{}, err
 		}
 		st.Status = StatusRunning
+		cyclesBefore := st.CyclesDone
 		var result CycleResult
-		actx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
-			StartToCloseTimeout: CycleStartToClose,
-			HeartbeatTimeout:    CycleHeartbeatTimeout,
-			RetryPolicy:         cycleRetry,
-			// A cancelled cycle is waited for (its last row write lands before ABORTED).
-			WaitForCancellation: true,
-		})
-		err := workflow.ExecuteActivity(actx, ActivityRunAgentCycle, CycleInput{
-			MissionID:       inp.MissionID,
-			Workdir:         inp.Workdir,
-			CycleID:         fmt.Sprintf("c%d", st.CyclesDone+1),
-			CheckCommands:   inp.CheckCommands,
-			BudgetUSD:       inp.BudgetUSD,
-			MaxCycles:       inp.MaxCycles,
-			SteerNotes:      append([]string{}, st.SteerNotes...),
-			ApprovedActions: append([]ApprovedAction{}, st.ApprovedActions...),
-		}).Get(ctx, &result)
-		if err == nil && ctx.Err() != nil {
-			// The cycle finished although the mission was cancelled: the cancellation stands.
-			return MissionResult{}, temporal.NewCanceledError("mission cancelled while its work was finishing")
+		var err error
+		if org { // research / review / parallel waves (org_round.go)
+			result, err = w.runOrgRound(ctx)
+		} else {
+			actx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+				StartToCloseTimeout: CycleStartToClose,
+				HeartbeatTimeout:    CycleHeartbeatTimeout,
+				RetryPolicy:         cycleRetry,
+				// A cancelled cycle is waited for (its last row write lands before ABORTED).
+				WaitForCancellation: true,
+			})
+			err = workflow.ExecuteActivity(actx, ActivityRunAgentCycle, CycleInput{
+				MissionID:       inp.MissionID,
+				Workdir:         inp.Workdir,
+				CycleID:         fmt.Sprintf("c%d", st.CyclesDone+1),
+				CheckCommands:   inp.CheckCommands,
+				BudgetUSD:       inp.BudgetUSD,
+				MaxCycles:       inp.MaxCycles,
+				SteerNotes:      append([]string{}, st.SteerNotes...),
+				ApprovedActions: append([]ApprovedAction{}, st.ApprovedActions...),
+			}).Get(ctx, &result)
+		}
+		if err == nil {
+			// The work finished although the mission was cancelled: the cancellation stands.
+			err = cancelRequested(ctx)
 		}
 		if err != nil {
-			if temporal.IsCanceledError(err) {
+			if temporal.IsCanceledError(err) || !isActivityError(err) {
 				return MissionResult{}, err // the mission was cancelled: never park on it
 			}
 			if app := applicationCause(err); app != nil {
@@ -345,7 +365,9 @@ func (w *missionRun) runMission(ctx workflow.Context) (MissionResult, error) {
 			continue
 		}
 
-		st.CyclesDone++
+		if !org {
+			st.CyclesDone++ // an org round counts its own cycles as it goes
+		}
 		w.absorb(result)
 		w.trackFailures(result)
 		if err := w.resolveApprovals(ctx, result); err != nil {
@@ -368,7 +390,12 @@ func (w *missionRun) runMission(ctx workflow.Context) (MissionResult, error) {
 			wake := epoch(workflow.Now(ctx)) + float64(inp.CyclePauseSeconds)
 			st.ResumeAt = math.Max(st.ResumeAt, wake)
 		}
-		if st.CyclesDone%inp.CyclesBeforeCAN == 0 {
+		cbc := inp.CyclesBeforeCAN
+		if org { // a wave can advance several cycles: CAN when a multiple is crossed
+			if st.CyclesDone/cbc > cyclesBefore/cbc {
+				return MissionResult{}, w.continueAsNew(ctx)
+			}
+		} else if st.CyclesDone%cbc == 0 {
 			return MissionResult{}, w.continueAsNew(ctx)
 		}
 		if err := w.maybeContinueAsNew(ctx); err != nil {
@@ -868,9 +895,10 @@ func (w *missionRun) terminal(ctx workflow.Context, outcome, reason string) (Mis
 	}, nil
 }
 
-// --- the organization (not yet ported) -------------------------------------------------------
+// --- the organization (org_round.go) -------------------------------------------------------
 
-// ErrOrgNotPorted is the configuration error of a mission that opted into the organization.
+// ErrOrgNotPorted is the configuration error a Go build before the durable organization raised
+// for a mission that opted in; kept so the histories it recorded replay (VersionOrg).
 const ErrOrgNotPorted = "the multi-agent organization (research_per_item / review / max_parallel) is not yet " +
 	"available in the Go implementation; run this mission on a Python worker"
 

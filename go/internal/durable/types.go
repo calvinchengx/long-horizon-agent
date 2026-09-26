@@ -377,6 +377,189 @@ type SubAgentOutput struct {
 	Turns     int    `json:"turns"`
 }
 
+// FanOutResult is the outcome of a sub-agent fan-out: every success AND every failure.
+type FanOutResult struct {
+	Outputs  []SubAgentOutput `json:"outputs"`
+	Failures []string         `json:"failures"`
+}
+
+// MarshalJSON never emits null for the lists.
+func (f FanOutResult) MarshalJSON() ([]byte, error) {
+	type alias FanOutResult
+	a := alias(f)
+	a.Outputs = nz(a.Outputs)
+	a.Failures = nz(a.Failures)
+	return json.Marshal(a)
+}
+
+// --- the durable organization (research / review / parallel waves) ------------------------
+
+// RoundInput plans the next round (plan_round): which item(s) and whether they form a wave.
+type RoundInput struct {
+	MissionID   string `json:"mission_id"`
+	Workdir     string `json:"workdir"`
+	MaxParallel int    `json:"max_parallel"`
+}
+
+// RoundItem is one item of a round.
+type RoundItem struct {
+	ItemID      string `json:"item_id"`
+	Description string `json:"description"`
+}
+
+// RoundPlan is the committed truth at the start of a round and the round's items (checklist
+// order). Parallel: the items form a wave (each owns a disjoint write-set); otherwise Items is the
+// next actionable item (or empty when nothing is actionable).
+type RoundPlan struct {
+	HeadSHA      string      `json:"head_sha"`
+	Items        []RoundItem `json:"items"`
+	Parallel     bool        `json:"parallel"`
+	IsComplete   bool        `json:"is_complete"`
+	IsDeadlocked bool        `json:"is_deadlocked"`
+}
+
+// MarshalJSON never emits null for items.
+func (p RoundPlan) MarshalJSON() ([]byte, error) {
+	type alias RoundPlan
+	a := alias(p)
+	a.Items = nz(a.Items)
+	return json.Marshal(a)
+}
+
+// ImplementerInput is one parallel implementer (run_implementer): an item, in its own worktree
+// at BaseSHA.
+type ImplementerInput struct {
+	MissionID        string           `json:"mission_id"`
+	Workdir          string           `json:"workdir"`
+	CycleID          string           `json:"cycle_id"`
+	ItemID           string           `json:"item_id"`
+	BaseSHA          string           `json:"base_sha"`
+	CheckCommands    [][]string       `json:"check_commands"`
+	BudgetUSD        *float64         `json:"budget_usd"`
+	MaxCycles        int              `json:"max_cycles"`
+	SteerNotes       []string         `json:"steer_notes"`
+	ApprovedActions  []ApprovedAction `json:"approved_actions"`
+	ResearchBriefs   []string         `json:"research_briefs"`
+	ResearchFailures []string         `json:"research_failures"`
+}
+
+// MarshalJSON never emits null for the lists.
+func (i ImplementerInput) MarshalJSON() ([]byte, error) {
+	type alias ImplementerInput
+	a := alias(i)
+	a.CheckCommands = nzCommands(a.CheckCommands)
+	a.SteerNotes = nz(a.SteerNotes)
+	a.ApprovedActions = nz(a.ApprovedActions)
+	a.ResearchBriefs = nz(a.ResearchBriefs)
+	a.ResearchFailures = nz(a.ResearchFailures)
+	return json.Marshal(a)
+}
+
+// UnmarshalJSON applies the dataclass defaults.
+func (i *ImplementerInput) UnmarshalJSON(data []byte) error {
+	type alias ImplementerInput
+	a := alias{MaxCycles: 1000}
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*i = ImplementerInput(a)
+	return nil
+}
+
+// ImplementerOutput is what an implementer left on its branch (JSON strings carry the rich
+// models, as pydantic's model_dump_json writes them).
+type ImplementerOutput struct {
+	ItemID           string              `json:"item_id"`
+	CycleID          string              `json:"cycle_id"`
+	Branch           string              `json:"branch"`
+	Head             string              `json:"head"`
+	Brief            string              `json:"brief"`
+	ToolCalls        int                 `json:"tool_calls"`
+	Error            string              `json:"error"`
+	VerificationJSON string              `json:"verification_json"` // VerificationResult
+	DecisionsJSON    []string            `json:"decisions_json"`    // DecisionRecord each
+	TicketJSON       string              `json:"ticket_json"`       // Ticket
+	TicketHistory    []map[string]string `json:"ticket_history"`
+	Leases           []string            `json:"leases"` // LeaseDecision each
+	SpentUSD         float64             `json:"spent_usd"`
+	PendingApprovals []PendingApproval   `json:"pending_approvals"`
+	UsedApprovals    []string            `json:"used_approvals"`
+}
+
+// MarshalJSON never emits null for the lists.
+func (o ImplementerOutput) MarshalJSON() ([]byte, error) {
+	type alias ImplementerOutput
+	a := alias(o)
+	a.DecisionsJSON = nz(a.DecisionsJSON)
+	a.TicketHistory = nz(a.TicketHistory)
+	a.Leases = nz(a.Leases)
+	a.PendingApprovals = nz(a.PendingApprovals)
+	a.UsedApprovals = nz(a.UsedApprovals)
+	return json.Marshal(a)
+}
+
+// IntegrateInput integrates one implementer's branch (integrate_branch) and commits the
+// checkpoint.
+type IntegrateInput struct {
+	MissionID        string             `json:"mission_id"`
+	Workdir          string             `json:"workdir"`
+	CycleID          string             `json:"cycle_id"`
+	ItemID           string             `json:"item_id"`
+	BaseSHA          string             `json:"base_sha"`
+	Output           *ImplementerOutput `json:"output"`
+	Error            string             `json:"error"` // the implementer activity failed (no output)
+	CheckCommands    [][]string         `json:"check_commands"`
+	BudgetUSD        *float64           `json:"budget_usd"`
+	MaxCycles        int                `json:"max_cycles"`
+	ResearchBriefs   int                `json:"research_briefs"`
+	ResearchFailures []string           `json:"research_failures"`
+}
+
+// MarshalJSON never emits null for the lists.
+func (i IntegrateInput) MarshalJSON() ([]byte, error) {
+	type alias IntegrateInput
+	a := alias(i)
+	a.CheckCommands = nzCommands(a.CheckCommands)
+	a.ResearchFailures = nz(a.ResearchFailures)
+	return json.Marshal(a)
+}
+
+// UnmarshalJSON applies the dataclass defaults.
+func (i *IntegrateInput) UnmarshalJSON(data []byte) error {
+	type alias IntegrateInput
+	a := alias{MaxCycles: 1000}
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*i = IntegrateInput(a)
+	return nil
+}
+
+// ReviewInput is the independent review (review_cycle) of one verified item's base..head diff.
+type ReviewInput struct {
+	MissionID string `json:"mission_id"`
+	Workdir   string `json:"workdir"`
+	// CycleID is the reviewed cycle's id; the review commits as "<cycle_id>-review".
+	CycleID string `json:"cycle_id"`
+	ItemID  string `json:"item_id"`
+	HeadSHA string `json:"head_sha"`
+	// BaseSHA "" = the head commit's first parent.
+	BaseSHA   string   `json:"base_sha"`
+	BudgetUSD *float64 `json:"budget_usd"`
+	MaxCycles int      `json:"max_cycles"`
+}
+
+// UnmarshalJSON applies the dataclass defaults.
+func (r *ReviewInput) UnmarshalJSON(data []byte) error {
+	type alias ReviewInput
+	a := alias{MaxCycles: 1000}
+	if err := json.Unmarshal(data, &a); err != nil {
+		return err
+	}
+	*r = ReviewInput(a)
+	return nil
+}
+
 func strPtr(s string) *string { return &s }
 
 func deref(p *string) string {

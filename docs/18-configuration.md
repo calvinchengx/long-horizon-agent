@@ -256,7 +256,7 @@ extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval 
 `LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
 extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` is the Go choice for real embeddings).
 The one Python-only feature a setting selects is the E2B sandbox: `LHA_SANDBOX=e2b` is refused.
-(The durable organization is chosen by `mission-start` options, not settings; Go refuses them.)
+(The durable organization is chosen by `mission-start` options, not settings; Go runs it too.)
 See
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 

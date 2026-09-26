@@ -128,6 +128,10 @@ func registerWith(r worker.Registry, acts *Activities, overrides map[string]any)
 		ActivityReadMissionSnapshot: acts.ReadMissionSnapshot,
 		ActivityRecordMissionStatus: acts.RecordMissionStatus,
 		ActivityRunSubAgent:         acts.RunSubAgent,
+		ActivityPlanRound:           acts.PlanRound,
+		ActivityRunImplementer:      acts.RunImplementer,
+		ActivityIntegrateBranch:     acts.IntegrateBranch,
+		ActivityReviewCycle:         acts.ReviewCycle,
 	}
 	for name, fn := range overrides {
 		fns[name] = fn

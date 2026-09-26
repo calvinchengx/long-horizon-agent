@@ -19,6 +19,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/durable"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
@@ -36,10 +37,6 @@ import (
 var dialTemporal = func(ctx context.Context, settings *config.Settings) (client.Client, error) {
 	return durable.Dial(ctx, settings, nil)
 }
-
-// orgNotPorted is the refusal of --research / --review / --max-parallel (phase B).
-const orgNotPorted = "--research, --review and --max-parallel (the durable multi-agent organization) are not yet " +
-	"available in the Go implementation; use the Python lha"
 
 // parseWithArgs parses flags that may come before or after positional arguments (click accepts
 // both) and returns the positional arguments.
@@ -184,9 +181,6 @@ func (c *cli) missionStart(args []string) error {
 		return rangeError("mission-start", "max-parallel", *maxParallel, 0, durable.MaxParallel, true)
 	}
 	withReview := *review && !*noReview
-	if *research > 0 || withReview || *maxParallel >= 2 {
-		return fail(2, "%s", orgNotPorted)
-	}
 	if pyfmt.PyStrip(*task) == "" && checklistFile.value == "" {
 		return fail(2, "give --task (to plan) or --checklist FILE (to import a checklist)")
 	}
@@ -227,8 +221,13 @@ func (c *cli) missionStart(args []string) error {
 		resumeAt = float64(time.Now().UnixNano())/1e9 + float64(*startIn)
 	}
 
+	if imported != nil && *maxParallel >= 2 {
+		fmt.Fprintln(c.stderr, "note: an imported checklist declares no file ownership, so no parallel wave can run "+
+			"(items are worked serially)")
+	}
 	missionID, err := c.startMission(settings, startRequest{
 		task: *task, title: title.value, imported: imported, references: reference, workdir: absWorkdir,
+		withOwnership: *maxParallel >= 2,
 		build: func(id string) durable.MissionInput {
 			inp := durable.NewMissionInput(id, absWorkdir)
 			inp.CheckCommands = checkCommands
@@ -271,8 +270,10 @@ type startRequest struct {
 	imported    *importedChecklist
 	references  []string
 	workdir     string
-	build       func(missionID string) durable.MissionInput
-	sleeping    bool
+	// withOwnership: plan with the Planner's single-writer file ownership (parallel waves need it).
+	withOwnership bool
+	build         func(missionID string) durable.MissionInput
+	sleeping      bool
 }
 
 // startMission plans (or imports) the checklist, initializes the anchor, writes the mission row
@@ -283,6 +284,7 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 	var planned contracts.Checklist
 	var mTitle, description string
 	var plannerSpend []governor.CostEntry
+	var ownershipJSON []byte
 	if r.imported != nil {
 		planned = r.imported.checklist
 		mTitle = firstNonEmpty(r.title, r.imported.title, "mission")
@@ -300,19 +302,26 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 			defer agent.CloseProvider(context.WithoutCancel(ctx), built)
 			plannerModel = built
 		}
-		checklist, err := agents.NewPlanner(meter.Wrap(plannerModel, "planner")).Plan(ctx, mTitle, r.task, "")
+		plan, err := agents.NewPlanner(meter.Wrap(plannerModel, "planner")).PlanMission(ctx, mTitle, r.task, "")
 		if err != nil {
 			return "", err
 		}
-		planned = checklist
+		planned = plan.Checklist
+		if r.withOwnership { // waves need the Planner's single-writer file ownership
+			data, err := coordination.OwnershipJSON(plan.Ownership)
+			if err != nil {
+				return "", err
+			}
+			ownershipJSON = data
+		}
 		for _, e := range meter.Ledger.Entries() {
 			plannerSpend = append(plannerSpend, e)
 		}
 	}
 	anchor := state.NewGitMissionAnchor(r.workdir)
-	if _, err := anchor.InitializeSpec(ctx, contracts.MissionSpec{
+	if _, err := anchor.InitializeSpecWithOwnership(ctx, contracts.MissionSpec{
 		Title: mTitle, Description: description, References: references,
-	}, planned); err != nil {
+	}, planned, ownershipJSON); err != nil {
 		return "", err
 	}
 	cl, err := dialTemporal(ctx, settings)

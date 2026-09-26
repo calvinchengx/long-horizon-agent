@@ -129,9 +129,8 @@ These limitations are in the current code:
   the implementers of one durable wave see each other's spend only after they finish, so the
   budget ceiling can be overshot by up to one wave's spend. A durable mission gets parallel waves
   only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
-- The Go CLI runs single-agent missions only (locally and on its own Temporal worker), and
-  Temporal histories do not replay across the two languages, so each implementation's workers
-  need their own task queue (see [Go phase 2](#go-phase-2-temporal-single-agent-done)).
+- Temporal histories do not replay across the two languages, so each implementation's workers
+  need their own task queue (see [Go phase 2](#go-phase-2-temporal-done)).
 - `lha orchestrate --resume` rebuilds the blackboard and reflections from committed events, so
   posts made after the interrupted run's last checkpoint are lost; the budget and cycle ceilings
   apply per invocation.
@@ -143,12 +142,13 @@ These limitations are in the current code:
 
 ## Go port
 
-The Go implementation ([`go/`](../go/)) is being built in three phases so that each lands usable
-and wire-compatible with Python ([19-wire-contract.md](19-wire-contract.md)). Until a phase lands,
-use the Python implementation for that feature
+The Go implementation ([`go/`](../go/)) was built in three phases so that each landed usable and
+wire-compatible with Python ([19-wire-contract.md](19-wire-contract.md)). All three have landed:
+Go implements everything except the E2B sandbox, the `sentence_transformers` / `cross_encoder`
+extras and the library-only `VoyageEmbedder`
 ([04-choosing-an-implementation.md](04-choosing-an-implementation.md)).
 
-### Go phase 1: the spine (in progress)
+### Go phase 1: the spine (done)
 
 | Component | Package | State |
 |---|---|---|
@@ -163,32 +163,34 @@ use the Python implementation for that feature
 | Checklist import, `vendor` | `internal/checklistimport`, `internal/state/vendor` | present |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
 | Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` lead engine with its MCP bridge |
-| CLI | `cmd/lha` | present: every command (`version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `worker` and `mission-*`); the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python). `mission-start` refuses the durable organization's `--research`, `--review` and `--max-parallel` 2 or more |
+| CLI | `cmd/lha` | present: every command (`version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `worker` and `mission-*`); the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python), including `mission-start`'s durable organization options |
 
 `go test ./...` passes for the present packages; the `go` CI job runs it with the race detector,
 plus `gofmt`, `go vet` and a Windows `go vet`.
 
-### Go phase 2: Temporal, single-agent (done)
+### Go phase 2: Temporal (done)
 
 `go/internal/durable`: a Go worker serving `MissionWorkflow` and `SubAgentWorkflow` with the same
-names, payloads and ClaimCheck codec, and the `worker` and `mission-*` commands, for single-agent
-missions ([08-durable-execution.md](08-durable-execution.md#the-go-worker)). The Go SDK shares
+names, payloads and ClaimCheck codec, and the `worker` and `mission-*` commands
+([08-durable-execution.md](08-durable-execution.md#the-go-worker)). The Go SDK shares
 one sequence counter between activities and timers while the Python SDK keeps separate ones, so
 histories do not replay across languages: each worker marks its identity and refuses a task
 queue the other implementation polls
 ([19-wire-contract.md](19-wire-contract.md#cross-language-workers)). The activities write the
 missions row, `hitl_gates` and every metered call's `cost_ledger` row (keyed
 `<cycle>@<attempt>#<n>`, as in Python) to the Go mission store, and the cycle runs with tiered
-memory and, when the mission has an ownership map, the Lead's ownership guard. Not yet: the
-durable organization (`plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`, a
-working `run_subagent`).
+memory and, when the mission has an ownership map, the Lead's ownership guard. The durable
+organization runs on it too (`org_round.go`, `org_activities.go`: researcher child workflows over
+the real `run_subagent`, `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`),
+behind `workflow.GetVersion("lha-go-durable-org-v1")`; a Go-served and a Python-served org
+mission on the same scripted inputs leave the same commits and anchor.
 
-### Go phase 3: organization, memory, Postgres, observability (landed, except the durable rounds)
+### Go phase 3: organization, memory, Postgres, observability (done)
 
 Landed: the reviewer, researchers and orchestrator (`lha orchestrate`, `internal/agents/org`);
 file ownership enforcement, tickets, the blackboard, parallel implementers and the integrator
 (`internal/coordination`); tiered memory (`internal/memory`); the mission store (SQLite and
 Postgres, `internal/persistence`) with `missions`, `costs`, `gates` and `db migrate`; OTLP trace
-export (`internal/obs/tracing`); and every `spec/` file. The durable organization rounds (on the
-phase 2 worker) are not yet ported. Not planned: E2B, the `sentence_transformers` / `cross_encoder` extras and
+export (`internal/obs/tracing`); and every `spec/` file; the durable organization rounds on the
+phase 2 worker. Not planned: E2B, the `sentence_transformers` / `cross_encoder` extras and
 `VoyageEmbedder`.

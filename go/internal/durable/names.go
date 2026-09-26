@@ -14,7 +14,8 @@
 // workflow.patched(). Go histories never replay Python histories, so the Go workflow starts from
 // the latest Python behaviour with no patch branches. A Go behaviour change after this point is
 // guarded with workflow.GetVersion(ctx, "lha-go-<change>-v<n>", workflow.DefaultVersion, <n>),
-// and the recorded Go histories in testdata/histories must keep replaying (replay_test.go).
+// and the recorded Go histories in testdata/histories must keep replaying (replay_test.go). The
+// first such change is the durable organization (VersionOrg, org_round.go).
 package durable
 
 // Workflow type names (python: the @workflow.defn class names).
@@ -33,7 +34,19 @@ const (
 	ActivityReadMissionSnapshot = "read_mission_snapshot"
 	ActivityRecordMissionStatus = "record_mission_status"
 	ActivityRunSubAgent         = "run_subagent"
+
+	// The durable organization's activities (python: lha.durable.org_activities).
+	ActivityPlanRound       = "plan_round"
+	ActivityRunImplementer  = "run_implementer"
+	ActivityIntegrateBranch = "integrate_branch"
+	ActivityReviewCycle     = "review_cycle"
 )
+
+// VersionOrg is the workflow.GetVersion change id of the durable organization in the Go
+// workflow (python: PATCH_ORG "lha-durable-org-v1"). It is consulted only by a mission that opts
+// in; a Go history recorded before it (DefaultVersion) replays down the old path, which refused
+// the options with a configuration error.
+const VersionOrg = "lha-go-durable-org-v1"
 
 // Signals and queries (python: lha.durable.signals and the MissionWorkflow query methods).
 const (
@@ -89,7 +102,7 @@ const (
 	OutcomeImpossible      = "impossible" // a human (or the deadlock gate's default) declared it
 )
 
-// Bounds of the durable organization (MissionInput); the organization itself is not yet ported.
+// Bounds of the durable organization (MissionInput.ResearchPerItem / MaxParallel).
 const (
 	MaxResearchPerItem = 4
 	MaxParallel        = 8

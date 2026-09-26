@@ -68,12 +68,18 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   guard. A Go and a Python worker must not share a task queue (their SDKs record histories
   differently): `lha worker` identifies as `lha-go:<pid>@<host>` and exits 2 when a Python worker
   (`lha-py:...`) polls `LHA_TASK_QUEUE`.
+- The durable multi-agent organization (`mission-start --research N --review --max-parallel N`):
+  researcher `SubAgentWorkflow` children running the real `run_subagent`, a serial Lead cycle or
+  a parallel wave of `run_implementer` activities in worktrees, `integrate_branch` (the
+  integration commit is the checkpoint, re-verified with the Lead's verifier) and `review_cycle`
+  after every verified item, with Python's activity names, payloads, gate-log lines, events and
+  ledger keys. A Go-served and a Python-served org mission on the same scripted inputs leave the
+  same commits and anchor (`cmd/lha/durable_org_e2e_test.go`). The org path is behind
+  `workflow.GetVersion("lha-go-durable-org-v1")`.
 
 ## Python-only
 
-The durable multi-agent organization rounds (`mission-start --research / --review /
---max-parallel` 2 or more, which print that they are not available and exit 2, and a working
-`run_subagent` on the Go worker); the E2B sandbox (E2B has no Go SDK; see
+The E2B sandbox (E2B has no Go SDK; see
 [choosing an implementation](../docs/04-choosing-an-implementation.md#e2b-is-not-supported-in-go));
 the `sentence_transformers` embedder and `cross_encoder` reranker (Python extras: Go degrades as
 Python does without them) and the library-only `VoyageEmbedder`.
@@ -108,7 +114,10 @@ The durable workflow tests (`internal/durable`) run on the Temporal SDK's in-pro
 environment. The tests that need a Temporal server — the cross-language CLI and worker-guard
 tests (`cmd/lha/durable_e2e_test.go`) and recording fresh workflow histories
 (`internal/durable/replay_test.go`) — use `LHA_IT_TEMPORAL_ADDRESS`, else start
-`temporal server start-dev` when the `temporal` CLI is on `PATH`, else skip. The committed
+`temporal server start-dev` when the `temporal` CLI is on `PATH`, else the Temporal test server
+the Python SDK caches for its durability tests (`$TMPDIR/temporal-test-server-sdk-python-*`),
+else skip. So does the org test that an abort during a wave waits for every implementer (the
+in-process test environment does not wait for a cancelled activity). The committed
 histories in `internal/durable/testdata/histories` always replay;
 `LHA_RECORD_HISTORIES=1 go test ./internal/durable -run TestRecordHistories` re-records them.
 

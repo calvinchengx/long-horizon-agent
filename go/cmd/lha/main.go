@@ -3,9 +3,9 @@
 // config, run-local, mission, orchestrate, decisions, vendor, the mission-store commands
 // (missions, costs, gates, db migrate) and the durable commands (worker, mission-start,
 // mission-status, mission-approve, mission-snooze, mission-abort; durable.go) — with the Python
-// CLI's options, output and exit codes. mission-start's organization options (--research,
-// --review, --max-parallel >= 2) are not yet available and exit 2. The hidden egress-proxy
-// command serves the Docker sandbox's allow-list egress proxy.
+// CLI's options, output and exit codes, including mission-start's durable organization
+// (--research, --review, --max-parallel). The hidden egress-proxy command serves the Docker
+// sandbox's allow-list egress proxy.
 //
 //	go build -o lha ./cmd/lha
 package main

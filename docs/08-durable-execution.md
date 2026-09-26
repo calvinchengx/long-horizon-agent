@@ -4,10 +4,10 @@ The durable path runs a mission as a Temporal workflow. The workflow body is a d
 scheduler. The real work (model calls, tool calls in the sandbox, verification, git commits)
 happens inside activities. Code: [`python/src/lha/durable/`](../python/src/lha/durable/).
 
-The Go port ([`go/internal/durable/`](../go/internal/durable/)) implements the same workflow for
-single-agent missions, under the same names and payloads; the organization (research, review,
-parallel waves) and `run_subagent` are Python-only. The two implementations' workers must not
-share a task queue: see [the Go worker](#the-go-worker).
+The Go port ([`go/internal/durable/`](../go/internal/durable/)) implements the same workflow,
+the organization (research, review, parallel waves) and `run_subagent` included, under the same
+names and payloads. The two implementations' workers must not share a task queue: see
+[the Go worker](#the-go-worker).
 
 ## Components
 
@@ -547,10 +547,12 @@ repository. See [Running on Temporal](14-running-on-temporal.md) and the
 
 ## The Go worker
 
-[`go/internal/durable/`](../go/internal/durable/) is the Go port of this page for single-agent
-missions: `MissionWorkflow` and `SubAgentWorkflow` (`workflow.go`, `subagent.go`), the activities
-(`activities.go`, calling the Go agent loop, verifier, anchor and execution toolbox that
-`lha run-local` uses; `cmd/lha` passes its `openToolbox`), the payload types (`types.go`, the
+[`go/internal/durable/`](../go/internal/durable/) is the Go port of this page:
+`MissionWorkflow` and `SubAgentWorkflow` (`workflow.go`, `subagent.go`), the organization round
+(`org_round.go`), the activities (`activities.go`, calling the Go agent loop, verifier, anchor
+and execution toolbox that `lha run-local` uses, `cmd/lha` passing its `openToolbox`; and
+`org_activities.go`: `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle` and
+`run_subagent` over the wave functions of `go/internal/agents/org`), the payload types (`types.go`, the
 Python field names), the names (`names.go`), the ClaimCheck codec and object store (`codec.go`,
 `objectstore.go`), the spend journal, workdir lock and exactly-once check (`journal.go`) and the
 worker (`worker.go`). `lha worker`, `lha mission-start` and the other `mission-*` commands of the
@@ -558,9 +560,13 @@ Go CLI use it.
 
 The workflow behaves as the latest Python code: every `workflow.patched` branch above is taken,
 none is recorded. The timeouts, retry policies, cycle ids, gate ids, gate-log lines, statuses and
-outcomes are Python's. A mission that opts into the organization fails with
-`MissionConfigError` ("not yet available in the Go implementation") and its row is written
-`ABORTED`; Go's `run_subagent` refuses the same way.
+outcomes are Python's, the organization's included: the round's activity options (every one
+waited for on a cancellation, and a cancel an activity finished through re-raised), the
+researcher child ids (`subagent:<mission>:<role>:<12 hex>`, deterministic per run), the wave's
+cycle ids and integration order, the review's reopen / block rule, Continue-As-New when a wave
+crosses a multiple of `cycles_before_can`, and parking after an implementer outage once the
+other branches are integrated. A Go-served and a Python-served org mission on the same scripted
+inputs leave the same commits and anchor (`go/cmd/lha/durable_org_e2e_test.go`).
 
 What differs:
 
@@ -572,21 +578,27 @@ What differs:
   affected: either CLI drives missions served by either worker.
 - **Versioning.** A Go behaviour change after histories are recorded is guarded with
   `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", workflow.DefaultVersion, <n>)` instead of
-  `workflow.patched`.
+  `workflow.patched`. The first is the organization (`lha-go-durable-org-v1`, the counterpart of
+  `lha-durable-org-v1`): it is consulted only by a mission that opts in, and a history recorded
+  by a Go build that still refused the options (`DefaultVersion`) replays down that refusal.
 - **Replay tests.** `go/internal/durable/replay_test.go` replays the Go histories in
   [`testdata/histories/`](../go/internal/durable/testdata/histories/) (a completed mission, an
   approval gate with an escalation reminder, `SLEEPING` with a snooze, a deadlock gate declared
-  impossible, a park with health probes, Continue-As-New, and a cancellation that waited for the
-  cycle), checks that each covers what it claims, and checks that a changed workflow fails replay.
-  `TestRecordHistories` records them against a Temporal server (`LHA_IT_TEMPORAL_ADDRESS`, or the
-  `temporal` CLI on `PATH`) and replays the fresh histories; `LHA_RECORD_HISTORIES=1` rewrites the
-  committed ones.
+  impossible, a park with health probes, Continue-As-New, a cancellation that waited for the
+  cycle, and an org mission with a researched, reviewed wave then a serial round), checks that
+  each covers what it claims (only the org history carries the version marker and the org
+  activities), and checks that a changed workflow fails replay. `TestRecordHistories` records
+  them against a Temporal server (`LHA_IT_TEMPORAL_ADDRESS`, the `temporal` CLI on `PATH`, or the
+  test server the Python SDK caches) and replays the fresh histories; `LHA_RECORD_HISTORIES=1`
+  rewrites the committed ones.
 - **Mission store and memory.** The activities write the mission row, `hitl_gates` events and
   cost-ledger rows to the Go mission store (`durable.DefaultStoreOpener`, over
   `go/internal/persistence`): the cycle installs a ledger hook on its meter, so each metered call
-  is written as it happens under Python's `<cycle>@<attempt>#<n>` key. The cycle's lead gets the
+  is written as it happens under Python's `<cycle>@<attempt>#<n>` key (the org roles under
+  `impl:` / `split:` / `review:` / `sub:<workflow>:<activity>@<attempt>#<n>`). The cycle's lead gets the
   tiered memory plane over the same store, and when the mission has an ownership map its
   dispatcher sits behind the Lead's `OwnershipGuard` (python: `lead_guard`).
-- The workflow unit tests (`spine_test.go`, `gates_test.go`, `row_test.go`) mirror
-  `tests/durability` on the Go SDK's test environment, with the real activities, a scripted stub
-  model and a real gating check in the local sandbox.
+- The workflow unit tests (`spine_test.go`, `gates_test.go`, `row_test.go`, `org_test.go`)
+  mirror `tests/durability` on the Go SDK's test environment, with the real activities, a
+  scripted stub model and a real gating check in the local sandbox. The test environment does
+  not wait for a cancelled activity, so the abort-during-a-wave test runs on a Temporal server.
