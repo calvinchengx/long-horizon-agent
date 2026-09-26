@@ -139,16 +139,31 @@ func loadSettings(s *config.Settings) (*config.Settings, error) {
 	return config.Load()
 }
 
-// LeadEngineError is returned for LHA_LEAD_ENGINE=claude_code, which the Go port does not have.
-var LeadEngineError = errors.New("LHA_LEAD_ENGINE=claude_code (one claude -p session per cycle) is not yet " +
-	"available in the Go implementation; use the Python lha or LHA_LEAD_ENGINE=loop")
+// LeadEngineError was returned for LHA_LEAD_ENGINE=claude_code before the Go port had the
+// engine; nothing returns it now.
+//
+// Deprecated: LHA_LEAD_ENGINE=claude_code is supported (LeadEngine).
+var LeadEngineError = errors.New("LHA_LEAD_ENGINE=claude_code is not available")
 
 // BuildLeadLoop is the lead's AgentLoop with every capability wired from settings (python:
 // build_lead_loop): the TrustedAwareVerifier (sandbox checks in the sandbox, trusted: checks on
-// the host), operator-protected harness globs, the trusted-check map and the replanner.
+// the host), operator-protected harness globs, the trusted-check map, the replanner and the lead
+// engine (the built-in turn loop, or LHA_LEAD_ENGINE=claude_code: see LeadEngine).
 func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider, anchor *state.GitMissionAnchor, dispatcher contracts.ToolDispatcher, recorder *obs.TraceRecorder) (*AgentLoop, error) {
-	if settings.LeadEngine == "claude_code" {
-		return nil, LeadEngineError
+	return buildLeadLoop(settings, leadModel, anchor, dispatcher, recorder, false)
+}
+
+// BuildGuardedLeadLoop is BuildLeadLoop for a dispatcher wrapped in the orchestrator's
+// file-ownership guard (python: build_lead_loop(dispatcher=...)): a native claude_code session
+// would bypass the guard, so it is refused.
+func BuildGuardedLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider, anchor *state.GitMissionAnchor, dispatcher contracts.ToolDispatcher, recorder *obs.TraceRecorder) (*AgentLoop, error) {
+	return buildLeadLoop(settings, leadModel, anchor, dispatcher, recorder, true)
+}
+
+func buildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider, anchor *state.GitMissionAnchor, dispatcher contracts.ToolDispatcher, recorder *obs.TraceRecorder, guarded bool) (*AgentLoop, error) {
+	engine, err := LeadEngine(settings, guarded)
+	if err != nil {
+		return nil, err
 	}
 	trusted, err := settings.TrustedCheckCommands()
 	if err != nil {
@@ -168,6 +183,7 @@ func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 	}
 	opts.MaxReplans = settings.MaxReplans
 	opts.MaxSplitDepth = settings.MaxSplitDepth
+	opts.Engine = engine
 	return NewAgentLoop(opts), nil
 }
 
