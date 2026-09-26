@@ -75,8 +75,15 @@ def prune_worktrees(workdir: str | Path) -> None:
             git_ops.run_git(workdir, "branch", "-D", branch, check=False)
 
 
-def commit_worktree(path: Path, message: str) -> str:
-    """Commit an implementer's work on its branch, excluding the harness-owned ``.lha/``."""
+def commit_worktree(path: Path, message: str, *, repo: str | Path | None = None) -> str:
+    """Commit an implementer's work on its branch, excluding the harness-owned ``.lha/``.
+
+    The worktree's ``.git`` pointer is re-validated first: it must still lead to ``repo``'s
+    repository (the mission workdir), or the commit is refused (``GitError``) before any git
+    command runs in the worktree.
+    """
+    if repo is not None:
+        git_ops.check_git_link(path, expected_common_dir=git_ops.common_dir(repo))
     if git_ops.exists_at_head(path, ".lha"):
         git_ops.run_git(path, "checkout", "HEAD", "--", ".lha")
         git_ops.run_git(path, "clean", "-fdq", "--", ".lha")

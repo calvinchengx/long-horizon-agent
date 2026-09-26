@@ -283,6 +283,7 @@ async def implement_in_worktree(
         commit_worktree,
         worktree,
         f"lha: {run.writer} {run.item.id} ({run.item.description})",
+        repo=workdir,
     )
     paths = await asyncio.to_thread(changed_paths, worktree, base, run.head)
     run.violations = ownership.violations(writer=run.writer, paths=paths)

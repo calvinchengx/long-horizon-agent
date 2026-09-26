@@ -57,6 +57,7 @@ from lha.memory.skills import Skill
 from lha.obs.events import TraceRecorder, get_logger
 from lha.ops.degradation import DependencyStatus, Health, MemoryMode, decide_memory_mode
 from lha.persistence.store import BACKEND_POSTGRES, MissionStore
+from lha.state import git_ops
 
 EPISODE_KIND = "cycle_outcome"
 CONSOLIDATION_KIND = "memory_consolidation"
@@ -206,9 +207,11 @@ def _one_line(text: str, cap: int) -> str:
 
 
 def _git(workdir: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(
-        ["git", *args], cwd=workdir, capture_output=True, timeout=_GIT_TIMEOUT_S, check=False
-    )
+    """The hardened harness git (``git_ops``); a refusal or timeout reads as exit code 128."""
+    try:
+        return git_ops.run_git_bytes(workdir, *args, timeout=_GIT_TIMEOUT_S)
+    except git_ops.GitError as exc:
+        return subprocess.CompletedProcess(["git", *args], 128, b"", str(exc).encode())
 
 
 def _changed_files(workdir: Path, before: str, after: str) -> list[str]:

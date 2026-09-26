@@ -104,7 +104,9 @@ status `todo`, `verified_by` cleared, the review notes attached, and a checkpoin
 2. A worktree is added at `.git/lha-worktrees/<branch>` on a new branch
    `lha/implementer-<item>/<cycle_id>`, starting from the mission branch's `HEAD`. A sandbox
    session is opened on that worktree the same way as the Lead's (`open_lead_sandbox`: the
-   configured image and sandbox egress allow-list).
+   configured image and sandbox egress allow-list). The worktree's `.git` is a `gitdir:` file;
+   the Docker sandbox mounts it read-only, and before the branch is committed the host checks it
+   still leads to the mission repository ([safety model](09-safety-model.md#7-host-side-git)).
 3. An `Implementer` ([specialists.py](../python/src/lha/agents/specialists.py)) runs. Its
    dispatcher has four layers: `record_decision` (into the implementer's own buffer), then
    `request_lease` ([Leases](#leases)), then an `OwnershipGuard` (writer: its implementer id),
