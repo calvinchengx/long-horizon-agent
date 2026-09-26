@@ -75,7 +75,11 @@ def lead_verifier(workdir: str, settings: Settings | None = None) -> Verifier:
     (``lha.verify.flaky_quarantine``)."""
     settings = settings or get_settings()
     return FlakyRetryVerifier(
-        TrustedAwareVerifier(DeterministicVerifier(), CommandTrustedRunner(), workdir),
+        TrustedAwareVerifier(
+            DeterministicVerifier(),
+            CommandTrustedRunner(env_allow=settings.trusted_check_env_names()),
+            workdir,
+        ),
         retries=settings.flaky_retries,
         workdir=workdir,
     )

@@ -7,10 +7,9 @@ finished only ends its turn loop; it has no effect on the item's status.
 Code: [`python/src/lha/contracts/verify.py`](../python/src/lha/contracts/verify.py) (types,
 verdict rules, check naming) and [`python/src/lha/verify/`](../python/src/lha/verify/)
 (`DeterministicVerifier`, witnesses, trusted checks, harness integrity, flaky-check quarantine).
-Go mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier, harness
-integrity and the quarantine's evidence bookkeeping and `Partition` (not the re-running
-verifier), but not yet witnesses, trusted checks or extra protected paths (the Go `Check` type
-does accept `where`).
+Go mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier, witnesses,
+trusted checks (with the same minimal environment), harness integrity and the quarantine's
+evidence bookkeeping and `Partition` (not the re-running verifier).
 
 ## Checks
 
@@ -159,21 +158,53 @@ runs sandbox checks in the sandbox and trusted checks with `CommandTrustedRunner
    files) using a temporary index, without moving `HEAD` or touching the real index or working
    tree.
 2. For each trusted check, it adds a detached `git worktree` of that commit, runs the argv on the
-   host from the worktree directory that corresponds to the workspace, with the host environment
-   plus `LHA_CHECK_COMMIT`, `LHA_CHECK_WORKTREE` and `LHA_CHECK_NAME`, and removes the worktree
+   host from the worktree directory that corresponds to the workspace, and removes the worktree
    afterwards.
-3. The default timeout is 3600 seconds (or the check's `timeout_s`); on timeout the whole process
-   group is killed. A failure to build the commit, create the worktree or run the command is a
-   failing result.
+3. The check gets a minimal environment, not the operator's: `PATH`, `LANG`/`LC_ALL`/`LC_CTYPE`
+   and `TZ` if set (plus `SYSTEMROOT`, `COMSPEC`, `PATHEXT` and the like on Windows), a fresh empty
+   `HOME` and `TMPDIR` (`HOME/tmp`) that are deleted afterwards, `GIT_TERMINAL_PROMPT=0`,
+   `LHA_CHECK_COMMIT`, `LHA_CHECK_WORKTREE` and `LHA_CHECK_NAME`, and the variables named in
+   `LHA_TRUSTED_CHECK_ENV`.
+4. The default timeout is 3600 seconds (or the check's `timeout_s`); on timeout the whole process
+   group is killed (on Windows, the process). A failure to build the commit, create the worktree
+   or run the command is a failing result.
 
-Trusted checks run code the agent wrote (tests, build scripts, `Makefile` targets) outside the
-sandbox, with the privileges of the process running the mission (the local CLI, or the Temporal
-worker). The sandbox's network and filesystem limits do not apply. Run missions that use them
-on a dedicated, disposable machine with no secrets, or make the trusted command a small script
-that hands `LHA_CHECK_COMMIT` to CI and waits for the verdict. Protect the files a trusted check
-executes with `LHA_HARNESS_PATHS` (next section) so the agent cannot rewrite what the gate runs.
-Malformed `LHA_TRUSTED_CHECKS` is a configuration error: local runs stop, and the durable
-activity fails with a non-retryable `MissionConfigError`.
+`LHA_TRUSTED_CHECK_ENV` is a comma-separated list of host variables to pass through, for
+example `GOFLAGS,GOPROXY,GOMODCACHE` so a Go suite reuses the host's module cache instead of
+downloading into the empty `HOME`. Names are passed verbatim when set on the host and override
+the defaults above (listing `HOME` gives the check the real home). Names starting with `LHA_`
+are refused (LHA's own settings hold its API keys and database DSN); any other name is the
+operator's explicit choice, including secret-looking ones such as a CI token for a hand-off
+script. A listed variable is readable by agent-written code, so list only what the check needs.
+
+### Threat model
+
+A trusted check runs code the agent wrote (tests, build scripts, `conftest.py`, `Makefile`
+targets) outside the sandbox, as the user running the mission (the local CLI, or the Temporal
+worker). The sandbox's network and filesystem limits do not apply. Defining
+`LHA_TRUSTED_CHECKS` is the opt-in: with it unset nothing runs on the host, and there is no
+separate switch, because every trusted check is a command the operator wrote.
+
+What the runner prevents:
+
+- inherited credentials: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `AWS_*`, `GITHUB_TOKEN`,
+  `SSH_AUTH_SOCK`, every `LHA_*` setting and anything else in the operator's environment are not
+  passed unless listed in `LHA_TRUSTED_CHECK_ENV`;
+- dotfiles through `HOME`: tools that read `~/.netrc`, `~/.npmrc`, `~/.pypirc`, `~/.docker/config.json`
+  or `~/.config/gh` find an empty home;
+- checks that outlive their timeout, and worktrees or temporary homes left behind.
+
+What it does not prevent: the process runs as the operator's user, so code that knows where to
+look can still read the real home by absolute path (`/home/me/.aws/credentials`), use a Docker
+socket it can reach (root-equivalent), or reach the network. Run missions that use trusted checks
+on a dedicated, disposable machine or VM with no secrets, or make the trusted command a small
+script that hands `LHA_CHECK_COMMIT` to CI and waits for the verdict. Protect the files a trusted
+check executes with `LHA_HARNESS_PATHS` (next section) so the agent cannot rewrite what the gate
+runs.
+
+Malformed `LHA_TRUSTED_CHECKS`, or an invalid or `LHA_*` name in `LHA_TRUSTED_CHECK_ENV`, is a
+configuration error: local runs stop, and the durable activity fails with a non-retryable
+`MissionConfigError`.
 
 ## Output tails
 

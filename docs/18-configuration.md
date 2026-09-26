@@ -151,11 +151,13 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 | `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org`; `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. Empty: no network |
 | `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the web tools may read; see [Web tools](#web-tools) |
 | `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
+| `LHA_TRUSTED_CHECK_ENV` | comma-separated variable names | `""` | host environment variables passed through to trusted checks, for example `GOFLAGS,GOPROXY,GOMODCACHE`. A trusted check otherwise gets only `PATH`, the locale, a fresh empty `HOME`/`TMPDIR` and `LHA_CHECK_*`, never the operator's credentials. `LHA_*` names are refused (configuration error); a listed name is visible to agent-written code. See [07-verification.md](07-verification.md#threat-model) |
 | `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
 | `LHA_FLAKY_RETRIES` | int (0 to 5) | `1` | re-runs of a failing, not timed-out gating check on the same work tree; a check that then passes is quarantined (non-gating for the rest of the mission, with a committed `check_quarantined` event). `0` turns re-runs and quarantine off. See [07-verification.md](07-verification.md#flaky-check-quarantine) |
 
 `LHA_SANDBOX_IMAGE` and `LHA_SANDBOX_EGRESS` apply to `docker` only. `e2b` authenticates through
-the E2B SDK's own configuration (not an `LHA_*` variable). See
+the E2B SDK's own configuration (not an `LHA_*` variable), uses the `base` template, and syncs
+the workspace into the microVM and back (at most 256 MiB per transfer). See
 [09-safety-model.md](09-safety-model.md) and, for witnesses, trusted checks and protected paths,
 [07-verification.md](07-verification.md).
 

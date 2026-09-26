@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -167,7 +166,7 @@ func inThread(t *testing.T, fn func() error) error {
 
 func TestFIFOsNeverBlock(t *testing.T) {
 	tmp := t.TempDir()
-	if err := syscall.Mkfifo(filepath.Join(tmp, "pipe"), 0o644); err != nil {
+	if err := mkfifo(filepath.Join(tmp, "pipe"), 0o644); err != nil {
 		t.Skip("no FIFOs")
 	}
 	err := inThread(t, func() error { _, err := ReadTextWithin(tmp, "pipe"); return err })

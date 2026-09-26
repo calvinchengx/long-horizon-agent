@@ -7,17 +7,26 @@ the *candidate commit* — a commit object of the current working tree (tracked 
 non-ignored files) made WITHOUT touching HEAD, the real index or the working tree.
 
 Security trade-off (read before enabling): a trusted check executes code the AGENT wrote (tests,
-build scripts, ``conftest.py``, ``Makefile`` targets...) outside the sandbox, with the runner's
-privileges — for example access to a Docker socket, which is root-equivalent on the host. The
-sandbox's egress and filesystem limits do not apply. Mitigations built in here:
+build scripts, ``conftest.py``, ``Makefile`` targets...) outside the sandbox, as the operator's
+user — for example with access to a Docker socket, which is root-equivalent on the host. The
+sandbox's egress and filesystem limits do not apply. Defining ``LHA_TRUSTED_CHECKS`` is the
+explicit opt-in: with it unset, nothing runs on the host. Mitigations built in here:
 
 * only operator-defined commands can be trusted checks: items reference them by NAME
   (``trusted:<name>`` witnesses resolved against ``LHA_TRUSTED_CHECKS``), never define argv;
-* the command runs in a throwaway worktree of a pinned commit, which is always removed.
+* the command runs in a throwaway worktree of a pinned commit, which is always removed;
+* the command gets a MINIMAL environment, never the operator's: ``PATH``, the locale, a fresh
+  empty ``HOME`` and ``TMPDIR`` (removed afterwards), the ``LHA_CHECK_*`` variables, and only the
+  extra names the operator lists in ``LHA_TRUSTED_CHECK_ENV`` (``trusted_env``). API keys, cloud
+  credentials, ``SSH_AUTH_SOCK`` and ``LHA_*`` settings are not passed unless listed, and
+  ``LHA_*`` names cannot be listed at all;
+* the check has a timeout, after which its whole process group is killed.
 
-That does not make agent code safe to run. The runner should be a dedicated, disposable machine
-or VM (no secrets, no production credentials), or ``CommandTrustedRunner`` should invoke a small
-script that hands the commit (``LHA_CHECK_COMMIT``) off to CI and waits for its verdict.
+That does not make agent code safe to run: the process still runs as the operator's user and can
+read any file that user can (``~/.aws/credentials`` by absolute path, for example). The runner
+should be a dedicated, disposable machine or VM (no secrets, no production credentials), or the
+trusted command should be a small script that hands the commit (``LHA_CHECK_COMMIT``) off to CI
+and waits for its verdict.
 """
 
 from __future__ import annotations
@@ -25,11 +34,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import shutil
 import signal
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -45,6 +56,70 @@ _IDENTITY = {
     "GIT_COMMITTER_NAME": "LHA Verifier",
     "GIT_COMMITTER_EMAIL": "verifier@lha.local",
 }
+
+# Host variables every trusted check inherits (the Windows ones are needed to start processes).
+_BASE_ENV = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "COMSPEC",
+    "PATHEXT",
+    "WINDIR",
+)
+_ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def validate_env_allow_list(names: Iterable[str]) -> list[str]:
+    """Check ``LHA_TRUSTED_CHECK_ENV`` names; return them (raises ``ValueError``).
+
+    A name must be a plain environment variable name, and may not start with ``LHA_`` (LHA's own
+    settings carry its API keys; the ``LHA_CHECK_*`` variables are set by the runner).
+    """
+    out: list[str] = []
+    for name in names:
+        if not _ENV_NAME.fullmatch(name):
+            raise ValueError(f"LHA_TRUSTED_CHECK_ENV: {name!r} is not an environment variable name")
+        if name.upper().startswith("LHA_"):
+            raise ValueError(
+                f"LHA_TRUSTED_CHECK_ENV: {name!r} cannot be passed to trusted checks (LHA_* "
+                "settings hold LHA's own credentials)"
+            )
+        out.append(name)
+    return out
+
+
+def trusted_env(
+    *,
+    home: str,
+    tmpdir: str,
+    allow: Iterable[str] = (),
+    check: Mapping[str, str] | None = None,
+    base: Mapping[str, str] | None = None,
+) -> dict[str, str]:
+    """The environment of a trusted check: minimal, never the operator's whole environment.
+
+    ``PATH`` and the locale (plus the Windows process essentials) come from ``base`` (default
+    ``os.environ``); ``HOME`` is ``home`` and ``TMPDIR`` is ``tmpdir`` (both fresh and empty; on
+    Windows also ``USERPROFILE`` / ``TEMP`` / ``TMP``); then each ``allow`` name present in
+    ``base`` is copied verbatim (the operator's explicit choice, so it may override those
+    defaults); ``check`` (the ``LHA_CHECK_*`` values) is applied last.
+    """
+    source = os.environ if base is None else base
+    env = {k: source[k] for k in _BASE_ENV if k in source}
+    env.setdefault("PATH", os.defpath)
+    env.setdefault("LANG", "C.UTF-8")
+    env.update({"HOME": home, "TMPDIR": tmpdir, "GIT_TERMINAL_PROMPT": "0"})
+    if os.name == "nt":  # pragma: no cover - Windows only
+        env.update({"USERPROFILE": home, "TEMP": tmpdir, "TMP": tmpdir})
+    for name in validate_env_allow_list(allow):
+        if name in source:
+            env[name] = source[name]
+    env.update(check or {})
+    return env
 
 
 def _git_with_env(cwd: str | Path, args: list[str], extra_env: dict[str, str]) -> str:
@@ -117,14 +192,24 @@ def _failed(check: Check, message: str, *, started: float, timed_out: bool = Fal
 class CommandTrustedRunner:
     """Runs a trusted check's argv on the HOST in a detached worktree of the candidate commit.
 
-    The command gets the host environment plus ``LHA_CHECK_COMMIT``, ``LHA_CHECK_WORKTREE`` and
-    ``LHA_CHECK_NAME``; its cwd is the worktree directory that corresponds to ``workdir``. On
-    timeout the whole process group is killed. The worktree is removed whatever happens.
+    The command gets a minimal environment (``trusted_env``): ``PATH``, the locale, a fresh
+    ``HOME`` and ``TMPDIR``, the names in ``env_allow`` (``LHA_TRUSTED_CHECK_ENV``) and
+    ``LHA_CHECK_COMMIT``, ``LHA_CHECK_WORKTREE`` and ``LHA_CHECK_NAME``; its cwd is the worktree
+    directory that corresponds to ``workdir``. On timeout the whole process group is killed. The
+    worktree and the temporary home are removed whatever happens. Raises ``ValueError`` for an
+    ``env_allow`` name ``validate_env_allow_list`` refuses.
     """
 
-    def __init__(self, *, timeout_s: int = 3600, output_tail: int = OUTPUT_TAIL_CHARS) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_s: int = 3600,
+        output_tail: int = OUTPUT_TAIL_CHARS,
+        env_allow: Iterable[str] = (),
+    ) -> None:
         self._timeout = timeout_s
         self._tail = output_tail
+        self._env_allow = validate_env_allow_list(env_allow)
 
     async def run(self, check: Check, *, workdir: str, commit: str) -> CheckResult:
         started = time.monotonic()
@@ -132,6 +217,7 @@ class CommandTrustedRunner:
         if root is None:
             return _failed(check, f"[trusted] {workdir} is not a git work tree", started=started)
         worktree = Path(tempfile.mkdtemp(prefix="lha-trusted-")).resolve()
+        home = Path(tempfile.mkdtemp(prefix="lha-trusted-home-")).resolve()
         try:
             try:
                 await asyncio.to_thread(
@@ -143,17 +229,22 @@ class CommandTrustedRunner:
                 )
             relative = Path(workdir).resolve().relative_to(root)
             cwd = worktree / relative
-            env = dict(os.environ)
-            env.update(
-                {
+            tmpdir = home / "tmp"
+            tmpdir.mkdir()
+            env = trusted_env(
+                home=str(home),
+                tmpdir=str(tmpdir),
+                allow=self._env_allow,
+                check={
                     "LHA_CHECK_COMMIT": commit,
                     "LHA_CHECK_WORKTREE": str(worktree),
                     "LHA_CHECK_NAME": check.name,
-                }
+                },
             )
             return await self._exec(check, cwd=cwd, env=env, started=started)
         finally:
             await asyncio.to_thread(_remove_worktree, root, worktree)
+            await asyncio.to_thread(shutil.rmtree, home, True)
 
     async def _exec(
         self, check: Check, *, cwd: Path, env: dict[str, str], started: float
@@ -178,8 +269,7 @@ class CommandTrustedRunner:
                 exit_code = await asyncio.wait_for(proc.wait(), timeout=timeout)
             except TimeoutError:
                 timed_out = True
-                with contextlib.suppress(ProcessLookupError, PermissionError):
-                    os.killpg(proc.pid, signal.SIGKILL)
+                _kill_tree(proc.pid, proc.kill)
                 exit_code = await proc.wait()
             log.seek(0)
             output = log.read().decode("utf-8", errors="replace")
@@ -195,6 +285,16 @@ class CommandTrustedRunner:
             timed_out=timed_out,
             output_tail=tail,
         )
+
+
+def _kill_tree(pid: int, kill: Callable[[], None]) -> None:
+    """SIGKILL the check's process group (it leads a new session); a plain kill elsewhere."""
+    killpg = getattr(os, "killpg", None)
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        if killpg is not None:
+            killpg(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        else:  # pragma: no cover - Windows has no process groups to signal
+            kill()
 
 
 def _remove_worktree(root: Path, worktree: Path) -> None:

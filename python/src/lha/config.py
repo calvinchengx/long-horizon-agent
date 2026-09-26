@@ -125,6 +125,11 @@ class Settings(BaseSettings):
     # Operator-defined checks that run OUTSIDE the sandbox (e.g. e2e suites needing Docker), as a
     # JSON object of name -> argv, referenced by items as witnesses "trusted:<name>".
     trusted_checks: str = ""
+    # Comma-separated names of host environment variables passed through to trusted checks, e.g.
+    # "GOFLAGS,GOPROXY". A trusted check otherwise gets only PATH, the locale and a fresh empty
+    # HOME/TMPDIR (never the operator's credentials); LHA_* names are refused. A listed name is
+    # visible to agent-written code (tests, build scripts), so list only what checks need.
+    trusted_check_env: str = ""
     # Comma-separated globs (workspace-relative) the agent may not modify, on top of the test
     # files harness integrity always protects, e.g. "Makefile,e2e/**,.github/**".
     harness_paths: str = ""
@@ -296,6 +301,12 @@ class Settings(BaseSettings):
                 )
             out[str(name)] = list(argv)
         return out
+
+    def trusted_check_env_names(self) -> list[str]:
+        """``trusted_check_env`` parsed (raises ``ValueError`` for an invalid or ``LHA_*`` name)."""
+        from lha.verify.trusted import validate_env_allow_list
+
+        return validate_env_allow_list(_csv(self.trusted_check_env))
 
     def redacted(self) -> dict[str, object]:
         """All settings as a dict with every ``SecretStr`` field masked (``***`` if set).

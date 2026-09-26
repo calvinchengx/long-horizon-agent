@@ -154,10 +154,18 @@ func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 	if err != nil {
 		return nil, err
 	}
+	envAllow, err := settings.TrustedCheckEnvNames()
+	if err != nil {
+		return nil, err
+	}
+	runner, err := verify.NewCommandTrustedRunnerWithEnv(envAllow)
+	if err != nil {
+		return nil, err
+	}
 	opts := DefaultLoopOptions()
 	opts.Model = leadModel
 	opts.Dispatcher = dispatcher
-	opts.Verifier = verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), verify.NewCommandTrustedRunner(), anchor.Workdir())
+	opts.Verifier = verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), runner, anchor.Workdir())
 	opts.Anchor = anchor
 	opts.Recorder = recorder
 	opts.MaxTurns = settings.MaxTurnsPerCycle

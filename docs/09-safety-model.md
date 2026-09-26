@@ -26,7 +26,7 @@ the single entry point. `LHA_SANDBOX` selects the kind. The default is `docker`.
 | Kind | Isolation | Notes |
 |---|---|---|
 | `docker` | container | Needs the `sandbox` extra (`docker>=7.1`). Image `LHA_SANDBOX_IMAGE`, default `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds a Go + uv + Node/pnpm image |
-| `e2b` | Firecracker microVM (E2B service) | Imports `e2b_code_interpreter`, which no extra provides. Excluded from coverage, not tested in CI |
+| `e2b` | Firecracker microVM (E2B service) | Imports `e2b_code_interpreter`, which no extra provides. The workspace is synced both ways (below); tested against a fake SDK only, not against the E2B service in CI. Python only |
 | `local` | none | Refused with `UnsafeSandboxError` unless `LHA_ALLOW_UNSAFE_LOCAL=true` or `--unsafe-local` |
 
 Docker hardening, from `DockerSandbox.run_kwargs()` in
@@ -54,9 +54,31 @@ Docker hardening, from `DockerSandbox.run_kwargs()` in
 workdir, and it gives children a minimal environment (see section 6). It does not restrict what a
 command itself can read, write or reach.
 
-`e2b` works in its own VM filesystem (`/home/user/workspace`). Nothing in the adapter copies the
-host workdir into the VM or back. The git anchor and harness checks on the host therefore do not
-see edits made inside E2B. Treat this adapter as unfinished.
+`e2b` works in its own VM filesystem (`/home/user/workspace`), so
+[sandbox_e2b.py](../python/src/lha/execution/sandbox_e2b.py) keeps it in step with the host
+workdir, which stays the source of truth (the git anchor, harness integrity, trusted checks and
+the checkpoint all read the host):
+
+- On `open`, and before every `exec`, `write_file` and `read_file`, host changes are sent in:
+  the files git would commit (`git ls-files -co --exclude-standard`; every file outside a git work
+  tree), as one tar. `.git`, `.lha`, any `.git` path component and ignored files (`.env`,
+  `.venv`...) are never sent. After the first upload only what changed on the host is sent, and
+  host deletions are replayed, so a failed attempt the harness rolled back is rolled back in the
+  VM too.
+- After every `exec` and `write_file`, the VM's changes come back: new and changed files
+  (by size, mtime, ctime and mode), except paths the host's ignore rules ignore, and deletions of
+  files the session mirrors. So the checks the verifier runs in the VM and the tree the checkpoint
+  commits are the same files.
+- Copy-back is the trust boundary. It uses `tarfile`'s `data` filter (no absolute or escaping
+  paths or links, no device files), accepts only the members it asked for, refuses anything
+  under `.git`/`.lha`, never writes through a host symlink, and caps each transfer at 256 MiB.
+- Every failure fails closed: an `exec` whose sync did not complete returns exit code `-1`, and a
+  command whose exit code the SDK does not report is also `-1`, never a pass.
+- No snapshots: `snapshot()` and `open(snapshot_id=...)` raise `NotImplementedError`; a resumed
+  mission opens a new VM from the host checkout.
+
+The VM template needs `python3` (3.8 or later) for the sync helper. The Go implementation has no
+E2B client and refuses `e2b` with an error.
 
 ## 2. The tool dispatcher
 
@@ -327,8 +349,11 @@ gate.
 
 - The classifier is a guardrail, not a sandbox. An arbitrary program (`python -c …`, a test
   suite, a build script) can do anything its sandbox allows. With `local` that means the host.
-- Trusted checks (`LHA_TRUSTED_CHECKS`) run agent-written code outside the sandbox, with the
-  privileges of the process running the mission ([verification](07-verification.md#trusted-checks)).
+- Trusted checks (`LHA_TRUSTED_CHECKS`) run agent-written code outside the sandbox, as the user
+  running the mission. They get a minimal environment (no inherited credentials or `LHA_*`
+  settings, an empty temporary `HOME`) plus only the names in `LHA_TRUSTED_CHECK_ENV`, but they
+  can still read whatever that user can read by absolute path
+  ([threat model](07-verification.md#threat-model)).
 - An approved action is allowed exactly as it was requested, but the approver sees only the tool
   and its arguments; what a `git push` sends is whatever the agent committed.
 - The web tools run in the worker process, not in the sandbox, so sandbox network isolation does
@@ -340,7 +365,9 @@ gate.
 - The Docker container can write anything in the workspace except `.git` and `.lha`. The harness
   checks for weakened test files after the fact ([Verification](07-verification.md)).
 - Redaction is pattern-based. Secrets in unrecognized formats pass through.
-- E2B isolation is not integrated with the host workdir (see section 1).
+- The E2B adapter's workspace sync is tested against a fake SDK, not the E2B service. Files a
+  background process writes in the VM after a command returns reach the host only with the next
+  command's sync (see section 1).
 - The `claude_code` lead engine with `LHA_CLAUDE_CODE_TOOLS=native` hands the host workdir to
   Claude Code's own tools. None of the sections above apply to them: only a prefix deny list for
   git history, publishing and web access, which `sh -c` gets around. The default `lha` mode
