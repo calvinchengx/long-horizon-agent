@@ -38,6 +38,8 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from lha.contracts.sandbox import ExecResult, Sandbox, SandboxSession, Snapshot
+from lha.contracts.state import EventRecord
+from lha.execution.egress_events import ProxyLogCursor
 from lha.execution.paths import PROTECTED_DIRS, PathEscapeError, contained_posix
 from lha.execution.proc import DEFAULT_MAX_OUTPUT_BYTES, BoundedBuffer, validate_timeout
 from lha.state.git_link import git_dirs_in_tree
@@ -103,6 +105,7 @@ class DockerSandboxSession(SandboxSession):
         max_output_bytes: int = DEFAULT_MAX_OUTPUT_BYTES,
         on_close: Callable[[], None] | None = None,
         host_workdir: str | None = None,
+        egress_log: Callable[[], str] | None = None,
     ) -> None:
         self._container = container
         self.workdir = workdir
@@ -110,6 +113,14 @@ class DockerSandboxSession(SandboxSession):
         self.host_workdir = host_workdir
         self._max_output = max_output_bytes
         self._on_close = on_close  # tears down per-session egress resources (proxy + network)
+        self._egress_log = egress_log  # the egress proxy's log (None: no egress)
+        self._egress_cursor = ProxyLogCursor()
+
+    def drain_egress_events(self) -> list[EventRecord]:
+        """``sandbox_egress`` events for the proxy requests since the last drain (blocking)."""
+        if self._egress_log is None:
+            return []
+        return self._egress_cursor.drain(self._egress_log())
 
     def _container_path(self, relpath: str) -> str:
         """Lexically contain ``relpath``, then confirm with ``realpath`` inside the container."""
@@ -316,6 +327,15 @@ class _EgressGate:
                 raise RuntimeError(f"egress proxy not ready after {_PROXY_READY_TIMEOUT_S}s")
             _sleep(_EXIT_POLL_S)
 
+    def logs(self) -> str:
+        """The proxy container's log so far ("" once it is gone)."""
+        if self.proxy is None:
+            return ""
+        try:
+            return bytes(self.proxy.logs()).decode("utf-8", errors="replace")
+        except Exception:
+            return ""
+
     def teardown(self) -> None:
         proxy, self.proxy = self.proxy, None
         network, self.network = self.network, None
@@ -464,7 +484,11 @@ class DockerSandbox(Sandbox):
 
         container = await asyncio.to_thread(_start_gated)
         return DockerSandboxSession(
-            container, max_output_bytes=self._max_output, on_close=gate.teardown, host_workdir=host
+            container,
+            max_output_bytes=self._max_output,
+            on_close=gate.teardown,
+            host_workdir=host,
+            egress_log=gate.logs,
         )
 
     async def snapshot(self, session: SandboxSession) -> Snapshot:

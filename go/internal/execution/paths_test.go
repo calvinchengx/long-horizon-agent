@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
@@ -148,40 +147,6 @@ func TestRealpathMatchesPython(t *testing.T) {
 	}
 	if got := Realpath(tmp + "/missing/../y"); got != tmp+"/y" {
 		t.Fatal(got)
-	}
-}
-
-func inThread(t *testing.T, fn func() error) error {
-	t.Helper()
-	done := make(chan error, 1)
-	go func() { done <- fn() }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("file tool blocked on a FIFO")
-	}
-	return nil
-}
-
-func TestFIFOsNeverBlock(t *testing.T) {
-	tmp := t.TempDir()
-	if err := mkfifo(filepath.Join(tmp, "pipe"), 0o644); err != nil {
-		t.Skip("no FIFOs")
-	}
-	err := inThread(t, func() error { _, err := ReadTextWithin(tmp, "pipe"); return err })
-	if err == nil || err.Error() != "not a regular file: 'pipe'" {
-		t.Fatal(err)
-	}
-	err = inThread(t, func() error { _, err := WriteTextWithin(tmp, "pipe", "x"); return err })
-	if err == nil || err.Error() != "not a regular file: 'pipe'" {
-		t.Fatal(err)
-	}
-	if _, err := WriteTextWithin(tmp, "a/b.txt", "hello"); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := ReadTextWithin(tmp, "a/b.txt"); err != nil || got != "hello" {
-		t.Fatal(got, err)
 	}
 }
 

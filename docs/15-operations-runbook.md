@@ -139,9 +139,14 @@ the workflow closes.
 
 **Allow an egress domain.** Two settings, both read by the worker:
 
-- `LHA_SANDBOX_EGRESS`: hosts the sandbox's commands may reach through the egress proxy (package
-  registries). A host alone allows ports 80 and 443; `.example.org` allows the domain and its
-  subdomains; `host:port` allows another port.
+- `LHA_SANDBOX_EGRESS`: package-registry download hosts the sandbox's commands may reach through
+  the egress proxy (only the fixed list in [18-configuration.md](18-configuration.md)). Any other
+  host goes in `LHA_SANDBOX_EGRESS_EXTRA_HOSTS` (`.example.org` allows the domain and its
+  subdomains; `host:port` allows another port), and a host that accepts pushes or uploads
+  (`github.com`, an S3 bucket) only in `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`. Sandbox egress and
+  `LHA_PRIVATE_DATA=true` cannot be combined (Rule of Two). The proxy's requests are committed
+  as `sandbox_egress` events; see
+  [09-safety-model.md](09-safety-model.md#sandbox-network).
 - `LHA_WEB_ALLOW_HOSTS`: hosts the web tools may read (`fetch_url`, and `web_search` when
   `LHA_WEB_SEARCH_PROVIDER` and `LHA_WEB_SEARCH_API_KEY` are set). Empty means no web tools. Local
   commands add hosts per run with `--allow-host`. A run with web tools is refused (Rule of Two) if

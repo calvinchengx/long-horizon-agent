@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -91,7 +92,12 @@ type Settings struct {
 	Sandbox          string `env:"sandbox" default:"docker" choices:"docker,e2b,local"`
 	AllowUnsafeLocal bool   `env:"allow_unsafe_local" default:"false"`
 	SandboxImage     string `env:"sandbox_image" default:"ghcr.io/astral-sh/uv:python3.12-bookworm-slim"`
-	SandboxEgress    string `env:"sandbox_egress" default:""`
+	// Hosts the Docker sandbox may reach through its egress proxy, split by what a host lets
+	// code in the sandbox do (egressproxy.SandboxAllowList): package-fetch download hosts only;
+	// any other host except known push/upload hosts; push/upload hosts, acknowledged.
+	SandboxEgress                string `env:"sandbox_egress" default:""`
+	SandboxEgressExtraHosts      string `env:"sandbox_egress_extra_hosts" default:""`
+	SandboxEgressAllowWriteHosts string `env:"sandbox_egress_allow_write_hosts" default:""`
 	// Docker sandbox limits (memory incl. swap; CPUs) and the /tmp tmpfs size, which holds the
 	// toolchain caches and counts against the memory limit.
 	SandboxMemory  string  `env:"sandbox_memory" default:"2g"`
@@ -457,8 +463,37 @@ func (s *Settings) Clone() *Settings {
 	return &c
 }
 
-// SandboxEgressHosts is sandbox_egress split (python: sandbox_egress_hosts).
-func (s *Settings) SandboxEgressHosts() []string { return CSV(s.SandboxEgress) }
+// SandboxEgressHosts is the Docker sandbox's egress allow-list from the three sandbox_egress*
+// settings (python: sandbox_egress_hosts). It returns a ValueError-typed error for a malformed
+// entry, a non-package-fetch host in LHA_SANDBOX_EGRESS or a known write host in
+// LHA_SANDBOX_EGRESS_EXTRA_HOSTS.
+func (s *Settings) SandboxEgressHosts() ([]string, error) {
+	return egressproxy.SandboxAllowList(CSV(s.SandboxEgress), CSV(s.SandboxEgressExtraHosts),
+		CSV(s.SandboxEgressAllowWriteHosts))
+}
+
+// SandboxEgressEntries is the three sandbox egress lists as written, de-duplicated (for
+// messages: no validation).
+func (s *Settings) SandboxEgressEntries() []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, v := range []string{s.SandboxEgress, s.SandboxEgressExtraHosts, s.SandboxEgressAllowWriteHosts} {
+		for _, h := range CSV(v) {
+			if !seen[h] {
+				seen[h] = true
+				out = append(out, h)
+			}
+		}
+	}
+	return out
+}
+
+// SandboxEgressEnabled reports whether a docker sandbox gets network through the egress proxy
+// (any of the three lists set) (python: sandbox_egress_enabled).
+func (s *Settings) SandboxEgressEnabled() bool {
+	return s.Sandbox == "docker" && (len(CSV(s.SandboxEgress)) > 0 ||
+		len(CSV(s.SandboxEgressExtraHosts)) > 0 || len(CSV(s.SandboxEgressAllowWriteHosts)) > 0)
+}
 
 // WebHosts is web_allow_hosts split (python: web_hosts).
 func (s *Settings) WebHosts() []string { return CSV(s.WebAllowHosts) }

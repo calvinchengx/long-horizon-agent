@@ -323,6 +323,11 @@ func runSettings(f *runFlags) (*config.Settings, error) {
 	if err := agent.CheckRunRuleOfTwo(settings); err != nil {
 		return nil, fail(2, "%s", err)
 	}
+	if settings.SandboxEgressEnabled() {
+		if _, err := settings.SandboxEgressHosts(); err != nil {
+			return nil, fail(2, "invalid sandbox egress settings: %s", err)
+		}
+	}
 	if err := validateWebTools(settings); err != nil {
 		return nil, fail(2, "invalid web settings: %s", err)
 	}

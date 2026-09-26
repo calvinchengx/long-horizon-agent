@@ -18,7 +18,8 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   and exit codes. For the same inputs a Go run leaves the same checkpoint commits and `.lha/`
   anchor as a Python run (`cmd/lha/e2e_test.go` runs both side by side).
 - Sandboxes: `local` (only with `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) and `docker`
-  (`LHA_SANDBOX_IMAGE`; `LHA_SANDBOX_EGRESS` routes egress through a per-session allow-list proxy).
+  (`LHA_SANDBOX_IMAGE`; the `LHA_SANDBOX_EGRESS*` settings route egress through a per-session
+  allow-list proxy, and its requests are committed as `sandbox_egress` events).
 - The lead's tools: `read_file`, `write_file`, `list_files`, `grep`, `run_command` and
   `record_decision`, plus `fetch_url` / `web_search` when `LHA_WEB_ALLOW_HOSTS` or `--allow-host`
   is set. An unsafe local sandbox and a Rule-of-Two (lethal trifecta) run are refused before the
@@ -29,6 +30,10 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   `LHA_CONSOLE_APPROVAL_TIMEOUT_S` or without a TTY, the optional `LHA_GATE_WEBHOOK_URL`). The
   prompt text, the `gate_reminder` / `tool_approval` events and the webhook body are
   byte-identical to Python's.
+- Flaky checks: a failing gating check is re-run up to `LHA_FLAKY_RETRIES` times; a check that
+  passed and failed on the same work tree is quarantined (never the evidence for green) with a
+  committed `check_quarantined` event, read back from `HEAD` by later runs, exactly as in Python
+  (`spec/verify/flaky_retry.json`).
 - Model backends `stub`, `ollama`, `openai_compat` and `claude`.
 
 ## Python-only
@@ -37,7 +42,7 @@ The Temporal worker and the `worker`, `mission-start`, `mission-status`, `missio
 `mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
 organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
 mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
-E2B sandbox; re-running failing checks (`LHA_FLAKY_RETRIES`); fallback model chains
+E2B sandbox; fallback model chains
 (`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
 available and exit 2.
 

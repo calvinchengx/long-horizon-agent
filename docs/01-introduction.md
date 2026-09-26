@@ -71,7 +71,9 @@ it. See [verification](07-verification.md).
   its default action on timeout. A durable mission that deadlocks opens a gate too: retry, abort,
   or declare the mission impossible.
 - **Default-deny egress.** The Docker sandbox has no network unless the operator lists hosts in
-  `LHA_SANDBOX_EGRESS`, which a proxy on an internal Docker network enforces. The lead gets the
+  `LHA_SANDBOX_EGRESS` (package-registry download hosts only; other hosts, and hosts that accept
+  pushes or uploads, need their own settings), which a proxy on an internal Docker network
+  enforces. Sandbox egress counts against the Rule of Two like web access. The lead gets the
   `fetch_url` tool (and `web_search`, if a provider is configured) only when
   `LHA_WEB_ALLOW_HOSTS` or `--allow-host` lists hosts it may read; fetched content is marked
   untrusted, and a run that would combine web access with private data or a `local` sandbox is

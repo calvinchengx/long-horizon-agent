@@ -325,7 +325,14 @@ class AgentLoop:
 
         mission_text = mission.render_anchor() if mission else snapshot.anchor_text()
         head = await self._checkpoint(
-            checklist, item, cycle_id, verification, tool_calls, mission_text, mission_id
+            checklist,
+            item,
+            cycle_id,
+            verification,
+            tool_calls,
+            mission_text,
+            mission_id,
+            egress=await self._egress_events(ctx.session, mission_id, cycle_id),
         )
         self._emit(
             "checkpoint",
@@ -601,6 +608,7 @@ class AgentLoop:
         tool_calls: int,
         mission_text: str = "",
         mission_id: str = "",
+        egress: list[EventRecord] | None = None,
     ) -> str:
         split_into: list[str] = []
         rolled_back: list[str] = []
@@ -635,6 +643,7 @@ class AgentLoop:
                 events=[
                     *self._gate_events(cycle_id),
                     *self._verifier_events(mission_id, cycle_id),
+                    *(egress or []),
                     EventRecord(
                         kind="cycle",
                         cycle_id=cycle_id,
@@ -712,6 +721,30 @@ class AgentLoop:
         if not callable(drain):
             return []
         events: list[EventRecord] = [e.model_copy(update={"cycle_id": cycle_id}) for e in drain()]
+        for event in events:
+            self._emit(event.kind, mission_id, cycle_id, **event.payload)
+        return events
+
+    async def _egress_events(
+        self, session: object, mission_id: str, cycle_id: str
+    ) -> list[EventRecord]:
+        """The sandbox egress proxy's requests this cycle (``sandbox_egress``; committed with it).
+
+        Only a Docker session with an egress allow-list has them; reading them never fails the
+        cycle (the record is best-effort, the proxy's enforcement is not).
+        """
+        drain = getattr(session, "drain_egress_events", None)
+        if not callable(drain):
+            return []
+        try:
+            found = await asyncio.to_thread(drain)
+        except Exception:
+            return []
+        if not isinstance(found, list):
+            return []
+        events = [
+            e.model_copy(update={"cycle_id": cycle_id}) for e in found if isinstance(e, EventRecord)
+        ]
         for event in events:
             self._emit(event.kind, mission_id, cycle_id, **event.payload)
         return events
