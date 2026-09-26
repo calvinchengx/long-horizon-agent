@@ -30,16 +30,23 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   prompt text, the `gate_reminder` / `tool_approval` events and the webhook body are
   byte-identical to Python's.
 - Model backends `stub`, `ollama`, `openai_compat` and `claude`.
+- Durable missions on Temporal (`internal/durable`): `worker`, `mission-start`, `mission-status`,
+  `mission-approve`, `mission-snooze` and `mission-abort`, with Python's options, output and exit
+  codes. The worker registers `MissionWorkflow` and `SubAgentWorkflow` and the activities under
+  the Python names, with the same payload JSON and ClaimCheck codec, so either CLI drives a
+  mission served by either implementation's worker. A Go and a Python worker must not share a
+  task queue (their SDKs record histories differently): `lha worker` identifies as
+  `lha-go:<pid>@<host>` and exits 2 when a Python worker (`lha-py:...`) polls `LHA_TASK_QUEUE`.
 
 ## Python-only
 
-The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
-`mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
-organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
-mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
-E2B sandbox; re-running failing checks (`LHA_FLAKY_RETRIES`); fallback model chains
-(`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
-available and exit 2.
+The durable multi-agent organization (`mission-start --research / --review / --max-parallel`,
+`run_subagent`) and `orchestrate`; the `missions` command; the mission store and persistent cost
+ledger (`costs`, `db`; Go runs write no mission rows: the durable activities write through
+`durable.DefaultStoreOpener`, a no-op until the Go store is connected) and tiered memory;
+`vendor`; the `claude_code` model backend and lead engine; the E2B sandbox; re-running failing
+checks (`LHA_FLAKY_RETRIES`); fallback model chains (`LHA_FALLBACK_MODELS`); OTLP trace export.
+The unported commands print that they are not available and exit 2.
 
 The Docker sandbox's egress proxy container runs the stdlib-only Python proxy source on
 `python:3.12-alpine` by default, exactly like Python. `internal/execution/egressproxy` is the same
@@ -58,6 +65,14 @@ it with `uv run --project ../python` and skip that half when `uv` is not on `PAT
 tests against a real daemon are opt-in, like Python's integration tests:
 `LHA_IT_DOCKER=1 go test ./internal/execution/ ./cmd/lha/ -run Docker`.
 
+The durable workflow tests (`internal/durable`) run on the Temporal SDK's in-process test
+environment. The tests that need a Temporal server — the cross-language CLI and worker-guard
+tests (`cmd/lha/durable_e2e_test.go`) and recording fresh workflow histories
+(`internal/durable/replay_test.go`) — use `LHA_IT_TEMPORAL_ADDRESS`, else start
+`temporal server start-dev` when the `temporal` CLI is on `PATH`, else skip. The committed
+histories in `internal/durable/testdata/histories` always replay;
+`LHA_RECORD_HISTORIES=1 go test ./internal/durable -run TestRecordHistories` re-records them.
+
 ## Layout
 
 Layout mirrors the Python packages: `internal/contracts` (shared types), `internal/config`
@@ -69,7 +84,9 @@ runner), `internal/governor`, `internal/obs`, `internal/execution` (local and Do
 the egress proxy, path containment, the allow-list dispatcher and the tools), `internal/hitl`
 (the console approval gate, escalation ladder and gate webhook), `internal/agent` (prompts, the
 turn loop, compaction, the local runner), `internal/agents` (Planner, Replanner),
-`internal/pyfmt` (Python string semantics for byte-identical prompts) and `cmd/lha`, whose
-`wiring.go` links the execution layer into the runner.
+`internal/pyfmt` (Python string semantics for byte-identical prompts), `internal/ops`
+(degradation / safe-park decisions, mission lifecycle), `internal/durable` (the Temporal
+workflows, activities, payload types, ClaimCheck codec and worker) and `cmd/lha`, whose
+`wiring.go` links the execution layer into the runner and the durable activities.
 
 Author: Calvin Cheng <calvin@calvinx.com>. MIT licensed.
