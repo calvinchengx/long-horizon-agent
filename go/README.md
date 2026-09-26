@@ -29,17 +29,22 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   `LHA_CONSOLE_APPROVAL_TIMEOUT_S` or without a TTY, the optional `LHA_GATE_WEBHOOK_URL`). The
   prompt text, the `gate_reminder` / `tool_approval` events and the webhook body are
   byte-identical to Python's.
-- Model backends `stub`, `ollama`, `openai_compat` and `claude`.
+- Model backends `stub`, `ollama`, `openai_compat` and `claude`, with `LHA_FALLBACK_MODELS`
+  failover chains and the model health probe (`model.ProbeModel`).
+- `vendor`: reference pages snapshotted with the egress rules and a DNS-pinned fetch
+  (`internal/state/vendor`, `safety.PinnedDialer`); the same files and `MANIFEST.json` as Python.
+- OTLP/HTTP trace export (`LHA_OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_ENDPOINT` or
+  Langfuse) with Python's span names and redacted attributes (`internal/obs/tracing`).
 
 ## Python-only
 
 The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
 `mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
 organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
-mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
-E2B sandbox; re-running failing checks (`LHA_FLAKY_RETRIES`); fallback model chains
-(`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
-available and exit 2.
+mission rows) and tiered memory; the `claude_code` model backend and lead engine; re-running
+failing checks (`LHA_FLAKY_RETRIES`). The unported commands print that they are not available and
+exit 2. The E2B sandbox is not supported in Go (E2B has no Go SDK; see
+[choosing an implementation](../docs/04-choosing-an-implementation.md#e2b-is-not-supported-in-go)).
 
 The Docker sandbox's egress proxy container runs the stdlib-only Python proxy source on
 `python:3.12-alpine` by default, exactly like Python. `internal/execution/egressproxy` is the same

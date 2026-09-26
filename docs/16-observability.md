@@ -139,6 +139,15 @@ the Temporal history is the record of the workflow.
 Spans carry metadata only. Prompts, model output, tool arguments and tool output are never
 attached, and every attribute passes through the redaction below.
 
+The Go implementation ([`go/internal/obs/tracing/`](../go/internal/obs/tracing/)) exports the
+same way, with no extra to install: the same settings and destinations, the resource attributes
+above, one batch exporter per destination, and the same span names and attributes for
+`lha.mission`, `lha.cycle`, `chat <model>` and `execute_tool <name>` on `run-local` and
+`mission`. Go also redacts the recorded error text of a failed span. Its helpers
+`StartActivityCycle`, `StartModelCall` (`chat` / `invoke_agent`), `TracedDispatch` and
+`AgentSpan` give the durable activity, `claude -p` sessions and the organization the same span
+schema as Python.
+
 Tracing never blocks or stops the agent. Spans are handed to a `BatchSpanProcessor` (a bounded
 background queue that drops spans when full), an export gives up after
 `LHA_OTEL_EXPORT_TIMEOUT_S` (default 5), and an unreachable backend is logged by the exporter and
