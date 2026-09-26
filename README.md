@@ -47,8 +47,10 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
 
 The `lha` CLI and worker are implemented in [Python](python/). The [Go](go/) port is one static
 binary that runs missions locally (`lha run-local`, `lha mission`, and the multi-agent
-`lha orchestrate`) with the same tools, gates, `.lha/` anchor, mission store and tiered memory;
-durable Temporal missions and the E2B sandbox are Python-only for now. The two share
+`lha orchestrate`) with the same tools, gates, `.lha/` anchor, mission store and tiered memory,
+and single-agent missions durably on its own Temporal worker (`lha worker`, `lha mission-*`);
+the durable organization (research / review / parallel rounds) and the E2B sandbox are
+Python-only for now, and a Go and a Python worker must use different task queues. The two share
 `LHA_*` settings, the `.lha/` anchor format (including the decision-log hash chain), the Postgres
 schema and the Temporal workflow and activity names, and both run the language-neutral cases in
 [`spec/`](spec/); see [choosing an implementation](docs/04-choosing-an-implementation.md).

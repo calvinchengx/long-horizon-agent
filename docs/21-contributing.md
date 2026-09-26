@@ -9,7 +9,7 @@ maintainer, do not open a public issue.
 | Path | Contents |
 |---|---|
 | [`python/`](../python/) | the reference implementation (`src/lha`), its tests, `pyproject.toml`, `Dockerfile` |
-| [`go/`](../go/) | the Go port: a CLI that runs local single-agent missions, no Temporal worker yet, built in phases ([23-roadmap.md](23-roadmap.md)) |
+| [`go/`](../go/) | the Go port: every `lha` command, missions locally (including `orchestrate`) and single-agent missions on Temporal (its own worker), built in phases ([23-roadmap.md](23-roadmap.md)) |
 | [`spec/`](../spec/) | language-neutral conformance cases both test suites run |
 | [`db/migrations/`](../db/migrations/) | the Postgres schema, one SQL file per version |
 | [`docs/`](../docs/) | this documentation (`NN-slug.md`) and the predicted runs |
@@ -49,9 +49,9 @@ Go, from `go/`:
 gofmt -l . && go vet ./... && go test ./...
 ```
 
-CI runs the Python checks (as two pytest steps plus the coverage report) and a separate
-integration job against real Postgres and Docker. It does not run the Go checks, so run them
-locally. Details, including how to run the integration tests yourself, are in
+CI runs the Python checks (as two pytest steps plus the coverage report), the Go checks (`gofmt`,
+`go vet`, a Windows `go vet` and `go test -race`) and a separate integration job against real
+Postgres and Docker. Details, including how to run the integration tests yourself, are in
 [20-testing.md](20-testing.md).
 
 ## Conventions

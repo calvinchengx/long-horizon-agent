@@ -44,8 +44,9 @@ func (t *toolbox) BindGateStore(store persistence.Store) {
 // It refuses an unsafe local sandbox (*execution.UnsafeSandboxError) and a lethal-trifecta run
 // (*tools.RuleOfTwoViolation) before touching the workspace, builds the lead dispatcher (every
 // tool, mutating allowed; the web tools under the egress policy when LHA_WEB_ALLOW_HOSTS is set,
-// unless req.AllowEgress is false; irreversible commands go to the console y/N gate when
-// req.ApproveInteractive, else they are refused), adds record_decision bound to req.Anchor, and
+// unless req.AllowEgress is false; irreversible commands go to req.Gate when set (a durable
+// cycle's DeferredApprovalGate), else to the console y/N gate when req.ApproveInteractive, else
+// they are refused), adds record_decision bound to req.Anchor, and
 // only then opens the sandbox from settings: kind (LHA_SANDBOX), image (LHA_SANDBOX_IMAGE) and
 // the sandbox egress allow-list (LHA_SANDBOX_EGRESS). Gate events (tool_approval, gate_reminder)
 // reach the agent loop through the dispatcher's DrainEvents, which the record_decision wrapper
@@ -72,8 +73,8 @@ var openToolbox agent.ToolboxOpener = func(ctx context.Context, req agent.Toolbo
 	if err != nil {
 		return nil, err
 	}
-	var gate contracts.HITLGate // nil: irreversible commands are refused
-	if req.ApproveInteractive {
+	gate := req.Gate // nil: irreversible commands are refused
+	if gate == nil && req.ApproveInteractive {
 		gate = consoleGate(settings)
 	}
 	dispatcher, err := tools.BuildRunDispatcher(settings, tools.RunDispatcherOptions{

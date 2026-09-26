@@ -166,7 +166,7 @@ func runMemoryCase(t *testing.T, c memoryCase) []string {
 	if hybrid {
 		embedder = memory.NewHashEmbedder(256)
 	} else {
-		statuses = append(statuses, ops.DependencyStatus{Name: "embeddings", Health: ops.Degraded, Detail: "disabled (LHA_MEMORY_EMBEDDER=none)"})
+		statuses = append(statuses, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthDegraded, Detail: "disabled (LHA_MEMORY_EMBEDDER=none)"})
 	}
 	cfg := c.Config
 	mem := memory.New(memory.Options{

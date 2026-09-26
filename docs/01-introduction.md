@@ -107,7 +107,7 @@ The project is early and under active development.
 | Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
 | File ownership with lease granting, tickets, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` and into durable missions started with `--max-parallel`; the blackboard and reflection only in `orchestrate` |
 | Flaky-check quarantine in the verifier; OTLP trace export (a collector or Langfuse) | Implemented and wired into every Python run path (the Lead's cycle, parallel implementers and branch integration alike); export is off until an endpoint or the Langfuse keys are set and needs the `observability` extra |
-| Go port | A `go/cmd/lha` binary that runs single-agent missions locally (`run-local`, `mission`) in the local or Docker sandbox, with the same tools, gates and `.lha/` anchor as Python; no Temporal worker, orchestrator, persistence or memory ([04](04-choosing-an-implementation.md)) |
+| Go port | A `go/cmd/lha` binary with every `lha` command: missions run locally (`run-local`, `mission`, and the organization with `orchestrate`) in the local or Docker sandbox, and single-agent missions durably on Temporal (`worker`, `mission-*`), with the same tools, gates, `.lha/` anchor, mission store and tiered memory as Python; no durable organization rounds or E2B, and its worker cannot share a task queue with Python workers ([04](04-choosing-an-implementation.md)) |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 
 ## Where to go next

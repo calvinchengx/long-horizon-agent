@@ -535,7 +535,7 @@ func (m *MissionMemory) recordError(where, missionID, cycleID string, err error)
 // degrade drops the dense channel for the rest of the run (lexical + git grep).
 func (m *MissionMemory) degrade(missionID, cycleID, dep string, err error) {
 	m.mu.Lock()
-	m.mode = ops.DecideMemoryMode([]ops.DependencyStatus{{Name: dep, Health: ops.Down, Detail: errText(err)}})
+	m.mode = ops.DecideMemoryMode([]ops.DependencyStatus{{Name: dep, Health: ops.HealthDown, Detail: errText(err)}})
 	m.embedder = nil
 	m.dense = map[string]contracts.SemanticIndex{}
 	reason := m.mode.Reason
@@ -1240,14 +1240,14 @@ func EmbeddingModel(s *config.Settings) string {
 func buildEmbedder(ctx context.Context, s *config.Settings, backend string, transport OpenOptions) (contracts.Embedder, ops.DependencyStatus) {
 	switch s.MemoryEmbedder {
 	case "none":
-		return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.Degraded, Detail: "disabled (LHA_MEMORY_EMBEDDER=none)"}
+		return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthDegraded, Detail: "disabled (LHA_MEMORY_EMBEDDER=none)"}
 	case "ollama":
 		emb, err := ConnectOllama(ctx, OllamaOptions{Model: EmbeddingModel(s), BaseURL: s.OllamaBaseURL,
 			Timeout: OllamaTimeout, Transport: transport.EmbedderTransport})
 		if err != nil {
-			return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.Down, Detail: err.Error()}
+			return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthDown, Detail: err.Error()}
 		}
-		return emb, ops.DependencyStatus{Name: "embeddings", Health: ops.OK}
+		return emb, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthOK}
 	case "sentence_transformers":
 		newST := NewSentenceTransformerEmbedder
 		if transport.SentenceTransformer != nil {
@@ -1259,15 +1259,15 @@ func buildEmbedder(ctx context.Context, s *config.Settings, backend string, tran
 			if !errors.Is(err, ErrSentenceTransformersUnsupported) {
 				detail = "sentence-transformers unavailable (" + errText(err) + ")"
 			}
-			return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.Down, Detail: detail}
+			return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthDown, Detail: detail}
 		}
-		return emb, ops.DependencyStatus{Name: "embeddings", Health: ops.OK}
+		return emb, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthOK}
 	}
 	dim := 256
 	if backend == persistence.BackendPostgres {
 		dim = PGEmbeddingDim
 	}
-	return NewHashEmbedder(dim), ops.DependencyStatus{Name: "embeddings", Health: ops.OK}
+	return NewHashEmbedder(dim), ops.DependencyStatus{Name: "embeddings", Health: ops.HealthOK}
 }
 
 // OpenOptions are OpenMissionMemory's optional inputs.
@@ -1288,7 +1288,7 @@ func OpenMissionMemory(ctx context.Context, s *config.Settings, store persistenc
 	}
 	statuses := []ops.DependencyStatus{}
 	if reason := store.DegradedReason(); reason != "" {
-		statuses = append(statuses, ops.DependencyStatus{Name: "postgres", Health: ops.Down, Detail: reason})
+		statuses = append(statuses, ops.DependencyStatus{Name: "postgres", Health: ops.HealthDown, Detail: reason})
 	}
 	embedder, status := buildEmbedder(ctx, s, store.Backend(), o)
 	statuses = append(statuses, status)
@@ -1298,11 +1298,11 @@ func OpenMissionMemory(ctx context.Context, s *config.Settings, store persistenc
 			embedder, _ = NewPaddedEmbedder(embedder, PGEmbeddingDim)
 		}
 		if embedder.Dim() != PGEmbeddingDim {
-			statuses = append(statuses, ops.DependencyStatus{Name: "pgvector", Health: ops.Down,
+			statuses = append(statuses, ops.DependencyStatus{Name: "pgvector", Health: ops.HealthDown,
 				Detail: fmt.Sprintf("embedder dim %d > vector(%d) column", embedder.Dim(), PGEmbeddingDim)})
 		} else {
 			// Go sends vectors as pgvector text literals: no client adapter to be missing.
-			statuses = append(statuses, ops.DependencyStatus{Name: "pgvector", Health: ops.OK})
+			statuses = append(statuses, ops.DependencyStatus{Name: "pgvector", Health: ops.HealthOK})
 		}
 	}
 	mode := ops.DecideMemoryMode(statuses)

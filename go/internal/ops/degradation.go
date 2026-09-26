@@ -1,14 +1,3 @@
-// Package ops is dependency-degradation -> safe-park decisions (python: lha.ops.degradation).
-//
-// When a dependency fails, the agent shouldn't blindly retry forever. Critical deps (git, the
-// model, the sandbox) being DOWN means no verified progress is possible -> park. Optional deps
-// (Postgres, pgvector, embeddings, Langfuse, egress proxy) DOWN means degrade gracefully and keep
-// going.
-//
-// Memory degradation (DecideMemoryMode, used by the memory service): the dense channel of hybrid
-// retrieval needs its embedder and, on Postgres, pgvector. If any of postgres / pgvector /
-// embeddings is not OK, retrieval drops to LEXICAL only — BM25 over the stored memory + repo
-// chunks, plus `git grep` over the checkout — and the mission continues.
 package ops
 
 import (
@@ -17,59 +6,83 @@ import (
 	"strings"
 )
 
-// Health of a dependency.
+// Dependency degradation -> safe-park decisions (python/src/lha/ops/degradation.py).
+//
+// Critical dependencies (git, the model, the sandbox) being DOWN means no verified progress is
+// possible, so a durable mission parks (status DEGRADED_PARK) and re-probes health with backoff.
+// Optional dependencies (Postgres, pgvector, embeddings, Langfuse, the egress proxy) degrade
+// gracefully. DecideMemoryMode narrows memory retrieval to the lexical channels when the dense
+// channel's dependencies are not OK; it never parks.
+
+// Health is one dependency's health (values match the Python enum).
 type Health string
 
-// Health values.
+// The health values.
 const (
-	OK       Health = "ok"
-	Degraded Health = "degraded"
-	Down     Health = "down"
+	HealthOK       Health = "ok"
+	HealthDegraded Health = "degraded"
+	HealthDown     Health = "down"
 )
 
-var (
-	critical        = map[string]bool{"git": true, "model": true, "sandbox": true}
-	optional        = map[string]bool{"postgres": true, "pgvector": true, "embeddings": true, "langfuse": true, "egress_proxy": true}
-	memoryDenseDeps = map[string]bool{"postgres": true, "pgvector": true, "embeddings": true}
-)
+// Critical dependencies: without these no verified progress is possible, so the mission parks.
+var Critical = map[string]bool{"git": true, "model": true, "sandbox": true}
 
-// DependencyStatus is one dependency's health.
+// Optional dependencies degrade gracefully.
+var Optional = map[string]bool{
+	"postgres": true, "pgvector": true, "embeddings": true, "langfuse": true, "egress_proxy": true,
+}
+
+// MemoryDenseDeps are the optional dependencies the dense (vector) memory channel needs.
+var MemoryDenseDeps = map[string]bool{"postgres": true, "pgvector": true, "embeddings": true}
+
+// DependencyStatus is one probed dependency.
 type DependencyStatus struct {
 	Name   string
 	Health Health
 	Detail string
 }
 
-// SafeParkDecision says whether to park.
+// SafeParkDecision says whether to park, why, and which optionals are degraded.
 type SafeParkDecision struct {
 	Park     bool
 	Reason   string
 	Degraded []string
 }
 
-// DecideSafePark parks iff a CRITICAL dependency is DOWN (noting degraded optionals).
+// pyList renders names like Python's repr of a list of str: ['git', 'model'].
+func pyList(names []string) string {
+	quoted := make([]string, len(names))
+	for i, n := range names {
+		quoted[i] = "'" + n + "'"
+	}
+	return "[" + strings.Join(quoted, ", ") + "]"
+}
+
+// DecideSafePark parks iff a CRITICAL dependency is DOWN; otherwise continues, noting degraded
+// optionals (python: decide_safe_park).
 func DecideSafePark(statuses []DependencyStatus) SafeParkDecision {
-	downCritical, degraded := []string{}, []string{}
+	var downCritical []string
+	degraded := []string{}
 	for _, s := range statuses {
-		if s.Health == Down && critical[s.Name] {
+		if s.Health == HealthDown && Critical[s.Name] {
 			downCritical = append(downCritical, s.Name)
 		}
-		if s.Health != OK && optional[s.Name] {
+		if s.Health != HealthOK && Optional[s.Name] {
 			degraded = append(degraded, s.Name)
 		}
 	}
 	if len(downCritical) > 0 {
 		sort.Strings(downCritical)
-		quoted := make([]string, len(downCritical))
-		for i, n := range downCritical {
-			quoted[i] = "'" + n + "'"
+		return SafeParkDecision{
+			Park:     true,
+			Reason:   fmt.Sprintf("critical dependency down: %s", pyList(downCritical)),
+			Degraded: degraded,
 		}
-		return SafeParkDecision{Park: true, Reason: fmt.Sprintf("critical dependency down: [%s]", strings.Join(quoted, ", ")), Degraded: degraded}
 	}
 	return SafeParkDecision{Park: false, Reason: "operational (some optionals degraded)", Degraded: degraded}
 }
 
-// MemoryMode is how memory retrieval runs given the optional deps' health.
+// MemoryMode is how memory retrieval runs given the optional dependencies' health.
 type MemoryMode struct {
 	Dense    bool // use the embedder / vector index channel
 	GitGrep  bool // add `git grep` over the checkout as a lexical channel
@@ -85,38 +98,38 @@ func (m MemoryMode) Label() string {
 	return "lexical"
 }
 
-// DecideMemoryMode is hybrid (lexical + dense) iff every dense-channel dep is OK; else lexical +
-// git grep. Never parks: memory is optional.
+// DecideMemoryMode is hybrid (lexical + dense) iff every dense-channel dependency is OK; else
+// lexical + git grep (python: decide_memory_mode). Never parks.
 func DecideMemoryMode(statuses []DependencyStatus) MemoryMode {
-	degradedSet := map[string]bool{}
+	var degraded []string
 	for _, s := range statuses {
-		if memoryDenseDeps[s.Name] && s.Health != OK {
-			degradedSet[s.Name] = true
+		if MemoryDenseDeps[s.Name] && s.Health != HealthOK {
+			degraded = append(degraded, s.Name)
 		}
 	}
-	if len(degradedSet) == 0 {
-		return MemoryMode{Dense: true, GitGrep: false, Reason: "hybrid retrieval (BM25 + dense)", Degraded: []string{}}
-	}
-	degraded := make([]string, 0, len(degradedSet))
-	for name := range degradedSet {
-		degraded = append(degraded, name)
+	if len(degraded) == 0 {
+		return MemoryMode{Dense: true, Reason: "hybrid retrieval (BM25 + dense)", Degraded: []string{}}
 	}
 	sort.Strings(degraded)
+	bad := map[string]bool{}
+	for _, n := range degraded {
+		bad[n] = true
+	}
 	sorted := append([]DependencyStatus{}, statuses...)
 	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
-	details := []string{}
+	var details []string
 	for _, s := range sorted {
-		if !degradedSet[s.Name] {
-			continue
+		if bad[s.Name] {
+			detail := s.Detail
+			if detail == "" {
+				detail = string(s.Health)
+			}
+			details = append(details, s.Name+": "+detail)
 		}
-		detail := s.Detail
-		if detail == "" {
-			detail = string(s.Health)
-		}
-		details = append(details, s.Name+": "+detail)
 	}
 	return MemoryMode{
-		Dense: false, GitGrep: true,
+		Dense:    false,
+		GitGrep:  true,
 		Reason:   "lexical-only retrieval (BM25 + git grep): " + strings.Join(details, "; "),
 		Degraded: degraded,
 	}

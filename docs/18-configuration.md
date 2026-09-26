@@ -248,12 +248,15 @@ with the same names, defaults and validation (`lha config` prints the same outpu
 uses the model, governor, sandbox, web-tool, trusted-check, harness and human-gate settings
 (`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL`,
 `LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`), the mission store (`LHA_SQLITE_PATH`, `LHA_POSTGRES_DSN`,
-`LHA_POSTGRES_FALLBACK_TO_SQLITE`) and the `LHA_MEMORY_*` settings. Two memory values name
-Python-only extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
+`LHA_POSTGRES_FALLBACK_TO_SQLITE`), the `LHA_MEMORY_*` settings, and for its durable commands the
+Temporal and durable-gate settings (`LHA_TEMPORAL_*`, `LHA_TASK_QUEUE`, `LHA_OBJECT_STORE_ROOT`,
+`LHA_APPROVAL_TIMEOUT_S`, `LHA_DEADLOCK_GATE_DEFAULT`, `LHA_IMPOSSIBLE_AFTER_FAILURES`,
+`LHA_CYCLE_PAUSE_SECONDS`, `LHA_MODEL_PROBE_TIMEOUT_S`). Two memory values name Python-only
+extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
 `LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
 extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` is the Go choice for real embeddings).
-Settings of features that are Python-only are read but have no effect in a Go run: the Temporal
-settings (the Go CLI has no worker or `mission-*` commands), and `LHA_SANDBOX=e2b` is refused.
+The one Python-only feature a setting selects is the E2B sandbox: `LHA_SANDBOX=e2b` is refused.
+(The durable organization is chosen by `mission-start` options, not settings; Go refuses them.)
 See
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 

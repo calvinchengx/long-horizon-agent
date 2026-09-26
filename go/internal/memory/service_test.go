@@ -108,19 +108,19 @@ func TestDecideMemoryModeDropsDenseWhenAMemoryDepIsDown(t *testing.T) {
 		t.Fatalf("%+v", m)
 	}
 	for _, dep := range []string{"postgres", "pgvector", "embeddings"} {
-		m := ops.DecideMemoryMode([]ops.DependencyStatus{{Name: dep, Health: ops.Down, Detail: "gone"}})
+		m := ops.DecideMemoryMode([]ops.DependencyStatus{{Name: dep, Health: ops.HealthDown, Detail: "gone"}})
 		if m.Dense || !m.GitGrep || m.Label() != "lexical" || len(m.Degraded) != 1 || m.Degraded[0] != dep ||
 			!strings.Contains(m.Reason, "gone") || !strings.Contains(m.Reason, "git grep") {
 			t.Fatalf("%s: %+v", dep, m)
 		}
 	}
-	if !ops.DecideMemoryMode([]ops.DependencyStatus{{Name: "langfuse", Health: ops.Down}}).Dense {
+	if !ops.DecideMemoryMode([]ops.DependencyStatus{{Name: "langfuse", Health: ops.HealthDown}}).Dense {
 		t.Fatal("non-memory dep degraded memory")
 	}
-	if park := ops.DecideSafePark([]ops.DependencyStatus{{Name: "pgvector", Health: ops.Down}}); park.Park || park.Degraded[0] != "pgvector" {
+	if park := ops.DecideSafePark([]ops.DependencyStatus{{Name: "pgvector", Health: ops.HealthDown}}); park.Park || park.Degraded[0] != "pgvector" {
 		t.Fatalf("%+v", park)
 	}
-	if park := ops.DecideSafePark([]ops.DependencyStatus{{Name: "git", Health: ops.Down}}); !park.Park || park.Reason != "critical dependency down: ['git']" {
+	if park := ops.DecideSafePark([]ops.DependencyStatus{{Name: "git", Health: ops.HealthDown}}); !park.Park || park.Reason != "critical dependency down: ['git']" {
 		t.Fatalf("%+v", park)
 	}
 }

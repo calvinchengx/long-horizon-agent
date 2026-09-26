@@ -61,6 +61,9 @@ type ToolboxRequest struct {
 	AllowEgress *bool
 	// ApproveInteractive routes irreversible commands to a console y/N gate (else refused).
 	ApproveInteractive bool
+	// Gate, when set, answers irreversible commands instead (a durable cycle's
+	// DeferredApprovalGate: it queues them for a human and allows approved ones once).
+	Gate contracts.HITLGate
 }
 
 // ToolboxOpener opens the run's Toolbox. It must refuse an unsafe local sandbox (without

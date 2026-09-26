@@ -7,11 +7,12 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 when one is configured ([16-observability.md](16-observability.md)).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission`, `orchestrate`,
-`decisions`, `vendor`, `missions`, `costs`, `gates` and `db migrate` (Go needs no extra for
-`db migrate`: the Postgres driver is built in), and installs the trace exporter at start like
-Python; the durable commands (`worker`, `mission-*`) print that they are not yet available in Go
-and exit 2; see
+ported. `go/cmd/lha` implements every command: `version`, `config`, `run-local`, `mission`,
+`orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate` (Go needs no
+extra for `db migrate`: the Postgres driver is built in), `worker`, `mission-start`,
+`mission-status`, `mission-approve`, `mission-snooze` and `mission-abort`, and installs the trace
+exporter at start like Python. `mission-start`'s organization options (`--research`, `--review`
+and `--max-parallel` 2 or more) print that they are not yet available in Go and exit 2; see
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
