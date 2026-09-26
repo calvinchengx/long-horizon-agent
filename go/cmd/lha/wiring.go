@@ -45,11 +45,16 @@ var openToolbox agent.ToolboxOpener = func(ctx context.Context, req agent.Toolbo
 	if settings == nil {
 		return nil, errors.New("openToolbox: no settings")
 	}
+	// The egress allow-list is split by what a host accepts; a host in the wrong list is refused.
+	egressHosts, err := settings.SandboxEgressHosts()
+	if err != nil {
+		return nil, err
+	}
 	// BuildSandbox refuses 'local' without the opt-in (and an unknown / e2b kind) without any IO.
 	sandbox, err := execution.BuildSandbox(settings.Sandbox, execution.SandboxOptions{
 		AllowUnsafeLocal: settings.AllowUnsafeLocal,
 		Image:            settings.SandboxImage,
-		EgressHosts:      settings.SandboxEgressHosts(),
+		EgressHosts:      egressHosts,
 		Memory:           settings.SandboxMemory,
 		CPUs:             settings.SandboxCPUs,
 		TmpSize:          settings.SandboxTmpSize,

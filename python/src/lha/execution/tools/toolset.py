@@ -12,7 +12,10 @@ tools and the Rule of Two are wired identically everywhere:
   configured size/timeout limits and a ``CredentialBroker`` built from ``LHA_WEB_CREDENTIALS``
   whose secrets are bound to allow-listed hosts only.
 - **Rule of Two (fail closed).** Web tools give the run ``UNTRUSTED_CONTENT`` and
-  ``EXTERNAL_COMMS``. The run holds ``PRIVATE_DATA`` when ``LHA_PRIVATE_DATA=true`` or when the
+  ``EXTERNAL_COMMS``, and so does sandbox egress (``LHA_SANDBOX_EGRESS*`` with a docker
+  sandbox): code in the sandbox can send data to any allowed host, bypassing the command
+  classifier through an interpreter one-liner, and third-party packages are untrusted input.
+  The run holds ``PRIVATE_DATA`` when ``LHA_PRIVATE_DATA=true`` or when the
   sandbox is ``local`` (the agent's shell then runs on the host, with the host's files,
   credentials and network: unrestricted state-changing tools). All three together raise
   ``RuleOfTwoViolation`` before anything runs — even if a human gate is configured.
@@ -82,15 +85,31 @@ def run_capabilities(settings: Settings, *, web: bool | None = None) -> set[Capa
     """The Rule-of-Two capability set of a run under ``settings``."""
     web = web_enabled(settings) if web is None else web
     caps: set[Capability] = set()
-    if web:
+    if web or settings.sandbox_egress_enabled():
         caps |= {Capability.UNTRUSTED_CONTENT, Capability.EXTERNAL_COMMS}
     if settings.private_data or settings.sandbox == "local":
         caps.add(Capability.PRIVATE_DATA)
     return caps
 
 
+def _sandbox_egress_entries(settings: Settings) -> list[str]:
+    """The three sandbox egress lists as written (for messages: no validation)."""
+    raw = (
+        settings.sandbox_egress,
+        settings.sandbox_egress_extra_hosts,
+        settings.sandbox_egress_allow_write_hosts,
+    )
+    return list(dict.fromkeys(h.strip() for value in raw for h in value.split(",") if h.strip()))
+
+
 def check_run_rule_of_two(settings: Settings, *, web: bool | None = None) -> None:
-    """Fail closed if the run would hold untrusted content + private data + external comms."""
+    """Fail closed if the run would hold untrusted content + private data + external comms.
+
+    Web tools and sandbox egress each bring untrusted content and external comms: code in a
+    sandbox with egress can send the workspace to any allowed host, and what it downloads
+    (third-party packages) is untrusted input the agent reads.
+    """
+    web = web_enabled(settings) if web is None else web
     caps = run_capabilities(settings, web=web)
     try:
         check_rule_of_two(caps)
@@ -101,11 +120,27 @@ def check_run_rule_of_two(settings: Settings, *, web: bool | None = None) -> Non
             if settings.sandbox == "local"
             else "LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data"
         )
+        sources: list[str] = []
+        clear: list[str] = []
+        if web:
+            sources.append(
+                f"web tools are enabled (egress allow-list: "
+                f"{', '.join(sorted(egress_hosts(settings)))})"
+            )
+            clear.append("LHA_WEB_ALLOW_HOSTS / --allow-host")
+        if settings.sandbox_egress_enabled():
+            sources.append(
+                f"the sandbox can reach the network (sandbox egress: "
+                f"{', '.join(_sandbox_egress_entries(settings))})"
+            )
+            clear.append(
+                "LHA_SANDBOX_EGRESS / LHA_SANDBOX_EGRESS_EXTRA_HOSTS / "
+                "LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS"
+            )
         raise RuleOfTwoViolation(
-            f"refusing to start: web tools are enabled (egress allow-list: "
-            f"{', '.join(sorted(egress_hosts(settings)))}), which brings untrusted content and "
+            f"refusing to start: {' and '.join(sources)}, which brings untrusted content and "
             f"external comms, and {why}. {exc}. Use a docker/e2b sandbox without private data, "
-            f"or clear the allow-list (LHA_WEB_ALLOW_HOSTS / --allow-host)."
+            f"or clear the allow-list ({'; '.join(clear)})."
         ) from exc
 
 
@@ -187,9 +222,12 @@ def web_tools(settings: Settings, *, io: WebIO | None = None) -> list[Tool]:
 def preflight_run_tools(settings: Settings) -> None:
     """Validate a run's tool configuration up front (before any planning spend).
 
-    Raises ``RuleOfTwoViolation`` (lethal trifecta) or ``WebConfigError`` (bad web settings).
+    Raises ``RuleOfTwoViolation`` (lethal trifecta), ``SandboxEgressError`` (a host in the wrong
+    sandbox egress list) or ``WebConfigError`` (bad web settings).
     """
     check_run_rule_of_two(settings)
+    if settings.sandbox_egress_enabled():
+        settings.sandbox_egress_hosts()
     web_tools(settings)
 
 

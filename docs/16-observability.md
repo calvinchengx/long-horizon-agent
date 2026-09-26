@@ -36,7 +36,9 @@ Event kinds emitted today:
 | `tool_call` | `AgentLoop` | `tool`, `ok` |
 | `invalid_reply` | `AgentLoop` | `reason` |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict` |
+| `claude_code_session` | `AgentLoop` (the `claude_code` lead engine) | `turns`, `tool_calls`, `session_id`, `stopped` |
 | `check_quarantined`, `quarantined_check_failed` | `AgentLoop` (from the verifier) | `check`, `revision`, `passes`, `fails` (also committed to `.lha/events.ndjson`; see [07-verification.md](07-verification.md#flaky-check-quarantine)) |
+| `sandbox_egress` | `AgentLoop` (from the Docker sandbox's egress proxy log) | `decision` (`allow`, `deny`, `fail`), `method`, `host`, `port`, `detail` (the address connected to, or the reason), `count` (requests with that decision, method, host and port in the cycle). Also committed to `.lha/events.ndjson`; see [09-safety-model.md](09-safety-model.md#sandbox-network) |
 | `governor_block` | runner, orchestrator | `reason` |
 | `deadlocked` | runner, orchestrator | `reason` |
 | `loop_detected` | runner | `item_id` |
@@ -47,6 +49,8 @@ Event kinds emitted today:
 | `parallel_wave` | orchestrator | the items of a parallel wave |
 | `integration` | orchestrator | `item`, `merged`, `branch`, `reason` |
 | `ownership_violation`, `ownership_released` | orchestrator | writer and paths |
+| `lease` | orchestrator | `writer`, `path`, `granted`, `why` (one per lease request of an implementer) |
+| `resumed` | orchestrator (`--resume`) | `run`, `cycle_offset`, `board` |
 | `memory_degraded`, `memory_error`, `memory_consolidated`, `skill_stored` | memory service | reason or counts ([12-memory.md](12-memory.md)) |
 
 Model spend is recorded by the metering wrapper, not by `llm_turn` events.

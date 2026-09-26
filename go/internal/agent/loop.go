@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
@@ -194,7 +196,8 @@ func (l *AgentLoop) RunCycle(ctx context.Context, tctx contracts.ToolContext, mi
 	if err != nil {
 		return CycleOutcome{}, err
 	}
-	head, err := l.checkpoint(ctx, &checklist, item.ID, cycleID, verification, act.toolCalls, missionText, missionID)
+	egress := l.egressEvents(ctx, cs.tctx.Session, missionID, cycleID)
+	head, err := l.checkpoint(ctx, &checklist, item.ID, cycleID, verification, act.toolCalls, missionText, missionID, egress)
 	if err != nil {
 		return CycleOutcome{}, err
 	}
@@ -379,7 +382,7 @@ func (l *AgentLoop) withIntegrity(ctx context.Context, v contracts.VerificationR
 	return v.WithResults([]contracts.CheckResult{verify.IntegrityResult(cs.tampered)}), nil
 }
 
-func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checklist, itemID, cycleID string, v contracts.VerificationResult, toolCalls int, missionText, missionID string) (string, error) {
+func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checklist, itemID, cycleID string, v contracts.VerificationResult, toolCalls int, missionText, missionID string, egress []contracts.EventRecord) (string, error) {
 	splitInto := []string{}
 	rolledBack := []string{}
 	var verb, note string
@@ -443,6 +446,8 @@ func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checkli
 		})
 	}
 	events := l.gateEvents(cycleID)
+	events = append(events, l.verifierEvents(missionID, cycleID)...)
+	events = append(events, egress...)
 	events = append(events, contracts.EventRecord{
 		Kind:    "cycle",
 		CycleID: cycleID,
@@ -543,6 +548,68 @@ func (l *AgentLoop) gateEvents(cycleID string) []contracts.EventRecord {
 		events = append(events, e)
 	}
 	return events
+}
+
+// verifierEvents are the flaky-check quarantine events the verifier kept this cycle (committed
+// with it, and recorded in the trace).
+func (l *AgentLoop) verifierEvents(missionID, cycleID string) []contracts.EventRecord {
+	drainer, ok := l.opts.Verifier.(EventDrainer)
+	if !ok {
+		return []contracts.EventRecord{}
+	}
+	events := []contracts.EventRecord{}
+	for _, e := range drainer.DrainEvents() {
+		e.CycleID = cycleID
+		events = append(events, e)
+		l.emit(e.Kind, missionID, cycleID, payloadFields(e.Payload)...)
+	}
+	return events
+}
+
+// EgressEventDrainer is implemented by sandbox sessions that route egress through a proxy whose
+// requests become sandbox_egress events (the Docker sandbox with an egress allow-list).
+type EgressEventDrainer interface {
+	DrainEgressEvents(ctx context.Context) []contracts.EventRecord
+}
+
+// egressEvents are the sandbox egress proxy's requests this cycle (committed with it, and
+// recorded in the trace) (python: _egress_events). Reading them never fails the cycle.
+func (l *AgentLoop) egressEvents(ctx context.Context, session contracts.SandboxSession, missionID, cycleID string) []contracts.EventRecord {
+	drainer, ok := session.(EgressEventDrainer)
+	if !ok {
+		return nil
+	}
+	events := []contracts.EventRecord{}
+	for _, e := range drainer.DrainEgressEvents(ctx) {
+		e.CycleID = cycleID
+		events = append(events, e)
+		l.emit(e.Kind, missionID, cycleID, payloadFields(e.Payload)...)
+	}
+	return events
+}
+
+// payloadFields orders an event payload for the trace: the flaky events' keys in Python's order,
+// then any other keys sorted.
+func payloadFields(payload map[string]any) []obs.Field {
+	fields := []obs.Field{}
+	seen := map[string]bool{}
+	for _, k := range append(append([]string{}, verify.QuarantineEventFields...), egressproxy.EgressEventFields...) {
+		if v, ok := payload[k]; ok {
+			fields = append(fields, obs.F(k, v))
+			seen[k] = true
+		}
+	}
+	rest := []string{}
+	for k := range payload {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	for _, k := range rest {
+		fields = append(fields, obs.F(k, payload[k]))
+	}
+	return fields
 }
 
 func (l *AgentLoop) emit(kind, missionID, cycleID string, data ...obs.Field) {

@@ -1,8 +1,25 @@
 """Central configuration.
 
 A single ``Settings`` object, populated from environment variables (prefix ``LHA_``)
-and an optional ``.env`` file. Nothing in the codebase reads ``os.environ`` directly;
-everything goes through here so configuration is one auditable surface.
+and an optional ``.env`` file. Every LHA setting is read here and nowhere else, so configuration
+is one auditable surface. The few direct ``os.environ`` reads elsewhere are deliberate, and none
+of them reads an LHA setting:
+
+* ``execution/proc.py`` (``child_env``), ``state/git_ops.py`` (``_git_env``),
+  ``verify/trusted.py`` (trusted checks) and ``model/claude_code.py`` (``child_env``) build a
+  child process's environment from this one: only an allowlisted subset for sandboxed commands;
+  the host environment plus fixed overrides for ``git``, trusted host-side checks and the
+  ``claude`` CLI (which needs its own login and ``ANTHROPIC_*``/``CLAUDE_*`` variables).
+* ``persistence/store.py`` (``default_sqlite_path``) follows the platform conventions
+  ``XDG_DATA_HOME`` and ``LOCALAPPDATA`` for the default store location; ``LHA_SQLITE_PATH``
+  (``sqlite_path``) overrides it.
+* ``execution/egress_proxy.py``'s ``_main`` runs only when the file is executed as a standalone
+  script inside the egress proxy container, where ``Settings`` is not available; it reads
+  ``LHA_PROXY_ALLOW`` and ``LHA_PROXY_PORT`` (set by the Docker sandbox) and ``LHA_PROXY_BIND``.
+
+Third-party libraries also read their own standard variables (the OpenTelemetry OTLP exporter
+reads ``OTEL_EXPORTER_OTLP_HEADERS``, for example), and tests read their ``LHA_IT_*`` and
+``LHA_RECORD_HISTORY`` switches directly; neither is application configuration.
 
 Secrets (API keys, the Postgres DSN which embeds a password) are ``SecretStr`` so ``repr``/logs
 never show them; read the raw value only at the point of use via ``.get_secret_value()``. Use
@@ -109,10 +126,19 @@ class Settings(BaseSettings):
     # Docker image the sandbox runs (needs the toolchains the checks use: this default has Python
     # and uv; see sandbox/Dockerfile for a Go + uv + Node/pnpm image).
     sandbox_image: str = "ghcr.io/astral-sh/uv:python3.12-bookworm-slim"
-    # Comma-separated hosts the SANDBOX may reach (package registries, e.g.
-    # "proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org"). Empty = no network.
-    # Enforced by an egress proxy on an internal Docker network, not by the agent's goodwill.
+    # Hosts the Docker SANDBOX may reach, enforced by an egress proxy on an internal Docker
+    # network (not by the agent's goodwill); all three empty = no network. Split by what a host
+    # lets code in the sandbox do (lha.execution.egress_hosts):
+    # - sandbox_egress: package-registry download hosts only, from a fixed list (pypi.org,
+    #   files.pythonhosted.org, registry.npmjs.org, proxy.golang.org, sum.golang.org,
+    #   storage.googleapis.com, crates.io, static.crates.io, index.crates.io);
+    # - sandbox_egress_extra_hosts: any other host, except known push/upload hosts;
+    # - sandbox_egress_allow_write_hosts: hosts accepted although code in the sandbox can push or
+    #   upload there (github.com, *.amazonaws.com, upload.pypi.org, ...).
+    # Any of them makes the run hold untrusted input + external comms (Rule of Two).
     sandbox_egress: str = ""
+    sandbox_egress_extra_hosts: str = ""
+    sandbox_egress_allow_write_hosts: str = ""
     # Docker sandbox resource limits (memory incl. swap, in Docker's notation; CPUs). A large
     # build needs more than the default: Go compiling a big dependency is OOM-killed at 2g.
     sandbox_memory: str = "2g"
@@ -265,7 +291,26 @@ class Settings(BaseSettings):
         return self
 
     def sandbox_egress_hosts(self) -> list[str]:
-        return _csv(self.sandbox_egress)
+        """The Docker sandbox's egress allow-list from the three ``sandbox_egress*`` settings.
+
+        Raises ``SandboxEgressError`` (a ``ValueError``) for a malformed entry, a non-package-fetch
+        host in ``LHA_SANDBOX_EGRESS`` or a known write host in ``LHA_SANDBOX_EGRESS_EXTRA_HOSTS``.
+        """
+        from lha.execution.egress_hosts import sandbox_allow_list
+
+        return sandbox_allow_list(
+            _csv(self.sandbox_egress),
+            _csv(self.sandbox_egress_extra_hosts),
+            _csv(self.sandbox_egress_allow_write_hosts),
+        )
+
+    def sandbox_egress_enabled(self) -> bool:
+        """True when a docker sandbox gets network through the egress proxy (any list set)."""
+        return self.sandbox == "docker" and bool(
+            _csv(self.sandbox_egress)
+            or _csv(self.sandbox_egress_extra_hosts)
+            or _csv(self.sandbox_egress_allow_write_hosts)
+        )
 
     def web_hosts(self) -> list[str]:
         return _csv(self.web_allow_hosts)

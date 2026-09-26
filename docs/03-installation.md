@@ -122,7 +122,10 @@ Each sandbox session then gets its own `--internal` Docker network (no route out
 container (`python:3.12-alpine`, running
 [`egress_proxy.py`](../python/src/lha/execution/egress_proxy.py)) that is the only way out and
 forwards only to the listed hosts. The first run pulls that image. Both are removed when the
-session closes. See [safety model](09-safety-model.md#sandbox-network).
+session closes. `LHA_SANDBOX_EGRESS` takes package-registry download hosts only; any other host
+goes in `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, and a host that accepts pushes or uploads (such as
+`github.com`) in `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`, because code in the sandbox can send
+data to every host it can reach. See [safety model](09-safety-model.md#sandbox-network).
 
 ## Local service stack
 

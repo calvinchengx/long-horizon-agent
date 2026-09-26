@@ -27,7 +27,7 @@ type FlakyQuarantine struct {
 	flaky   map[string]bool
 }
 
-// NewFlakyQuarantine returns a quarantine (Python defaults: minFlips=1, minRuns=3). minFlips is
+// NewFlakyQuarantine returns a quarantine (Python defaults: minFlips=1, minRuns=2). minFlips is
 // clamped to >= 1 and minRuns to >= 2.
 func NewFlakyQuarantine(minFlips, minRuns int) *FlakyQuarantine {
 	return &FlakyQuarantine{
@@ -38,8 +38,8 @@ func NewFlakyQuarantine(minFlips, minRuns int) *FlakyQuarantine {
 	}
 }
 
-// NewDefaultFlakyQuarantine is NewFlakyQuarantine(1, 3).
-func NewDefaultFlakyQuarantine() *FlakyQuarantine { return NewFlakyQuarantine(1, 3) }
+// NewDefaultFlakyQuarantine is NewFlakyQuarantine(1, 2) (python: FlakyQuarantine()).
+func NewDefaultFlakyQuarantine() *FlakyQuarantine { return NewFlakyQuarantine(1, 2) }
 
 // Record records one observed outcome of check name on code revision (e.g. a git sha).
 func (q *FlakyQuarantine) Record(name, revision string, passed bool) {
@@ -60,6 +60,16 @@ func (q *FlakyQuarantine) Record(name, revision string, passed bool) {
 	} else {
 		counts[1]++
 	}
+}
+
+// Counts returns (passes, fails) of name on revision.
+func (q *FlakyQuarantine) Counts(name, revision string) (passes, fails int) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if c := q.history[name][revision]; c != nil {
+		return c[0], c[1]
+	}
+	return 0, 0
 }
 
 // RecordResults records every result on revision.
@@ -97,6 +107,15 @@ func (q *FlakyQuarantine) MarkFlaky(name string) error {
 	}
 	q.flaky[name] = true
 	return nil
+}
+
+// Restore re-applies quarantines recorded earlier (committed check_quarantined events).
+func (q *FlakyQuarantine) Restore(names map[string]bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for name := range names {
+		q.flaky[name] = true
+	}
 }
 
 // IsFlaky reports whether name is quarantined.

@@ -228,7 +228,7 @@ func TestMarkFlakyRequiresEvidence(t *testing.T) {
 	q := NewDefaultFlakyQuarantine()
 	var fe *FlakeEvidenceError
 	err := q.MarkFlaky("pytest")
-	if !errors.As(err, &fe) || err.Error() != "refusing to quarantine 'pytest': no recorded pass+fail on the same revision (need >= 1 of each over >= 3 runs)" {
+	if !errors.As(err, &fe) || err.Error() != "refusing to quarantine 'pytest': no recorded pass+fail on the same revision (need >= 1 of each over >= 2 runs)" {
 		t.Fatal(err)
 	}
 	// Failing on different revisions is a regression, not a flake.

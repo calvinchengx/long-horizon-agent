@@ -1,8 +1,8 @@
 # Testing
 
 Both implementations are tested independently, and both run the shared cases in `spec/`. CI
-([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs the Python suites; the Go suite
-is run locally.
+([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs the Python suites and the Go
+suite.
 
 ## Python test layout
 
@@ -181,12 +181,13 @@ On every push to `main` and every pull request:
 | Job | Steps |
 |---|---|
 | `python-check` | `uv sync --locked`; `ruff check`; `ruff format --check`; `ty check`; `pytest tests/unit` with coverage; `pytest tests/durability tests/load` with coverage appended (12-minute timeout); `coverage report` (fails under 90%) |
+| `go` | Go 1.26 with the module cache; uv and `uv sync --locked` in `python/` (the cross-implementation tests run the Python implementation); `gofmt -l .` must print nothing; `go vet ./...`; `GOOS=windows go vet ./...`; `go test -race ./...` (15-minute timeout) |
 | `python-services-integration` | a `pgvector/pgvector:pg16` service container; `uv sync --locked --extra postgres --extra sandbox`; Go 1.26 (for the trusted `go run` check); `docker build -t lha-sandbox:dev sandbox/`; `pytest tests/integration` with `LHA_IT_POSTGRES_DSN` and `LHA_IT_DOCKER=1` set (20-minute timeout) |
 
 A separate workflow, [`docs-site.yml`](../.github/workflows/docs-site.yml), builds this
 documentation site on changes to `docs/` or `website/`.
 
-No CI job builds or tests the Go module.
+The Go Docker integration tests (`LHA_IT_DOCKER`) are not run by the `go` job.
 
 ## Spec conformance tests
 

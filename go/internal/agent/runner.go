@@ -143,9 +143,35 @@ func loadSettings(s *config.Settings) (*config.Settings, error) {
 var LeadEngineError = errors.New("LHA_LEAD_ENGINE=claude_code (one claude -p session per cycle) is not yet " +
 	"available in the Go implementation; use the Python lha or LHA_LEAD_ENGINE=loop")
 
+// LeadVerifier is the lead's verifier (python: lead_verifier): sandbox checks in the sandbox,
+// operator trusted: checks on the trusted runner, and a failing gating check re-run up to
+// LHA_FLAKY_RETRIES times with proven flakes quarantined (verify.FlakyRetryVerifier).
+func LeadVerifier(workdir string, settings *config.Settings) *verify.FlakyRetryVerifier {
+	return leadVerifierWith(workdir, settings, trustedRunnerFor(settings))
+}
+
+// trustedRunnerFor is the trusted-check runner with the operator's LHA_TRUSTED_CHECK_ENV
+// allow-list. An invalid allow-list (already refused by BuildLeadLoop) falls back to the most
+// restrictive runner, which passes no operator variables through.
+func trustedRunnerFor(settings *config.Settings) *verify.CommandTrustedRunner {
+	if names, err := settings.TrustedCheckEnvNames(); err == nil {
+		if runner, err := verify.NewCommandTrustedRunnerWithEnv(names); err == nil {
+			return runner
+		}
+	}
+	return verify.NewCommandTrustedRunner()
+}
+
+func leadVerifierWith(workdir string, settings *config.Settings, runner *verify.CommandTrustedRunner) *verify.FlakyRetryVerifier {
+	return verify.NewFlakyRetryVerifier(
+		verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), runner, workdir),
+		settings.FlakyRetries, workdir)
+}
+
 // BuildLeadLoop is the lead's AgentLoop with every capability wired from settings (python:
-// build_lead_loop): the TrustedAwareVerifier (sandbox checks in the sandbox, trusted: checks on
-// the host), operator-protected harness globs, the trusted-check map and the replanner.
+// build_lead_loop): the LeadVerifier (sandbox checks in the sandbox, trusted: checks on the
+// host, flaky re-runs and quarantine), operator-protected harness globs, the trusted-check map
+// and the replanner.
 func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider, anchor *state.GitMissionAnchor, dispatcher contracts.ToolDispatcher, recorder *obs.TraceRecorder) (*AgentLoop, error) {
 	if settings.LeadEngine == "claude_code" {
 		return nil, LeadEngineError
@@ -165,7 +191,7 @@ func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 	opts := DefaultLoopOptions()
 	opts.Model = leadModel
 	opts.Dispatcher = dispatcher
-	opts.Verifier = verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), runner, anchor.Workdir())
+	opts.Verifier = leadVerifierWith(anchor.Workdir(), settings, runner)
 	opts.Anchor = anchor
 	opts.Recorder = recorder
 	opts.MaxTurns = settings.MaxTurnsPerCycle

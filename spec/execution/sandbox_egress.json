@@ -1,0 +1,352 @@
+{
+ "package_fetch_hosts": [
+  "pypi.org",
+  "files.pythonhosted.org",
+  "registry.npmjs.org",
+  "proxy.golang.org",
+  "sum.golang.org",
+  "storage.googleapis.com",
+  "crates.io",
+  "static.crates.io",
+  "index.crates.io"
+ ],
+ "write_hosts": [
+  ".github.com",
+  ".gitlab.com",
+  ".bitbucket.org",
+  ".codeberg.org",
+  ".sr.ht",
+  ".dev.azure.com",
+  ".visualstudio.com",
+  ".huggingface.co",
+  "upload.pypi.org",
+  ".test.pypi.org",
+  ".amazonaws.com",
+  ".blob.core.windows.net",
+  ".r2.cloudflarestorage.com",
+  ".digitaloceanspaces.com",
+  ".backblazeb2.com",
+  ".docker.io",
+  "ghcr.io",
+  ".pkg.dev",
+  ".pastebin.com",
+  "transfer.sh",
+  "hooks.slack.com",
+  ".discord.com",
+  ".webhook.site"
+ ],
+ "allow_list": [
+  {
+   "egress": [],
+   "extra": [],
+   "write": [],
+   "hosts": [],
+   "error": null
+  },
+  {
+   "egress": [
+    "proxy.golang.org",
+    "sum.golang.org",
+    "storage.googleapis.com"
+   ],
+   "extra": [],
+   "write": [],
+   "hosts": [
+    "proxy.golang.org",
+    "sum.golang.org",
+    "storage.googleapis.com"
+   ],
+   "error": null
+  },
+  {
+   "egress": [
+    "PyPI.org.",
+    "files.pythonhosted.org",
+    "pypi.org"
+   ],
+   "extra": [],
+   "write": [],
+   "hosts": [
+    "pypi.org",
+    "files.pythonhosted.org"
+   ],
+   "error": null
+  },
+  {
+   "egress": [
+    "github.com"
+   ],
+   "extra": [],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS entry github.com is not a package-fetch host (pypi.org, files.pythonhosted.org, registry.npmjs.org, proxy.golang.org, sum.golang.org, storage.googleapis.com, crates.io, static.crates.io, index.crates.io); list any other host in LHA_SANDBOX_EGRESS_EXTRA_HOSTS, or one that accepts pushes or uploads in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS"
+  },
+  {
+   "egress": [
+    ".golang.org"
+   ],
+   "extra": [],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS entry .golang.org is not a package-fetch host (pypi.org, files.pythonhosted.org, registry.npmjs.org, proxy.golang.org, sum.golang.org, storage.googleapis.com, crates.io, static.crates.io, index.crates.io); list any other host in LHA_SANDBOX_EGRESS_EXTRA_HOSTS, or one that accepts pushes or uploads in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS"
+  },
+  {
+   "egress": [
+    "pypi.org:8443"
+   ],
+   "extra": [],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS entry pypi.org:8443 is not a package-fetch host (pypi.org, files.pythonhosted.org, registry.npmjs.org, proxy.golang.org, sum.golang.org, storage.googleapis.com, crates.io, static.crates.io, index.crates.io); list any other host in LHA_SANDBOX_EGRESS_EXTRA_HOSTS, or one that accepts pushes or uploads in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS"
+  },
+  {
+   "egress": [
+    "10.0.0.1"
+   ],
+   "extra": [],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS: invalid egress allow-list entry '10.0.0.1' (expected a DNS name)"
+  },
+  {
+   "egress": [],
+   "extra": [
+    "mirror.internal.example",
+    ".docs.example"
+   ],
+   "write": [],
+   "hosts": [
+    "mirror.internal.example",
+    ".docs.example"
+   ],
+   "error": null
+  },
+  {
+   "egress": [],
+   "extra": [
+    "api.github.com"
+   ],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS_EXTRA_HOSTS entry api.github.com reaches .github.com, which accepts pushes or uploads: code in the sandbox could send the workspace there. List it in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS to accept that"
+  },
+  {
+   "egress": [],
+   "extra": [
+    ".com"
+   ],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS_EXTRA_HOSTS entry .com reaches .github.com, which accepts pushes or uploads: code in the sandbox could send the workspace there. List it in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS to accept that"
+  },
+  {
+   "egress": [],
+   "extra": [
+    "bucket.s3.eu-west-1.amazonaws.com"
+   ],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS_EXTRA_HOSTS entry bucket.s3.eu-west-1.amazonaws.com reaches .amazonaws.com, which accepts pushes or uploads: code in the sandbox could send the workspace there. List it in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS to accept that"
+  },
+  {
+   "egress": [],
+   "extra": [
+    ".pypi.org"
+   ],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS_EXTRA_HOSTS entry .pypi.org reaches upload.pypi.org, which accepts pushes or uploads: code in the sandbox could send the workspace there. List it in LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS to accept that"
+  },
+  {
+   "egress": [],
+   "extra": [
+    "http://x.org"
+   ],
+   "write": [],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS_EXTRA_HOSTS: invalid port in egress allow-list entry 'http://x.org'"
+  },
+  {
+   "egress": [],
+   "extra": [],
+   "write": [
+    "github.com",
+    ".amazonaws.com",
+    "upload.pypi.org"
+   ],
+   "hosts": [
+    "github.com",
+    ".amazonaws.com",
+    "upload.pypi.org"
+   ],
+   "error": null
+  },
+  {
+   "egress": [],
+   "extra": [],
+   "write": [
+    "x.org:99999"
+   ],
+   "hosts": null,
+   "error": "LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS: invalid port in egress allow-list entry 'x.org:99999'"
+  },
+  {
+   "egress": [
+    "pypi.org"
+   ],
+   "extra": [
+    "pypi.org",
+    "mirror.example"
+   ],
+   "write": [
+    "mirror.example",
+    "github.com"
+   ],
+   "hosts": [
+    "pypi.org",
+    "mirror.example",
+    "github.com"
+   ],
+   "error": null
+  }
+ ],
+ "rule_of_two": [
+  {
+   "env": {
+    "sandbox_egress": "pypi.org"
+   },
+   "egress_enabled": true,
+   "error": null
+  },
+  {
+   "env": {
+    "sandbox_egress": "pypi.org",
+    "private_data": "true"
+   },
+   "egress_enabled": true,
+   "error": "refusing to start: the sandbox can reach the network (sandbox egress: pypi.org), which brings untrusted content and external comms, and LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data. session would hold untrusted content + private data + external comms (the lethal trifecta); split capabilities across sessions. Use a docker/e2b sandbox without private data, or clear the allow-list (LHA_SANDBOX_EGRESS / LHA_SANDBOX_EGRESS_EXTRA_HOSTS / LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS)."
+  },
+  {
+   "env": {
+    "sandbox_egress_allow_write_hosts": "github.com, gitlab.com",
+    "private_data": "true"
+   },
+   "egress_enabled": true,
+   "error": "refusing to start: the sandbox can reach the network (sandbox egress: github.com, gitlab.com), which brings untrusted content and external comms, and LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data. session would hold untrusted content + private data + external comms (the lethal trifecta); split capabilities across sessions. Use a docker/e2b sandbox without private data, or clear the allow-list (LHA_SANDBOX_EGRESS / LHA_SANDBOX_EGRESS_EXTRA_HOSTS / LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS)."
+  },
+  {
+   "env": {
+    "sandbox_egress": "pypi.org",
+    "web_allow_hosts": "b.test,a.test",
+    "private_data": "true"
+   },
+   "egress_enabled": true,
+   "error": "refusing to start: web tools are enabled (egress allow-list: a.test, b.test) and the sandbox can reach the network (sandbox egress: pypi.org), which brings untrusted content and external comms, and LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data. session would hold untrusted content + private data + external comms (the lethal trifecta); split capabilities across sessions. Use a docker/e2b sandbox without private data, or clear the allow-list (LHA_WEB_ALLOW_HOSTS / --allow-host; LHA_SANDBOX_EGRESS / LHA_SANDBOX_EGRESS_EXTRA_HOSTS / LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS)."
+  },
+  {
+   "env": {
+    "web_allow_hosts": "docs.test",
+    "private_data": "true"
+   },
+   "egress_enabled": false,
+   "error": "refusing to start: web tools are enabled (egress allow-list: docs.test), which brings untrusted content and external comms, and LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data. session would hold untrusted content + private data + external comms (the lethal trifecta); split capabilities across sessions. Use a docker/e2b sandbox without private data, or clear the allow-list (LHA_WEB_ALLOW_HOSTS / --allow-host)."
+  },
+  {
+   "env": {
+    "sandbox": "local",
+    "sandbox_egress": "pypi.org"
+   },
+   "egress_enabled": false,
+   "error": null
+  },
+  {
+   "env": {
+    "sandbox": "local",
+    "allow_unsafe_local": "true",
+    "web_allow_hosts": "docs.test"
+   },
+   "egress_enabled": false,
+   "error": "refusing to start: web tools are enabled (egress allow-list: docs.test), which brings untrusted content and external comms, and LHA_SANDBOX=local runs the agent's shell on this host (host files, credentials and network). session would hold untrusted content + private data + external comms (the lethal trifecta); split capabilities across sessions. Use a docker/e2b sandbox without private data, or clear the allow-list (LHA_WEB_ALLOW_HOSTS / --allow-host)."
+  },
+  {
+   "env": {
+    "sandbox": "e2b",
+    "sandbox_egress": "pypi.org",
+    "private_data": "true"
+   },
+   "egress_enabled": false,
+   "error": null
+  },
+  {
+   "env": {
+    "private_data": "true"
+   },
+   "egress_enabled": false,
+   "error": null
+  }
+ ],
+ "proxy_log": {
+  "lines": [
+   "2026-09-26 10:00:00,001 INFO lha-egress-proxy listening on 0.0.0.0:3128 allow=pypi.org",
+   "2026-09-26 10:00:01,000 INFO allow CONNECT pypi.org:443 -> 151.101.0.223:443",
+   "2026-09-26 10:00:01,500 INFO allow CONNECT pypi.org:443 -> 151.101.64.223:443",
+   "2026-09-26 10:00:02,000 WARNING deny CONNECT github.com:443: host not in egress allow-list: github.com",
+   "2026-09-26 10:00:03,000 WARNING deny GET http://example.org:8080/x?token=abc: host not in egress allow-list: example.org",
+   "2026-09-26 10:00:03,500 INFO allow GET http://files.example/a -> 93.184.216.34:80",
+   "2026-09-26 10:00:04,000 WARNING fail CONNECT [2001:db8::1]:8443: upstream unreachable: x",
+   "2026-09-26 10:00:05,000 WARNING deny CONNECT 10.0.0.1:443: IP-literal hosts are not allowed: 10.0.0.1",
+   "2026-09-26 10:00:06,000 ERROR error: boom",
+   "not a log line"
+  ],
+  "events": [
+   {
+    "decision": "allow",
+    "method": "CONNECT",
+    "host": "pypi.org",
+    "port": 443,
+    "detail": "151.101.0.223:443",
+    "count": 2
+   },
+   {
+    "decision": "deny",
+    "method": "CONNECT",
+    "host": "github.com",
+    "port": 443,
+    "detail": "host not in egress allow-list: github.com",
+    "count": 1
+   },
+   {
+    "decision": "deny",
+    "method": "GET",
+    "host": "example.org",
+    "port": 8080,
+    "detail": "host not in egress allow-list: example.org",
+    "count": 1
+   },
+   {
+    "decision": "allow",
+    "method": "GET",
+    "host": "files.example",
+    "port": 80,
+    "detail": "93.184.216.34:80",
+    "count": 1
+   },
+   {
+    "decision": "fail",
+    "method": "CONNECT",
+    "host": "2001:db8::1",
+    "port": 8443,
+    "detail": "upstream unreachable: x",
+    "count": 1
+   },
+   {
+    "decision": "deny",
+    "method": "CONNECT",
+    "host": "10.0.0.1",
+    "port": 443,
+    "detail": "IP-literal hosts are not allowed: 10.0.0.1",
+    "count": 1
+   }
+  ]
+ }
+}

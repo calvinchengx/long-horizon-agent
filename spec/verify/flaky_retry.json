@@ -1,0 +1,518 @@
+{
+ "revision": "0123456789abcdef0123456789abcdef01234567",
+ "cases": [
+  {
+   "name": "consistent_failure",
+   "retries": 2,
+   "checks": [
+    [
+     "t",
+     true
+    ]
+   ],
+   "outcomes": {
+    "t": [
+     "fail"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "t",
+     "t",
+     "t"
+    ],
+    "calls": [
+     {
+      "verdict": "failed",
+      "results": [
+       {
+        "name": "t",
+        "passed": false,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "fail"
+       }
+      ],
+      "events": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "pass_on_rerun",
+   "retries": 2,
+   "checks": [
+    [
+     "flaky",
+     true
+    ],
+    [
+     "solid",
+     true
+    ]
+   ],
+   "outcomes": {
+    "flaky": [
+     "fail",
+     "pass"
+    ],
+    "solid": [
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "flaky",
+     "solid",
+     "flaky"
+    ],
+    "calls": [
+     {
+      "verdict": "passed",
+      "results": [
+       {
+        "name": "flaky",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined: 1 pass(es) and 1 failure(s) on revision 0123456789ab; non-gating\npass"
+       },
+       {
+        "name": "solid",
+        "passed": true,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "pass"
+       }
+      ],
+      "events": [
+       {
+        "kind": "check_quarantined",
+        "payload": {
+         "check": "flaky",
+         "revision": "0123456789abcdef0123456789abcdef01234567",
+         "passes": 1,
+         "fails": 1
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "quarantined_check_alone_is_unverified",
+   "retries": 1,
+   "calls": 2,
+   "checks": [
+    [
+     "flaky",
+     true
+    ]
+   ],
+   "outcomes": {
+    "flaky": [
+     "fail",
+     "pass",
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "flaky",
+     "flaky",
+     "flaky"
+    ],
+    "calls": [
+     {
+      "verdict": "unverified",
+      "results": [
+       {
+        "name": "flaky",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined: 1 pass(es) and 1 failure(s) on revision 0123456789ab; non-gating\npass"
+       }
+      ],
+      "events": [
+       {
+        "kind": "check_quarantined",
+        "payload": {
+         "check": "flaky",
+         "revision": "0123456789abcdef0123456789abcdef01234567",
+         "passes": 1,
+         "fails": 1
+        }
+       }
+      ]
+     },
+     {
+      "verdict": "unverified",
+      "results": [
+       {
+        "name": "flaky",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined; non-gating\npass"
+       }
+      ],
+      "events": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "quarantined_check_failing_every_attempt_gates",
+   "retries": 1,
+   "calls": 2,
+   "checks": [
+    [
+     "flaky",
+     true
+    ],
+    [
+     "solid",
+     true
+    ]
+   ],
+   "outcomes": {
+    "flaky": [
+     "fail",
+     "pass",
+     "fail"
+    ],
+    "solid": [
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "flaky",
+     "solid",
+     "flaky",
+     "flaky",
+     "solid",
+     "flaky"
+    ],
+    "calls": [
+     {
+      "verdict": "passed",
+      "results": [
+       {
+        "name": "flaky",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined: 1 pass(es) and 1 failure(s) on revision 0123456789ab; non-gating\npass"
+       },
+       {
+        "name": "solid",
+        "passed": true,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "pass"
+       }
+      ],
+      "events": [
+       {
+        "kind": "check_quarantined",
+        "payload": {
+         "check": "flaky",
+         "revision": "0123456789abcdef0123456789abcdef01234567",
+         "passes": 1,
+         "fails": 1
+        }
+       }
+      ]
+     },
+     {
+      "verdict": "failed",
+      "results": [
+       {
+        "name": "flaky",
+        "passed": false,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "[flaky] flaky is quarantined but failed all 3 attempt(s) on this revision, so it gates\nfail"
+       },
+       {
+        "name": "solid",
+        "passed": true,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "pass"
+       }
+      ],
+      "events": [
+       {
+        "kind": "quarantined_check_failed",
+        "payload": {
+         "check": "flaky",
+         "revision": "0123456789abcdef0123456789abcdef01234567",
+         "passes": 1,
+         "fails": 3
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "timeouts_and_advisory_checks_not_rerun",
+   "retries": 2,
+   "checks": [
+    [
+     "slow",
+     true
+    ],
+    [
+     "advice",
+     false
+    ]
+   ],
+   "outcomes": {
+    "slow": [
+     "timeout"
+    ],
+    "advice": [
+     "fail"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "slow",
+     "advice"
+    ],
+    "calls": [
+     {
+      "verdict": "failed",
+      "results": [
+       {
+        "name": "slow",
+        "passed": false,
+        "gating": true,
+        "timed_out": true,
+        "output_tail": "timeout"
+       },
+       {
+        "name": "advice",
+        "passed": false,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "fail"
+       }
+      ],
+      "events": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "zero_retries",
+   "retries": 0,
+   "checks": [
+    [
+     "f",
+     true
+    ]
+   ],
+   "outcomes": {
+    "f": [
+     "fail",
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "f"
+    ],
+    "calls": [
+     {
+      "verdict": "failed",
+      "results": [
+       {
+        "name": "f",
+        "passed": false,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "fail"
+       }
+      ],
+      "events": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "passes_on_the_last_retry",
+   "retries": 3,
+   "checks": [
+    [
+     "f",
+     true
+    ]
+   ],
+   "outcomes": {
+    "f": [
+     "fail",
+     "fail",
+     "fail",
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "f",
+     "f",
+     "f",
+     "f"
+    ],
+    "calls": [
+     {
+      "verdict": "unverified",
+      "results": [
+       {
+        "name": "f",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined: 1 pass(es) and 3 failure(s) on revision 0123456789ab; non-gating\npass"
+       }
+      ],
+      "events": [
+       {
+        "kind": "check_quarantined",
+        "payload": {
+         "check": "f",
+         "revision": "0123456789abcdef0123456789abcdef01234567",
+         "passes": 1,
+         "fails": 3
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "committed_quarantine_restored",
+   "retries": 1,
+   "quarantined": [
+    "t"
+   ],
+   "checks": [
+    [
+     "t",
+     true
+    ],
+    [
+     "u",
+     true
+    ]
+   ],
+   "outcomes": {
+    "t": [
+     "fail",
+     "pass"
+    ],
+    "u": [
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "t",
+     "u",
+     "t"
+    ],
+    "calls": [
+     {
+      "verdict": "passed",
+      "results": [
+       {
+        "name": "t",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined: 1 pass(es) and 1 failure(s) on revision 0123456789ab; non-gating\npass"
+       },
+       {
+        "name": "u",
+        "passed": true,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "pass"
+       }
+      ],
+      "events": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "duplicate_names_are_suffixed",
+   "retries": 1,
+   "checks": [
+    [
+     "t",
+     true
+    ],
+    [
+     "t",
+     true
+    ]
+   ],
+   "outcomes": {
+    "t": [
+     "fail",
+     "pass"
+    ],
+    "t-2": [
+     "pass"
+    ]
+   },
+   "expected": {
+    "runs": [
+     "t",
+     "t-2",
+     "t"
+    ],
+    "calls": [
+     {
+      "verdict": "passed",
+      "results": [
+       {
+        "name": "t",
+        "passed": true,
+        "gating": false,
+        "timed_out": false,
+        "output_tail": "[flaky] quarantined: 1 pass(es) and 1 failure(s) on revision 0123456789ab; non-gating\npass"
+       },
+       {
+        "name": "t-2",
+        "passed": true,
+        "gating": true,
+        "timed_out": false,
+        "output_tail": "pass"
+       }
+      ],
+      "events": [
+       {
+        "kind": "check_quarantined",
+        "payload": {
+         "check": "t",
+         "revision": "0123456789abcdef0123456789abcdef01234567",
+         "passes": 1,
+         "fails": 1
+        }
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

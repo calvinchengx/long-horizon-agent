@@ -56,12 +56,14 @@ path (local, durable and `orchestrate`) through [`agent/assembly.py`](../python/
 - the replanner, which splits a blocked item instead of deadlocking
   ([11-multi-agent-organization.md](11-multi-agent-organization.md));
 - a configurable sandbox image, a reference polyglot image in `sandbox/`, and an allow-listed
-  egress proxy on an internal Docker network (`LHA_SANDBOX_IMAGE`, `LHA_SANDBOX_EGRESS`);
+  egress proxy on an internal Docker network (`LHA_SANDBOX_IMAGE`, `LHA_SANDBOX_EGRESS`, with
+  other hosts and push/upload hosts in their own settings, and every proxied request committed as
+  a `sandbox_egress` event);
 - web tools (`fetch_url`, and `web_search` with `LHA_WEB_SEARCH_PROVIDER` and a key) when
   `LHA_WEB_ALLOW_HOSTS` or `--allow-host` names at least one host: a default-deny egress policy,
   public addresses only, redirects re-checked, a credential broker that binds each secret to its
-  hosts, output fenced as untrusted, and a Rule of Two preflight that refuses web tools together
-  with private data (`LHA_PRIVATE_DATA` or the `local` sandbox);
+  hosts, output fenced as untrusted, and a Rule of Two preflight that refuses web tools (or
+  sandbox egress) together with private data (`LHA_PRIVATE_DATA` or the `local` sandbox);
 - `lha vendor` with `--reference`;
 - human approval of irreversible commands: durable (`WAITING_ON_HUMAN`, `lha mission-approve`) and
   local (`--approve-interactive`, a terminal prompt that rejects after
@@ -102,7 +104,7 @@ quality with real models.
 | Memory: episodic, semantic, skills, hybrid BM25 + dense retrieval, consolidation, degradation to lexical-only | done: every run path gives the lead a memory block (`LHA_MEMORY_ENABLED`, default on); semantic embeddings at $0 with `LHA_MEMORY_EMBEDDER=ollama` ([12-memory.md](12-memory.md)) |
 | Persistence: mission rows, the idempotent cost ledger and human gates (`hitl_gates`) on SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), `lha missions`, `lha costs`, `lha gates`, `lha db migrate` | done: every run path |
 | Model resilience: fallback chain (`LHA_FALLBACK_MODELS`), health probe before a parked mission resumes | done: every run path ([13-models.md](13-models.md#retries-and-failover)) |
-| Operator-configurable egress allow-list | done: `LHA_SANDBOX_EGRESS` (sandbox, via proxy) and `LHA_WEB_ALLOW_HOSTS` / `--allow-host` (web tools) |
+| Operator-configurable egress allow-list | done: `LHA_SANDBOX_EGRESS`, `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS` (sandbox, via proxy) and `LHA_WEB_ALLOW_HOSTS` / `--allow-host` (web tools) |
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
 | Deadlock gate with "impossible", escalation ladder, gate webhook, `SLEEPING` | done: durable path |
 | Observability: OTLP trace export (any collector, and Langfuse through its OTLP endpoint) | done: the CLI and worker install an exporter at start when `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` or the Langfuse keys are set; mission, cycle, cycle-activity, model-call and tool-call spans on every run path ([16-observability.md](16-observability.md)) |
@@ -149,20 +151,21 @@ use the Python implementation for that feature
 
 | Component | Package | State |
 |---|---|---|
-| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, `claude_code`, OTLP, `LHA_FLAKY_RETRIES`) are read but have no effect in Go runs |
+| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, `claude_code`, OTLP) are read but have no effect in Go runs |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
 | Model backends: stub, OpenAI-compatible, Claude, pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
 | Budget governor, cost ledger, metering | `internal/governor` | present |
 | Git mission anchor and git operations | `internal/state` | present; cross-implementation tests read Python anchors and vice versa |
-| Verifier, harness integrity, flaky quarantine, witnesses, trusted runner | `internal/verify` | present; `spec/verify/harness_files.json` passes. The lead does not yet re-run failing checks (`LHA_FLAKY_RETRIES`) |
+| Verifier, harness integrity, flaky quarantine, witnesses, trusted runner | `internal/verify` | present; `spec/verify/harness_files.json` and `spec/verify/flaky_retry.json` pass. The lead re-runs failing checks (`LHA_FLAKY_RETRIES`) as in Python |
 | Redaction and structured events | `internal/obs` | present; `spec/obs/redact.json` passes |
 | Checklist import, `vendor` | `internal/checklistimport` | checklist import present; `vendor` not started |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
 | Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, and the console approval gate (`--approve-interactive`). No `claude_code` lead engine |
 | CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `decisions`; `run-local` and `mission` run real missions (end-to-end tests compare them with Python) |
 
-`go test ./...` passes for the present packages. No CI job runs the Go tests yet.
+`go test ./...` passes for the present packages; the `go` CI job runs it with the race detector,
+plus `gofmt`, `go vet` and a Windows `go vet`.
 
 ### Go phase 2: Temporal (not started)
 
@@ -174,7 +177,8 @@ SDK keeps separate ones, so histories with timers do not replay across languages
 
 ### Go phase 3: organization, memory, Postgres, observability (not started)
 
-The planner, reviewer, researchers and orchestrator; file ownership, tickets, the blackboard,
-parallel implementers and the integrator; human gates and web tools; memory; the mission store
-(SQLite and Postgres) and `db migrate`; and `spec/coordination/shared_paths.json` (Go passes
-`decision_chain.json` today, in `internal/state`).
+The reviewer, researchers and orchestrator; file ownership enforcement, tickets, the blackboard,
+parallel implementers and the integrator; memory; the mission store (SQLite and Postgres) and
+`db migrate`; OTLP trace export; and `spec/coordination/shared_paths.json` (Go passes
+`decision_chain.json` today, in `internal/state`). The Planner, the web tools and the console
+approval gate are already in phase 1.

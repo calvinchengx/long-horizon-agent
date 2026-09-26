@@ -161,6 +161,15 @@ def test_shared_paths_and_harness_files() -> None:
         assert _is_harness_file(case["path"]) == case["harness"], case
 
 
+def test_flaky_retry() -> None:
+    from tests.unit.test_flaky_retry_verifier import SPEC_REVISION, run_flaky_scenario
+
+    spec = _load("verify/flaky_retry.json")
+    assert spec["revision"] == SPEC_REVISION and spec["cases"]
+    for case in spec["cases"]:
+        assert run_flaky_scenario(case) == case["expected"], case["name"]
+
+
 def test_pricing() -> None:
     for case in _load("model/pricing.json")["claude"]:
         price = lookup_claude_price(case["model"])
@@ -274,3 +283,39 @@ def test_execution_arguments() -> None:
     for case in spec["missing_required"]:
         missing = _missing_required({"required": case["required"]}, case["arguments"])
         assert sorted(missing) == case["missing"], case
+
+
+def test_execution_sandbox_egress() -> None:
+    from lha.config import Settings
+    from lha.execution.egress_events import parse_proxy_log
+    from lha.execution.egress_hosts import (
+        PACKAGE_FETCH_HOSTS,
+        WRITE_HOSTS,
+        SandboxEgressError,
+        sandbox_allow_list,
+    )
+    from lha.execution.tools.toolset import check_run_rule_of_two
+    from lha.safety.rule_of_two import RuleOfTwoViolation
+
+    spec = _load("execution/sandbox_egress.json")
+    assert spec["package_fetch_hosts"] == list(PACKAGE_FETCH_HOSTS)
+    assert spec["write_hosts"] == list(WRITE_HOSTS)
+    for case in spec["allow_list"]:
+        lists = (case["egress"], case["extra"], case["write"])
+        if case["error"] is None:
+            assert sandbox_allow_list(*lists) == case["hosts"], case
+        else:
+            with pytest.raises(SandboxEgressError) as info:
+                sandbox_allow_list(*lists)
+            assert str(info.value) == case["error"], case
+    for case in spec["rule_of_two"]:
+        settings = Settings(_env_file=None, **case["env"])  # type: ignore[call-arg]
+        assert settings.sandbox_egress_enabled() == case["egress_enabled"], case
+        if case["error"] is None:
+            check_run_rule_of_two(settings)
+        else:
+            with pytest.raises(RuleOfTwoViolation) as refused:
+                check_run_rule_of_two(settings)
+            assert str(refused.value) == case["error"], case
+    log = spec["proxy_log"]
+    assert [e.payload for e in parse_proxy_log(log["lines"])] == log["events"]

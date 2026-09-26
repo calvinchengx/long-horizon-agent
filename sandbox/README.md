@@ -33,26 +33,44 @@ export LHA_SANDBOX_IMAGE=lha-sandbox:latest
 export LHA_SANDBOX_EGRESS="proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org,registry.npmjs.org"
 ```
 
-`LHA_SANDBOX_EGRESS` is a comma-separated allow-list:
+The allow-list is split over three comma-separated settings, by what a host lets code in the
+sandbox do. Code in the sandbox can send data to every host it can reach (a `python -c`
+one-liner is not gated), so hosts that accept pushes or uploads must be acknowledged by name:
+
+- `LHA_SANDBOX_EGRESS`: package-registry download hosts, from a fixed list: `pypi.org`,
+  `files.pythonhosted.org`, `registry.npmjs.org`, `proxy.golang.org`, `sum.golang.org`,
+  `storage.googleapis.com`, `crates.io`, `static.crates.io`, `index.crates.io`.
+- `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`: any other host, except known push/upload hosts
+  (`github.com`, `gitlab.com`, `*.amazonaws.com`, `upload.pypi.org`, ...).
+- `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`: hosts accepted although code in the sandbox can push
+  or upload there.
+
+A host in the wrong list stops the run before it starts. In the last two lists:
 
 - `pypi.org` allows exactly that host.
 - `.golang.org` (with a leading dot) allows `golang.org` and every subdomain.
 - A host alone allows ports 443 and 80. `host:port` allows one other port.
 - IP addresses are rejected. The allow-list names hosts only.
 
+Any sandbox egress counts as untrusted content and external comms under the Rule of Two, so it
+cannot be combined with `LHA_PRIVATE_DATA=true`. See
+[`docs/09-safety-model.md`](../docs/09-safety-model.md#sandbox-network) for why, and for what a
+"download host" can still be made to do.
+
 Registries that commonly need adding:
 
 | Ecosystem | Hosts |
 | --- | --- |
-| Go modules | `proxy.golang.org`, `sum.golang.org` and `storage.googleapis.com` (the proxy redirects module zip downloads there; without it they fail with 403 Forbidden). Modules that `GOPROXY` can't serve (for example `GOPRIVATE` or `direct`) also need their VCS host, such as `github.com` or `codeload.github.com`. |
+| Go modules | `proxy.golang.org`, `sum.golang.org` and `storage.googleapis.com` (the proxy redirects module zip downloads there; without it they fail with 403 Forbidden). Modules that `GOPROXY` can't serve (for example `GOPRIVATE` or `direct`) also need their VCS host, such as `github.com` or `codeload.github.com`, in `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`. |
 | Python (pip/uv) | `pypi.org`, `files.pythonhosted.org` |
-| npm/pnpm/yarn | `registry.npmjs.org`. Yarn classic also needs `registry.yarnpkg.com`. |
-| corepack (downloading a pinned package manager) | `registry.npmjs.org`, `repo.yarnpkg.com` |
+| Rust (cargo) | `index.crates.io`, `static.crates.io`, `crates.io` |
+| npm/pnpm/yarn | `registry.npmjs.org`. Yarn classic also needs `registry.yarnpkg.com` (in `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`). |
+| corepack (downloading a pinned package manager) | `registry.npmjs.org`, and `repo.yarnpkg.com` in `LHA_SANDBOX_EGRESS_EXTRA_HOSTS` |
 
 ## How egress works
 
-With `LHA_SANDBOX_EGRESS` empty, which is the default, the container runs with `network_mode=none`
-and has no network at all.
+With all three egress settings empty, which is the default, the container runs with
+`network_mode=none` and has no network at all.
 
 With a non-empty allow-list, every sandbox session gets:
 
@@ -69,7 +87,8 @@ With a non-empty allow-list, every sandbox session gets:
      services);
    - connects to the exact address it checked;
    - answers everything else with `403`, and logs one line per request. Read the log with
-     `docker logs lha-egress-proxy-…`.
+     `docker logs lha-egress-proxy-…`; the agent loop also commits these requests to
+     `.lha/events.ndjson` as `sandbox_egress` events at every checkpoint.
 3. **Proxy environment variables in the sandbox.** `HTTP_PROXY`, `HTTPS_PROXY`, `http_proxy` and
    `https_proxy` are set to `http://lha-egress-proxy-<random>:3128`, and `NO_PROXY` to
    `localhost,127.0.0.1`. pip, uv, go, npm, pnpm, curl and git over HTTPS all follow these
@@ -79,7 +98,8 @@ Closing the session removes the sandbox container, the proxy container and the n
 fails, it removes them too.
 
 HTTPS goes through `CONNECT` and TLS stays end to end, so the proxy only ever sees the host name.
-It never sees paths or credentials.
+It never sees paths or credentials, and it cannot tell a download from an upload: a host on the
+list is reachable for writes too.
 
 ## Running as an arbitrary non-root user
 
@@ -88,7 +108,7 @@ DockerSandbox starts containers with these settings:
 - `--user <host uid>:<host gid>`
 - `HOME=/workspace`
 - a read-only root filesystem
-- a 1 GB tmpfs at `/tmp`, mounted `exec` (so `go test` can run the binaries it builds there)
+- a tmpfs at `/tmp` (`LHA_SANDBOX_TMP_SIZE`, default 1 GB), mounted `exec` (so `go test` can run the binaries it builds there)
 - `--cap-drop ALL`
 - `no-new-privileges`
 
