@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -34,7 +35,8 @@ import (
 // Go is queried, signalled and aborted with the Python CLI, a mission served by a Python worker is
 // driven with the Go CLI, and each implementation's worker refuses a task queue the other
 // polls. They need uv and a Temporal server: LHA_IT_TEMPORAL_ADDRESS (an existing server), else
-// `temporal server start-dev` when the temporal CLI is on PATH; otherwise they are skipped.
+// `temporal server start-dev` when the temporal CLI is on PATH, else the test server the Python
+// SDK caches for its durability tests; otherwise they are skipped.
 
 func temporalAddress(t *testing.T) string {
 	t.Helper()
@@ -47,13 +49,17 @@ func temporalAddress(t *testing.T) string {
 	if addr := os.Getenv("LHA_IT_TEMPORAL_ADDRESS"); addr != "" {
 		return addr
 	}
-	bin, err := exec.LookPath("temporal")
-	if err != nil {
-		t.Skip("no Temporal server: set LHA_IT_TEMPORAL_ADDRESS or put the temporal CLI on PATH")
-	}
 	port := freePort(t)
-	cmd := exec.Command(bin, "server", "start-dev", "--headless", "--ip", "127.0.0.1", "--port", strconv.Itoa(port),
-		"--http-port", strconv.Itoa(freePort(t)), "--metrics-port", strconv.Itoa(freePort(t)), "--log-level", "error")
+	var cmd *exec.Cmd
+	if bin, err := exec.LookPath("temporal"); err == nil {
+		cmd = exec.Command(bin, "server", "start-dev", "--headless", "--ip", "127.0.0.1", "--port", strconv.Itoa(port),
+			"--http-port", strconv.Itoa(freePort(t)), "--metrics-port", strconv.Itoa(freePort(t)), "--log-level", "error")
+	} else if bin := cachedTestServer(); bin != "" {
+		cmd = exec.Command(bin, strconv.Itoa(port)) // the Python SDK's test server (normal time)
+	} else {
+		t.Skip("no Temporal server: set LHA_IT_TEMPORAL_ADDRESS, put the temporal CLI on PATH, or run the Python " +
+			"durability tests once (they cache Temporal's test server)")
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +80,19 @@ func temporalAddress(t *testing.T) string {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// cachedTestServer is the Temporal test server the Python SDK downloads for its tests
+// (<tmp>/temporal-test-server-sdk-python-<version>), "" when there is none.
+func cachedTestServer() string {
+	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "temporal-test-server-sdk-python-*"))
+	sort.Strings(matches)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if info, err := os.Stat(matches[i]); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+			return matches[i]
+		}
+	}
+	return ""
 }
 
 func freePort(t *testing.T) int {

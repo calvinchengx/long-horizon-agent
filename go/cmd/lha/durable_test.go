@@ -142,6 +142,43 @@ func TestMissionStartPlansWithThePlannerAndRecordsItsSpend(t *testing.T) {
 	}
 }
 
+// The organization's options reach the workflow; waves plan with the Planner's file ownership.
+func TestMissionStartWithTheOrganization(t *testing.T) {
+	dir := cleanEnv(t, "LHA_MODEL_BACKEND=stub")
+	fake := useFakeTemporal(t)
+	useRowStore(t)
+	planner := model.NewStub([]contracts.TurnResult{{Text: `[{"description": "write a", "files": ["a.py"]}, ` +
+		`{"description": "write b", "files": ["b.py"]}]`}})
+	r := runCLI(t, planner, "mission-start", "--task", "two files", "--no-default-checks", "--check", "true",
+		"--workdir", "ws", "--research", "2", "--review", "--max-parallel", "3")
+	if r.code != 0 || len(fake.started) != 1 || r.stderr != "" {
+		t.Fatalf("%+v", r)
+	}
+	if in := fake.started[0].input; in.ResearchPerItem != 2 || !in.Review || in.MaxParallel != 3 {
+		t.Fatalf("input %+v", in)
+	}
+	owners := git(t, filepath.Join(dir, "ws"), "show", "HEAD:.lha/ownership.json")
+	if !strings.Contains(owners, `"a.py": "implementer-01"`) || !strings.Contains(owners, `"b.py": "implementer-02"`) {
+		t.Fatalf("ownership %s", owners)
+	}
+	// Without waves the mission declares no ownership (as in Python).
+	planner = model.NewStub([]contracts.TurnResult{{Text: `[{"description": "write a", "files": ["a.py"]}]`}})
+	if r := runCLI(t, planner, "mission-start", "--task", "one file", "--workdir", "ws2", "--review", "--no-review",
+		"--research", "1"); r.code != 0 || fake.started[1].input.Review || fake.started[1].input.ResearchPerItem != 1 {
+		t.Fatalf("%+v %+v", r, fake.started[1].input)
+	}
+	if ok, _ := state.ExistsAtHead(context.Background(), filepath.Join(dir, "ws2"), ".lha/ownership.json"); ok {
+		t.Fatal("ownership.json without --max-parallel")
+	}
+	// An imported checklist has no ownership: a note says the items run serially.
+	_ = os.WriteFile(filepath.Join(dir, "plan.md"), []byte("- [ ] one\n- [ ] two\n"), 0o644)
+	r = runCLI(t, nil, "mission-start", "--checklist", "plan.md", "--workdir", "ws3", "--max-parallel", "2")
+	if r.code != 0 || r.stderr != "note: an imported checklist declares no file ownership, so no parallel wave can run "+
+		"(items are worked serially)\n" {
+		t.Fatalf("%+v", r)
+	}
+}
+
 func TestMissionStartRecordsAbortedWhenTheStartFails(t *testing.T) {
 	dir := cleanEnv(t)
 	fake := useFakeTemporal(t)
@@ -169,9 +206,7 @@ func TestDurableCommandsValidateBeforeConnecting(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"mission-start", "--task", "x", "--research", "2"}, "not yet available in the Go implementation"},
-		{[]string{"mission-start", "--task", "x", "--review"}, "not yet available in the Go implementation"},
-		{[]string{"mission-start", "--task", "x", "--max-parallel", "3"}, "not yet available in the Go implementation"},
+		{[]string{"mission-start", "--task", "x", "--max-parallel", "9"}, "Error: Invalid value for '--max-parallel': 9 is not in the range 0<=x<=8."},
 		{[]string{"mission-start", "--task", "x", "--research", "5"}, "Error: Invalid value for '--research': 5 is not in the range 0<=x<=4."},
 		{[]string{"mission-start", "--task", "x", "--start-in-seconds", "-1"}, "is not in the range x>=0."},
 		{[]string{"mission-start"}, "error: give --task (to plan) or --checklist FILE (to import a checklist)"},

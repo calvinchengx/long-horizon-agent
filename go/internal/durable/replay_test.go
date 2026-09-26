@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -32,7 +33,8 @@ import (
 //
 //	LHA_IT_TEMPORAL_ADDRESS=<a Temporal server> LHA_RECORD_HISTORIES=1 go test ./internal/durable -run TestRecord
 //
-// (or with the temporal CLI on PATH instead of LHA_IT_TEMPORAL_ADDRESS).
+// (or with the temporal CLI on PATH, or the test server the Python SDK caches for its durability
+// tests, instead of LHA_IT_TEMPORAL_ADDRESS).
 
 const historiesDir = "testdata/histories"
 
@@ -61,6 +63,8 @@ func TestCommittedHistoriesCoverWhatTheyClaim(t *testing.T) {
 		"park":         {"ActivityTaskFailed", "TimerFired"},
 		"can":          {"WorkflowExecutionContinuedAsNew"},
 		"cancel_cycle": {"WorkflowExecutionCancelRequested", "ActivityTaskCancelRequested", "WorkflowExecutionCanceled"},
+		"org_wave_review": {"MarkerRecorded", "StartChildWorkflowExecutionInitiated", "ChildWorkflowExecutionCompleted",
+			"WorkflowExecutionCompleted"},
 	}
 	for name, events := range want {
 		data, err := os.ReadFile(filepath.Join(historiesDir, name+".json"))
@@ -79,6 +83,35 @@ func TestCommittedHistoriesCoverWhatTheyClaim(t *testing.T) {
 			if !seen[e] {
 				t.Fatalf("%s.json has no %s event (%v)", name, e, seen)
 			}
+		}
+		var scheduled []string
+		markers, children := 0, 0
+		for _, ev := range hist.Events {
+			if a := ev.GetActivityTaskScheduledEventAttributes(); a != nil {
+				scheduled = append(scheduled, a.GetActivityType().GetName())
+			}
+			if m := ev.GetMarkerRecordedEventAttributes(); m != nil && m.GetMarkerName() == "Version" {
+				markers++
+			}
+			if ev.GetStartChildWorkflowExecutionInitiatedEventAttributes() != nil {
+				children++
+			}
+		}
+		if name == "org_wave_review" {
+			// The organization's path, behind its version marker (the only one in any history).
+			want := []string{
+				ActivityPlanRound, ActivityRunImplementer, ActivityRunImplementer, // the wave: two implementers at once
+				ActivityIntegrateBranch, ActivityReviewCycle, // each integration commit is a checkpoint, then reviewed
+				ActivityIntegrateBranch, ActivityReviewCycle,
+				ActivityPlanRound, ActivityRunAgentCycle, ActivityReviewCycle, // a serial round
+				ActivityRecordMissionStatus, // DONE
+			}
+			if strings.Join(scheduled, ",") != strings.Join(want, ",") || markers != 1 || children != 3 {
+				t.Fatalf("org history: %v (version markers %d, children %d)", scheduled, markers, children)
+			}
+		} else if markers != 0 || contains(scheduled, ActivityPlanRound) || contains(scheduled, ActivityRunImplementer) ||
+			contains(scheduled, ActivityIntegrateBranch) || contains(scheduled, ActivityReviewCycle) {
+			t.Fatalf("%s.json went down the organization's path: %v", name, scheduled)
 		}
 		if name == "cancel_cycle" {
 			// WaitForCancellation: the cycle acknowledged the cancellation before ABORTED was
@@ -129,13 +162,17 @@ func temporalServer(t *testing.T) string {
 	if addr := os.Getenv("LHA_IT_TEMPORAL_ADDRESS"); addr != "" {
 		return addr
 	}
-	bin, err := exec.LookPath("temporal")
-	if err != nil {
-		t.Skip("no Temporal server: set LHA_IT_TEMPORAL_ADDRESS or put the temporal CLI on PATH")
-	}
 	port := freeTCPPort(t)
-	cmd := exec.Command(bin, "server", "start-dev", "--headless", "--ip", "127.0.0.1", "--port", strconv.Itoa(port),
-		"--http-port", strconv.Itoa(freeTCPPort(t)), "--metrics-port", strconv.Itoa(freeTCPPort(t)), "--log-level", "error")
+	var cmd *exec.Cmd
+	if bin, err := exec.LookPath("temporal"); err == nil {
+		cmd = exec.Command(bin, "server", "start-dev", "--headless", "--ip", "127.0.0.1", "--port", strconv.Itoa(port),
+			"--http-port", strconv.Itoa(freeTCPPort(t)), "--metrics-port", strconv.Itoa(freeTCPPort(t)), "--log-level", "error")
+	} else if bin := cachedTestServer(); bin != "" {
+		cmd = exec.Command(bin, strconv.Itoa(port)) // the Python SDK's test server (normal time)
+	} else {
+		t.Skip("no Temporal server: set LHA_IT_TEMPORAL_ADDRESS, put the temporal CLI on PATH, or run the Python " +
+			"durability tests once (they cache Temporal's test server)")
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -156,6 +193,19 @@ func temporalServer(t *testing.T) string {
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
+}
+
+// cachedTestServer is the Temporal test server the Python SDK downloads for its tests
+// (<tmp>/temporal-test-server-sdk-python-<version>), "" when there is none.
+func cachedTestServer() string {
+	matches, _ := filepath.Glob(filepath.Join(os.TempDir(), "temporal-test-server-sdk-python-*"))
+	sort.Strings(matches)
+	for i := len(matches) - 1; i >= 0; i-- {
+		if info, err := os.Stat(matches[i]); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
+			return matches[i]
+		}
+	}
+	return ""
 }
 
 func freeTCPPort(t *testing.T) int {
@@ -179,6 +229,10 @@ type scenario struct {
 	cycle func(acts *Activities) any
 	// health replaces check_mission_health (nil = the real one).
 	health any
+	// owned > 0: an organization mission whose first owned items each own a file
+	// (initOrgMission); configure sets the org roles' models.
+	owned     int
+	configure func(acts *Activities)
 }
 
 func waitQuery(t *testing.T, cl client.Client, wid, name, want string) {
@@ -260,6 +314,15 @@ var recordedScenarios = []scenario{
 			t.Fatal(err)
 		}
 	}},
+	// The durable organization (VersionOrg): items 01 and 02 own disjoint files (a parallel wave),
+	// 03 owns none (a serial round); one researcher child per item; every verified item reviewed.
+	{name: "org_wave_review", items: 3, owned: 2, model: workingModel, setup: func(inp *MissionInput) {
+		inp.ResearchPerItem, inp.Review, inp.MaxParallel = 1, true, 2
+	}, configure: func(acts *Activities) {
+		acts.ImplementerModel = workingModel
+		acts.ReviewerModel = reviewers()
+		acts.SubAgent = (&fakeResearchers{}).run
+	}},
 }
 
 // TestRecordHistories runs every scenario on a real server with the Go worker, replays each fresh
@@ -286,6 +349,9 @@ func TestRecordHistories(t *testing.T) {
 				factory = gatedModel(gatedArgv(marker))
 			}
 			acts := newActs(t, factory, nil)
+			if sc.configure != nil {
+				sc.configure(acts)
+			}
 			w := worker.New(cl, queue, worker.Options{Identity: WorkerIdentity(), MaxHeartbeatThrottleInterval: 200 * time.Millisecond})
 			overrides := map[string]any{}
 			if sc.cycle != nil {
@@ -297,6 +363,10 @@ func TestRecordHistories(t *testing.T) {
 			}
 			defer w.Stop()
 			inp := initMission(t, sc.items)
+			if sc.owned > 0 {
+				inp = initOrgMission(t, sc.items, sc.owned, nil)
+				inp.MaxCycles, inp.ParkInitialSeconds, inp.ParkMaxSeconds = 50, 30, 600
+			}
 			inp.MissionID = sc.name
 			if sc.setup != nil {
 				sc.setup(&inp)

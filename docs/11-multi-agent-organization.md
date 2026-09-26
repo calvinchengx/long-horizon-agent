@@ -15,10 +15,13 @@ The Go implementation runs the same organization for `lha orchestrate`
 ([`go/internal/agents/org/`](../go/internal/agents/org/),
 [`go/internal/coordination/`](../go/internal/coordination/)): the same prompts (pinned in
 [`spec/agent/org.json`](../spec/agent/org.json)), ownership refusals, commit messages, event
-kinds and payloads, so a mission started by one implementation can be resumed by the other.
-Its durable organization rounds are not ported yet; the wave functions (`ImplementInWorktree`,
-`IntegrateRun`, `BranchIntegrator`, `ResearchFanout`, `Reviewer.Review`,
-`coordination.LeaseBroker`) are plain functions so they can become activities.
+kinds and payloads, so a mission started by one implementation can be resumed by the other. Its
+durable organization rounds ([`go/internal/durable/org_round.go`](../go/internal/durable/org_round.go),
+[`org_activities.go`](../go/internal/durable/org_activities.go)) run the same wave functions
+(`ImplementInWorktree`, `IntegrateRun`, `BranchIntegrator`, `Reviewer.Review`,
+`coordination.LeaseBroker`) as Temporal activities, with Python's activity names, payloads,
+events and gate-log lines: a Go-served and a Python-served org mission on the same scripted
+inputs leave the same commits and anchor.
 
 ## Why asymmetric
 

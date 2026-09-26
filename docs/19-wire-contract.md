@@ -7,7 +7,7 @@ reference; every name below is taken from its code. The Go port implements the a
 mission store (SQLite and Postgres), the spec'd behaviours and the Temporal names, payloads and
 codec below ([`go/internal/durable/`](../go/internal/durable/)): its CLI runs local missions
 (single-agent and the organization) with persistence and memory, its worker serves
-`MissionWorkflow` for single-agent missions, and either CLI can start, query, signal and abort a
+`MissionWorkflow` (the durable organization included), and either CLI can start, query, signal and abort a
 mission the other implementation's worker serves. One workflow execution cannot move between
 the two worker implementations ([cross-language workers](#cross-language-workers)); see
 [23-roadmap.md](23-roadmap.md) for what is not ported.
@@ -476,9 +476,8 @@ Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit
 Go in `go/internal/spec/conformance_*_test.go`. `shared_paths.json` waits for a Go port of the
 ownership map.
 
-The Go worker implements the payload types, queries and fingerprints above for single-agent
-missions ([`go/internal/durable/`](../go/internal/durable/)). It does not implement the
-organization's activities (`plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`)
-or a working `run_subagent`: a mission that sets `research_per_item`, `review` or
-`max_parallel >= 2` fails on a Go worker with `MissionConfigError`, and the Go `mission-start`
-refuses those options.
+The Go worker implements the payload types, queries and fingerprints above
+([`go/internal/durable/`](../go/internal/durable/)), the organization's activities
+(`plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`) and `run_subagent`
+included; its `ImplementerOutput` carries the rich models as pydantic's `model_dump_json` writes
+them (`ticket_json`, `leases`, `decisions_json`, `verification_json`).

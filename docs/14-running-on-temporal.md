@@ -3,8 +3,8 @@
 The local commands (`lha run-local`, `lha mission`, `lha orchestrate`) run a mission in one
 process. The durable path runs the same agent loop inside a Temporal activity, so a mission
 survives worker crashes and restarts. The commands below are the Python implementation's; the Go
-binary has the same `worker` and `mission-*` commands, options and output for single-agent
-missions (see [Go worker](#go-worker)). Background on the design is in
+binary has the same `worker` and `mission-*` commands, options and output, the organization
+options included (see [Go worker](#go-worker)). Background on the design is in
 [08-durable-execution.md](08-durable-execution.md).
 
 ## 1. Start the stack
@@ -300,7 +300,7 @@ probe checks and what ends a mission.
 
 ## Go worker
 
-The Go binary runs the same durable path for single-agent missions:
+The Go binary runs the same durable path, the multi-agent organization included:
 
 ```bash
 cd go && go build -o lha ./cmd/lha
@@ -314,14 +314,15 @@ LHA_TASK_QUEUE=lha-mission-go ./lha mission-start --task "Add a slugify() helper
 `mission-abort` take the options above and print the same output with the same exit codes. The
 worker registers the same workflows and activities; it runs the cycle with the Go agent loop in
 the `local` or `docker` sandbox and probes the model with the same cheap requests while parked.
+With `mission-start --research N`, `--review` or `--max-parallel N` it runs the organization's
+rounds (researcher child workflows, parallel implementer waves in worktrees, integration,
+review) as the Python worker does.
 Differences:
 
 - It needs its own task queue (see [2. Run a worker](#2-run-a-worker)): it refuses one that a
   Python worker polls. Start the missions it should run with the same `LHA_TASK_QUEUE`. The
   `mission-status`, `mission-approve`, `mission-snooze` and `mission-abort` commands of either
   implementation work on any mission, whichever worker serves it.
-- `mission-start --research`, `--review` and `--max-parallel 2..8` exit 2 ("not yet available in
-  the Go implementation"), and a mission that sets them fails on a Go worker.
 - The worker writes the mission store as Python does (rows for `lha missions`, `lha costs` and
   `lha gates`), with the same `.lha/` anchor events, spend journal and webhook.
 - If the server is unreachable, the commands print `error: ...` and exit 1.

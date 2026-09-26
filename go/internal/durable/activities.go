@@ -74,10 +74,15 @@ type Activities struct {
 	WebhookTransport http.RoundTripper
 	// ProbeModel contacts the model for the health probe (nil = model.ProbeModel).
 	ProbeModel func(ctx context.Context, settings *config.Settings) model.ModelHealth
-	// SubAgent runs run_subagent (nil = not yet available in Go: a non-retryable config error).
-	//
-	// Phase B: set it to a Go sub-agent runner over internal/agents/org (durable org rounds).
+	// SubAgent replaces run_subagent's body (nil = the real sub-agent: org.SubAgent in the Lead's
+	// sandbox, metered against the mission budget; tests inject fake researchers here).
 	SubAgent SubAgentRunner
+	// ImplementerModel / ReviewerModel build the organization roles' models (nil = the role's
+	// model, agents.ModelForRole); SubAgentModel builds a sub-agent's (nil = the configured
+	// model). The Lead's model (a cycle, and the replanner of a blocked branch) is ModelFactory.
+	ImplementerModel ModelFactory
+	ReviewerModel    ModelFactory
+	SubAgentModel    ModelFactory
 	// HeartbeatEvery is the heartbeat period (0 = HeartbeatEvery).
 	HeartbeatEvery time.Duration
 }
@@ -878,9 +883,8 @@ func (a *Activities) RecordMissionStatus(ctx context.Context, inp MissionStatusI
 
 // RunSubAgent is run_subagent: one sub-agent (the body of a SubAgentWorkflow).
 func (a *Activities) RunSubAgent(ctx context.Context, inp SubAgentInput) (SubAgentOutput, error) {
-	if a.SubAgent == nil {
-		return SubAgentOutput{}, configError(fmt.Sprintf("sub-agent %s: run_subagent is not yet available in the Go "+
-			"implementation (the organization's roles are ported in a later phase)", contracts.PyRepr(inp.RoleName)), nil)
+	if a.SubAgent != nil {
+		return a.SubAgent(ctx, inp)
 	}
-	return a.SubAgent(ctx, inp)
+	return a.runSubAgent(ctx, inp)
 }
