@@ -11,8 +11,8 @@ the same package layout (see [choosing an implementation](04-choosing-an-impleme
 ## System context
 
 How the pieces are deployed and what talks to what. Solid lines are called on a run path today
-(a CLI command, the local runners or a Temporal activity). Dashed lines and dashed boxes are
-library code that no command calls yet, or planned.
+(a CLI command, the local runners or a Temporal activity). The dashed box and line are planned:
+a Go Temporal worker (see [choosing an implementation](04-choosing-an-implementation.md)).
 
 ```mermaid
 flowchart TB
@@ -31,15 +31,15 @@ flowchart TB
     end
 
     subgraph ext["Outside the process"]
-        MODELS["Model providers<br/>Ollama / OpenAI-compatible / Claude / stub<br/>primary, then LHA_FALLBACK_MODELS"]
+        MODELS["Model providers<br/>Ollama / OpenAI-compatible / Claude /<br/>Claude Code (claude -p) / stub<br/>primary, then LHA_FALLBACK_MODELS"]
         SB["Sandbox<br/>Docker daemon / E2B / local"]
-        PROXY["Egress proxy container<br/>(when LHA_SANDBOX_EGRESS is set)"]
+        PROXY["Egress proxy container<br/>(when LHA_SANDBOX_EGRESS* lists hosts)"]
         TR["Trusted runner<br/>host subprocess, trusted: checks"]
         WS[("Workspace git repo<br/>+ .lha/ anchor")]
         STORE[("Mission store<br/>SQLite (default) or<br/>Postgres + pgvector")]
         OBJ[("Object store<br/>large payloads")]
         HOOK["Gate webhook<br/>(LHA_GATE_WEBHOOK_URL)"]
-        LF["Langfuse / OTel collector"]
+        LF["Langfuse / OTel collector<br/>(OTLP/HTTP; Python only)"]
         NET["Internet"]
     end
 
@@ -51,7 +51,7 @@ flowchart TB
     TS <-- "task queue lha-mission" --> PYW
     TS -.-> GOW
     PYW --> MW
-    MW -.-> SUB
+    MW -- "with --research N" --> SUB
     RUN --> MODELS
     MW -- "cycles; health probe while parked" --> MODELS
     RUN --> SB
@@ -69,15 +69,15 @@ flowchart TB
     RUN -- "gate events" --> HOOK
     MW -- "gate events (notify_gate)" --> HOOK
     PYW -- "ClaimCheck codec" --> OBJ
-    RUN -. "OTLP spans (when configured)" .-> LF
-    PYW -. "OTLP spans (when configured)" .-> LF
+    RUN -- "OTLP spans (when configured)" --> LF
+    PYW -- "OTLP spans (when configured)" --> LF
     SB -- "allow-listed hosts only" --> PROXY
     PROXY --> NET
     RUN -- "fetch_url, web_search<br/>(when LHA_WEB_ALLOW_HOSTS is set)" --> NET
     MW -- "fetch_url, web_search<br/>(when LHA_WEB_ALLOW_HOSTS is set)" --> NET
 
     classDef planned stroke-dasharray: 5 5
-    class GOW,LF planned
+    class GOW planned
 ```
 
 The Temporal server is the only component that must be running for durable missions; a local
@@ -222,7 +222,7 @@ See [memory](12-memory.md).
   `trusted:` checks to the trusted runner and re-runs failing checks to quarantine proven
   flakes, protected harness paths and the replanner.
 - **Sandboxes** ([`execution/factory.py`](../python/src/lha/execution/factory.py)): `docker`
-  (default; image `LHA_SANDBOX_IMAGE`, no network unless `LHA_SANDBOX_EGRESS` lists hosts,
+  (default; image `LHA_SANDBOX_IMAGE`, no network unless the `LHA_SANDBOX_EGRESS*` settings list hosts,
   dropped capabilities, read-only root and read-only `.git/` and `.lha/` mounts), `e2b`, and
   `local` (no isolation; refused unless `LHA_ALLOW_UNSAFE_LOCAL=true` or `--unsafe-local`).
 - **Dispatcher** ([`execution/dispatcher.py`](../python/src/lha/execution/dispatcher.py)): a
@@ -319,6 +319,7 @@ from `LHA_MODEL_BACKEND`:
 | `ollama` | `OpenAICompatModel` against `LHA_OLLAMA_BASE_URL/v1` | Priced at $0 |
 | `openai_compat` | `OpenAICompatModel` against `LHA_OPENAI_BASE_URL` | Unknown unless `LHA_OPENAI_PRICE_*_PER_MTOK` are set |
 | `claude` | `ClaudeModel`, Messages API over HTTP | Built-in price table, overridable |
+| `claude_code` (Python only) | `ClaudeCodeModel`, the `claude -p` CLI | The `total_cost_usd` Claude Code reports |
 
 Cost is computed from the token usage in each provider response. Under the `claude` backend,
 `lha orchestrate` routes roles to model tiers (planner, lead and reviewer to Opus, implementers

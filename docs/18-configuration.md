@@ -2,8 +2,9 @@
 
 All runtime configuration is one `Settings` object in
 [`python/src/lha/config.py`](../python/src/lha/config.py) (pydantic-settings). Application code
-does not read `os.environ`; it calls `get_settings()`. The Go port reads a subset of the same names,
-with the same defaults, in [`go/internal/config/config.go`](../go/internal/config/config.go) (see
+does not read settings from `os.environ`; it calls `get_settings()` (the few deliberate direct
+reads, such as building a child process's environment, are listed in `config.py`'s docstring).
+The Go port defines the same names, with the same defaults, in [`go/internal/config/config.go`](../go/internal/config/config.go) (see
 [Go port coverage](#go-port-coverage)).
 
 ## Sources and precedence
@@ -148,13 +149,18 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 | `LHA_SANDBOX_MEMORY` | Docker memory size | `2g` | the Docker sandbox's memory limit (swap included); a Go build of a large dependency is killed at the default |
 | `LHA_SANDBOX_CPUS` | float (> 0) | `2.0` | CPUs the Docker sandbox may use |
 | `LHA_SANDBOX_TMP_SIZE` | Docker size | `1g` | size of the sandbox's `/tmp` tmpfs, which holds toolchain caches (Go modules and build cache, uv); it counts against `LHA_SANDBOX_MEMORY` |
-| `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org`; `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. Empty: no network |
+| `LHA_SANDBOX_EGRESS` | comma-separated hosts | `""` | package-registry download hosts the Docker sandbox may reach through the per-session egress proxy, for example `proxy.golang.org,sum.golang.org,storage.googleapis.com,pypi.org,files.pythonhosted.org`. Only `pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`, `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com`, `crates.io`, `static.crates.io` and `index.crates.io` are accepted; anything else is a configuration error when a run starts. All three egress settings empty: no network |
+| `LHA_SANDBOX_EGRESS_EXTRA_HOSTS` | comma-separated hosts | `""` | any other host the sandbox may reach (a private mirror, a docs site); `.example.org` allows the domain and subdomains, `host:port` another port; IP addresses are rejected. An entry that reaches a known push/upload host (`github.com`, `gitlab.com`, `*.amazonaws.com`, `upload.pypi.org`, ...) is refused |
+| `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS` | comma-separated hosts | `""` | hosts the sandbox may reach although code in it can push or upload there, for example `github.com` for Go modules the proxy does not serve. Listing a host here is the acknowledgement |
 | `LHA_WEB_ALLOW_HOSTS` | comma-separated hosts | `""` | hosts the web tools may read; see [Web tools](#web-tools) |
 | `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
 | `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
 | `LHA_FLAKY_RETRIES` | int (0 to 5) | `1` | re-runs of a failing, not timed-out gating check on the same work tree; a check that then passes is quarantined (non-gating for the rest of the mission, with a committed `check_quarantined` event). `0` turns re-runs and quarantine off. See [07-verification.md](07-verification.md#flaky-check-quarantine) |
 
-`LHA_SANDBOX_IMAGE` and `LHA_SANDBOX_EGRESS` apply to `docker` only. `e2b` authenticates through
+`LHA_SANDBOX_IMAGE` and the three `LHA_SANDBOX_EGRESS*` settings apply to `docker` only. Any
+sandbox egress counts as untrusted content and external comms under the Rule of Two, so it cannot
+be combined with `LHA_PRIVATE_DATA=true`; every allow-listed host is reachable for writes by code
+in the sandbox ([09-safety-model.md](09-safety-model.md#sandbox-network)). `e2b` authenticates through
 the E2B SDK's own configuration (not an `LHA_*` variable). See
 [09-safety-model.md](09-safety-model.md) and, for witnesses, trusted checks and protected paths,
 [07-verification.md](07-verification.md).
@@ -187,8 +193,8 @@ refused before it starts. An invalid `LHA_WEB_CREDENTIALS` (bad JSON, a binding 
 outside the allow-list), `LHA_WEB_ALLOW_PORTS` or `LHA_WEB_SEARCH_ENDPOINT` is refused the same
 way. See [09-safety-model.md](09-safety-model.md#web-tools).
 
-The web settings above other than `LHA_WEB_ALLOW_HOSTS` are read by the Python implementation
-only; `go/internal/config` does not define them (see [Go port coverage](#go-port-coverage)).
+The Go implementation reads the same web settings and registers the same web tools (see
+[Go port coverage](#go-port-coverage)).
 
 ### Multi-agent coordination
 
