@@ -3,10 +3,12 @@ never let a quarantined check make an item green."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -249,3 +251,98 @@ async def test_local_mission_quarantines_a_flaky_check_and_commits_the_event(
     flaky = next(c for c in cycle["payload"]["checks"] if c["name"] == "flaky")
     assert flaky == {**flaky, "passed": True, "gating": False}
     assert committed_quarantine(str(workdir)) == {"flaky"}
+
+
+# --- cross-implementation scenarios (spec/verify/flaky_retry.json) -----------------------------
+SPEC_REVISION = "0123456789abcdef0123456789abcdef01234567"
+
+FLAKY_SCENARIOS: list[dict[str, Any]] = [
+    {
+        "name": "consistent_failure",
+        "retries": 2,
+        "checks": [["t", True]],
+        "outcomes": {"t": ["fail"]},
+    },
+    {
+        "name": "pass_on_rerun",
+        "retries": 2,
+        "checks": [["flaky", True], ["solid", True]],
+        "outcomes": {"flaky": ["fail", "pass"], "solid": ["pass"]},
+    },
+    {
+        "name": "quarantined_check_alone_is_unverified",
+        "retries": 1,
+        "calls": 2,
+        "checks": [["flaky", True]],
+        "outcomes": {"flaky": ["fail", "pass", "pass"]},
+    },
+    {
+        "name": "quarantined_check_failing_every_attempt_gates",
+        "retries": 1,
+        "calls": 2,
+        "checks": [["flaky", True], ["solid", True]],
+        "outcomes": {"flaky": ["fail", "pass", "fail"], "solid": ["pass"]},
+    },
+    {
+        "name": "timeouts_and_advisory_checks_not_rerun",
+        "retries": 2,
+        "checks": [["slow", True], ["advice", False]],
+        "outcomes": {"slow": ["timeout"], "advice": ["fail"]},
+    },
+    {
+        "name": "zero_retries",
+        "retries": 0,
+        "checks": [["f", True]],
+        "outcomes": {"f": ["fail", "pass"]},
+    },
+    {
+        "name": "passes_on_the_last_retry",
+        "retries": 3,
+        "checks": [["f", True]],
+        "outcomes": {"f": ["fail", "fail", "fail", "pass"]},
+    },
+    {
+        "name": "committed_quarantine_restored",
+        "retries": 1,
+        "quarantined": ["t"],
+        "checks": [["t", True], ["u", True]],
+        "outcomes": {"t": ["fail", "pass"], "u": ["pass"]},
+    },
+    {
+        "name": "duplicate_names_are_suffixed",
+        "retries": 1,
+        "checks": [["t", True], ["t", True]],
+        "outcomes": {"t": ["fail", "pass"], "t-2": ["pass"]},
+    },
+]
+
+
+class _FixedRevision(FlakyRetryVerifier):
+    async def _revision(self) -> str:
+        return SPEC_REVISION
+
+
+def run_flaky_scenario(case: dict[str, Any]) -> dict[str, Any]:
+    """Run one scenario (a scripted inner verifier, a fixed revision); record what happened.
+
+    The export (``scripts/export_spec.py``) and the conformance test both run it, so Go's
+    ``FlakyRetryVerifier`` is held to the same results, output tails and committed events.
+    """
+    inner = _Scripted(case["outcomes"])
+    verifier = _FixedRevision(inner, retries=case["retries"])
+    verifier.quarantine.restore(set(case.get("quarantined", [])))
+    checks = [Check(name=name, command=["x"], gating=gating) for name, gating in case["checks"]]
+    calls = []
+    for _ in range(case.get("calls", 1)):
+        result = asyncio.run(verifier.verify(_SESSION, checks))
+        calls.append(
+            {
+                "verdict": result.verdict,
+                "results": [
+                    r.model_dump(include={"name", "passed", "gating", "timed_out", "output_tail"})
+                    for r in result.results
+                ],
+                "events": [{"kind": e.kind, "payload": e.payload} for e in verifier.drain_events()],
+            }
+        )
+    return {"runs": inner.runs, "calls": calls}

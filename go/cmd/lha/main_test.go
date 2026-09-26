@@ -141,6 +141,21 @@ func TestRuleOfTwoIsRefusedUpFront(t *testing.T) {
 	}
 }
 
+func TestSandboxEgressIsCheckedUpFront(t *testing.T) {
+	cleanEnv(t)
+	t.Setenv("LHA_SANDBOX_EGRESS", "github.com")
+	r := runCLI(t, nil, "run-local", "--item", "a", "--sandbox", "docker")
+	if r.code != 2 || !strings.HasPrefix(r.stderr, "error: invalid sandbox egress settings: LHA_SANDBOX_EGRESS entry github.com is not a package-fetch host") {
+		t.Fatalf("%+v", r)
+	}
+	t.Setenv("LHA_SANDBOX_EGRESS", "pypi.org")
+	t.Setenv("LHA_PRIVATE_DATA", "true")
+	r = runCLI(t, nil, "run-local", "--item", "a", "--sandbox", "docker")
+	if r.code != 2 || !strings.HasPrefix(r.stderr, "error: refusing to start: the sandbox can reach the network (sandbox egress: pypi.org)") {
+		t.Fatalf("%+v", r)
+	}
+}
+
 var reportRE = regexp.MustCompile(`^mission (mission_[0-9a-f]{12}): (.+)\nitems (\d+)/(\d+)  cycles (\d+)  cost \$(\d+\.\d{4})\nhead ([0-9a-f]{40}|\(none\))\n$`)
 
 func git(t *testing.T, dir string, args ...string) string {

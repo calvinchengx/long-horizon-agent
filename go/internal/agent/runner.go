@@ -143,9 +143,19 @@ func loadSettings(s *config.Settings) (*config.Settings, error) {
 var LeadEngineError = errors.New("LHA_LEAD_ENGINE=claude_code (one claude -p session per cycle) is not yet " +
 	"available in the Go implementation; use the Python lha or LHA_LEAD_ENGINE=loop")
 
+// LeadVerifier is the lead's verifier (python: lead_verifier): sandbox checks in the sandbox,
+// operator trusted: checks on the trusted runner, and a failing gating check re-run up to
+// LHA_FLAKY_RETRIES times with proven flakes quarantined (verify.FlakyRetryVerifier).
+func LeadVerifier(workdir string, settings *config.Settings) *verify.FlakyRetryVerifier {
+	return verify.NewFlakyRetryVerifier(
+		verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), verify.NewCommandTrustedRunner(), workdir),
+		settings.FlakyRetries, workdir)
+}
+
 // BuildLeadLoop is the lead's AgentLoop with every capability wired from settings (python:
-// build_lead_loop): the TrustedAwareVerifier (sandbox checks in the sandbox, trusted: checks on
-// the host), operator-protected harness globs, the trusted-check map and the replanner.
+// build_lead_loop): the LeadVerifier (sandbox checks in the sandbox, trusted: checks on the
+// host, flaky re-runs and quarantine), operator-protected harness globs, the trusted-check map
+// and the replanner.
 func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider, anchor *state.GitMissionAnchor, dispatcher contracts.ToolDispatcher, recorder *obs.TraceRecorder) (*AgentLoop, error) {
 	if settings.LeadEngine == "claude_code" {
 		return nil, LeadEngineError
@@ -157,7 +167,7 @@ func BuildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 	opts := DefaultLoopOptions()
 	opts.Model = leadModel
 	opts.Dispatcher = dispatcher
-	opts.Verifier = verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), verify.NewCommandTrustedRunner(), anchor.Workdir())
+	opts.Verifier = LeadVerifier(anchor.Workdir(), settings)
 	opts.Anchor = anchor
 	opts.Recorder = recorder
 	opts.MaxTurns = settings.MaxTurnsPerCycle

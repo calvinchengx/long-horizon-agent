@@ -79,7 +79,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 80 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 82 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -219,7 +219,8 @@ func TestHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(s.SandboxEgressHosts(), []string{"pypi.org", "proxy.golang.org"}) ||
+	egress, err := s.SandboxEgressHosts()
+	if err != nil || !reflect.DeepEqual(egress, []string{"pypi.org", "proxy.golang.org"}) ||
 		!reflect.DeepEqual(s.WebHosts(), []string{"a.com", "b.com"}) ||
 		!reflect.DeepEqual(s.FallbackModelEntries(), []string{"claude:x", "ollama:y"}) ||
 		!reflect.DeepEqual(s.HarnessGlobs(), []string{"Makefile", "e2e/**"}) {
@@ -394,6 +395,7 @@ func TestConfigOutputMatchesPython(t *testing.T) {
 			"LHA_GATE_ESCALATION_SECONDS=[1, \"2\", 3.0]", "LHA_WEB_SEARCH_PROVIDER=exa",
 			"LHA_WEB_SEARCH_ENDPOINT=", "LHA_MAX_CYCLES=1_000", "LHA_MEMORY_ENABLED=off",
 			"LHA_WEB_TIMEOUT_S=7", "LHA_GATE_WEBHOOK_URL=https://hooks.example/x", "LHA_SANDBOX_EGRESS=pypi.org",
+			"LHA_SANDBOX_EGRESS_EXTRA_HOSTS=mirror.example", "LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS=github.com",
 		},
 		"postgres": {
 			"LHA_POSTGRES_DSN=postgresql://u:p@h/db", "LHA_SQLITE_PATH=" + filepath.Join(tmp, "store", "lha.db"),

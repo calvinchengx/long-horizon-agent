@@ -126,6 +126,7 @@ def _run_settings(
     """Settings with the CLI's sandbox / web overrides; refuses an unsafe local sandbox, a
     lethal-trifecta run (Rule of Two) and invalid web settings up front (before any planning
     spend or workspace writes)."""
+    from lha.execution.egress_hosts import SandboxEgressError
     from lha.execution.factory import SANDBOX_KINDS, UnsafeSandboxError, build_sandbox
     from lha.execution.tools.toolset import preflight_run_tools, with_allow_hosts
     from lha.safety.rule_of_two import RuleOfTwoViolation
@@ -151,6 +152,8 @@ def _run_settings(
         preflight_run_tools(settings)
     except RuleOfTwoViolation as exc:
         _fail(str(exc))
+    except SandboxEgressError as exc:
+        _fail(f"invalid sandbox egress settings: {exc}")
     except ValueError as exc:  # WebConfigError, bad LHA_WEB_ALLOW_PORTS
         _fail(f"invalid web settings: {exc}")
     return settings

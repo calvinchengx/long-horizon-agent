@@ -245,7 +245,9 @@ func (s *DockerSandbox) Open(ctx context.Context, workdir, snapshotID string) (c
 		gate.teardown()
 		return nil, err
 	}
-	return s.session(strings.TrimSpace(out), host, gate.teardown), nil
+	session := s.session(strings.TrimSpace(out), host, gate.teardown)
+	session.egressLog = gate.logs
+	return session, nil
 }
 
 func (s *DockerSandbox) session(containerID, host string, onClose func()) *DockerSandboxSession {
@@ -282,6 +284,17 @@ type DockerSandboxSession struct {
 	maxOutput   int
 	onClose     func() // tears down per-session egress resources (proxy + network)
 	clock       func() time.Time
+	egressLog   func(context.Context) string // the egress proxy's log (nil: no egress)
+	egressSeen  egressproxy.ProxyLogCursor
+}
+
+// DrainEgressEvents is the sandbox_egress events for the proxy requests since the last drain
+// (none without an egress allow-list) (python: drain_egress_events).
+func (s *DockerSandboxSession) DrainEgressEvents(ctx context.Context) []contracts.EventRecord {
+	if s.egressLog == nil {
+		return nil
+	}
+	return s.egressSeen.Drain(s.egressLog(ctx))
 }
 
 var (
@@ -584,6 +597,15 @@ func (g *egressGate) waitReady(ctx context.Context) error {
 		}
 		g.sleep(dockerPollInterval)
 	}
+}
+
+// logs is the proxy container's log so far ("" once it is gone).
+func (g *egressGate) logs(ctx context.Context) string {
+	out, stderr, code, err := dockerOutput(ctx, g.cli, nil, "logs", g.proxyName())
+	if err != nil || code != 0 {
+		return ""
+	}
+	return pyval.DecodeUTF8Replace([]byte(out + stderr))
 }
 
 func (g *egressGate) teardown() {

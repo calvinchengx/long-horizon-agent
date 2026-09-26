@@ -19,11 +19,12 @@ the matching package is ported; it runs every file below.
 | `coordination/decision_chain.json` | the canonical JSON bytes and SHA-256 chain of the decision log |
 | `coordination/shared_paths.json` | files only the lead engineer may write |
 | `verify/harness_files.json` | test/harness files the agent may not weaken |
+| `verify/flaky_retry.json` | flaky-check re-runs and quarantine: re-run order, verdicts, output tails, and the `check_quarantined` / `quarantined_check_failed` event payloads |
 | `model/pricing.json` | Claude price table and per-call cost |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
-
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
 | `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
+| `execution/sandbox_egress.json` | the sandbox egress lists (package-fetch, extra and write hosts) and their errors, the run-level Rule of Two with sandbox egress, and `sandbox_egress` events parsed from the proxy log |
 
 ## Changing behaviour
 

@@ -1,6 +1,9 @@
 package safety
 
-import "errors"
+import (
+	"errors"
+	"strings"
+)
 
 // Meta's "Rule of Two" for agent safety (python/src/lha/safety/rule_of_two.py).
 //
@@ -40,4 +43,25 @@ func CheckRuleOfTwo(caps ...Capability) error {
 		return ErrRuleOfTwoViolation
 	}
 	return nil
+}
+
+// RunRefusal is the message of a run-level Rule-of-Two refusal (python:
+// lha.execution.tools.toolset.check_run_rule_of_two): webHosts is the web tools' allow-list when
+// they are enabled (nil otherwise), sandboxEgress the sandbox egress entries as written when the
+// sandbox has egress (nil otherwise), why names the private-data source and err is the violation.
+func RunRefusal(webHosts, sandboxEgress []string, why string, err error) string {
+	var sources, clear []string
+	if webHosts != nil {
+		sources = append(sources, "web tools are enabled (egress allow-list: "+strings.Join(webHosts, ", ")+")")
+		clear = append(clear, "LHA_WEB_ALLOW_HOSTS / --allow-host")
+	}
+	if sandboxEgress != nil {
+		sources = append(sources, "the sandbox can reach the network (sandbox egress: "+
+			strings.Join(sandboxEgress, ", ")+")")
+		clear = append(clear, "LHA_SANDBOX_EGRESS / LHA_SANDBOX_EGRESS_EXTRA_HOSTS / "+
+			"LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS")
+	}
+	return "refusing to start: " + strings.Join(sources, " and ") + ", which brings untrusted content and " +
+		"external comms, and " + why + ". " + err.Error() + ". Use a docker/e2b sandbox without private data, " +
+		"or clear the allow-list (" + strings.Join(clear, "; ") + ")."
 }
