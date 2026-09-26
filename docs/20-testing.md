@@ -199,8 +199,7 @@ cd python && uv run pytest -q tests/unit/test_spec_conformance.py
 cd go && go test ./internal/spec/
 ```
 
-Python runs all nine files. Go runs eight; `coordination/shared_paths.json` waits for a Go port
-of the ownership map.
+Both implementations run every file.
 
 The spec files live outside the Go module (`spec/` is next to `go/`), so Go's test cache does not
 see them change. After regenerating `spec/` (or editing it), run the Go conformance tests with

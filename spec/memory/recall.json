@@ -1,0 +1,373 @@
+{
+ "episodes": [
+  {
+   "payload": {},
+   "cycle_id": "c1",
+   "rendered": "- c1 [?] no verdict (attempt ?, status ?)"
+  },
+  {
+   "payload": {
+    "item_id": "01",
+    "verdict": "failed",
+    "attempts": 2,
+    "status": "in_progress",
+    "tools": [
+     "read_file",
+     "write_file",
+     "read_file"
+    ],
+    "files": [
+     "f0.py",
+     "f1.py",
+     "f2.py",
+     "f3.py",
+     "f4.py",
+     "f5.py",
+     "f6.py",
+     "f7.py",
+     "f8.py",
+     "f9.py"
+    ],
+    "summary": "tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex tried  a\tregex ",
+    "failure": "KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError ",
+    "verified": false
+   },
+   "cycle_id": "c2",
+   "rendered": "- c2 [01] failed (attempt 2, status in_progress); tools: read_file, write_file; files: f0.py, f1.py, f2.py, f3.py, f4.py, f5.py, f6.py, f7.py; claimed: tried a regex tried a regex tried a regex tried a regex tried a regex tried a regex tried a regex tried a regex tried a regex tried a regex tried a regex tri...; failure: KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError KeyError ..."
+  },
+  {
+   "payload": {
+    "item_id": "02",
+    "verdict": "",
+    "verified": true,
+    "summary": "worked",
+    "failure": "ignored",
+    "attempts": 1,
+    "status": "done"
+   },
+   "cycle_id": "c3",
+   "rendered": "- c3 [02] no verdict (attempt 1, status done); what worked: worked"
+  },
+  {
+   "payload": {
+    "item_id": null,
+    "verdict": null,
+    "verified": true,
+    "summary": ""
+   },
+   "cycle_id": "c4",
+   "rendered": "- c4 [None] no verdict (attempt ?, status ?)"
+  }
+ ],
+ "terms": [
+  {
+   "text": "Fix the config parser for missing port keys",
+   "terms": [
+    "fix",
+    "config",
+    "parser",
+    "missing",
+    "port",
+    "keys"
+   ]
+  },
+  {
+   "text": "make the LISTEN port configurable, the port!",
+   "terms": [
+    "listen",
+    "port",
+    "configurable"
+   ]
+  },
+  {
+   "text": "add a test for each item in files",
+   "terms": []
+  },
+  {
+   "text": "snake_case_name and CamelCase and x9_y",
+   "terms": [
+    "snake_case_name",
+    "camelcase",
+    "x9_y"
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "name": "hybrid_hash_sqlite",
+   "embedder": "hash",
+   "config": {
+    "prompt_budget_chars": 4000,
+    "episodic_k": 4,
+    "semantic_k": 4,
+    "skills_k": 2,
+    "consolidate_every": 2,
+    "consolidation": "extractive",
+    "index_repo_files": true,
+    "max_repo_files": 400
+   },
+   "files": {
+    "config_parser.py": "import os\n\nDEFAULT_PORT = 8080\n\n\ndef parse_config(text):\n    \"\"\"Parse key=value lines into a dict.\"\"\"\n    out = {}\n    for line in text.splitlines():\n        key, _, value = line.partition(\"=\")\n        out[key.strip()] = value.strip()\n    return out\n",
+    "server.py": "from config_parser import parse_config\n\n\ndef listen(port=None):\n    port = port or 8080\n    return port\n",
+    "README.md": "# demo\n\nA tiny server with a config parser and a listen port.\n",
+    "docs/notes.txt": "The listen port comes from the config file (key: port).\n"
+   },
+   "observations": [
+    {
+     "cycle_id": "c1",
+     "item_id": "01",
+     "item_description": "fix the config parser for missing port keys",
+     "verdict": "failed",
+     "verified": false,
+     "status": "in_progress",
+     "attempts": 1,
+     "failure": "- pytest FAILED (exit 1): KeyError 'port' in parse_config",
+     "done_summary": "tried a regex",
+     "tools": [
+      "read_file",
+      "write_file",
+      "read_file"
+     ]
+    },
+    {
+     "cycle_id": "c2",
+     "item_id": "01",
+     "item_description": "fix the config parser for missing port keys",
+     "verdict": "passed",
+     "verified": true,
+     "status": "done",
+     "attempts": 2,
+     "failure": "",
+     "done_summary": "defaulted the port to DEFAULT_PORT when the key is missing",
+     "tools": [
+      "read_file",
+      "write_file",
+      "run_command"
+     ]
+    },
+    {
+     "cycle_id": "c3",
+     "item_id": "02",
+     "item_description": "make the listen port configurable",
+     "verdict": "failed",
+     "verified": false,
+     "status": "in_progress",
+     "attempts": 1,
+     "failure": "- red FAILED (exit 1): listen() ignores   the\tconfig",
+     "done_summary": "",
+     "tools": [
+      "grep"
+     ]
+    }
+   ],
+   "recalls": [
+    {
+     "cycle_id": "c4",
+     "item": {
+      "id": "02",
+      "description": "make the listen port configurable"
+     },
+     "decisions": [
+      {
+       "decision": "keep ports in config_parser",
+       "rationale": "one source of truth"
+      }
+     ]
+    },
+    {
+     "cycle_id": "c4",
+     "item": {
+      "id": "03",
+      "description": "add a config parser for missing keys in admin"
+     },
+     "decisions": []
+    }
+   ],
+   "blocks": [
+    "Relevant memory (retrieved from earlier cycles, skills and the repository; it may be stale, so verify before relying on it):\nEarlier attempts and outcomes:\n- c3 [02] failed (attempt 1, status in_progress); tools: grep; failure: - red FAILED (exit 1): listen() ignores the config\n- c1 [01] failed (attempt 1, status in_progress); tools: read_file, write_file; claimed: tried a regex; failure: - pytest FAILED (exit 1): KeyError 'port' in parse_config\n- c2 [01] passed (attempt 2, status done); tools: read_file, write_file, run_command; what worked: defaulted the port to DEFAULT_PORT when the key is missing\nSkills that worked before:\n- fix the config parser for missing port keys: fix the config parser for missing port keys\n  what worked: summary: defaulted the port to DEFAULT_PORT when the key is missing tools: read_file, write_file, run_command files: (none)\nRelated facts, progress, decisions and code:\n- (file) docs/notes.txt:1-1\nThe listen port comes from the config file (key: port).\n- (fact) [01] fix the config parser for missing port keys: verified in c2 after 2 attempt(s); what worked: defaulted the port to DEFAULT_PORT when the key is missing; last failure: - pytest FAILED (exit 1): KeyError 'port' in parse_config\n- (file) server.py:1-6\nfrom config_parser import parse_config\n\n\ndef listen(port=None):\n    port = port or 8080\n    return port\n- (file) README.md:1-3\n# demo\n\nA tiny server with a config parser and a listen port.",
+    "Relevant memory (retrieved from earlier cycles, skills and the repository; it may be stale, so verify before relying on it):\nEarlier attempts and outcomes:\n- c2 [01] passed (attempt 2, status done); tools: read_file, write_file, run_command; what worked: defaulted the port to DEFAULT_PORT when the key is missing\n- c3 [02] failed (attempt 1, status in_progress); tools: grep; failure: - red FAILED (exit 1): listen() ignores the config\nSkills that worked before:\n- fix the config parser for missing port keys: fix the config parser for missing port keys\n  what worked: summary: defaulted the port to DEFAULT_PORT when the key is missing tools: read_file, write_file, run_command files: (none)\nRelated facts, progress, decisions and code:\n- (fact) [01] fix the config parser for missing port keys: verified in c2 after 2 attempt(s); what worked: defaulted the port to DEFAULT_PORT when the key is missing; last failure: - pytest FAILED (exit 1): KeyError 'port' in parse_config\n- (file) README.md:1-3\n# demo\n\nA tiny server with a config parser and a listen port.\n- (file) config_parser.py:1-12\nimport os\n\nDEFAULT_PORT = 8080\n\n\ndef parse_config(text):\n    \"\"\"Parse key=value lines into a dict.\"\"\"\n    out = {}\n    for line in text.splitlines():\n        key, _, value = line.partition(\"=\")\n        out[key.strip()] = value.strip()\n    return out\n- (progress) make the listen port configurable: c3 [02] failed (attempt 1, status in_progress); tools: grep; failure: - red FAILED (exit 1): listen() ignores the config"
+   ]
+  },
+  {
+   "name": "lexical_git_grep",
+   "embedder": "none",
+   "config": {
+    "prompt_budget_chars": 4000,
+    "episodic_k": 4,
+    "semantic_k": 4,
+    "skills_k": 2,
+    "consolidate_every": 0,
+    "consolidation": "extractive",
+    "index_repo_files": false,
+    "max_repo_files": 400
+   },
+   "files": {
+    "config_parser.py": "import os\n\nDEFAULT_PORT = 8080\n\n\ndef parse_config(text):\n    \"\"\"Parse key=value lines into a dict.\"\"\"\n    out = {}\n    for line in text.splitlines():\n        key, _, value = line.partition(\"=\")\n        out[key.strip()] = value.strip()\n    return out\n",
+    "server.py": "from config_parser import parse_config\n\n\ndef listen(port=None):\n    port = port or 8080\n    return port\n",
+    "README.md": "# demo\n\nA tiny server with a config parser and a listen port.\n",
+    "docs/notes.txt": "The listen port comes from the config file (key: port).\n"
+   },
+   "observations": [
+    {
+     "cycle_id": "c1",
+     "item_id": "01",
+     "item_description": "fix the config parser for missing port keys",
+     "verdict": "failed",
+     "verified": false,
+     "status": "in_progress",
+     "attempts": 1,
+     "failure": "- pytest FAILED (exit 1): KeyError 'port' in parse_config",
+     "done_summary": "tried a regex",
+     "tools": [
+      "read_file",
+      "write_file",
+      "read_file"
+     ]
+    },
+    {
+     "cycle_id": "c2",
+     "item_id": "01",
+     "item_description": "fix the config parser for missing port keys",
+     "verdict": "passed",
+     "verified": true,
+     "status": "done",
+     "attempts": 2,
+     "failure": "",
+     "done_summary": "defaulted the port to DEFAULT_PORT when the key is missing",
+     "tools": [
+      "read_file",
+      "write_file",
+      "run_command"
+     ]
+    },
+    {
+     "cycle_id": "c3",
+     "item_id": "02",
+     "item_description": "make the listen port configurable",
+     "verdict": "failed",
+     "verified": false,
+     "status": "in_progress",
+     "attempts": 1,
+     "failure": "- red FAILED (exit 1): listen() ignores   the\tconfig",
+     "done_summary": "",
+     "tools": [
+      "grep"
+     ]
+    }
+   ],
+   "recalls": [
+    {
+     "cycle_id": "c4",
+     "item": {
+      "id": "02",
+      "description": "make the listen port configurable"
+     },
+     "decisions": [
+      {
+       "decision": "keep ports in config_parser",
+       "rationale": "one source of truth"
+      }
+     ]
+    },
+    {
+     "cycle_id": "c4",
+     "item": {
+      "id": "03",
+      "description": "add a config parser for missing keys in admin"
+     },
+     "decisions": []
+    }
+   ],
+   "blocks": [
+    "Relevant memory (retrieved from earlier cycles, skills and the repository; it may be stale, so verify before relying on it):\nEarlier attempts and outcomes:\n- c3 [02] failed (attempt 1, status in_progress); tools: grep; failure: - red FAILED (exit 1): listen() ignores the config\n- c1 [01] failed (attempt 1, status in_progress); tools: read_file, write_file; claimed: tried a regex; failure: - pytest FAILED (exit 1): KeyError 'port' in parse_config\n- c2 [01] passed (attempt 2, status done); tools: read_file, write_file, run_command; what worked: defaulted the port to DEFAULT_PORT when the key is missing\nSkills that worked before:\n- fix the config parser for missing port keys: fix the config parser for missing port keys\n  what worked: summary: defaulted the port to DEFAULT_PORT when the key is missing tools: read_file, write_file, run_command files: (none)\nRelated facts, progress, decisions and code:\n- (grep) docs/notes.txt (1 matching lines)\n1:The listen port comes from the config file (key: port).\n- (grep) server.py (4 matching lines)\n1:from config_parser import parse_config\n4:def listen(port=None):\n5: port = port or 8080\n6: return port\n- (grep) README.md (1 matching lines)\n3:A tiny server with a config parser and a listen port.\n- (grep) config_parser.py (2 matching lines)\n1:import os\n3:DEFAULT_PORT = 8080",
+    "Relevant memory (retrieved from earlier cycles, skills and the repository; it may be stale, so verify before relying on it):\nEarlier attempts and outcomes:\n- c2 [01] passed (attempt 2, status done); tools: read_file, write_file, run_command; what worked: defaulted the port to DEFAULT_PORT when the key is missing\n- c3 [02] failed (attempt 1, status in_progress); tools: grep; failure: - red FAILED (exit 1): listen() ignores the config\nSkills that worked before:\n- fix the config parser for missing port keys: fix the config parser for missing port keys\n  what worked: summary: defaulted the port to DEFAULT_PORT when the key is missing tools: read_file, write_file, run_command files: (none)\nRelated facts, progress, decisions and code:\n- (grep) README.md (1 matching lines)\n3:A tiny server with a config parser and a listen port.\n- (grep) config_parser.py (1 matching lines)\n6:def parse_config(text):\n- (grep) docs/notes.txt (1 matching lines)\n1:The listen port comes from the config file (key: port).\n- (grep) server.py (1 matching lines)\n1:from config_parser import parse_config"
+   ]
+  },
+  {
+   "name": "tight_budget",
+   "embedder": "hash",
+   "config": {
+    "prompt_budget_chars": 700,
+    "episodic_k": 4,
+    "semantic_k": 4,
+    "skills_k": 2,
+    "consolidate_every": 2,
+    "consolidation": "extractive",
+    "index_repo_files": true,
+    "max_repo_files": 400
+   },
+   "files": {
+    "config_parser.py": "import os\n\nDEFAULT_PORT = 8080\n\n\ndef parse_config(text):\n    \"\"\"Parse key=value lines into a dict.\"\"\"\n    out = {}\n    for line in text.splitlines():\n        key, _, value = line.partition(\"=\")\n        out[key.strip()] = value.strip()\n    return out\n",
+    "server.py": "from config_parser import parse_config\n\n\ndef listen(port=None):\n    port = port or 8080\n    return port\n",
+    "README.md": "# demo\n\nA tiny server with a config parser and a listen port.\n",
+    "docs/notes.txt": "The listen port comes from the config file (key: port).\n"
+   },
+   "observations": [
+    {
+     "cycle_id": "c1",
+     "item_id": "01",
+     "item_description": "fix the config parser for missing port keys",
+     "verdict": "failed",
+     "verified": false,
+     "status": "in_progress",
+     "attempts": 1,
+     "failure": "- pytest FAILED (exit 1): KeyError 'port' in parse_config",
+     "done_summary": "tried a regex",
+     "tools": [
+      "read_file",
+      "write_file",
+      "read_file"
+     ]
+    },
+    {
+     "cycle_id": "c2",
+     "item_id": "01",
+     "item_description": "fix the config parser for missing port keys",
+     "verdict": "passed",
+     "verified": true,
+     "status": "done",
+     "attempts": 2,
+     "failure": "",
+     "done_summary": "defaulted the port to DEFAULT_PORT when the key is missing",
+     "tools": [
+      "read_file",
+      "write_file",
+      "run_command"
+     ]
+    },
+    {
+     "cycle_id": "c3",
+     "item_id": "02",
+     "item_description": "make the listen port configurable",
+     "verdict": "failed",
+     "verified": false,
+     "status": "in_progress",
+     "attempts": 1,
+     "failure": "- red FAILED (exit 1): listen() ignores   the\tconfig",
+     "done_summary": "",
+     "tools": [
+      "grep"
+     ]
+    }
+   ],
+   "recalls": [
+    {
+     "cycle_id": "c4",
+     "item": {
+      "id": "02",
+      "description": "make the listen port configurable"
+     },
+     "decisions": [
+      {
+       "decision": "keep ports in config_parser",
+       "rationale": "one source of truth"
+      }
+     ]
+    }
+   ],
+   "blocks": [
+    "Relevant memory (retrieved from earlier cycles, skills and the repository; it may be stale, so verify before relying on it):\nEarlier attempts and outcomes:\n- c3 [02] failed (attempt 1, status in_progress); tools: grep; failure: - red FAILED (exit 1): listen() ignores the config\n- c1 [01] failed (attempt 1, status in_progress); tools: rea ...[clipped]\nSkills that worked before:\n- fix the config parser for missing port keys: fix the config parser for ...[clipped]\nRelated facts, progress, decisions and code:\n- (file) docs/notes.txt:1-1\nThe listen port comes from the config file (key: port).\n- (fact) [01] fix the config parser for missing port keys: verified in c2 after 2 attemp ...[clipped]"
+   ]
+  }
+ ]
+}

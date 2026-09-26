@@ -39,7 +39,7 @@ func (mm *MeteredModel) RunExternal(ctx context.Context, worstCaseUSD float64, r
 	if usage.ReportedCostUSD != nil {
 		usd = *usage.ReportedCostUSD
 	}
-	meter.Ledger.Record(meter.CycleID(), usage, &usd, mm.Role)
+	meter.record(ctx, usage, &usd, mm.Role) // reaches the CostHook too (python: on_record)
 	return nil
 }
 

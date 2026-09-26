@@ -114,6 +114,10 @@ type TerminalApprover struct {
 	prompt   sync.Mutex
 	eventsMu sync.Mutex
 	events   []contracts.EventRecord
+
+	storeMu       sync.Mutex
+	store         GateRecorder // the run's hitl_gates (BindStore); nil = not recorded
+	storeFailures int
 }
 
 var (
@@ -170,7 +174,9 @@ func denied(req contracts.GateRequest, by string, defaulted bool) contracts.Gate
 // Request implements contracts.HITLGate. It returns ctx's error if ctx ends while waiting.
 func (a *TerminalApprover) Request(ctx context.Context, req contracts.GateRequest) (contracts.GateResolution, error) {
 	if !a.isTTY() {
-		return denied(req, "non-interactive (stdin is not a TTY)", true), nil
+		by := "non-interactive (stdin is not a TTY)"
+		a.persist(ctx, req, "defaulted", "reject", by, 0)
+		return denied(req, by, true), nil
 	}
 	a.prompt.Lock()
 	defer a.prompt.Unlock()
@@ -219,6 +225,7 @@ func (a *TerminalApprover) ask(ctx context.Context, req contracts.GateRequest) (
 		fmt.Sprintf("  timeout: %ds (default: reject)\n", int(a.timeout)) +
 		"Allow this exact call? [y/N]: ")
 	a.send(req, "opened")
+	a.persist(ctx, req, "opened", "", "", 0)
 	start := a.clock()
 	sent := 0
 	for {
@@ -231,6 +238,7 @@ func (a *TerminalApprover) ask(ctx context.Context, req contracts.GateRequest) (
 			if rung.Step == 0 {
 				a.say("\n[lha] no answer before the timeout: rejected.\n")
 				a.send(req, "defaulted", Field{"decision", "reject"})
+				a.persist(ctx, req, "defaulted", "reject", "timeout", 0)
 				return denied(req, "timeout", true), nil
 			}
 			sent = rung.Step
@@ -250,11 +258,13 @@ func (a *TerminalApprover) ask(ctx context.Context, req contracts.GateRequest) (
 			})
 			a.eventsMu.Unlock()
 			a.send(req, "reminder", Field{"step", sent})
+			a.persist(ctx, req, "reminder", "", "", sent)
 			continue
 		}
 		if line == "" {
 			a.say("\n[lha] end of input: rejected.\n")
 			a.send(req, "defaulted", Field{"decision", "reject"})
+			a.persist(ctx, req, "defaulted", "reject", "end of input", 0)
 			return denied(req, "end of input", true), nil
 		}
 		answer := strings.ToLower(pyStrip(line))
@@ -264,6 +274,7 @@ func (a *TerminalApprover) ask(ctx context.Context, req contracts.GateRequest) (
 			decision = "approve"
 		}
 		a.send(req, "resolved", Field{"decision", decision})
+		a.persist(ctx, req, "resolved", decision, "terminal:"+terminalUser(), 0)
 		if approved {
 			return contracts.GateResolution{GateID: req.GateID, Decision: contracts.GateApprove, ResolvedBy: "human"}, nil
 		}

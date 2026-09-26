@@ -151,7 +151,7 @@ use the Python implementation for that feature
 
 | Component | Package | State |
 |---|---|---|
-| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, OTLP) are read but have no effect in Go runs |
+| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal) are read but have no effect in Go runs |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
 | Model backends: stub, OpenAI-compatible, Claude, Claude Code (`claude -p`), pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
@@ -159,10 +159,10 @@ use the Python implementation for that feature
 | Git mission anchor and git operations | `internal/state` | present; cross-implementation tests read Python anchors and vice versa |
 | Verifier, harness integrity, flaky quarantine, witnesses, trusted runner | `internal/verify` | present; `spec/verify/harness_files.json` and `spec/verify/flaky_retry.json` pass. The lead re-runs failing checks (`LHA_FLAKY_RETRIES`) as in Python |
 | Redaction and structured events | `internal/obs` | present; `spec/obs/redact.json` passes |
-| Checklist import, `vendor` | `internal/checklistimport` | checklist import present; `vendor` not started |
+| Checklist import, `vendor` | `internal/checklistimport`, `internal/state/vendor` | present |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
 | Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` lead engine with its MCP bridge |
-| CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `decisions`; `run-local` and `mission` run real missions (end-to-end tests compare them with Python) |
+| CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`; the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python) |
 
 `go test ./...` passes for the present packages; the `go` CI job runs it with the race detector,
 plus `gofmt`, `go vet` and a Windows `go vet`.
@@ -175,10 +175,12 @@ document: the Go SDK shares one sequence counter between activities and timers w
 SDK keeps separate ones, so histories with timers do not replay across languages
 ([19-wire-contract.md](19-wire-contract.md#known-cross-language-limitation)).
 
-### Go phase 3: organization, memory, Postgres, observability (not started)
+### Go phase 3: organization, memory, Postgres, observability (landed, except the durable rounds)
 
-The reviewer, researchers and orchestrator; file ownership enforcement, tickets, the blackboard,
-parallel implementers and the integrator; memory; the mission store (SQLite and Postgres) and
-`db migrate`; OTLP trace export; and `spec/coordination/shared_paths.json` (Go passes
-`decision_chain.json` today, in `internal/state`). The Planner, the web tools and the console
-approval gate are already in phase 1.
+Landed: the reviewer, researchers and orchestrator (`lha orchestrate`, `internal/agents/org`);
+file ownership enforcement, tickets, the blackboard, parallel implementers and the integrator
+(`internal/coordination`); tiered memory (`internal/memory`); the mission store (SQLite and
+Postgres, `internal/persistence`) with `missions`, `costs`, `gates` and `db migrate`; OTLP trace
+export (`internal/obs/tracing`); and every `spec/` file. The durable organization rounds wait for
+phase 2. Not planned: E2B, the `sentence_transformers` / `cross_encoder` extras and
+`VoyageEmbedder`.

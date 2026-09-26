@@ -56,9 +56,9 @@ from lha.coordination.ownership import FileOwnershipMap, LeaseRequest, is_shared
 from lha.coordination.ticket import TaskContract, Ticket, TicketStatus  # noqa: E402
 from lha.execution.tools import default_local_tools  # noqa: E402
 from lha.execution.tools.decisions import DecisionBuffer, RecordDecisionTool  # noqa: E402
-from lha.model import parse_fallback_entry  # noqa: E402
 from lha.execution.tools.leases import LEASE_SPEC  # noqa: E402
 from lha.execution.tools.web import FetchUrlTool, WebSearchTool  # noqa: E402
+from lha.model import parse_fallback_entry  # noqa: E402
 from lha.model.pricing import CLAUDE_PRICES, lookup_claude_price  # noqa: E402
 from lha.model.stub import StubModel  # noqa: E402
 from lha.obs.redact import is_secret_key, redact_text  # noqa: E402
@@ -1600,7 +1600,145 @@ def export_sandbox_egress() -> None:
     )
 
 
+_MEMORY_TEXTS = [
+    "",
+    "hello",
+    "Fix the config parser: KeyError 'port' (twice) port PORT",
+    "déjà vu — ÉCOLE of 42 fish_and_chips; tabs\tand\nnewlines",
+    "a b c d e f g h i j k l m n o p q r s t u v w x y z 0 1 2 3 4 5 6 7 8 9",
+    "listen port configurable " * 12,
+]
+
+_BM25_DOCS = [
+    ("d1", "the config parser reads key=value lines"),
+    ("d2", "listen on the configured port; default port 8080"),
+    ("d3", "config config config port"),
+    ("d4", "unrelated text about fish"),
+    ("d5", ""),
+    ("d1", "the config parser reads key value lines and the port"),  # re-add replaces d1
+    ("d6", "Port PORT port: the listen port"),
+]
+
+_BM25_QUERIES = [
+    "config parser",
+    "listen port",
+    "port",
+    "fish and chips",
+    "",
+    "nothing matches here",
+    "the the the",
+]
+
+
+def export_memory() -> None:
+    """spec/memory: hash-embedder vectors, cosine, BM25 scores, RRF fusion order, episode and
+    term rendering, and full memory blocks recalled by ``MissionMemory`` for a fixture."""
+    from tests.unit.memory_spec_fixture import memory_cases, run_case
+
+    from lha.contracts.memory import MemoryRecord
+    from lha.memory.embeddings import HashEmbedder
+    from lha.memory.hybrid import BM25Index, reciprocal_rank_fusion
+    from lha.memory.semantic_memory import cosine
+    from lha.memory.service import _render_episode, _terms
+
+    hash_cases = []
+    for dim in (256, 1024, 7):
+        embedder = HashEmbedder(dim=dim)
+        for text in _MEMORY_TEXTS:
+            (vector,) = asyncio.run(embedder.embed([text]))
+            hash_cases.append({"dim": dim, "text": text, "vector": vector})
+    cosine_cases = []
+    for a, b in [
+        ([1.0, 0.0], [0.0, 1.0]),
+        ([1.0, 2.0, 3.0], [3.0, 2.0, 1.0]),
+        ([0.1] * 10, [0.2, 0.3] * 5),
+        ([0.0, 0.0], [1.0, 1.0]),
+        ([1e-300, 1e300, -1e300], [1.0, 1.0, 1.0]),
+        ([0.1, 0.2, 0.3, 1e16, -1e16], [0.3, 0.2, 0.1, 1.0, 1.0]),
+    ]:
+        cosine_cases.append({"a": a, "b": b, "cosine": cosine(a, b)})
+    _write("memory/hash_embedder.json", {"hash": hash_cases, "cosine": cosine_cases})
+
+    bm25 = BM25Index()
+    for doc_id, text in _BM25_DOCS:
+        bm25.add([MemoryRecord(id=doc_id, kind="semantic", text=text)])
+    bm25_cases = [
+        {"query": q, "k": k, "hits": [[d, s] for d, s in bm25.query(q, k=k)]}
+        for q in _BM25_QUERIES
+        for k in (10, 2)
+    ]
+    rankings_cases = [
+        [["a", "b", "c"], ["c", "b", "a"]],
+        [["a", "b"], ["c", "d"]],
+        [["x"], [], ["x", "y"], ["y", "x", "z"]],
+        [],
+        [["only"]],
+    ]
+    fusion = [
+        {"rankings": r, "fused": [[d, s] for d, s in reciprocal_rank_fusion(r)]}
+        for r in rankings_cases
+    ]
+    _write(
+        "memory/retrieval.json",
+        {
+            "bm25_docs": [list(d) for d in _BM25_DOCS],
+            "bm25": bm25_cases,
+            "fusion": fusion,
+        },
+    )
+
+    episodes = []
+    for payload, cycle in [
+        ({}, "c1"),
+        (
+            {
+                "item_id": "01",
+                "verdict": "failed",
+                "attempts": 2,
+                "status": "in_progress",
+                "tools": ["read_file", "write_file", "read_file"],
+                "files": [f"f{i}.py" for i in range(10)],
+                "summary": "tried  a\tregex " * 20,
+                "failure": "KeyError " * 60,
+                "verified": False,
+            },
+            "c2",
+        ),
+        (
+            {
+                "item_id": "02",
+                "verdict": "",
+                "verified": True,
+                "summary": "worked",
+                "failure": "ignored",
+                "attempts": 1,
+                "status": "done",
+            },
+            "c3",
+        ),
+        ({"item_id": None, "verdict": None, "verified": True, "summary": ""}, "c4"),
+    ]:
+        episodes.append(
+            {"payload": payload, "cycle_id": cycle, "rendered": _render_episode(payload, cycle)}
+        )
+    terms = [
+        {"text": t, "terms": _terms(t)}
+        for t in [
+            "Fix the config parser for missing port keys",
+            "make the LISTEN port configurable, the port!",
+            "add a test for each item in files",
+            "snake_case_name and CamelCase and x9_y",
+        ]
+    ]
+    recall = []
+    for case in memory_cases():
+        blocks = asyncio.run(run_case(case))
+        recall.append({**case, "blocks": blocks})
+    _write("memory/recall.json", {"episodes": episodes, "terms": terms, "cases": recall})
+
+
 def main() -> None:
+    export_memory()
     export_paths()
     export_arguments()
     export_sandbox_egress()

@@ -14,6 +14,18 @@ run's memory as `memory=`. Sub-agents (researchers and parallel implementers), t
 the replanner do not get memory. Memory is persisted in the mission store
 ([Persistence](#persistence)): SQLite by default, Postgres when `LHA_POSTGRES_DSN` is set.
 
+**In Go.** [`go/internal/memory`](../go/internal/memory/) is the same memory plane, wired into
+the Go `lha run-local`, `lha mission` and `lha orchestrate` (the Lead), for the built-in turn
+loop and the `claude_code` engine alike: the same tiers, retrieval, consolidation, skills,
+degradation rules and settings, and the same rows in the same store, so either implementation
+recalls what the other recorded. For the same inputs the memory block is byte-identical:
+[`spec/memory/`](../spec/memory/) pins the hash embedder's vectors (Go reproduces CPython's
+compensated `sum()`), BM25 scores, fusion order and the blocks recalled for a fixture. Go has the
+`hash` and `ollama` embedders; `sentence_transformers` and the `cross_encoder` reranker are
+Python extras, so in Go they degrade exactly as Python does without the extra (lexical-only
+retrieval with a `memory_degraded` event; fusion order kept with a `memory_rerank_unavailable`
+warning). On Postgres, Go sends vectors to pgvector as text literals, so it needs no adapter.
+
 ## What happens each cycle
 
 `AgentLoop.run_cycle` ([agent/loop.py](../python/src/lha/agent/loop.py)) calls the memory plane
@@ -213,5 +225,6 @@ for the store itself):
 | `OllamaEmbedder` | core install (httpx) + a running Ollama with the embedding model pulled |
 | `SentenceTransformerEmbedder`, `CrossEncoderReranker` | `embeddings` extra (`sentence-transformers`) |
 | `VoyageEmbedder` | core install (httpx) + Voyage API key, passed in code |
+| Go: everything above except `SentenceTransformerEmbedder`, `CrossEncoderReranker` and `VoyageEmbedder` | the `lha` binary (and `git`); Postgres needs no client extra |
 
 Related: [Configuration](18-configuration.md), [Operations runbook](15-operations-runbook.md).

@@ -73,8 +73,28 @@ func processEnv(env ...string) []string {
 	return append(out, env...)
 }
 
+// packageXDG is the package's temporary XDG_DATA_HOME (TestMain).
+var packageXDG string
+
+// isolateStore gives a process run in dir its own mission store and memory (under dir, outside
+// the workspace) unless the test chose one: the Go and Python runs a parity test compares must
+// not recall each other's memory.
+func isolateStore(dir string, env []string) []string {
+	xdg := ""
+	for _, kv := range env {
+		if k, v, _ := strings.Cut(kv, "="); k == "XDG_DATA_HOME" {
+			xdg = v
+		}
+	}
+	if env == nil || (xdg != "" && xdg != packageXDG) {
+		return env
+	}
+	return append(append([]string{}, env...), "XDG_DATA_HOME="+filepath.Join(dir, ".lha-xdg"))
+}
+
 func runProcess(t *testing.T, dir string, env []string, name string, args ...string) result {
 	t.Helper()
+	env = isolateStore(dir, env)
 	var out, errOut bytes.Buffer
 	cmd := exec.Command(name, args...)
 	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = dir, env, &out, &errOut
