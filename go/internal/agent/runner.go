@@ -14,6 +14,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -224,7 +225,25 @@ func buildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 // RunMissionLocal initializes the anchor and runs cycles until done / deadlocked / over-budget /
 // looping. A *governor.BudgetExceeded or a *state.DecisionChainError from a cycle ends the run
 // with a StoppedReason (not an error); any other failure is returned as an error.
+//
+// The run is one "lha.mission" span (internal/obs/tracing) carrying MissionSpanAttributes.
 func RunMissionLocal(ctx context.Context, o RunOptions) (MissionSummary, error) {
+	ctx, span := tracing.SpanMission(ctx, map[string]any{"lha.run_path": "local", "lha.title": o.Title})
+	summary, err := runMissionLocal(ctx, o)
+	if err == nil {
+		span.Set(MissionSpanAttributes(summary))
+	}
+	span.End(err)
+	return summary, err
+}
+
+// MissionSpanAttributes are what a finished mission's "lha.mission" span records (python:
+// mission_span_attributes).
+func MissionSpanAttributes(s MissionSummary) map[string]any {
+	return tracing.MissionResult(s.MissionID, s.StoppedReason, s.Completed, s.Cycles, s.ItemsDone, s.ItemsTotal, s.TotalUSD)
+}
+
+func runMissionLocal(ctx context.Context, o RunOptions) (MissionSummary, error) {
 	settings, err := loadSettings(o.Settings)
 	if err != nil {
 		return MissionSummary{}, err

@@ -48,6 +48,7 @@ from lha.coordination.decision_log import (  # noqa: E402
 from lha.coordination.ownership import is_shared  # noqa: E402
 from lha.execution.tools import default_local_tools  # noqa: E402
 from lha.execution.tools.decisions import DecisionBuffer, RecordDecisionTool  # noqa: E402
+from lha.model import parse_fallback_entry  # noqa: E402
 from lha.model.pricing import CLAUDE_PRICES, lookup_claude_price  # noqa: E402
 from lha.model.stub import StubModel  # noqa: E402
 from lha.obs.redact import is_secret_key, redact_text  # noqa: E402
@@ -59,6 +60,7 @@ from lha.safety.egress import (  # noqa: E402
     normalize_host,
     parse_url,
 )
+from lha.state.vendor import _target_path  # noqa: E402
 from lha.verify.harness_integrity import _is_harness_file  # noqa: E402
 
 GENESIS = "0" * 64
@@ -583,6 +585,94 @@ def export_pricing() -> None:
             }
         )
     _write("model/pricing.json", {"claude": cases})
+
+
+# --- model/fallback_models --------------------------------------------------------------------
+# LHA_FALLBACK_MODELS entries (``backend:model[@in/out]``) -> the parsed spec, or python's exact
+# ValueError message.
+
+
+def export_fallback_models() -> None:
+    entries = [
+        "ollama:qwen3:8b",
+        " OpenAI_Compat:llama-3.3-70b@0.59/0.79 ",
+        "claude:claude-haiku-4-5",
+        "CLAUDE:claude-opus-4-8@5/25",
+        "openai_compat:a@b@ 1 / 2 ",
+        "openai_compat:m@1_0/2e1",
+        "openai_compat:m@.5/5.",
+        "openai_compat:m@+1/-0",
+        "stub: s ",
+        "claude_code:sonnet",
+        "claude",
+        "gpt:4o",
+        ":m",
+        "claude:",
+        "claude: @1/2",
+        "openai_compat:m@abc",
+        "openai_compat:m@1",
+        "openai_compat:m@1/",
+        "openai_compat:m@-1/2",
+        "openai_compat:m@1/-2",
+        "openai_compat:m@0x1/2",
+        "openai_compat:m@1__0/2",
+        "openai_compat:m@_1/2",
+        "openai_compat:@1/2",
+        "  ollama : qwen3 ",
+        "ollama:'quoted'é",
+    ]
+    cases: list[dict[str, Any]] = []
+    for entry in entries:
+        try:
+            spec = parse_fallback_entry(entry)
+        except ValueError as exc:
+            cases.append({"entry": entry, "error": str(exc)})
+            continue
+        price = spec.price
+        cases.append(
+            {
+                "entry": entry,
+                "backend": spec.backend,
+                "model": spec.model,
+                "price": None
+                if price is None
+                else {
+                    "input_per_mtok": price.input_per_mtok,
+                    "output_per_mtok": price.output_per_mtok,
+                },
+            }
+        )
+    _write("model/fallback_models.json", {"cases": cases})
+
+
+# --- state/vendor_paths -----------------------------------------------------------------------
+# Where ``lha vendor`` stores a fetched URL (relative to the vendor directory).
+
+
+def export_vendor_paths() -> None:
+    inputs = [
+        ("https://docs.example.com/", "text/html"),
+        ("https://docs.example.com/api/v1/guide", "text/html"),
+        ("https://docs.example.com/api/v1/guide", "application/json"),
+        ("https://docs.example.com/spec.json", "application/json"),
+        ("https://docs.example.com/a/./b/../c", "text/plain"),
+        ("https://docs.example.com/page?x=1&y=2", "text/html"),
+        ("https://docs.example.com/page.html?x=1", "text/html"),
+        ("https://docs.example.com/we%20ird/na%2Fme/..hidden./x", "text/html"),
+        ("https://docs.example.com/über/straße", "text/html"),
+        ("https://Docs.Example.COM:8443/x", ""),
+        ("https://docs.example.com//double//slash/", "application/xhtml+xml"),
+        ("http://127.0.0.1/raw", "text/plain"),
+        ("https://xn--bcher-kva.example/buch", "text/html"),
+        ("https://docs.example.com/~user/-_.ok", "text/html"),
+        ("https://docs.example.com/?", "text/html"),
+        ("https://docs.example.com/p?q=%C3%A9", "text/html"),
+    ]
+    cases = [
+        {"url": url, "content_type": ctype, "path": str(_target_path(url, ctype))}
+        for url, ctype in inputs
+    ]
+    _write("state/vendor_paths.json", {"cases": cases})
 
 
 # --- agent/prompts ----------------------------------------------------------------------------
@@ -1205,6 +1295,8 @@ def main() -> None:
     export_harness_files()
     export_flaky_retry()
     export_pricing()
+    export_fallback_models()
+    export_vendor_paths()
     export_agent_prompts()
 
 

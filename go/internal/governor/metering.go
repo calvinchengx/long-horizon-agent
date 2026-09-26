@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 )
 
 // Metered model provider: every Complete is budget-checked BEFORE it runs and recorded AFTER.
@@ -169,7 +170,21 @@ func priceOrNil(p contracts.ModelProvider, usage contracts.Usage) (*float64, err
 
 // Complete authorizes the call's worst case (plus in-flight reservations), runs it, and records
 // its actual cost. A refusal returns a *BudgetExceeded without calling the provider.
+//
+// The call is one "chat <model>" span (internal/obs/tracing): model, role, cycle, token usage,
+// finish reason and cost (when known).
 func (mm *MeteredModel) Complete(ctx context.Context, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int) (contracts.TurnResult, error) {
+	ctx, span := tracing.StartModelCall(ctx, "chat", mm.Name(), mm.Role, mm.meter.CycleID())
+	var usd *float64
+	result, err := mm.complete(ctx, messages, tools, maxTokens, &usd)
+	if err == nil {
+		span.Set(tracing.ModelUsage(result.Usage, result.StopReason, usd))
+	}
+	span.End(err)
+	return result, err
+}
+
+func (mm *MeteredModel) complete(ctx context.Context, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int, cost **float64) (contracts.TurnResult, error) {
 	meter := mm.meter
 	worst, err := mm.WorstCaseUSD(messages, tools, maxTokens)
 	if err != nil {
@@ -202,6 +217,7 @@ func (mm *MeteredModel) Complete(ctx context.Context, messages []contracts.Model
 		return contracts.TurnResult{}, err
 	}
 	meter.Ledger.Record(meter.CycleID(), result.Usage, usd, mm.Role)
+	*cost = usd
 	return result, nil
 }
 

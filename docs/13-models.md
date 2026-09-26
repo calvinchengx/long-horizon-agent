@@ -301,10 +301,13 @@ for an unknown Claude model) is reported as DOWN with the reason. See
 ## Go implementation
 
 `go/internal/model` ports the stub, OpenAI-compatible, Claude and `claude_code` backends, pricing,
-retry and failover, and runs the shared `spec/model/pricing.json` cases. The Go settings do not yet read
-`LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS` or `LHA_MODEL_PROBE_TIMEOUT_S`, there is no Go
-health probe (`ClaudeCodeModel.HealthCheck` runs `claude --version`, but nothing calls it yet);
-the Go CLI (`lha run-local`, `lha mission`) runs missions with every backend.
+retry and failover, and runs the shared `spec/model/pricing.json` and `spec/model/fallback_models.json`
+cases. `BuildProvider` builds the same failover chain from `LHA_FALLBACK_MODELS` (the same
+`backend:model[@in/out]` parsing and error messages, one retry per member, `LHA_FALLBACK_MAX_ROUNDS`,
+each turn priced by the member that served it), and `ProbeModel` / `ProbeProvider`
+(`go/internal/model/health.go`) are the health probe above, bounded by
+`LHA_MODEL_PROBE_TIMEOUT_S`, for the durable core to call while a mission is parked. The Go CLI
+(`lha run-local`, `lha mission`) runs missions with every backend.
 
 `LHA_MODEL_BACKEND=claude_code` ([`model/claude_code.go`](../go/internal/model/claude_code.go))
 and `LHA_LEAD_ENGINE=claude_code`

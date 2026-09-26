@@ -1,6 +1,6 @@
 // Command lha is the Go implementation of the LHA command line (python: lha.cli.main), built on
-// the standard library flag package. It implements version, config, run-local, mission and
-// decisions with the Python CLI's options, output and exit codes; every other Python command
+// the standard library flag package. It implements version, config, run-local, mission,
+// decisions and vendor with the Python CLI's options, output and exit codes; every other Python command
 // prints that it is not yet available and exits 2. The hidden egress-proxy command serves the
 // Docker sandbox's allow-list egress proxy.
 //
@@ -41,7 +41,7 @@ const appHelp = "LHA — a durable, self-improving agent organization for long-h
 // notPorted are the Python commands the Go CLI does not implement yet.
 var notPorted = []string{
 	"orchestrate", "worker", "mission-start", "mission-status", "mission-approve", "mission-abort",
-	"mission-snooze", "missions", "costs", "db", "vendor",
+	"mission-snooze", "missions", "costs", "gates", "db",
 }
 
 var commandHelp = []struct{ name, help string }{
@@ -50,6 +50,7 @@ var commandHelp = []struct{ name, help string }{
 	{"run-local", "Run a mission locally (no Temporal) until complete / deadlocked / over-budget."},
 	{"mission", "Plan a task into a checklist (or import one), then run it locally to completion."},
 	{"decisions", "Print the mission's committed design decisions (.lha/decisions.ndjson), or verify them."},
+	{"vendor", vendorHelp},
 }
 
 // exitError ends a command with an exit code (message "" prints nothing).
@@ -76,7 +77,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	c := &cli{stdout: os.Stdout, stderr: os.Stderr, ctx: ctx}
-	os.Exit(c.run(os.Args[1:]))
+	shutdownTracing := startTracing(os.Args[1:])
+	code := c.run(os.Args[1:])
+	shutdownTracing()
+	os.Exit(code)
 }
 
 func (c *cli) usage(w io.Writer) {
@@ -114,6 +118,8 @@ func (c *cli) run(args []string) int {
 		err = c.mission(rest)
 	case "decisions":
 		err = c.decisions(rest)
+	case "vendor":
+		err = c.vendorCmd(rest)
 	case "egress-proxy": // hidden: the Docker sandbox's allow-list egress proxy
 		err = c.egressProxy(rest)
 	default:
