@@ -32,14 +32,16 @@ the single entry point. `LHA_SANDBOX` selects the kind. The default is `docker`.
 Docker hardening, from `DockerSandbox.run_kwargs()` in
 [sandbox_docker.py](../python/src/lha/execution/sandbox_docker.py):
 
-- `network_mode="none"` unless `LHA_SANDBOX_EGRESS` lists hosts (then only those hosts, through
+- `network_mode="none"` unless the sandbox egress settings list hosts (then only those hosts, through
   the egress proxy; see [sandbox network](#sandbox-network)) or the sandbox is built with `network=True` (full
   network; no entry point passes it, and it cannot be combined with an allow-list). This is where
   egress for `run_command` is actually blocked.
-- `mem_limit` and `memswap_limit` 2g, `pids_limit` 512, `nano_cpus` for 2 CPUs.
+- `mem_limit` and `memswap_limit` `LHA_SANDBOX_MEMORY` (default 2g), `pids_limit` 512,
+  `nano_cpus` for `LHA_SANDBOX_CPUS` CPUs (default 2).
 - `cap_drop=["ALL"]`, `security_opt=["no-new-privileges:true"]`.
 - A non-root user: the host `uid:gid` on POSIX, otherwise `65534:65534`.
-- `read_only=True` root filesystem, `tmpfs /tmp` (`rw,exec,nosuid,nodev,size=1g`). `/tmp` is
+- `read_only=True` root filesystem, `tmpfs /tmp` (`rw,exec,nosuid,nodev`, size `LHA_SANDBOX_TMP_SIZE`, default 1g, counted
+  against the memory limit). `/tmp` is
   mounted `exec` because toolchains such as `go test` build and run binaries there; code can
   already run from `/workspace`, so this grants nothing new.
 - The host workdir is bind-mounted read-write at `/workspace`. Its `.git` and `.lha` directories,
@@ -251,8 +253,8 @@ signal; the enforcement is the Rule of Two (section 5).
 
 ### Sandbox network
 
-With `LHA_SANDBOX_EGRESS` empty (the default) the Docker sandbox has no network. With a
-comma-separated list of hosts, each sandbox session gets
+With the three sandbox egress settings below empty (the default) the Docker sandbox has no
+network. With any of them set, each sandbox session gets
 ([sandbox_docker.py](../python/src/lha/execution/sandbox_docker.py),
 [egress_proxy.py](../python/src/lha/execution/egress_proxy.py)):
 
@@ -270,13 +272,49 @@ are denied. It resolves the host and denies the request if any address is non-pu
 rules as above), then connects to the address it checked, without re-resolving. Ports 80 and 443
 are allowed; another port only through an explicit `host:port` entry. It supports `CONNECT`
 (TLS stays end to end, so it sees only the host name) and absolute-URI plain HTTP; everything else
-gets `403`. It logs one line per request to stderr (`docker logs lha-egress-proxy-...`). A
-malformed allow-list is rejected when the sandbox is built. Closing the session, or a failed
-open, removes the proxy container and the network.
+gets `403`. A malformed allow-list is rejected when the run starts. Closing the session, or a
+failed open, removes the proxy container and the network.
 
-The proxy decides by host name only. A host that serves arbitrary users' content (`github.com`,
-`raw.githubusercontent.com`) can be used to pull or push arbitrary data; allow such hosts
-deliberately. Only HTTP(S) is proxied, so SSH remotes have no route. See
+**Every allow-listed host is reachable for writes by code in the sandbox.** The command
+classifier (section 3) gates `git push`, `npm publish`, `curl -T` and the like, but it does not
+look inside interpreter one-liners (`python -c`, `node -e`, a test or build script). Without a
+network that costs nothing; with an allow-list, such a program can send the workspace to any
+allowed host without a human gate. The proxy cannot tell a download from an upload: `CONNECT`
+keeps TLS end to end, so it sees only the host name. So the allow-list is split by what a host
+accepts ([egress_hosts.py](../python/src/lha/execution/egress_hosts.py), Go
+[policy.go](../go/internal/execution/egressproxy/policy.go)), and a host in the wrong list stops
+the run before it starts (`lha` exits with code 2: `invalid sandbox egress settings`):
+
+| Setting | May list | Refused |
+|---|---|---|
+| `LHA_SANDBOX_EGRESS` | package-registry download hosts, exactly: `pypi.org`, `files.pythonhosted.org`, `registry.npmjs.org`, `proxy.golang.org`, `sum.golang.org`, `storage.googleapis.com`, `crates.io`, `static.crates.io`, `index.crates.io` | anything else, a `.domain` entry, a `host:port` entry |
+| `LHA_SANDBOX_EGRESS_EXTRA_HOSTS` | any other host (a private mirror, a docs site), `.domain` and `host:port` entries | an entry that reaches a known push/upload host: code hosting (`.github.com`, `.gitlab.com`, `.bitbucket.org`, `.codeberg.org`, `.sr.ht`, Azure DevOps), package upload (`upload.pypi.org`, `.test.pypi.org`), object stores (`.amazonaws.com`, `.blob.core.windows.net`, R2, Spaces, B2), container registries (`.docker.io`, `ghcr.io`, `.pkg.dev`), `.huggingface.co`, paste and webhook services. `.com` is refused because it covers `github.com` |
+| `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS` | hosts you accept code in the sandbox may push or upload to, for example `github.com` for `go get` of a module the Go proxy does not serve | nothing (malformed entries only) |
+
+The lists are a speed bump for the obvious write channels, not a promise that a "package-fetch"
+host is read-only:
+
+- `registry.npmjs.org` and `crates.io` accept `publish` from anyone holding a token, including
+  one planted in untrusted input for an account the attacker owns;
+- `storage.googleapis.com` is a general object store: it accepts writes to any bucket a signed
+  URL grants. It is on the list only because `proxy.golang.org` redirects module downloads there
+  (leave it out, and vendor Go modules, if that matters to you);
+- a request's path can carry data: `proxy.golang.org` fetches an arbitrary module path from its
+  origin server, so the path of a module lookup reaches a host of the requester's choosing.
+
+That is why any sandbox egress counts as untrusted content plus external comms under the Rule of
+Two (section 5): a run with sandbox egress may not also hold private data.
+
+Every request the proxy decides is recorded. The proxy logs one line per request to stderr
+(`docker logs lha-egress-proxy-...`); at each checkpoint the agent loop reads the new lines from
+the sandbox session (`drain_egress_events`) and commits them to `.lha/events.ndjson` as
+`sandbox_egress` events, one per decision, method, host and port in the cycle, with a `count`
+([egress_events.py](../python/src/lha/execution/egress_events.py)). Allowed, denied and failed
+requests are all recorded; a plain-HTTP URL is reduced to its host and port. The record is
+best-effort (a proxy log that cannot be read leaves the cycle without it); the enforcement is the
+proxy.
+
+Only HTTP(S) is proxied, so SSH remotes have no route. See
 [`sandbox/README.md`](../sandbox/README.md).
 
 ## 5. Rule of two
@@ -291,11 +329,14 @@ capabilities:
 
 | Capability | Held when |
 |---|---|
-| untrusted content | the web tools are enabled (non-empty `LHA_WEB_ALLOW_HOSTS`) |
-| external comms | the web tools are enabled |
+| untrusted content | the web tools are enabled (non-empty `LHA_WEB_ALLOW_HOSTS`), or the `docker` sandbox has egress (any of `LHA_SANDBOX_EGRESS`, `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`): what it downloads is third-party content the agent reads |
+| external comms | the web tools are enabled, or the `docker` sandbox has egress: code in the sandbox can send data to any allowed host ([sandbox network](#sandbox-network)) |
 | private data | `LHA_PRIVATE_DATA=true`, or `LHA_SANDBOX=local` (the agent's shell runs on the host, with the host's files, credentials and network) |
 
-So a run with web tools must use `docker` or `e2b` and must not declare private data. Otherwise it
+So a run with web tools or sandbox egress must use `docker` or `e2b` and must not declare private
+data. The sandbox egress settings configure the Docker proxy only, so they add nothing for `local`
+or `e2b`. A run that needs packages and holds private data should use an image that already has
+its dependencies (or vendor them). Otherwise it
 raises `RuleOfTwoViolation`: `lha` exits with code 2 and a message naming the cause, and the
 activities raise a non-retryable `ERROR_CONFIG`. A human gate (including the durable
 `DeferredApprovalGate`) does not lift this check. It is run-level because the agents of a run
@@ -313,7 +354,8 @@ gate.
   environment ([proc.py](../python/src/lha/execution/proc.py)): `PATH`, locale, `TZ`, `TERM`,
   `UV_CACHE_DIR`, Windows essentials, plus `HOME` pointing at the workspace. API keys and `LHA_*`
   variables are not inherited. Timeouts are capped at 3600 s, and the whole process group is
-  killed on timeout.
+  killed on timeout. Trusted checks are the exception: they run on the host with the host
+  environment ([verify/trusted.py](../python/src/lha/verify/trusted.py)).
 - Settings secrets are `SecretStr`. `lha config` prints `***` for them.
 - [obs/redact.py](../python/src/lha/obs/redact.py) masks values under secret-looking keys (not
   `input_tokens`-style counters) and secret-looking strings: `sk-…`, GitHub and Slack tokens, AWS
@@ -326,7 +368,9 @@ gate.
 ## Residual risks
 
 - The classifier is a guardrail, not a sandbox. An arbitrary program (`python -c …`, a test
-  suite, a build script) can do anything its sandbox allows. With `local` that means the host.
+  suite, a build script) can do anything its sandbox allows. With `local` that means the host;
+  with sandbox egress, it means sending the workspace to any allow-listed host
+  ([sandbox network](#sandbox-network)).
 - Trusted checks (`LHA_TRUSTED_CHECKS`) run agent-written code outside the sandbox, with the
   privileges of the process running the mission ([verification](07-verification.md#trusted-checks)).
 - An approved action is allowed exactly as it was requested, but the approver sees only the tool

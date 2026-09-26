@@ -99,8 +99,8 @@ What remains Python-only:
 - `lha orchestrate` (the multi-agent organization), `vendor` and `db`.
 - Persistence and memory: Go runs do not write the mission store or the persistent cost ledger
   (so `lha costs` has nothing from them) and the lead has no tiered memory.
-- The `claude_code` model backend and lead engine, the E2B sandbox, re-running failing checks
-  (`LHA_FLAKY_RETRIES`), fallback model chains (`LHA_FALLBACK_MODELS`) and OTLP trace export.
+- The `claude_code` model backend and lead engine, the E2B sandbox, fallback model chains
+  (`LHA_FALLBACK_MODELS`) and OTLP trace export.
 - The Docker sandbox's egress proxy container runs the Python proxy source by default in both
   implementations; the Go proxy (`lha egress-proxy`) is used only when the sandbox is given a
   proxy command and an image containing a Linux `lha` binary, which no setting selects yet.
