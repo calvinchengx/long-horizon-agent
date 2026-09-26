@@ -300,9 +300,19 @@ for an unknown Claude model) is reported as DOWN with the reason. See
 
 ## Go implementation
 
-`go/internal/model` ports the stub, OpenAI-compatible and Claude backends, pricing, retry and
-failover, and runs the shared `spec/model/pricing.json` cases. The Go settings do not yet read
+`go/internal/model` ports the stub, OpenAI-compatible, Claude and `claude_code` backends, pricing,
+retry and failover, and runs the shared `spec/model/pricing.json` cases. The Go settings do not yet read
 `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS` or `LHA_MODEL_PROBE_TIMEOUT_S`, there is no Go
-health probe; the Go CLI (`lha run-local`, `lha mission`) runs missions with the other backends. The `claude_code` backend and lead engine are
-Python-only; the Go settings reject `LHA_MODEL_BACKEND=claude_code`. See
+health probe (`ClaudeCodeModel.HealthCheck` runs `claude --version`, but nothing calls it yet);
+the Go CLI (`lha run-local`, `lha mission`) runs missions with every backend.
+
+`LHA_MODEL_BACKEND=claude_code` ([`model/claude_code.go`](../go/internal/model/claude_code.go))
+and `LHA_LEAD_ENGINE=claude_code`
+([`agent/claude_code_engine.go`](../go/internal/agent/claude_code_engine.go), with the MCP bridge in
+[`agent/mcpbridge`](../go/internal/agent/mcpbridge/)) work in the Go CLI as described above: the
+same `claude` arguments and `--mcp-config`, the same bridged tools and results (the dispatcher's
+gates, approval events and `record_decision` included), the same budget, timeout and cost
+accounting and the same errors. `go/cmd/lha/claude_code_test.go` runs both implementations
+against one fake `claude` and compares what each passed to it. The bridge is the standard
+library only (`net/http`), speaking the same Streamable HTTP subset as the Python one. See
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).

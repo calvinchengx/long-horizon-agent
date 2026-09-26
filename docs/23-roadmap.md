@@ -149,17 +149,17 @@ use the Python implementation for that feature
 
 | Component | Package | State |
 |---|---|---|
-| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, `claude_code`, OTLP, `LHA_FLAKY_RETRIES`) are read but have no effect in Go runs |
+| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, OTLP, `LHA_FLAKY_RETRIES`) are read but have no effect in Go runs |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
-| Model backends: stub, OpenAI-compatible, Claude, pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
+| Model backends: stub, OpenAI-compatible, Claude, Claude Code (`claude -p`), pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
 | Budget governor, cost ledger, metering | `internal/governor` | present |
 | Git mission anchor and git operations | `internal/state` | present; cross-implementation tests read Python anchors and vice versa |
 | Verifier, harness integrity, flaky quarantine, witnesses, trusted runner | `internal/verify` | present; `spec/verify/harness_files.json` passes. The lead does not yet re-run failing checks (`LHA_FLAKY_RETRIES`) |
 | Redaction and structured events | `internal/obs` | present; `spec/obs/redact.json` passes |
 | Checklist import, `vendor` | `internal/checklistimport` | checklist import present; `vendor` not started |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
-| Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, and the console approval gate (`--approve-interactive`). No `claude_code` lead engine |
+| Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` lead engine with its MCP bridge |
 | CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `decisions`; `run-local` and `mission` run real missions (end-to-end tests compare them with Python) |
 
 `go test ./...` passes for the present packages. No CI job runs the Go tests yet.

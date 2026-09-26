@@ -4,7 +4,8 @@ LHA has two implementations of the same system: Python in [`python/`](../python/
 [`go/`](../go/). Python is the reference implementation and the only complete one.
 The Go CLI runs single-agent missions locally (`lha run-local`, `lha mission`) in the local or
 Docker sandbox; everything durable or multi-agent (the Temporal worker and `mission-*` commands,
-`lha orchestrate`), persistence and memory, the `claude_code` engine and E2B are Python-only.
+`lha orchestrate`), persistence and memory, and E2B are Python-only. Both run the `claude_code`
+model backend and lead engine (Claude Code's `claude -p`).
 
 ## What the two share
 
@@ -60,14 +61,14 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
 | `config` | `lha.config` | Committed: every Python setting, with the same names, defaults and validation; `lha config` output is byte-identical |
 | `spec` | conformance harness | Committed: runs every file in `spec/`, including `agent/prompts.json` and `coordination/shared_paths.json` |
-| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, failover, retry, pricing) | Committed. `BuildProvider` does not build a fallback chain from settings, and there is no health probe |
+| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, failover, retry, pricing) | Committed, including the `claude_code` backend (`claude -p`, the same argv, result parsing, errors and reported cost). `BuildProvider` does not build a fallback chain from settings, and there is no health probe |
 | `safety` | `lha.safety` (command classifier, egress policy with credential broker, Rule of Two) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
 | `obs` | `lha.obs` (events, redaction) | Committed |
 | `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, and carrying `.lha/ownership.json` along; no `vendor` |
 | `checklistimport` | `lha.state.checklist_import` | Committed (`.json` and `.md` checklists) |
 | `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`); no mutation testing or trust bootstrap |
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
-| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local`. No `claude_code` lead engine and no tiered memory |
+| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local`; the `claude_code` lead engine and its MCP bridge (`agent/mcpbridge`: the same MCP config, tools and results as `lha.agent.mcp_bridge`). No tiered memory |
 | `agents` | `lha.agents.planner`, `lha.agents.replanner` | Committed (Planner with file ownership, Replanner); not the orchestrator or the other roles |
 | `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions` (and the hidden `egress-proxy`). The other commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
 | `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox |
@@ -79,7 +80,9 @@ What the Go CLI can do today:
 - `cd go && go build -o lha ./cmd/lha` builds it. `lha run-local` and `lha mission` run a mission
   to completion, deadlock, budget refusal or loop detection in the `local` sandbox (with
   `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) or the `docker` sandbox (`LHA_SANDBOX_IMAGE`,
-  `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible or Claude backend.
+  `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible, Claude or Claude Code
+  (`claude_code`) backend, and with the built-in turn loop or the `claude_code` lead engine
+  (`LHA_LEAD_ENGINE=claude_code`, both `LHA_CLAUDE_CODE_TOOLS` modes).
 - The lead gets the same tools as in Python (file IO, `run_command`, `record_decision`, and
   `fetch_url` / `web_search` under `LHA_WEB_ALLOW_HOSTS` / `--allow-host`). An unsafe local sandbox
   and a Rule-of-Two run are refused before the workspace is touched, with Python's messages and
@@ -99,7 +102,7 @@ What remains Python-only:
 - `lha orchestrate` (the multi-agent organization), `vendor` and `db`.
 - Persistence and memory: Go runs do not write the mission store or the persistent cost ledger
   (so `lha costs` has nothing from them) and the lead has no tiered memory.
-- The `claude_code` model backend and lead engine, the E2B sandbox, re-running failing checks
+- The E2B sandbox, re-running failing checks
   (`LHA_FLAKY_RETRIES`), fallback model chains (`LHA_FALLBACK_MODELS`) and OTLP trace export.
 - The Docker sandbox's egress proxy container runs the Python proxy source by default in both
   implementations; the Go proxy (`lha egress-proxy`) is used only when the sandbox is given a

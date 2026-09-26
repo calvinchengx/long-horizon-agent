@@ -203,13 +203,6 @@ func TestReferencesAreRecitedInTheMissionAnchor(t *testing.T) {
 	}
 }
 
-func TestLeadEngineClaudeCodeIsRefused(t *testing.T) {
-	o := runOpts(t, t.TempDir(), runnerSettings(t, "LHA_LEAD_ENGINE=claude_code"), model.NewStub(nil), passCheck)
-	if _, err := RunMissionLocal(context.Background(), o); !errors.Is(err, LeadEngineError) {
-		t.Fatalf("err = %v", err)
-	}
-}
-
 func TestNoToolboxOpenerIsNotLinked(t *testing.T) {
 	o := runOpts(t, t.TempDir(), runnerSettings(t), model.NewStub(nil), passCheck)
 	o.OpenToolbox = nil
