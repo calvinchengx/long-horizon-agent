@@ -8,6 +8,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
@@ -129,7 +130,30 @@ type cycleState struct {
 
 // RunCycle runs one cycle on the next actionable item. anchorText is optional caller context;
 // checks are the mission's gating checks.
+// The cycle is one "lha.cycle" span (internal/obs/tracing).
 func (l *AgentLoop) RunCycle(ctx context.Context, tctx contracts.ToolContext, missionID, cycleID, anchorText string, checks []contracts.Check) (CycleOutcome, error) {
+	ctx, span := tracing.SpanCycle(ctx, missionID, cycleID)
+	outcome, err := l.runCycle(ctx, tctx, missionID, cycleID, anchorText, checks)
+	if err == nil {
+		span.Set(map[string]any{
+			"lha.item_id": nilIfEmpty(outcome.ItemID), "lha.verdict": nilIfEmpty(outcome.Verdict),
+			"lha.verified": outcome.Verified, "lha.tool_calls": outcome.ToolCalls,
+			"lha.turns": outcome.Turns, "lha.head_sha": nilIfEmpty(outcome.HeadSHA),
+		})
+	}
+	span.End(err)
+	return outcome, err
+}
+
+// nilIfEmpty is python's None for an unset optional string (skipped as a span attribute).
+func nilIfEmpty(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
+func (l *AgentLoop) runCycle(ctx context.Context, tctx contracts.ToolContext, missionID, cycleID, anchorText string, checks []contracts.Check) (CycleOutcome, error) {
 	anchor := l.opts.Anchor
 	checklist, err := anchor.ReadChecklist(ctx) // committed truth, owned in memory
 	if err != nil {
@@ -317,7 +341,7 @@ func (l *AgentLoop) dispatch(ctx context.Context, call contracts.ToolCall, cs *c
 	if call.Arguments == nil {
 		call.Arguments = map[string]any{}
 	}
-	result := l.opts.Dispatcher.Dispatch(ctx, call, cs.tctx)
+	result := tracing.TracedDispatch(ctx, l.opts.Dispatcher, call, cs.tctx)
 	l.emit("tool_call", cs.missionID, cs.cycleID, obs.F("tool", call.Name), obs.F("ok", result.OK))
 	observation := result.Content
 	if observation == "" {
