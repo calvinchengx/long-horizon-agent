@@ -76,7 +76,10 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	c := &cli{stdout: os.Stdout, stderr: os.Stderr, ctx: ctx}
-	os.Exit(c.run(os.Args[1:]))
+	shutdownTracing := startTracing(os.Args[1:])
+	code := c.run(os.Args[1:])
+	shutdownTracing()
+	os.Exit(code)
 }
 
 func (c *cli) usage(w io.Writer) {
