@@ -79,7 +79,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 80 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 81 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -270,6 +270,20 @@ func TestTrustedCheckCommands(t *testing.T) {
 	}
 }
 
+func TestTrustedCheckEnvNames(t *testing.T) {
+	s := &Settings{TrustedCheckEnv: " GOFLAGS, GOPROXY ,"}
+	if got, err := s.TrustedCheckEnvNames(); err != nil || !reflect.DeepEqual(got, []string{"GOFLAGS", "GOPROXY"}) {
+		t.Fatalf("%v %v", got, err)
+	}
+	if got, err := (&Settings{}).TrustedCheckEnvNames(); err != nil || len(got) != 0 {
+		t.Fatalf("%v %v", got, err)
+	}
+	s.TrustedCheckEnv = "LHA_POSTGRES_DSN"
+	if _, err := s.TrustedCheckEnvNames(); err == nil || !strings.Contains(err.Error(), "cannot be passed") {
+		t.Fatal(err)
+	}
+}
+
 func TestFormatPy(t *testing.T) {
 	point1 := 0.1
 	cases := []struct {
@@ -394,6 +408,7 @@ func TestConfigOutputMatchesPython(t *testing.T) {
 			"LHA_GATE_ESCALATION_SECONDS=[1, \"2\", 3.0]", "LHA_WEB_SEARCH_PROVIDER=exa",
 			"LHA_WEB_SEARCH_ENDPOINT=", "LHA_MAX_CYCLES=1_000", "LHA_MEMORY_ENABLED=off",
 			"LHA_WEB_TIMEOUT_S=7", "LHA_GATE_WEBHOOK_URL=https://hooks.example/x", "LHA_SANDBOX_EGRESS=pypi.org",
+			"LHA_TRUSTED_CHECK_ENV=GOFLAGS,GOPROXY",
 		},
 		"postgres": {
 			"LHA_POSTGRES_DSN=postgresql://u:p@h/db", "LHA_SQLITE_PATH=" + filepath.Join(tmp, "store", "lha.db"),

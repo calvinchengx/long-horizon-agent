@@ -130,7 +130,7 @@ func TestTimeoutKillsTheWholeProcessGroup(t *testing.T) {
 	raw, _ := os.ReadFile(pidFile)
 	pid, _ := strconv.Atoi(strings.TrimSpace(string(raw)))
 	for i := 0; i < 50; i++ {
-		if syscall.Kill(pid, 0) != nil {
+		if !processAlive(pid) {
 			return
 		}
 		time.Sleep(100 * time.Millisecond)

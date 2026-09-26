@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
 // Redacted is what secret values display as.
@@ -98,8 +99,11 @@ type Settings struct {
 	SandboxTmpSize string  `env:"sandbox_tmp_size" default:"1g"`
 	WebAllowHosts  string  `env:"web_allow_hosts" default:""`
 	TrustedChecks  string  `env:"trusted_checks" default:""`
-	HarnessPaths   string  `env:"harness_paths" default:""`
-	FlakyRetries   int     `env:"flaky_retries" default:"1" ge:"0" le:"5"`
+	// Host environment variables passed through to trusted checks (comma-separated); a trusted
+	// check otherwise gets only PATH, the locale and a fresh HOME/TMPDIR. LHA_* names are refused.
+	TrustedCheckEnv string `env:"trusted_check_env" default:""`
+	HarnessPaths    string `env:"harness_paths" default:""`
+	FlakyRetries    int    `env:"flaky_retries" default:"1" ge:"0" le:"5"`
 
 	// --- Multi-agent coordination
 	MaxParallelImplementers int `env:"max_parallel_implementers" default:"3"`
@@ -490,6 +494,11 @@ func (s *Settings) FallbackModelEntries() []string { return CSV(s.FallbackModels
 
 // HarnessGlobs is harness_paths split (python: harness_globs).
 func (s *Settings) HarnessGlobs() []string { return CSV(s.HarnessPaths) }
+
+// TrustedCheckEnvNames is trusted_check_env split and validated (python: trusted_check_env_names).
+func (s *Settings) TrustedCheckEnvNames() ([]string, error) {
+	return verify.ValidateEnvAllowList(CSV(s.TrustedCheckEnv))
+}
 
 // TrustedCheckCommands parses trusted_checks (python: trusted_check_commands).
 func (s *Settings) TrustedCheckCommands() (map[string][]string, error) {

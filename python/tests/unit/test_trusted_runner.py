@@ -16,6 +16,7 @@ from lha.verify.trusted import (
     TrustedAwareVerifier,
     TrustedRunner,
     candidate_commit,
+    trusted_env,
 )
 from lha.verify.verifier import DeterministicVerifier
 
@@ -316,3 +317,99 @@ async def test_verifier_end_to_end_with_command_runner(repo: Path) -> None:
         ).stdout.strip()
         == "?? feature.txt"
     )
+
+
+# --- the trusted check's environment --------------------------------------------------------
+_SECRETS = {
+    "ANTHROPIC_API_KEY": "sk-ant-leak",
+    "LHA_ANTHROPIC_API_KEY": "sk-lha-leak",
+    "AWS_SECRET_ACCESS_KEY": "aws-leak",
+    "GITHUB_TOKEN": "ghp-leak",
+    "MY_SERVICE_SECRET": "svc-leak",
+    "SSH_AUTH_SOCK": "/nonexistent/agent.sock",
+}
+
+
+def _env_of(output: str) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in output.splitlines() if "=" in line)
+
+
+async def test_runner_env_is_scrubbed(repo: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    for name, value in _SECRETS.items():
+        monkeypatch.setenv(name, value)
+    monkeypatch.setenv("GOPROXY", "https://proxy.example")
+    commit = candidate_commit(repo)
+    result = await CommandTrustedRunner().run(_check("env"), workdir=str(repo), commit=commit)
+    assert result.passed
+    env = _env_of(result.output_tail)
+    for name, value in _SECRETS.items():
+        assert name not in env and value not in result.output_tail
+    assert "GOPROXY" not in env  # not allow-listed
+    assert env["PATH"] and env["LHA_CHECK_NAME"] == "e2e" and env["LHA_CHECK_COMMIT"] == commit
+    home = Path(env["HOME"])
+    assert home != Path.home() and home.name.startswith("lha-trusted-home-")
+    assert Path(env["TMPDIR"]).parent == home
+    assert not home.exists()  # removed after the check
+    assert not {k for k in env if k.startswith("LHA_") and not k.startswith("LHA_CHECK_")}
+
+
+async def test_runner_home_is_fresh_and_writable(repo: Path) -> None:
+    commit = candidate_commit(repo)
+    script = 'test "$(ls -A "$HOME")" = tmp && touch "$HOME/x" "$TMPDIR/y" && echo ok'
+    result = await CommandTrustedRunner().run(_check(script), workdir=str(repo), commit=commit)
+    assert result.passed and result.output_tail.endswith("ok")
+
+
+async def test_runner_passes_allow_listed_names(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GOPROXY", "https://proxy.example")
+    monkeypatch.setenv("GOFLAGS", "-mod=mod")
+    monkeypatch.setenv("CI_HANDOFF_TOKEN", "tok")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-leak")
+    monkeypatch.delenv("NOT_SET_ANYWHERE", raising=False)
+    commit = candidate_commit(repo)
+    allow = ["GOPROXY", "GOFLAGS", "CI_HANDOFF_TOKEN", "NOT_SET_ANYWHERE"]
+    result = await CommandTrustedRunner(env_allow=allow).run(
+        _check("env"), workdir=str(repo), commit=commit
+    )
+    env = _env_of(result.output_tail)
+    assert env["GOPROXY"] == "https://proxy.example" and env["GOFLAGS"] == "-mod=mod"
+    assert env["CI_HANDOFF_TOKEN"] == "tok"  # an explicit listing is the operator's choice
+    assert "ANTHROPIC_API_KEY" not in env and "NOT_SET_ANYWHERE" not in env
+
+
+@pytest.mark.parametrize("name", ["LHA_ANTHROPIC_API_KEY", "lha_x", "BAD-NAME", "", "1X", "FOO\n"])
+def test_env_allow_list_refuses_lha_and_invalid_names(name: str) -> None:
+    with pytest.raises(ValueError, match="LHA_TRUSTED_CHECK_ENV"):
+        CommandTrustedRunner(env_allow=[name])
+
+
+def test_trusted_env_defaults_and_allow_list_order() -> None:
+    base = {"PATH": "/p", "LC_ALL": "C", "HOME": "/real", "FOO": "1", "SECRET_KEY": "s"}
+    env = trusted_env(
+        home="/h", tmpdir="/h/tmp", base=base, allow=["FOO"], check={"LHA_CHECK_NAME": "n"}
+    )
+    assert env == {
+        "PATH": "/p",
+        "LC_ALL": "C",
+        "LANG": "C.UTF-8",
+        "HOME": "/h",
+        "TMPDIR": "/h/tmp",
+        "GIT_TERMINAL_PROMPT": "0",
+        "FOO": "1",
+        "LHA_CHECK_NAME": "n",
+    }
+    assert trusted_env(home="/h", tmpdir="/t", base={})["PATH"]
+
+
+def test_settings_trusted_check_env_names() -> None:
+    from lha.config import Settings
+
+    assert Settings(trusted_check_env=" GOFLAGS, GOPROXY ,").trusted_check_env_names() == [
+        "GOFLAGS",
+        "GOPROXY",
+    ]
+    assert Settings().trusted_check_env_names() == []
+    with pytest.raises(ValueError, match="cannot be passed"):
+        Settings(trusted_check_env="LHA_POSTGRES_DSN").trusted_check_env_names()
