@@ -55,10 +55,6 @@ packages = ["src/lha"]
 [tool.coverage.run]
 source = ["src/lha"]
 branch = true
-omit = [
-    # Needs the `e2b` SDK and an E2B account; nothing in the default install can exercise it.
-    "src/lha/execution/sandbox_e2b.py",
-]
 
 [tool.coverage.report]
 show_missing = true

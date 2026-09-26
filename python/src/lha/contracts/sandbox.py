@@ -2,9 +2,9 @@
 
 All shell/code execution goes through a ``Sandbox`` so the same agent loop runs unchanged on a
 local subprocess (dev/CI), a Docker container, or an E2B Firecracker microVM (prod). Sessions
-support exec + file IO and can be *snapshotted* for hours/days-long persistence and recovery —
-the snapshot id is what the durable workflow stores so a run can resume its workspace after a
-crash or after parking on a durable sleep.
+support exec + file IO. The durable state of a run is the host git checkout, not the sandbox: a
+resumed run opens a fresh session on that checkout. ``snapshot`` is optional (the E2B sandbox
+raises ``NotImplementedError``) and no run path calls it.
 """
 
 from __future__ import annotations

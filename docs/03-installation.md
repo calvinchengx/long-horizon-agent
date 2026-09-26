@@ -40,8 +40,10 @@ uv sync --extra postgres --extra sandbox   # extras combine
 ```
 
 The `claude` model backend needs no extra: it calls the Messages API over HTTP with
-`LHA_ANTHROPIC_API_KEY`. The `e2b` sandbox needs the `e2b-code-interpreter` package,
-which is not part of any extra, and an E2B account; it is not exercised in CI.
+`LHA_ANTHROPIC_API_KEY`. The `e2b` sandbox (Python only) needs the `e2b-code-interpreter`
+package, which is not part of any extra, an E2B account and a VM template with `python3`; it
+syncs the workspace into the microVM and back ([safety model](09-safety-model.md#1-sandboxes)),
+and CI tests it against a fake SDK only, never the E2B service.
 
 If a command needs a module from a missing extra, it stops with an error naming the extra, for
 example `error: python module 'docker' is not installed; install the 'sandbox' extra (lha[sandbox])`.
