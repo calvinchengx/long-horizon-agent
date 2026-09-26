@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -19,6 +20,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety/pystr"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
 // Docker sandbox — real isolation behind the same Sandbox interface
@@ -169,6 +171,29 @@ func (s *DockerSandbox) Image() string { return s.opts.Image }
 // EgressHosts is the (stripped, non-empty) egress allow-list.
 func (s *DockerSandbox) EgressHosts() []string { return append([]string(nil), s.egressHosts...) }
 
+// protectedMounts are the read-only binds over the writable work tree for everything git trusts
+// in it: .git and .lha whether a directory OR a file. In a linked worktree .git is a
+// "gitdir: <path>" FILE, and a writable one would let sandboxed code repoint the host's next
+// git add/commit at a repository it planted. The git dir it names normally lies outside the
+// mount (the parent repository's .git/worktrees/<name>); should it (or its common dir) lie inside
+// the work tree, that directory is bound read-only too.
+func protectedMounts(host string) []string {
+	var args []string
+	for _, name := range ProtectedDirs { // sorted: .git, .lha
+		if _, err := os.Lstat(posixJoin(host, name)); err == nil { // a dangling symlink fails the run: closed
+			args = append(args, "-v", posixJoin(host, name)+":"+dockerWorkdir+"/"+name+":ro")
+		}
+	}
+	for _, inner := range state.GitDirsInTree(host) {
+		rel, err := filepath.Rel(host, inner)
+		if err != nil {
+			continue
+		}
+		args = append(args, "-v", inner+":"+dockerWorkdir+"/"+filepath.ToSlash(rel)+":ro")
+	}
+	return args
+}
+
 // RunArgs is the full `docker run` argument list for a session container (exposed for
 // inspection / tests). With egressNetwork the container joins ONLY that (internal) network
 // instead of --network none/bridge, and proxyEnv is added to its environment.
@@ -183,11 +208,7 @@ func (s *DockerSandbox) RunArgs(image, workdir, egressNetwork string, proxyEnv m
 		args = append(args, "-e", k+"="+env[k])
 	}
 	args = append(args, "-v", host+":"+dockerWorkdir+":rw")
-	for _, name := range ProtectedDirs { // sorted: .git, .lha
-		if st, err := os.Stat(posixJoin(host, name)); err == nil && st.IsDir() {
-			args = append(args, "-v", posixJoin(host, name)+":"+dockerWorkdir+"/"+name+":ro")
-		}
-	}
+	args = append(args, protectedMounts(host)...)
 	switch {
 	case egressNetwork != "":
 		args = append(args, "--network", egressNetwork)

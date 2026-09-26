@@ -72,6 +72,33 @@ async def test_harness_dirs_are_read_only_inside_the_container(session: SandboxS
     assert (await session.exec(["sh", "-c", "echo x > scratch.txt"])).ok
 
 
+async def test_linked_worktree_git_file_is_read_only_inside_the_container(tmp_path: Path) -> None:
+    from lha.agents.integrator import add_worktree
+    from lha.state import git_ops
+
+    repo = tmp_path / "repo"
+    git_ops.init_repo(repo)
+    (repo / "f.txt").write_text("base\n")
+    git_ops.commit_all(repo, "base")
+    wt = add_worktree(repo, branch="lha/implementer-a/c1", base="HEAD")
+    pointer = (wt / ".git").read_text()
+    sess = await _open(wt)
+    try:
+        attempts = [
+            ["sh", "-c", "echo 'gitdir: /workspace/planted' > .git"],
+            ["python", "-c", "open('.git', 'w').write('gitdir: /workspace/planted')"],
+            ["sh", "-c", "rm -f .git"],
+            ["sh", "-c", "mv .git moved"],
+        ]
+        for argv in attempts:
+            assert not (await sess.exec(argv)).ok, argv
+        assert (await sess.exec(["sh", "-c", "echo x > scratch.txt"])).ok
+    finally:
+        await sess.close()
+    assert (wt / ".git").read_text() == pointer
+    git_ops.check_git_link(wt, expected_common_dir=git_ops.common_dir(repo))
+
+
 async def test_no_network_by_default(session: SandboxSession) -> None:
     probe = (
         "import socket\n"
