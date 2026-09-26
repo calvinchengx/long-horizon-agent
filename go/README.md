@@ -17,6 +17,11 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   (plan a task, or import a `.json`/`.md` checklist, then run it), with Python's options, output
   and exit codes. For the same inputs a Go run leaves the same checkpoint commits and `.lha/`
   anchor as a Python run (`cmd/lha/e2e_test.go` runs both side by side).
+- `orchestrate`: the multi-agent organization (`internal/agents/org`, `internal/coordination`):
+  research fan-out, the Lead, reflection, the fresh-context Reviewer, parallel implementer waves in
+  worktrees with leases, and the integrator; `--checklist` skips planning and `--resume`
+  continues a mission anchored by either implementation (`cmd/lha/orchestrate_test.go` runs
+  both side by side, and resumes each one's interrupted mission with the other).
 - Sandboxes: `local` (only with `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) and `docker`
   (`LHA_SANDBOX_IMAGE`; `LHA_SANDBOX_EGRESS` routes egress through a per-session allow-list proxy).
 - The lead's tools: `read_file`, `write_file`, `list_files`, `grep`, `run_command` and
@@ -34,8 +39,8 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
 ## Python-only
 
 The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
-`mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
-organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
+`mission-abort`, `mission-snooze` and `missions` commands; the durable multi-agent
+organization rounds; the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
 mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
 E2B sandbox; re-running failing checks (`LHA_FLAKY_RETRIES`); fallback model chains
 (`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
@@ -53,7 +58,7 @@ that contains a Linux `lha` binary, which no setting selects yet.
 gofmt -l . && go vet ./... && go test ./...
 ```
 
-Tests that compare with Python (`cmd/lha/e2e_test.go`, `internal/hitl`, `internal/state`) run
+Tests that compare with Python (`cmd/lha/e2e_test.go`, `cmd/lha/orchestrate_test.go`, `internal/hitl`, `internal/state`) run
 it with `uv run --project ../python` and skip that half when `uv` is not on `PATH`. The Docker
 tests against a real daemon are opt-in, like Python's integration tests:
 `LHA_IT_DOCKER=1 go test ./internal/execution/ ./cmd/lha/ -run Docker`.

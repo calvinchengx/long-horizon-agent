@@ -21,6 +21,7 @@ the matching package is ported; it runs every file below.
 | `verify/harness_files.json` | test/harness files the agent may not weaken |
 | `model/pricing.json` | Claude price table and per-call cost |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
+| `agent/org.json` | the organization: role chart and per-role models, sub-agent prompts and tool visibility, the Reviewer's prompt and verdict parsing, reflection, the implementer's objective, ownership-guard refusals, lease decisions and the ticket lifecycle |
 
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
 | `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
