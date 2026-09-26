@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
@@ -88,6 +89,10 @@ type LoopOptions struct {
 	Replanner              Splitter
 	MaxReplans             int
 	MaxSplitDepth          int
+	// Engine, when set, is the claude_code lead engine: the acting phase runs as one claude -p
+	// session instead of Model turns (Model still meters it and serves the replanner).
+	// Everything before and after acting is the same.
+	Engine *ClaudeCodeEngine
 }
 
 // DefaultLoopOptions are the Python defaults (max_turns=8, max_consecutive_failures=3,
@@ -176,11 +181,16 @@ func (l *AgentLoop) RunCycle(ctx context.Context, tctx contracts.ToolContext, mi
 		Snapshot:    snapshot,
 		Item:        item,
 		Specs:       l.opts.Dispatcher.Specs(),
+		Engine:      l.opts.Engine != nil,
 	})
 	l.emit("cycle_started", missionID, cycleID, obs.F("item_id", item.ID))
 
 	act := &acting{dirty: true}
-	if err := l.modelTurns(ctx, act, messages, cs); err != nil {
+	if l.opts.Engine != nil {
+		if err := l.engineSession(ctx, act, messages, cs); err != nil {
+			return CycleOutcome{}, err
+		}
+	} else if err := l.modelTurns(ctx, act, messages, cs); err != nil {
 		return CycleOutcome{}, err
 	}
 	core := act.core
@@ -295,6 +305,57 @@ func (l *AgentLoop) modelTurns(ctx context.Context, act *acting, messages []cont
 	return nil
 }
 
+// engineSession is the claude_code lead: one Claude Code session using LHA's tools and verify.
+func (l *AgentLoop) engineSession(ctx context.Context, act *acting, messages []contracts.ModelMessage, cs *cycleState) error {
+	engine := l.opts.Engine
+	var mu sync.Mutex // the bridge serializes calls; this guards act against a torn-down session
+	dispatch := func(ctx context.Context, call contracts.ToolCall) contracts.ToolResult {
+		result := l.dispatchResult(ctx, call, cs)
+		mu.Lock()
+		act.dirty = true
+		mu.Unlock()
+		return result
+	}
+	verifyFn := func(ctx context.Context) (contracts.VerificationResult, error) {
+		core, err := l.verifyCore(ctx, cs)
+		if err != nil {
+			return contracts.VerificationResult{}, err
+		}
+		mu.Lock()
+		act.core = &core
+		act.dirty = engine.Native() // native edits bypass the dispatcher: re-verify after
+		mu.Unlock()
+		return l.withIntegrity(ctx, core, cs)
+	}
+	run, err := engine.Run(ctx, EngineRequest{
+		Messages: messages,
+		Cwd:      l.opts.Anchor.Workdir(),
+		CycleID:  cs.cycleID,
+		Specs:    l.opts.Dispatcher.Specs(),
+		Dispatch: dispatch,
+		Verify:   verifyFn,
+		Meter:    l.opts.Model,
+	})
+	if err != nil {
+		return err
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	act.toolCalls = run.ToolCalls
+	act.toolsUsed = run.ToolsUsed
+	act.turns = run.Turns
+	act.doneSummary = pyfmt.Head(run.Summary, engineSummaryCap)
+	if run.EditsUntracked {
+		act.dirty = true
+	}
+	l.emit("claude_code_session", cs.missionID, cs.cycleID,
+		obs.F("turns", run.Turns),
+		obs.F("tool_calls", run.ToolCalls),
+		obs.F("session_id", run.SessionID),
+		obs.F("stopped", run.Stopped))
+	return nil
+}
+
 func idleOutcome(checklist *contracts.Checklist, headSHA string) CycleOutcome {
 	return CycleOutcome{
 		IsComplete:   checklist.IsComplete(),
@@ -317,16 +378,22 @@ func (l *AgentLoop) traceTurn(result contracts.TurnResult, cs *cycleState) {
 }
 
 func (l *AgentLoop) dispatch(ctx context.Context, call contracts.ToolCall, cs *cycleState) string {
-	if call.Arguments == nil {
-		call.Arguments = map[string]any{}
-	}
-	result := l.opts.Dispatcher.Dispatch(ctx, call, cs.tctx)
-	l.emit("tool_call", cs.missionID, cs.cycleID, obs.F("tool", call.Name), obs.F("ok", result.OK))
+	result := l.dispatchResult(ctx, call, cs)
 	observation := result.Content
 	if observation == "" {
 		observation = result.ErrorText()
 	}
 	return fmt.Sprintf("OBSERVATION (%s, tool_use_id=%s): %s", call.Name, call.ID, pyfmt.Head(observation, observationCap))
+}
+
+// dispatchResult runs one tool call through the dispatcher and traces it.
+func (l *AgentLoop) dispatchResult(ctx context.Context, call contracts.ToolCall, cs *cycleState) contracts.ToolResult {
+	if call.Arguments == nil {
+		call.Arguments = map[string]any{}
+	}
+	result := l.opts.Dispatcher.Dispatch(ctx, call, cs.tctx)
+	l.emit("tool_call", cs.missionID, cs.cycleID, obs.F("tool", call.Name), obs.F("ok", result.OK))
+	return result
 }
 
 // witnessChecks are the item's witnesses as checks, plus a failing result per unusable witness.

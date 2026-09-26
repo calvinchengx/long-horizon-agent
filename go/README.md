@@ -34,14 +34,16 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   passed and failed on the same work tree is quarantined (never the evidence for green) with a
   committed `check_quarantined` event, read back from `HEAD` by later runs, exactly as in Python
   (`spec/verify/flaky_retry.json`).
-- Model backends `stub`, `ollama`, `openai_compat` and `claude`.
+- Model backends `stub`, `ollama`, `openai_compat`, `claude` and `claude_code` (`claude -p`), and
+  the `claude_code` lead engine (`LHA_LEAD_ENGINE=claude_code`: one `claude -p` session per
+  cycle, with LHA's tools served over MCP by `internal/agent/mcpbridge`).
 
 ## Python-only
 
 The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
 `mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
 organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
-mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
+mission rows) and tiered memory; `vendor`; the
 E2B sandbox; fallback model chains
 (`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
 available and exit 2.
