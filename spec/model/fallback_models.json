@@ -1,0 +1,150 @@
+{
+ "cases": [
+  {
+   "entry": "ollama:qwen3:8b",
+   "backend": "ollama",
+   "model": "qwen3:8b",
+   "price": null
+  },
+  {
+   "entry": " OpenAI_Compat:llama-3.3-70b@0.59/0.79 ",
+   "backend": "openai_compat",
+   "model": "llama-3.3-70b",
+   "price": {
+    "input_per_mtok": 0.59,
+    "output_per_mtok": 0.79
+   }
+  },
+  {
+   "entry": "claude:claude-haiku-4-5",
+   "backend": "claude",
+   "model": "claude-haiku-4-5",
+   "price": null
+  },
+  {
+   "entry": "CLAUDE:claude-opus-4-8@5/25",
+   "backend": "claude",
+   "model": "claude-opus-4-8",
+   "price": {
+    "input_per_mtok": 5.0,
+    "output_per_mtok": 25.0
+   }
+  },
+  {
+   "entry": "openai_compat:a@b@ 1 / 2 ",
+   "backend": "openai_compat",
+   "model": "a@b",
+   "price": {
+    "input_per_mtok": 1.0,
+    "output_per_mtok": 2.0
+   }
+  },
+  {
+   "entry": "openai_compat:m@1_0/2e1",
+   "backend": "openai_compat",
+   "model": "m",
+   "price": {
+    "input_per_mtok": 10.0,
+    "output_per_mtok": 20.0
+   }
+  },
+  {
+   "entry": "openai_compat:m@.5/5.",
+   "backend": "openai_compat",
+   "model": "m",
+   "price": {
+    "input_per_mtok": 0.5,
+    "output_per_mtok": 5.0
+   }
+  },
+  {
+   "entry": "openai_compat:m@+1/-0",
+   "backend": "openai_compat",
+   "model": "m",
+   "price": {
+    "input_per_mtok": 1.0,
+    "output_per_mtok": -0.0
+   }
+  },
+  {
+   "entry": "stub: s ",
+   "backend": "stub",
+   "model": "s",
+   "price": null
+  },
+  {
+   "entry": "claude_code:sonnet",
+   "backend": "claude_code",
+   "model": "sonnet",
+   "price": null
+  },
+  {
+   "entry": "claude",
+   "error": "invalid LHA_FALLBACK_MODELS entry 'claude': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+  },
+  {
+   "entry": "gpt:4o",
+   "error": "invalid LHA_FALLBACK_MODELS entry 'gpt:4o': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+  },
+  {
+   "entry": ":m",
+   "error": "invalid LHA_FALLBACK_MODELS entry ':m': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+  },
+  {
+   "entry": "claude:",
+   "error": "invalid LHA_FALLBACK_MODELS entry 'claude:': empty model name"
+  },
+  {
+   "entry": "claude: @1/2",
+   "error": "invalid LHA_FALLBACK_MODELS entry 'claude: @1/2': empty model name"
+  },
+  {
+   "entry": "openai_compat:m@abc",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@abc': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@1",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@1': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@1/",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@1/': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@-1/2",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@-1/2': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@1/-2",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@1/-2': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@0x1/2",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@0x1/2': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@1__0/2",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@1__0/2': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:m@_1/2",
+   "error": "invalid price in LHA_FALLBACK_MODELS entry 'openai_compat:m@_1/2': expected '@<in>/<out>' USD per 1M tokens"
+  },
+  {
+   "entry": "openai_compat:@1/2",
+   "error": "invalid LHA_FALLBACK_MODELS entry 'openai_compat:@1/2': empty model name"
+  },
+  {
+   "entry": "  ollama : qwen3 ",
+   "backend": "ollama",
+   "model": "qwen3",
+   "price": null
+  },
+  {
+   "entry": "ollama:'quoted'é",
+   "backend": "ollama",
+   "model": "'quoted'é",
+   "price": null
+  }
+ ]
+}
