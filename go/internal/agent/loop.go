@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
@@ -86,6 +87,9 @@ type LoopOptions struct {
 	Replanner              Splitter
 	MaxReplans             int
 	MaxSplitDepth          int
+	// Memory is the optional tiered memory: recalled into the task message before the first turn
+	// and told the cycle's outcome after the checkpoint (nil = no memory).
+	Memory memory.CycleMemory
 }
 
 // DefaultLoopOptions are the Python defaults (max_turns=8, max_consecutive_failures=3,
@@ -168,12 +172,17 @@ func (l *AgentLoop) RunCycle(ctx context.Context, tctx contracts.ToolContext, mi
 	if mission != nil {
 		missionText = mission.RenderAnchor()
 	}
+	memoryText := ""
+	if l.opts.Memory != nil {
+		memoryText = l.opts.Memory.Recall(ctx, missionID, cycleID, item, snapshot)
+	}
 	messages := BuildMessages(PromptInput{
 		AnchorText:  anchorText,
 		MissionText: missionText,
 		Snapshot:    snapshot,
 		Item:        item,
 		Specs:       l.opts.Dispatcher.Specs(),
+		MemoryText:  memoryText,
 	})
 	l.emit("cycle_started", missionID, cycleID, obs.F("item_id", item.ID))
 
@@ -201,6 +210,18 @@ func (l *AgentLoop) RunCycle(ctx context.Context, tctx contracts.ToolContext, mi
 	l.emit("checkpoint", missionID, cycleID, obs.F("head_sha", head),
 		obs.F("verified", verification.AllGreen), obs.F("verdict", verification.Verdict))
 	final := checklist.Get(item.ID)
+	if l.opts.Memory != nil {
+		failure := ""
+		if !verification.AllGreen {
+			failure = verification.FailureReport(0)
+		}
+		l.opts.Memory.ObserveCycle(ctx, memory.CycleObservation{
+			MissionID: missionID, CycleID: cycleID, ItemID: item.ID, ItemDescription: item.Description,
+			Verdict: verification.Verdict, Verified: verification.AllGreen, Status: final.Status,
+			Attempts: final.Attempts, HeadSHA: head, BeforeHead: snapshot.HeadSHA, Failure: failure,
+			DoneSummary: act.doneSummary, Tools: act.toolsUsed,
+		})
+	}
 	reason := checklist.DeadlockReason()
 	if reason == "" {
 		reason = pyfmt.Head(final.LastFailure, 500)

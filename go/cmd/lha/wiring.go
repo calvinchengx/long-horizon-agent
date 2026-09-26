@@ -10,6 +10,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/tools"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/hitl"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 )
 
 // The execution layer (sandboxes, tools, the allow-list dispatcher, the web tools and the human
@@ -23,11 +24,20 @@ var consoleGate = func(settings *config.Settings) contracts.HITLGate { return hi
 type toolbox struct {
 	session    contracts.SandboxSession
 	dispatcher contracts.ToolDispatcher
+	gate       contracts.HITLGate
 }
 
 func (t *toolbox) Session() contracts.SandboxSession    { return t.session }
 func (t *toolbox) Dispatcher() contracts.ToolDispatcher { return t.dispatcher }
 func (t *toolbox) Close(ctx context.Context) error      { return t.session.Close(ctx) }
+
+// BindGateStore points a gate that records its events (the terminal approver) at the run's
+// mission store (python: bind_gate_store), so `lha gates` lists them.
+func (t *toolbox) BindGateStore(store persistence.Store) {
+	if binder, ok := t.gate.(interface{ BindStore(hitl.GateRecorder) }); ok {
+		binder.BindStore(store)
+	}
+}
 
 // openToolbox opens the lead's sandbox session and dispatcher for a run (agent.ToolboxOpener).
 //
@@ -77,7 +87,7 @@ var openToolbox agent.ToolboxOpener = func(ctx context.Context, req agent.Toolbo
 	if err != nil {
 		return nil, err
 	}
-	return &toolbox{session: session, dispatcher: lead}, nil
+	return &toolbox{session: session, dispatcher: lead, gate: gate}, nil
 }
 
 // validateWebTools validates the web settings up front, before any planning spend (python: the

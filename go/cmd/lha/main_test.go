@@ -34,6 +34,8 @@ func cleanEnv(t *testing.T, env ...string) string {
 			os.Unsetenv(k)
 		}
 	}
+	// Runs persist to the mission store: a per-test one, never the developer's per-user store.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	for _, kv := range env {
 		k, v, _ := strings.Cut(kv, "=")
 		t.Setenv(k, v)
