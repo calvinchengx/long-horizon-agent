@@ -9,7 +9,7 @@ maintainer, do not open a public issue.
 | Path | Contents |
 |---|---|
 | [`python/`](../python/) | the reference implementation (`src/lha`), its tests, `pyproject.toml`, `Dockerfile` |
-| [`go/`](../go/) | the Go port: a CLI that runs local single-agent missions, no Temporal worker yet, built in phases ([23-roadmap.md](23-roadmap.md)) |
+| [`go/`](../go/) | the Go port: a CLI that runs single-agent missions locally and on Temporal (its own worker), built in phases ([23-roadmap.md](23-roadmap.md)) |
 | [`spec/`](../spec/) | language-neutral conformance cases both test suites run |
 | [`db/migrations/`](../db/migrations/) | the Postgres schema, one SQL file per version |
 | [`docs/`](../docs/) | this documentation (`NN-slug.md`) and the predicted runs |

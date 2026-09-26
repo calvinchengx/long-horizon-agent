@@ -127,8 +127,9 @@ These limitations are in the current code:
   the implementers of one durable wave see each other's spend only after they finish, so the
   budget ceiling can be overshot by up to one wave's spend. A durable mission gets parallel waves
   only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
-- The Go CLI runs local single-agent missions only (no Temporal worker), and Temporal histories with
-  timers do not replay across the two languages (see [Go phase 2](#go-phase-2-temporal-not-started)).
+- The Go CLI runs single-agent missions only (locally and on its own Temporal worker), and
+  Temporal histories do not replay across the two languages, so each implementation's workers
+  need their own task queue (see [Go phase 2](#go-phase-2-temporal-single-agent-done)).
 - `lha orchestrate --resume` rebuilds the blackboard and reflections from committed events, so
   posts made after the interrupted run's last checkpoint are lost; the budget and cycle ceilings
   apply per invocation.
@@ -149,7 +150,7 @@ use the Python implementation for that feature
 
 | Component | Package | State |
 |---|---|---|
-| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal, persistence, memory, fallback chains, health probe, `claude_code`, OTLP, `LHA_FLAKY_RETRIES`) are read but have no effect in Go runs |
+| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (persistence, memory, fallback chains, `claude_code`, OTLP, `LHA_FLAKY_RETRIES`) are read but have no effect in Go runs |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
 | Model backends: stub, OpenAI-compatible, Claude, pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
@@ -160,17 +161,22 @@ use the Python implementation for that feature
 | Checklist import, `vendor` | `internal/checklistimport` | checklist import present; `vendor` not started |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
 | Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, and the console approval gate (`--approve-interactive`). No `claude_code` lead engine |
-| CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `decisions`; `run-local` and `mission` run real missions (end-to-end tests compare them with Python) |
+| CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `decisions`; `run-local` and `mission` run real missions (end-to-end tests compare them with Python). The durable commands arrived with phase 2 |
 
 `go test ./...` passes for the present packages. No CI job runs the Go tests yet.
 
-### Go phase 2: Temporal (not started)
+### Go phase 2: Temporal, single-agent (done)
 
-A Go worker serving `MissionWorkflow` and `SubAgentWorkflow` with the same names, payloads and
-ClaimCheck codec, and the `worker` and `mission-*` commands. Known limitation to resolve or
-document: the Go SDK shares one sequence counter between activities and timers while the Python
-SDK keeps separate ones, so histories with timers do not replay across languages
-([19-wire-contract.md](19-wire-contract.md#known-cross-language-limitation)).
+`go/internal/durable`: a Go worker serving `MissionWorkflow` and `SubAgentWorkflow` with the same
+names, payloads and ClaimCheck codec, and the `worker` and `mission-*` commands, for single-agent
+missions ([08-durable-execution.md](08-durable-execution.md#the-go-worker)). The Go SDK shares
+one sequence counter between activities and timers while the Python SDK keeps separate ones, so
+histories do not replay across languages: each worker marks its identity and refuses a task
+queue the other implementation polls
+([19-wire-contract.md](19-wire-contract.md#cross-language-workers)). Not yet: the durable
+organization (`plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`, a working
+`run_subagent`) and the mission-store writes, which go through a no-op hook until the Go store
+lands.
 
 ### Go phase 3: organization, memory, Postgres, observability (not started)
 
