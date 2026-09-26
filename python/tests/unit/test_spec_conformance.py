@@ -12,13 +12,21 @@ import pytest
 from lha.agent.loop import parse_action
 from lha.agent.prompt import build_messages, corrective_message, render_memory_block, render_tools
 from lha.agents.planner import Planner, assign_ownership, parse_plan
+from lha.agents.reflection import reflect_on_failure
 from lha.agents.replanner import Replanner
+from lha.agents.reviewer import Reviewer, ReviewResult, parse_review
+from lha.agents.roles import ROLES, claude_model_for
+from lha.agents.subagent import SubAgent
+from lha.agents.waves import implementer_objective, new_implementer_run
 from lha.contracts.model import ModelMessage, TurnResult, Usage
 from lha.contracts.state import Checklist, ChecklistItem, SituationSnapshot
-from lha.contracts.tools import ToolSpec
+from lha.contracts.tools import ToolResult, ToolSpec
 from lha.contracts.verify import checks_from_commands, derive_check_name
 from lha.coordination.decision_log import _canonical, _chain_hash, parse_chain, verify_chain
-from lha.coordination.ownership import is_shared
+from lha.coordination.enforcement import OwnershipGuard
+from lha.coordination.leases import decide_lease
+from lha.coordination.ownership import FileOwnershipMap, LeaseRequest, is_shared
+from lha.coordination.ticket import TaskContract, Ticket, TicketStatus
 from lha.execution.dispatcher import _missing_required, validate_arguments
 from lha.execution.paths import PathEscapeError, contained_posix, is_protected, normalize_relpath
 from lha.model.pricing import lookup_claude_price
@@ -274,3 +282,109 @@ def test_execution_arguments() -> None:
     for case in spec["missing_required"]:
         missing = _missing_required({"required": case["required"]}, case["arguments"])
         assert sorted(missing) == case["missing"], case
+
+
+class _SpecsOnly:
+    """A dispatcher that only lists specs (no tool is ever called)."""
+
+    def __init__(self, specs: list[ToolSpec]) -> None:
+        self._specs = specs
+
+    def specs(self) -> list[ToolSpec]:
+        return list(self._specs)
+
+    async def dispatch(self, call: object, ctx: object) -> ToolResult:  # pragma: no cover
+        raise AssertionError("no tool call expected")
+
+
+def test_agent_org() -> None:
+    spec = _load("agent/org.json")
+    for name, role in spec["roles"].items():
+        got = ROLES[name]
+        assert got.tier.value == role["tier"] and claude_model_for(got.tier) == role["claude_model"]
+        assert got.system_prompt == role["system_prompt"], name
+        assert (got.allow_mutating, got.allow_egress, got.max_turns) == (
+            role["allow_mutating"],
+            role["allow_egress"],
+            role["max_turns"],
+        )
+    assert set(spec["roles"]) == set(ROLES)
+    specs = [ToolSpec.model_validate(s) for s in spec["specs"]]
+    assert render_tools(specs) == spec["rendered_specs"]
+    for case in spec["subagent"]:
+        model = _Recording()
+        agent = SubAgent(role=ROLES[case["role"]], model=model, dispatcher=_SpecsOnly(specs))
+        assert [s.name for s in agent.visible_specs()] == case["visible"]
+        asyncio.run(
+            agent.run(objective=case["objective"], ctx=None, extra_context=case["extra_context"])  # type: ignore[arg-type]
+        )
+        assert model.seen == case["messages"], case["role"]
+    for case in spec["reviewer_messages"]:
+        model = _Recording()
+        asyncio.run(
+            Reviewer(model, _SpecsOnly(specs)).review(
+                diff=case["diff"],
+                criteria=case["criteria"],
+                ctx=None,  # type: ignore[arg-type]
+            )
+        )
+        assert model.seen == case["messages"]
+    for case in spec["parse_review"]:
+        verdict, blocking, issues, advisory = parse_review(case["text"])
+        assert [verdict, blocking, issues, advisory] == [
+            case[k] for k in ("verdict", "blocking", "blocking_issues", "advisory")
+        ], case["text"]
+        review = ReviewResult(
+            brief=case["text"],
+            blocking=blocking,
+            tool_calls=0,
+            verdict=verdict,
+            blocking_issues=issues,
+            advisory=advisory,
+        )
+        assert review.notes() == case["notes"]
+    reflection = spec["reflection"]
+    model = _Recording()
+    asyncio.run(
+        reflect_on_failure(
+            model=model,
+            item_description=reflection["item_description"],
+            failure_summary=reflection["failure_summary"],
+        )
+    )
+    assert model.seen == reflection["messages"]
+    for case in spec["implementer_objective"]:
+        owners = FileOwnershipMap(owners=case["owners"])
+        run = new_implementer_run(
+            ChecklistItem.model_validate(case["item"]),
+            case["cycle_id"],
+            owners,
+            tool_budget=12,
+            acceptance=case["acceptance"],
+        )
+        assert (run.ticket.id, run.ticket.contract.write_set) == (
+            case["ticket_id"],
+            case["write_set"],
+        )
+        objective, extra = implementer_objective(run, **case["inputs"])
+        assert (objective, extra) == (case["objective"], case["extra"]), case["name"]
+    for case in spec["ownership_guard"]:
+        guard = OwnershipGuard(
+            _SpecsOnly([]),
+            FileOwnershipMap(owners=case["owners"]),
+            writers=case["writers"],
+            lease_tool=case["lease_tool"],
+        )
+        assert guard.refusal(case["path"]) == case["refusal"], case
+    for case in spec["leases"]:
+        request = LeaseRequest(writer=case["writer"], path=case["path"], reason=case["reason"])
+        decision = decide_lease(
+            FileOwnershipMap(owners=case["owners"]), request, finished=case["finished"]
+        )
+        assert decision.model_dump() == case["decision"], case["path"]
+        assert decision.message() == case["message"]
+    for case in spec["tickets"]:
+        ticket = Ticket(
+            id="t", contract=TaskContract(objective="o"), status=TicketStatus(case["from"])
+        )
+        assert ticket.can_transition(TicketStatus(case["to"])) == case["legal"], case

@@ -7,6 +7,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // ShellTool runs a command (argv list, no shell) inside the sandbox. argv is the spec's
@@ -21,10 +22,10 @@ func (ShellTool) Spec() contracts.ToolSpec {
 		Description: "Run a command (argv list, NO shell) in the workspace; returns output + exit code.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"argv":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-				"timeout_s": map[string]any{"type": "integer", "minimum": 1},
-			},
+			"properties": pyfmt.NewOrderedMap(
+				"argv", pyfmt.NewOrderedMap("type", "array", "items", map[string]any{"type": "string"}),
+				"timeout_s", pyfmt.NewOrderedMap("type", "integer", "minimum", 1),
+			),
 			"required": []any{"argv"},
 		},
 		Mutating:   true,

@@ -21,8 +21,8 @@ import (
 //	.lha/decisions.ndjson   — append-only, SHA-256 hash-chained DecisionRecord log (never
 //	                          compacted; format in decision_chain.go)
 //	.lha/events.ndjson      — append-only EventRecord (episodic) log
-//	.lha/ownership.json     — the file-ownership map, when the mission declared one (written by
-//	                          the Python orchestrator; carried along here)
+//	.lha/ownership.json     — the file-ownership map, when the mission declared one (the
+//	                          orchestrator's; coordination.ReadOwnership / StageOwnership)
 //
 // The committed decisions.ndjson is verified on every snapshot read and before every checkpoint
 // appends to it: a chain that does not verify is a *DecisionChainError and nothing is committed
@@ -65,6 +65,9 @@ type GitMissionAnchor struct {
 	// Decisions queued mid-cycle by the record_decision tool (RecordDecision); chained onto
 	// decisions.ndjson by the next CommitCheckpoint.
 	pendingDecisions []contracts.DecisionRecord
+	// An ownership map (its .lha/ownership.json bytes) staged for the next checkpoint
+	// (StageOwnershipJSON); nil when none is staged.
+	pendingOwnership []byte
 	// skipRestore disables the .lha restore (tests prove the log rebuild is idempotent anyway).
 	skipRestore bool
 }
@@ -113,6 +116,13 @@ func (a *GitMissionAnchor) InitializeWithAcceptance(ctx context.Context, title, 
 // schema version is always 1; a checklist with dependency errors is rejected before anything is
 // written.
 func (a *GitMissionAnchor) InitializeSpec(ctx context.Context, spec contracts.MissionSpec, items contracts.Checklist) (string, error) {
+	return a.InitializeSpecWithOwnership(ctx, spec, items, nil)
+}
+
+// InitializeSpecWithOwnership is InitializeSpec plus the file-ownership map (python:
+// initialize(..., ownership=)): ownershipJSON is written as .lha/ownership.json; nil means the
+// mission has no map, and a stale ownership.json from an earlier initialization is removed.
+func (a *GitMissionAnchor) InitializeSpecWithOwnership(ctx context.Context, spec contracts.MissionSpec, items contracts.Checklist, ownershipJSON []byte) (string, error) {
 	if errs := items.DependencyErrors(); len(errs) > 0 {
 		return "", errors.New("invalid checklist: " + strings.Join(errs, "; "))
 	}
@@ -136,6 +146,13 @@ func (a *GitMissionAnchor) InitializeSpec(ctx context.Context, spec contracts.Mi
 	if err := a.writeChecklist(items); err != nil {
 		return "", err
 	}
+	if ownershipJSON != nil {
+		if err := a.writeFile(OwnershipFile, string(ownershipJSON)); err != nil {
+			return "", err
+		}
+	} else if err := os.Remove(a.path(OwnershipFile)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", err // re-initialized without a map: never inherit a stale one
+	}
 	progress := "# Mission: " + spec.Title + "\n\n" + spec.Description + "\n\n" +
 		progressMarker + "- _initialized; no work yet._\n"
 	if err := a.writeFile(ProgressFile, progress); err != nil {
@@ -149,6 +166,7 @@ func (a *GitMissionAnchor) InitializeSpec(ctx context.Context, spec contracts.Mi
 	}
 	a.pendingEvents = nil
 	a.pendingDecisions = nil
+	a.pendingOwnership = nil
 	return a.commitAll(ctx, "lha: initialize mission anchor")
 }
 
@@ -277,6 +295,17 @@ func (a *GitMissionAnchor) PendingDecisions() []contracts.DecisionRecord {
 // CommitCheckpoint restores .lha/ to HEAD, rewrites it from the checkpoint and commits
 // everything (work + anchor) atomically; it returns the new HEAD sha.
 func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Checkpoint) (string, error) {
+	return a.commitSync(ctx, cp, false)
+}
+
+// CommitAnchorUpdate is CommitCheckpoint, but the commit holds ONLY .lha/ files: for harness
+// bookkeeping between cycles (e.g. a lease granted mid-wave), whatever else is in the work tree
+// or the index is neither committed nor discarded.
+func (a *GitMissionAnchor) CommitAnchorUpdate(ctx context.Context, cp contracts.Checkpoint) (string, error) {
+	return a.commitSync(ctx, cp, true)
+}
+
+func (a *GitMissionAnchor) commitSync(ctx context.Context, cp contracts.Checkpoint, anchorOnly bool) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	// Verify the committed decision chain BEFORE touching anything: an altered history is never
@@ -299,6 +328,11 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 	}
 	if pyStrip(cp.ProgressSummary) != "" {
 		if err := a.appendProgress(ctx, cp.ProgressSummary); err != nil {
+			return "", err
+		}
+	}
+	if a.pendingOwnership != nil {
+		if err := a.writeFile(OwnershipFile, string(a.pendingOwnership)); err != nil {
 			return "", err
 		}
 	}
@@ -337,13 +371,56 @@ func (a *GitMissionAnchor) CommitCheckpoint(ctx context.Context, cp contracts.Ch
 	if message == "" {
 		message = "lha: checkpoint " + cp.CycleID
 	}
-	sha, err := a.commitAll(ctx, message)
+	var sha string
+	if anchorOnly {
+		sha, err = a.commitAnchor(ctx, message)
+	} else {
+		sha, err = a.commitAll(ctx, message)
+	}
 	if err != nil {
 		return "", err
 	}
 	a.pendingEvents = nil
 	a.pendingDecisions = nil
+	a.pendingOwnership = nil
 	return sha, nil
+}
+
+// ReadEvents returns the committed episodic events, oldest first (unreadable lines are skipped).
+func (a *GitMissionAnchor) ReadEvents(ctx context.Context) ([]contracts.EventRecord, error) {
+	text, err := a.committedText(ctx, EventsFile)
+	if err != nil {
+		return nil, err
+	}
+	out := []contracts.EventRecord{}
+	for _, line := range strings.Split(text, "\n") {
+		if pyStrip(line) == "" {
+			continue
+		}
+		var event contracts.EventRecord
+		if err := json.Unmarshal([]byte(line), &event); err != nil || event.Kind == "" {
+			continue
+		}
+		if event.Payload == nil {
+			event.Payload = map[string]any{}
+		}
+		out = append(out, event)
+	}
+	return out, nil
+}
+
+// ReadOwnershipJSON returns the committed .lha/ownership.json (falling back to the working tree
+// before the first commit); ok is false when the mission never declared a map.
+func (a *GitMissionAnchor) ReadOwnershipJSON(ctx context.Context) (text string, ok bool, err error) {
+	return a.readAnchorFile(ctx, OwnershipFile)
+}
+
+// StageOwnershipJSON writes data as .lha/ownership.json with the next checkpoint (or anchor
+// update). The staging is not sticky: it is cleared by that commit.
+func (a *GitMissionAnchor) StageOwnershipJSON(data []byte) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.pendingOwnership = append([]byte{}, data...)
 }
 
 // RestoreFromHead restores tracked relpaths to their HEAD content; it returns the ones restored.
@@ -372,6 +449,14 @@ func (a *GitMissionAnchor) commitAll(ctx context.Context, message string) (strin
 		force = append(force, AnchorDir+"/"+name)
 	}
 	return CommitAll(ctx, a.workdir, message, force...)
+}
+
+func (a *GitMissionAnchor) commitAnchor(ctx context.Context, message string) (string, error) {
+	paths := make([]string, 0, len(AnchorFiles))
+	for _, name := range AnchorFiles {
+		paths = append(paths, AnchorDir+"/"+name)
+	}
+	return CommitPaths(ctx, a.workdir, message, paths...)
 }
 
 func (a *GitMissionAnchor) writeFile(name, content string) error {

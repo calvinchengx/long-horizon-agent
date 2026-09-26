@@ -99,6 +99,9 @@ func pyFloatRepr(f float64) string {
 	return mant + "e" + sign + es
 }
 
+// PydanticJSON is v as pydantic's model_dump_json writes it (indent => indent=2).
+func PydanticJSON(v any, indent bool) ([]byte, error) { return pydanticJSON(v, indent) }
+
 // pydanticJSON serializes v like pydantic's model_dump_json: compact (or indent=2), UTF-8, with
 // no HTML escaping and U+2028/U+2029 written raw. No trailing newline.
 func pydanticJSON(v any, indent bool) ([]byte, error) {

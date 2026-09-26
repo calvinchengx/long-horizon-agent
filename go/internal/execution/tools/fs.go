@@ -15,6 +15,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety/pystr"
 )
 
@@ -156,10 +157,10 @@ func (WriteFileTool) Spec() contracts.ToolSpec {
 		Description: "Create or overwrite a UTF-8 text file (path relative to the workspace root).",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"path":    map[string]any{"type": "string"},
-				"content": map[string]any{"type": "string"},
-			},
+			"properties": pyfmt.NewOrderedMap(
+				"path", map[string]any{"type": "string"},
+				"content", map[string]any{"type": "string"},
+			),
 			"required": []any{"path", "content"},
 		},
 		Mutating: true,
@@ -288,11 +289,11 @@ func (GrepTool) Spec() contracts.ToolSpec {
 			"string unless 'regex' is true (simple regular expressions only).",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"pattern": map[string]any{"type": "string"},
-				"subdir":  map[string]any{"type": "string"},
-				"regex":   map[string]any{"type": "boolean"},
-			},
+			"properties": pyfmt.NewOrderedMap(
+				"pattern", map[string]any{"type": "string"},
+				"subdir", map[string]any{"type": "string"},
+				"regex", map[string]any{"type": "boolean"},
+			),
 			"required": []any{"pattern"},
 		},
 		PathArgs: []string{"subdir"},
