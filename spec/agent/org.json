@@ -1,0 +1,1176 @@
+{
+ "roles": {
+  "planner": {
+   "tier": "opus",
+   "claude_model": "claude-opus-4-8",
+   "system_prompt": "You are the Planner/Architect. Decompose the mission into an ordered checklist of small, independently-verifiable items, and assign single-writer-per-file ownership. Mark items that touch shared files/types as serial.",
+   "allow_mutating": false,
+   "allow_egress": false,
+   "max_turns": 8
+  },
+  "lead": {
+   "tier": "opus",
+   "claude_model": "claude-opus-4-8",
+   "system_prompt": "You are the Lead Engineer and the SOLE writer to the integration line. Keep design decisions coherent. Use tools to read, edit, run, and verify. Mark an item done only when the deterministic checks are green.",
+   "allow_mutating": true,
+   "allow_egress": false,
+   "max_turns": 8
+  },
+  "researcher": {
+   "tier": "haiku",
+   "claude_model": "claude-haiku-4-5-20251001",
+   "system_prompt": "You are a Researcher. Investigate read-only: search the codebase, read docs, and (if permitted) the web. Return a concise ~1-2K-token brief. Never write code.",
+   "allow_mutating": false,
+   "allow_egress": true,
+   "max_turns": 8
+  },
+  "reviewer": {
+   "tier": "opus",
+   "claude_model": "claude-opus-4-8",
+   "system_prompt": "You are an independent Reviewer with NO shared context with the author. Review the diff adversarially for correctness, security, and scope. Return blocking vs advisory findings anchored to evidence.",
+   "allow_mutating": false,
+   "allow_egress": false,
+   "max_turns": 8
+  },
+  "implementer": {
+   "tier": "sonnet",
+   "claude_model": "claude-sonnet-4-6",
+   "system_prompt": "You are an Implementer working a single file-disjoint slice in your own worktree. Write only files in your assigned write-set; if you need a foreign file, stop and request a lease instead of writing it.",
+   "allow_mutating": true,
+   "allow_egress": false,
+   "max_turns": 8
+  }
+ },
+ "specs": [
+  {
+   "name": "read_file",
+   "description": "Read a UTF-8 text file at a path relative to the workspace root.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path"
+    ]
+   },
+   "mutating": false,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [
+    "path"
+   ],
+   "command_arg": null
+  },
+  {
+   "name": "write_file",
+   "description": "Create or overwrite a UTF-8 text file (path relative to the workspace root).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "content": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "content"
+    ]
+   },
+   "mutating": true,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [
+    "path"
+   ],
+   "command_arg": null
+  },
+  {
+   "name": "list_files",
+   "description": "List files under the workspace (optionally a subdirectory), ignoring noise.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "subdir": {
+      "type": "string"
+     }
+    }
+   },
+   "mutating": false,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [
+    "subdir"
+   ],
+   "command_arg": null
+  },
+  {
+   "name": "grep",
+   "description": "Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only).",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "pattern": {
+      "type": "string"
+     },
+     "subdir": {
+      "type": "string"
+     },
+     "regex": {
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "pattern"
+    ]
+   },
+   "mutating": false,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [
+    "subdir"
+   ],
+   "command_arg": null
+  },
+  {
+   "name": "run_command",
+   "description": "Run a command (argv list, NO shell) in the workspace; returns output + exit code.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "argv": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "timeout_s": {
+      "type": "integer",
+      "minimum": 1
+     }
+    },
+    "required": [
+     "argv"
+    ]
+   },
+   "mutating": true,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [],
+   "command_arg": "argv"
+  },
+  {
+   "name": "record_decision",
+   "description": "Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "decision": {
+      "type": "string"
+     },
+     "rationale": {
+      "type": "string"
+     },
+     "alternatives_rejected": {
+      "type": "string"
+     },
+     "affected": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "decision",
+     "rationale"
+    ],
+    "additionalProperties": false
+   },
+   "mutating": true,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [],
+   "command_arg": null
+  },
+  {
+   "name": "request_lease",
+   "description": "Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "Repo-relative path of the file."
+     },
+     "reason": {
+      "type": "string",
+      "description": "Why your item needs this file."
+     }
+    },
+    "required": [
+     "path",
+     "reason"
+    ],
+    "additionalProperties": false
+   },
+   "mutating": true,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [],
+   "command_arg": null
+  },
+  {
+   "name": "fetch_url",
+   "description": "Fetch a URL and return its readable text content (HTML stripped; untrusted data). Optional 'headers' may contain credential placeholders, filled in only for their bound host.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "url": {
+      "type": "string"
+     },
+     "headers": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "url"
+    ]
+   },
+   "mutating": false,
+   "egress": true,
+   "untrusted_input": true,
+   "path_args": [],
+   "command_arg": null
+  },
+  {
+   "name": "web_search",
+   "description": "Search the web; returns top results (title, url, snippet) for research. Results are untrusted data.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     },
+     "max_results": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   },
+   "mutating": false,
+   "egress": true,
+   "untrusted_input": true,
+   "path_args": [],
+   "command_arg": null
+  }
+ ],
+ "rendered_specs": "- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})\n- request_lease: Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant. (args: {'path': {'type': 'string', 'description': 'Repo-relative path of the file.'}, 'reason': {'type': 'string', 'description': 'Why your item needs this file.'}})\n- fetch_url: Fetch a URL and return its readable text content (HTML stripped; untrusted data). Optional 'headers' may contain credential placeholders, filled in only for their bound host. (args: {'url': {'type': 'string'}, 'headers': {'type': 'object', 'additionalProperties': {'type': 'string'}}})\n- web_search: Search the web; returns top results (title, url, snippet) for research. Results are untrusted data. (args: {'query': {'type': 'string'}, 'max_results': {'type': 'integer'}})",
+ "subagent": [
+  {
+   "role": "researcher",
+   "objective": "Find context relevant to: add a CLI",
+   "extra_context": "",
+   "visible": [
+    "read_file",
+    "list_files",
+    "grep",
+    "fetch_url",
+    "web_search"
+   ],
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are a Researcher. Investigate read-only: search the codebase, read docs, and (if permitted) the web. Return a concise ~1-2K-token brief. Never write code.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- fetch_url: Fetch a URL and return its readable text content (HTML stripped; untrusted data). Optional 'headers' may contain credential placeholders, filled in only for their bound host. (args: {'url': {'type': 'string'}, 'headers': {'type': 'object', 'additionalProperties': {'type': 'string'}}})\n- web_search: Search the web; returns top results (title, url, snippet) for research. Results are untrusted data. (args: {'query': {'type': 'string'}, 'max_results': {'type': 'integer'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
+    },
+    {
+     "role": "user",
+     "content": "Find context relevant to: add a CLI"
+    }
+   ]
+  },
+  {
+   "role": "reviewer",
+   "objective": "Review it",
+   "extra_context": "  Acceptance criteria: x\n\n",
+   "visible": [
+    "read_file",
+    "list_files",
+    "grep"
+   ],
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are an independent Reviewer with NO shared context with the author. Review the diff adversarially for correctness, security, and scope. Return blocking vs advisory findings anchored to evidence.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
+    },
+    {
+     "role": "user",
+     "content": "Review it\n\n  Acceptance criteria: x"
+    }
+   ]
+  },
+  {
+   "role": "implementer",
+   "objective": "Checklist item [01]: do it",
+   "extra_context": "Mission: M\n\nResearch briefs:\nB",
+   "visible": [
+    "read_file",
+    "write_file",
+    "list_files",
+    "grep",
+    "run_command",
+    "record_decision",
+    "request_lease"
+   ],
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are an Implementer working a single file-disjoint slice in your own worktree. Write only files in your assigned write-set; if you need a foreign file, stop and request a lease instead of writing it.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})\n- request_lease: Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant. (args: {'path': {'type': 'string', 'description': 'Repo-relative path of the file.'}, 'reason': {'type': 'string', 'description': 'Why your item needs this file.'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
+    },
+    {
+     "role": "user",
+     "content": "Checklist item [01]: do it\n\nMission: M\n\nResearch briefs:\nB"
+    }
+   ]
+  }
+ ],
+ "reviewer_messages": [
+  {
+   "criteria": "Add the model",
+   "diff": "(empty diff)",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are an independent Reviewer with NO shared context with the author. Review the diff adversarially for correctness, security, and scope. Return blocking vs advisory findings anchored to evidence.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
+    },
+    {
+     "role": "user",
+     "content": "Review the diff against the acceptance criteria. Identify correctness, security, and scope issues. Investigate with the tools if needed. When finished, reply with EXACTLY one JSON object: {\"done\": true, \"verdict\": \"approve\" | \"block\", \"blocking_issues\": [\"<issue that must be fixed before merge>\", ...], \"advisory\": [\"<non-blocking suggestion>\", ...], \"summary\": \"<one line>\"}. Use \"block\" only if blocking_issues is non-empty.\n\nAcceptance criteria: Add the model\n\nDIFF:\n(empty diff)"
+    }
+   ]
+  },
+  {
+   "criteria": "Ünïcode",
+   "diff": "diff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+é",
+   "messages": [
+    {
+     "role": "system",
+     "content": "You are an independent Reviewer with NO shared context with the author. Review the diff adversarially for correctness, security, and scope. Return blocking vs advisory findings anchored to evidence.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
+    },
+    {
+     "role": "user",
+     "content": "Review the diff against the acceptance criteria. Identify correctness, security, and scope issues. Investigate with the tools if needed. When finished, reply with EXACTLY one JSON object: {\"done\": true, \"verdict\": \"approve\" | \"block\", \"blocking_issues\": [\"<issue that must be fixed before merge>\", ...], \"advisory\": [\"<non-blocking suggestion>\", ...], \"summary\": \"<one line>\"}. Use \"block\" only if blocking_issues is non-empty.\n\nAcceptance criteria: Ünïcode\n\nDIFF:\ndiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+édiff --git a/x b/x\n+"
+    }
+   ]
+  }
+ ],
+ "parse_review": [
+  {
+   "text": "{\"done\": true, \"verdict\": \"approve\", \"blocking_issues\": [], \"advisory\": [\"docs\"]}",
+   "verdict": "approve",
+   "blocking": false,
+   "blocking_issues": [],
+   "advisory": [
+    "docs"
+   ],
+   "notes": "Review verdict: approve\n- advisory: docs\n{\"done\": true, \"verdict\": \"approve\", \"blocking_issues\": [], \"advisory\": [\"docs\"]}"
+  },
+  {
+   "text": "{\"done\": true, \"verdict\": \"APPROVED \", \"blocking_issues\": [\"no tests\"]}",
+   "verdict": "block",
+   "blocking": true,
+   "blocking_issues": [
+    "no tests"
+   ],
+   "advisory": [],
+   "notes": "Review verdict: block\n- BLOCKING: no tests"
+  },
+  {
+   "text": "{\"done\": true, \"verdict\": \"request_changes\", \"blocking_issues\": [\" a \", \"\", 3, null]}",
+   "verdict": "block",
+   "blocking": true,
+   "blocking_issues": [
+    "a",
+    "3",
+    "None"
+   ],
+   "advisory": [],
+   "notes": "Review verdict: block\n- BLOCKING: a\n- BLOCKING: 3\n- BLOCKING: None"
+  },
+  {
+   "text": "{\"done\": true, \"verdict\": \"maybe\", \"blocking_issues\": []}",
+   "verdict": "approve",
+   "blocking": false,
+   "blocking_issues": [],
+   "advisory": [],
+   "notes": "Review verdict: approve\n{\"done\": true, \"verdict\": \"maybe\", \"blocking_issues\": []}"
+  },
+  {
+   "text": "{\"done\": true, \"verdict\": \"maybe\", \"blocking_issues\": [\"x\"]}",
+   "verdict": "block",
+   "blocking": true,
+   "blocking_issues": [
+    "x"
+   ],
+   "advisory": [],
+   "notes": "Review verdict: block\n- BLOCKING: x"
+  },
+  {
+   "text": "{\"done\": true, \"verdict\": \"maybe\"}",
+   "verdict": "unparsed",
+   "blocking": true,
+   "blocking_issues": [],
+   "advisory": [],
+   "notes": "Review verdict: unparsed\n{\"done\": true, \"verdict\": \"maybe\"}"
+  },
+  {
+   "text": "{\"done\": true, \"blocking_issues\": \"not a list\"}",
+   "verdict": "unparsed",
+   "blocking": true,
+   "blocking_issues": [],
+   "advisory": [],
+   "notes": "Review verdict: unparsed\n{\"done\": true, \"blocking_issues\": \"not a list\"}"
+  },
+  {
+   "text": "{\"done\": true, \"summary\": \"no verdict\"}",
+   "verdict": "unparsed",
+   "blocking": true,
+   "blocking_issues": [],
+   "advisory": [],
+   "notes": "Review verdict: unparsed\n{\"done\": true, \"summary\": \"no verdict\"}"
+  },
+  {
+   "text": "Looks fine.\n  block: missing error handling\nBLOCK:  and no tests \n",
+   "verdict": "block",
+   "blocking": true,
+   "blocking_issues": [
+    "missing error handling",
+    "and no tests"
+   ],
+   "advisory": [],
+   "notes": "Review verdict: block\n- BLOCKING: missing error handling\n- BLOCKING: and no tests"
+  },
+  {
+   "text": "No blocking issues found.",
+   "verdict": "unparsed",
+   "blocking": true,
+   "blocking_issues": [],
+   "advisory": [],
+   "notes": "Review verdict: unparsed\nNo blocking issues found."
+  },
+  {
+   "text": "",
+   "verdict": "unparsed",
+   "blocking": true,
+   "blocking_issues": [],
+   "advisory": [],
+   "notes": "Review verdict: unparsed"
+  },
+  {
+   "text": "{\"verdict\": 7, \"advisory\": [1.5, true, {\"k\": \"v\"}]}",
+   "verdict": "unparsed",
+   "blocking": true,
+   "blocking_issues": [],
+   "advisory": [
+    "1.5",
+    "True",
+    "{'k': 'v'}"
+   ],
+   "notes": "Review verdict: unparsed\n- advisory: 1.5\n- advisory: True\n- advisory: {'k': 'v'}\n{\"verdict\": 7, \"advisory\": [1.5, true, {\"k\": \"v\"}]}"
+  }
+ ],
+ "reflection": {
+  "item_description": "Wire the API",
+  "failure_summary": "FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ ",
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are reflecting on a failed attempt (Reflexion-style). Write a SHORT post-mortem: the likely root cause and a concrete different approach to try next. No code."
+   },
+   {
+    "role": "user",
+    "content": "Item: Wire the API\n\nFailure:\nFAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAILED ✗ FAIL"
+   }
+  ]
+ },
+ "implementer_objective": [
+  {
+   "name": "minimal",
+   "item": {
+    "id": "01",
+    "description": "Add the model",
+    "status": "todo",
+    "verified_by": [],
+    "depends_on": [],
+    "attempts": 0,
+    "consecutive_failures": 0,
+    "last_failure": "",
+    "allow_harness_edits": false,
+    "witnesses": [],
+    "notes": "",
+    "schema_version": 1
+   },
+   "owners": {
+    "src/a.py": "implementer-01",
+    "src/b.py": "implementer-01"
+   },
+   "cycle_id": "c3",
+   "acceptance": [
+    "pytest",
+    "ruff"
+   ],
+   "inputs": {
+    "mission_text": ""
+   },
+   "ticket_id": "c3-01",
+   "write_set": [
+    "src/a.py",
+    "src/b.py"
+   ],
+   "objective": "Checklist item [01]: Add the model\n\nYour write-set (the ONLY files you may create or modify): src/a.py, src/b.py\nBoundaries: write only the files in write_set; request a lease instead of writing others; do not edit .lha/ (harness-owned) or existing tests / test configuration\nIf the item truly needs a file outside your write-set, call request_lease first. Acceptance: the gating checks pytest, ruff must pass in your worktree. When the item is done, reply with {\"done\": true, \"summary\": \"a short summary of what you changed and why\"}.",
+   "extra": ""
+  },
+  {
+   "name": "full",
+   "item": {
+    "id": "01",
+    "description": "Add the model",
+    "status": "todo",
+    "verified_by": [],
+    "depends_on": [],
+    "attempts": 2,
+    "consecutive_failures": 0,
+    "last_failure": "boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é ",
+    "allow_harness_edits": false,
+    "witnesses": [],
+    "notes": "",
+    "schema_version": 1
+   },
+   "owners": {
+    "src/a.py": "implementer-01",
+    "src/b.py": "implementer-01"
+   },
+   "cycle_id": "c3",
+   "acceptance": [],
+   "inputs": {
+    "mission_text": "Mission: M\n\nBuild it.",
+    "reflection": "\n  Reflection on 01: try again  \n",
+    "decisions_text": "Design decisions already recorded: x",
+    "briefs": [
+     "B1",
+     "B2"
+    ],
+    "board": "Team board (earlier rounds):\n[a] b"
+   },
+   "ticket_id": "c3-01",
+   "write_set": [
+    "src/a.py",
+    "src/b.py"
+   ],
+   "objective": "Checklist item [01]: Add the model\n\nYour write-set (the ONLY files you may create or modify): src/a.py, src/b.py\nBoundaries: write only the files in write_set; request a lease instead of writing others; do not edit .lha/ (harness-owned) or existing tests / test configuration\nIf the item truly needs a file outside your write-set, call request_lease first. Acceptance: the gating checks (none) must pass in your worktree. When the item is done, reply with {\"done\": true, \"summary\": \"a short summary of what you changed and why\"}.",
+   "extra": "Mission: M\n\nBuild it.\n\nPrevious attempt FAILED:\nm é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é boom é \n\nReflection on 01: try again\n\nDesign decisions already recorded: x\n\nResearch briefs:\nB1\n---\nB2\n\nTeam board (earlier rounds):\n[a] b"
+  },
+  {
+   "name": "no_lease_tool",
+   "item": {
+    "id": "01",
+    "description": "Add the model",
+    "status": "todo",
+    "verified_by": [],
+    "depends_on": [],
+    "attempts": 0,
+    "consecutive_failures": 0,
+    "last_failure": "",
+    "allow_harness_edits": false,
+    "witnesses": [],
+    "notes": "",
+    "schema_version": 1
+   },
+   "owners": {
+    "src/a.py": "implementer-01",
+    "src/b.py": "implementer-01"
+   },
+   "cycle_id": "c3",
+   "acceptance": [
+    "pytest"
+   ],
+   "inputs": {
+    "mission_text": "M",
+    "lease_tool": false,
+    "reflection": "  "
+   },
+   "ticket_id": "c3-01",
+   "write_set": [
+    "src/a.py",
+    "src/b.py"
+   ],
+   "objective": "Checklist item [01]: Add the model\n\nYour write-set (the ONLY files you may create or modify): src/a.py, src/b.py\nBoundaries: write only the files in write_set; request a lease instead of writing others; do not edit .lha/ (harness-owned) or existing tests / test configuration\nAcceptance: the gating checks pytest must pass in your worktree. When the item is done, reply with {\"done\": true, \"summary\": \"a short summary of what you changed and why\"}.",
+   "extra": "M\n\n"
+  }
+ ],
+ "ownership_guard": [
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": false,
+   "path": "mine.py",
+   "refusal": null
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": false,
+   "path": "./Theirs.py",
+   "refusal": "ownership: implementer-01 may not write 'Theirs.py': it is owned by 'implementer-02'. Write only the files you own; if you really need this file, stop and say so in your summary (a lease request) instead of writing it."
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": true,
+   "path": "theirs.py",
+   "refusal": "ownership: implementer-01 may not write 'theirs.py': it is owned by 'implementer-02'. Write only the files you own; if you really need this file, call request_lease with the path and why; write it only if the lease is granted."
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": false,
+   "path": "pyproject.toml",
+   "refusal": "ownership: implementer-01 may not write 'pyproject.toml': it is a shared file (build manifest, lockfile, package entry point, ...) that only the lead writes. Write only the files you own; if you really need this file, stop and say so in your summary (a lease request) instead of writing it."
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": true,
+   "path": "src/__init__.py",
+   "refusal": "ownership: implementer-01 may not write 'src/__init__.py': it is a shared file (build manifest, lockfile, package entry point, ...) that only the lead writes. Write only the files you own; if you really need this file, call request_lease with the path and why; write it only if the lease is granted."
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": false,
+   "path": "new.py",
+   "refusal": "ownership: implementer-01 may not write 'new.py': it is outside your write-set (unassigned files belong to the lead). Write only the files you own; if you really need this file, stop and say so in your summary (a lease request) instead of writing it."
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": true,
+   "path": "../x.py",
+   "refusal": "ownership: implementer-01 may not write '../x.py': path escapes the repository root: '../x.py'"
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "implementer-01"
+   ],
+   "lease_tool": false,
+   "path": "/etc/passwd",
+   "refusal": "ownership: implementer-01 may not write '/etc/passwd': path must be repo-relative, got '/etc/passwd'"
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "lead",
+    "implementer-02"
+   ],
+   "lease_tool": false,
+   "path": "theirs.py",
+   "refusal": null
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "lead",
+    "implementer-02"
+   ],
+   "lease_tool": false,
+   "path": "new.py",
+   "refusal": null
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "lead",
+    "implementer-02"
+   ],
+   "lease_tool": false,
+   "path": "mine.py",
+   "refusal": "ownership: lead / implementer-02 may not write 'mine.py': it is owned by 'implementer-01'. Write only the files you own; if you really need this file, stop and say so in your summary (a lease request) instead of writing it."
+  },
+  {
+   "owners": {
+    "mine.py": "implementer-01",
+    "theirs.py": "implementer-02"
+   },
+   "writers": [
+    "lead"
+   ],
+   "lease_tool": false,
+   "path": "pyproject.toml",
+   "refusal": null
+  }
+ ],
+ "leases": [
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "src/new.py",
+   "reason": " why ",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "src/new.py",
+    "reason": "why",
+    "granted": true,
+    "previous_owner": null,
+    "why": "it was unassigned"
+   },
+   "message": "lease granted: you may now write 'src/new.py' (it was unassigned). It is yours until your item is done."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "./a.py",
+   "reason": "mine",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "a.py",
+    "reason": "mine",
+    "granted": true,
+    "previous_owner": "implementer-01",
+    "why": "you already own it"
+   },
+   "message": "lease granted: you may now write 'a.py' (you already own it). It is yours until your item is done."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "b.py",
+   "reason": "need it",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "b.py",
+    "reason": "need it",
+    "granted": false,
+    "previous_owner": "implementer-02",
+    "why": "it is owned by 'implementer-02', whose item is still open"
+   },
+   "message": "lease refused for 'b.py': it is owned by 'implementer-02', whose item is still open. Do not write it; finish what you can within your write-set and say in your summary what still needs this file."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "B.py",
+   "reason": "now",
+   "finished": [
+    "implementer-02"
+   ],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "B.py",
+    "reason": "now",
+    "granted": true,
+    "previous_owner": "implementer-02",
+    "why": "its owner 'implementer-02' has finished"
+   },
+   "message": "lease granted: you may now write 'B.py' (its owner 'implementer-02' has finished). It is yours until your item is done."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "c.py",
+   "reason": "lead's",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "c.py",
+    "reason": "lead's",
+    "granted": true,
+    "previous_owner": "lead",
+    "why": "it was unassigned"
+   },
+   "message": "lease granted: you may now write 'c.py' (it was unassigned). It is yours until your item is done."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "pyproject.toml",
+   "reason": "deps",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "pyproject.toml",
+    "reason": "deps",
+    "granted": false,
+    "previous_owner": null,
+    "why": "it is a shared file (build manifest, lockfile, package entry point, ...) that only the lead writes"
+   },
+   "message": "lease refused for 'pyproject.toml': it is a shared file (build manifest, lockfile, package entry point, ...) that only the lead writes. Do not write it; finish what you can within your write-set and say in your summary what still needs this file."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": ".lha/ownership.json",
+   "reason": "x",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": ".lha/ownership.json",
+    "reason": "x",
+    "granted": false,
+    "previous_owner": null,
+    "why": "harness-owned files (.lha/, .git/) are never leased"
+   },
+   "message": "lease refused for '.lha/ownership.json': harness-owned files (.lha/, .git/) are never leased. Do not write it; finish what you can within your write-set and say in your summary what still needs this file."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": ".GIT/config",
+   "reason": "x",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": ".GIT/config",
+    "reason": "x",
+    "granted": false,
+    "previous_owner": null,
+    "why": "harness-owned files (.lha/, .git/) are never leased"
+   },
+   "message": "lease refused for '.GIT/config': harness-owned files (.lha/, .git/) are never leased. Do not write it; finish what you can within your write-set and say in your summary what still needs this file."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-01",
+   "path": "../x.py",
+   "reason": "x",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-01",
+    "path": "../x.py",
+    "reason": "x",
+    "granted": false,
+    "previous_owner": null,
+    "why": "path escapes the repository root: '../x.py'"
+   },
+   "message": "lease refused for '../x.py': path escapes the repository root: '../x.py'. Do not write it; finish what you can within your write-set and say in your summary what still needs this file."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "lead",
+   "path": "d.py",
+   "reason": "x",
+   "finished": [],
+   "decision": {
+    "writer": "lead",
+    "path": "d.py",
+    "reason": "x",
+    "granted": false,
+    "previous_owner": null,
+    "why": "the lead needs no lease (it owns all unassigned space)"
+   },
+   "message": "lease refused for 'd.py': the lead needs no lease (it owns all unassigned space). Do not write it; finish what you can within your write-set and say in your summary what still needs this file."
+  },
+  {
+   "owners": {
+    "a.py": "implementer-01",
+    "b.py": "implementer-02",
+    "c.py": "lead"
+   },
+   "writer": "implementer-03",
+   "path": "e.py",
+   "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+   "finished": [],
+   "decision": {
+    "writer": "implementer-03",
+    "path": "e.py",
+    "reason": "rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+    "granted": true,
+    "previous_owner": null,
+    "why": "it was unassigned"
+   },
+   "message": "lease granted: you may now write 'e.py' (it was unassigned). It is yours until your item is done."
+  }
+ ],
+ "tickets": [
+  {
+   "from": "created",
+   "to": "created",
+   "legal": false
+  },
+  {
+   "from": "created",
+   "to": "in_progress",
+   "legal": true
+  },
+  {
+   "from": "created",
+   "to": "awaiting_verify",
+   "legal": false
+  },
+  {
+   "from": "created",
+   "to": "awaiting_merge",
+   "legal": false
+  },
+  {
+   "from": "created",
+   "to": "done",
+   "legal": false
+  },
+  {
+   "from": "created",
+   "to": "failed",
+   "legal": true
+  },
+  {
+   "from": "in_progress",
+   "to": "created",
+   "legal": false
+  },
+  {
+   "from": "in_progress",
+   "to": "in_progress",
+   "legal": false
+  },
+  {
+   "from": "in_progress",
+   "to": "awaiting_verify",
+   "legal": true
+  },
+  {
+   "from": "in_progress",
+   "to": "awaiting_merge",
+   "legal": false
+  },
+  {
+   "from": "in_progress",
+   "to": "done",
+   "legal": false
+  },
+  {
+   "from": "in_progress",
+   "to": "failed",
+   "legal": true
+  },
+  {
+   "from": "awaiting_verify",
+   "to": "created",
+   "legal": false
+  },
+  {
+   "from": "awaiting_verify",
+   "to": "in_progress",
+   "legal": true
+  },
+  {
+   "from": "awaiting_verify",
+   "to": "awaiting_verify",
+   "legal": false
+  },
+  {
+   "from": "awaiting_verify",
+   "to": "awaiting_merge",
+   "legal": true
+  },
+  {
+   "from": "awaiting_verify",
+   "to": "done",
+   "legal": false
+  },
+  {
+   "from": "awaiting_verify",
+   "to": "failed",
+   "legal": true
+  },
+  {
+   "from": "awaiting_merge",
+   "to": "created",
+   "legal": false
+  },
+  {
+   "from": "awaiting_merge",
+   "to": "in_progress",
+   "legal": true
+  },
+  {
+   "from": "awaiting_merge",
+   "to": "awaiting_verify",
+   "legal": false
+  },
+  {
+   "from": "awaiting_merge",
+   "to": "awaiting_merge",
+   "legal": false
+  },
+  {
+   "from": "awaiting_merge",
+   "to": "done",
+   "legal": true
+  },
+  {
+   "from": "awaiting_merge",
+   "to": "failed",
+   "legal": true
+  },
+  {
+   "from": "done",
+   "to": "created",
+   "legal": false
+  },
+  {
+   "from": "done",
+   "to": "in_progress",
+   "legal": false
+  },
+  {
+   "from": "done",
+   "to": "awaiting_verify",
+   "legal": false
+  },
+  {
+   "from": "done",
+   "to": "awaiting_merge",
+   "legal": false
+  },
+  {
+   "from": "done",
+   "to": "done",
+   "legal": false
+  },
+  {
+   "from": "done",
+   "to": "failed",
+   "legal": false
+  },
+  {
+   "from": "failed",
+   "to": "created",
+   "legal": false
+  },
+  {
+   "from": "failed",
+   "to": "in_progress",
+   "legal": false
+  },
+  {
+   "from": "failed",
+   "to": "awaiting_verify",
+   "legal": false
+  },
+  {
+   "from": "failed",
+   "to": "awaiting_merge",
+   "legal": false
+  },
+  {
+   "from": "failed",
+   "to": "done",
+   "legal": false
+  },
+  {
+   "from": "failed",
+   "to": "failed",
+   "legal": false
+  }
+ ]
+}

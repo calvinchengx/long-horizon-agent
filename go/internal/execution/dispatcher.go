@@ -11,6 +11,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
 )
 
@@ -436,6 +437,12 @@ func asDict(v any) (map[string]any, bool) {
 		out := make(map[string]any, len(x))
 		for k, s := range x {
 			out[k] = s
+		}
+		return out, true
+	case *pyfmt.OrderedMap: // a tool's "properties" in declaration order
+		out := make(map[string]any, len(x.Values))
+		for k, v := range x.Values {
+			out[k] = v
 		}
 		return out, true
 	}

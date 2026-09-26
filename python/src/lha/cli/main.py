@@ -507,8 +507,13 @@ def mission(
 
 @app.command()
 def orchestrate(
-    task: str = typer.Option("", help="The mission / task description (required unless --resume)."),
-    title: str = typer.Option("mission", help="Mission title."),
+    task: str = typer.Option(
+        "", help="The mission / task description (required unless --resume or --checklist)."
+    ),
+    title: str | None = typer.Option(
+        None, help="Mission title (default: the checklist's, else 'mission')."
+    ),
+    checklist_file: str | None = typer.Option(None, "--checklist", help=_CHECKLIST_HELP),
     reference: list[str] = typer.Option([], "--reference", help=_REFERENCE_HELP),
     approve_interactive: bool = typer.Option(False, "--approve-interactive", help=_APPROVE_HELP),
     workdir: str = typer.Option(".lha/workspaces/org", help="Workspace dir (becomes a git repo)."),
@@ -541,10 +546,13 @@ def orchestrate(
             f"{workdir!r} already holds a mission: pass --resume to continue it, or use a new "
             "--workdir (starting over would replace its checklist)"
         )
-    if not resume and not task.strip():
-        _fail("give --task (or --resume to continue an existing mission)")
+    if resume and checklist_file:
+        _fail("--checklist cannot be combined with --resume (the mission keeps its checklist)")
+    if not resume and not task.strip() and not checklist_file:
+        _fail("give --task or --checklist FILE (or --resume to continue an existing mission)")
     checks = checks_from_commands(resolve_check_commands(check, no_default_checks))
     settings = _run_settings(sandbox, unsafe_local, allow_host)
+    imported = _load_checklist_file(checklist_file) if checklist_file and not resume else None
 
     async def _mission() -> MissionSummary:
         meter = build_meter(settings)  # planner + every org role share one budget
@@ -555,15 +563,25 @@ def orchestrate(
                 gate=_gate(approve_interactive, settings),
                 resume=True,
             )
+        if imported is not None:  # a checklist of your own: no planning, no ownership map
+            return await Orchestrator(settings, meter=meter).run_mission(
+                workdir=workdir,
+                title=title or imported.title or "mission",
+                description=task or imported.description,
+                checklist=imported.checklist,
+                checks=checks,
+                gate=_gate(approve_interactive, settings),
+                references=_merge_references(list(reference), imported.references),
+            )
         planner_model = build_provider(settings)
         try:
             planner = Planner(meter.wrap(planner_model, role="planner"))
-            plan = await planner.plan_mission(title=title, description=task)
+            plan = await planner.plan_mission(title=title or "mission", description=task)
         finally:
             await aclose_provider(planner_model)
         return await Orchestrator(settings, meter=meter).run_mission(
             workdir=workdir,
-            title=title,
+            title=title or "mission",
             description=task,
             checklist=plan.checklist,
             checks=checks,

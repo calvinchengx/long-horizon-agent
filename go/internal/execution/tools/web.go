@@ -20,6 +20,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety/pystr"
 )
@@ -275,10 +276,10 @@ func (*WebSearchTool) Spec() contracts.ToolSpec {
 			"are untrusted data.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"query":       map[string]any{"type": "string"},
-				"max_results": map[string]any{"type": "integer"},
-			},
+			"properties": pyfmt.NewOrderedMap(
+				"query", map[string]any{"type": "string"},
+				"max_results", map[string]any{"type": "integer"},
+			),
 			"required": []any{"query"},
 		},
 		Egress:         true,
@@ -436,10 +437,10 @@ func fetchURLSpec() contracts.ToolSpec {
 			"bound host.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"url":     map[string]any{"type": "string"},
-				"headers": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
-			},
+			"properties": pyfmt.NewOrderedMap(
+				"url", map[string]any{"type": "string"},
+				"headers", pyfmt.NewOrderedMap("type", "object", "additionalProperties", map[string]any{"type": "string"}),
+			),
 			"required": []any{"url"},
 		},
 		Egress:         true,
