@@ -544,6 +544,20 @@ def export_harness_files() -> None:
     )
 
 
+def export_flaky_retry() -> None:
+    flaky = importlib.import_module("tests.unit.test_flaky_retry_verifier")
+    _write(
+        "verify/flaky_retry.json",
+        {
+            "revision": flaky.SPEC_REVISION,
+            "cases": [
+                {**case, "expected": flaky.run_flaky_scenario(case)}
+                for case in flaky.FLAKY_SCENARIOS
+            ],
+        },
+    )
+
+
 # --- model/pricing ----------------------------------------------------------------------------
 
 
@@ -1081,9 +1095,106 @@ def export_arguments() -> None:
     _write("execution/arguments.json", {"validate": cases, "missing_required": missing})
 
 
+# --- execution/sandbox_egress -----------------------------------------------------------------
+
+_SANDBOX_EGRESS_LISTS: list[tuple[list[str], list[str], list[str]]] = [
+    ([], [], []),
+    (["proxy.golang.org", "sum.golang.org", "storage.googleapis.com"], [], []),
+    (["PyPI.org.", "files.pythonhosted.org", "pypi.org"], [], []),
+    (["github.com"], [], []),
+    ([".golang.org"], [], []),
+    (["pypi.org:8443"], [], []),
+    (["10.0.0.1"], [], []),
+    ([], ["mirror.internal.example", ".docs.example"], []),
+    ([], ["api.github.com"], []),
+    ([], [".com"], []),
+    ([], ["bucket.s3.eu-west-1.amazonaws.com"], []),
+    ([], [".pypi.org"], []),
+    ([], ["http://x.org"], []),
+    ([], [], ["github.com", ".amazonaws.com", "upload.pypi.org"]),
+    ([], [], ["x.org:99999"]),
+    (["pypi.org"], ["pypi.org", "mirror.example"], ["mirror.example", "github.com"]),
+]
+
+_RULE_OF_TWO_ENV: list[dict[str, str]] = [
+    {"sandbox_egress": "pypi.org"},
+    {"sandbox_egress": "pypi.org", "private_data": "true"},
+    {"sandbox_egress_allow_write_hosts": "github.com, gitlab.com", "private_data": "true"},
+    {"sandbox_egress": "pypi.org", "web_allow_hosts": "b.test,a.test", "private_data": "true"},
+    {"web_allow_hosts": "docs.test", "private_data": "true"},
+    {"sandbox": "local", "sandbox_egress": "pypi.org"},
+    {"sandbox": "local", "allow_unsafe_local": "true", "web_allow_hosts": "docs.test"},
+    {"sandbox": "e2b", "sandbox_egress": "pypi.org", "private_data": "true"},
+    {"private_data": "true"},
+]
+
+_PROXY_LOG = [
+    "2026-09-26 10:00:00,001 INFO lha-egress-proxy listening on 0.0.0.0:3128 allow=pypi.org",
+    "2026-09-26 10:00:01,000 INFO allow CONNECT pypi.org:443 -> 151.101.0.223:443",
+    "2026-09-26 10:00:01,500 INFO allow CONNECT pypi.org:443 -> 151.101.64.223:443",
+    "2026-09-26 10:00:02,000 WARNING deny CONNECT github.com:443: host not in egress allow-list: "
+    "github.com",
+    "2026-09-26 10:00:03,000 WARNING deny GET http://example.org:8080/x?token=abc: host not in "
+    "egress allow-list: example.org",
+    "2026-09-26 10:00:03,500 INFO allow GET http://files.example/a -> 93.184.216.34:80",
+    "2026-09-26 10:00:04,000 WARNING fail CONNECT [2001:db8::1]:8443: upstream unreachable: x",
+    "2026-09-26 10:00:05,000 WARNING deny CONNECT 10.0.0.1:443: IP-literal hosts are not "
+    "allowed: 10.0.0.1",
+    "2026-09-26 10:00:06,000 ERROR error: boom",
+    "not a log line",
+]
+
+
+def export_sandbox_egress() -> None:
+    from lha.config import Settings
+    from lha.execution.egress_events import parse_proxy_log
+    from lha.execution.egress_hosts import (
+        PACKAGE_FETCH_HOSTS,
+        WRITE_HOSTS,
+        SandboxEgressError,
+        sandbox_allow_list,
+    )
+    from lha.execution.tools.toolset import check_run_rule_of_two
+    from lha.safety.rule_of_two import RuleOfTwoViolation
+
+    lists: list[dict[str, Any]] = []
+    for egress, extra, write in _SANDBOX_EGRESS_LISTS:
+        case: dict[str, Any] = {"egress": egress, "extra": extra, "write": write}
+        try:
+            case |= {"hosts": sandbox_allow_list(egress, extra, write), "error": None}
+        except SandboxEgressError as exc:
+            case |= {"hosts": None, "error": str(exc)}
+        lists.append(case)
+    rule: list[dict[str, Any]] = []
+    for env in _RULE_OF_TWO_ENV:
+        settings = Settings(_env_file=None, **env)  # type: ignore[call-arg]
+        try:
+            check_run_rule_of_two(settings)
+            error = None
+        except RuleOfTwoViolation as exc:
+            error = str(exc)
+        rule.append(
+            {"env": env, "egress_enabled": settings.sandbox_egress_enabled(), "error": error}
+        )
+    _write(
+        "execution/sandbox_egress.json",
+        {
+            "package_fetch_hosts": list(PACKAGE_FETCH_HOSTS),
+            "write_hosts": list(WRITE_HOSTS),
+            "allow_list": lists,
+            "rule_of_two": rule,
+            "proxy_log": {
+                "lines": _PROXY_LOG,
+                "events": [e.payload for e in parse_proxy_log(_PROXY_LOG)],
+            },
+        },
+    )
+
+
 def main() -> None:
     export_paths()
     export_arguments()
+    export_sandbox_egress()
     export_classifier()
     export_egress()
     export_redact()
@@ -1092,6 +1203,7 @@ def main() -> None:
     export_decision_chain()
     export_ownership()
     export_harness_files()
+    export_flaky_retry()
     export_pricing()
     export_agent_prompts()
 

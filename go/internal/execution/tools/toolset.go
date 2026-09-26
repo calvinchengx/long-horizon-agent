@@ -120,7 +120,7 @@ func runCapabilities(s *config.Settings, web bool) []safety.Capability {
 	if s.PrivateData || s.Sandbox == "local" {
 		caps = append(caps, safety.PrivateData)
 	}
-	if web {
+	if web || s.SandboxEgressEnabled() {
 		caps = append(caps, safety.ExternalComms, safety.UntrustedContent)
 	}
 	sort.Slice(caps, func(i, j int) bool { return caps[i] < caps[j] })
@@ -128,7 +128,8 @@ func runCapabilities(s *config.Settings, web bool) []safety.Capability {
 }
 
 // CheckRunRuleOfTwo fails closed (*RuleOfTwoViolation) if the run would hold untrusted content +
-// private data + external comms.
+// private data + external comms. Web tools and sandbox egress each bring untrusted content and
+// external comms.
 func CheckRunRuleOfTwo(s *config.Settings) error {
 	if err := safety.CheckRuleOfTwo(RunCapabilities(s)...); err != nil {
 		why := "LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data"
@@ -136,10 +137,14 @@ func CheckRunRuleOfTwo(s *config.Settings) error {
 			why = "LHA_SANDBOX=local runs the agent's shell on this host (host files, credentials " +
 				"and network)"
 		}
-		return &RuleOfTwoViolation{Msg: "refusing to start: web tools are enabled (egress allow-list: " +
-			strings.Join(EgressHosts(s), ", ") + "), which brings untrusted content and " +
-			"external comms, and " + why + ". " + err.Error() + ". Use a docker/e2b sandbox without private data, " +
-			"or clear the allow-list (LHA_WEB_ALLOW_HOSTS / --allow-host)."}
+		var web, sandbox []string
+		if WebEnabled(s) {
+			web = EgressHosts(s)
+		}
+		if s.SandboxEgressEnabled() {
+			sandbox = s.SandboxEgressEntries()
+		}
+		return &RuleOfTwoViolation{Msg: safety.RunRefusal(web, sandbox, why, err)}
 	}
 	return nil
 }
@@ -314,10 +319,16 @@ func WebTools(s *config.Settings, webIO *WebIO) ([]contracts.Tool, error) {
 }
 
 // PreflightRunTools validates a run's tool configuration up front (before any planning spend):
-// *RuleOfTwoViolation (lethal trifecta) or *WebConfigError (bad web settings).
+// *RuleOfTwoViolation (lethal trifecta), a ValueError naming a host in the wrong sandbox egress
+// list, or *WebConfigError (bad web settings).
 func PreflightRunTools(s *config.Settings) error {
 	if err := CheckRunRuleOfTwo(s); err != nil {
 		return err
+	}
+	if s.SandboxEgressEnabled() {
+		if _, err := s.SandboxEgressHosts(); err != nil {
+			return err
+		}
 	}
 	_, err := WebTools(s, nil)
 	return err

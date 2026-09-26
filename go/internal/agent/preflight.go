@@ -45,7 +45,7 @@ func WebEnabled(settings *config.Settings) bool { return len(EgressHosts(setting
 // external comms.
 func CheckRunRuleOfTwo(settings *config.Settings) error {
 	caps := []safety.Capability{}
-	if WebEnabled(settings) {
+	if WebEnabled(settings) || settings.SandboxEgressEnabled() {
 		caps = append(caps, safety.UntrustedContent, safety.ExternalComms)
 	}
 	if settings.PrivateData || settings.Sandbox == "local" {
@@ -63,10 +63,14 @@ func CheckRunRuleOfTwo(settings *config.Settings) error {
 		why = "LHA_SANDBOX=local runs the agent's shell on this host (host files, credentials " +
 			"and network)"
 	}
-	return &RuleOfTwoViolation{Message: "refusing to start: web tools are enabled (egress allow-list: " +
-		strings.Join(EgressHosts(settings), ", ") + "), which brings untrusted content and " +
-		"external comms, and " + why + ". " + err.Error() + ". Use a docker/e2b sandbox without private data, " +
-		"or clear the allow-list (LHA_WEB_ALLOW_HOSTS / --allow-host)."}
+	var web, sandbox []string
+	if WebEnabled(settings) {
+		web = EgressHosts(settings)
+	}
+	if settings.SandboxEgressEnabled() {
+		sandbox = settings.SandboxEgressEntries()
+	}
+	return &RuleOfTwoViolation{Message: safety.RunRefusal(web, sandbox, why, err)}
 }
 
 // WithAllowHosts is settings with hosts added to the egress allow-list (per-run --allow-host);
