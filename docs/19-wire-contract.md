@@ -3,9 +3,13 @@
 What the Python and Go implementations must agree on so that one deployment can mix them: the
 same Temporal names and payloads, the same on-disk mission anchor, the same Postgres schema, and
 the same observable behaviour pinned by [`spec/`](../spec/). The Python implementation is the
-reference; every name below is taken from its code. The Go port implements the anchor and the
-spec'd behaviours, and its CLI runs local single-agent missions; it has no Temporal worker yet
-(see [23-roadmap.md](23-roadmap.md)).
+reference; every name below is taken from its code. The Go port implements the anchor, the
+spec'd behaviours and the Temporal names, payloads and codec below
+([`go/internal/durable/`](../go/internal/durable/)): its worker serves `MissionWorkflow` for
+single-agent missions, and either CLI can start, query, signal and abort a mission the other
+implementation's worker serves. One workflow execution cannot move between the two worker
+implementations ([cross-language workers](#cross-language-workers)); see
+[23-roadmap.md](23-roadmap.md) for what is not ported.
 
 ## Temporal
 
@@ -85,8 +89,12 @@ gate offers `impossible`), `lha-sleeping-v1` (the SLEEPING timer before a cycle,
 `lha-cycle-wait-cancel-v1` (the `run_agent_cycle` activity is scheduled with cancellation type
 `WAIT_CANCELLATION_COMPLETED` instead of `TRY_CANCEL`, so a cancelled workflow waits for the cycle
 to acknowledge before it writes `ABORTED`; a cycle that completes anyway does not cancel the
-cancellation). A worker in another language must branch on the same ids to replay histories from
-either side of the change.
+cancellation). These markers only matter to Python histories: the Go workflow never replays a
+Python history (see [cross-language workers](#cross-language-workers)), so it has no patch
+branches and always behaves as the latest Python code. A Go behaviour change after this point is
+guarded with `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", ...)`, and the Go histories in
+[`go/internal/durable/testdata/histories/`](../go/internal/durable/testdata/histories/) must keep
+replaying.
 
 Timeouts and retry policies are part of the workflow's recorded commands, so they must match for
 replay: see [14-running-on-temporal.md](14-running-on-temporal.md#how-a-cycle-runs). The
@@ -173,14 +181,45 @@ store.
   encoding is in metadata `lha-orig-encoding`.
 - No encryption: blobs are plaintext.
 
-### Known cross-language limitation
+Both implementations encode payloads with Temporal's JSON payload converter (`json/plain`) and
+the field names in the table above. Go marshals every `list[...]` field as `[]` (never `null`, which
+Python cannot decode into a list) and applies the dataclass defaults to absent fields. Values that
+cross in both directions are tested in
+[`go/internal/durable/hardening_test.go`](../go/internal/durable/hardening_test.go) against the
+Python implementation, as is the codec: a pointer written by either codec decodes in the other.
+
+### Cross-language workers
 
 Temporal replay compares the commands a worker issues with the recorded history, including
 command sequence ids. The Python SDK numbers activity ids and timer ids with separate counters; the
-Go SDK uses one shared counter. A history containing both activities and timers (any mission that
-parked, slept, or opened a gate) therefore does not replay on a worker of the other
-language. Histories with activities only are not affected by this. Until this is resolved, keep a
-mission's workers to one language once it has recorded a timer.
+Go SDK uses one shared counter. A history recorded by one implementation's worker therefore does
+not replay on a worker of the other, so one workflow execution must stay with one implementation:
+a Python worker and a Go worker must never poll the same task queue.
+
+Both workers enforce this, failing closed at startup:
+
+- **Identity marker.** The worker identity is `lha-py:<pid>@<host>` (Python,
+  [`durable/worker.py`](../python/src/lha/durable/worker.py) `worker_identity`) or
+  `lha-go:<pid>@<host>` (Go, `durable.WorkerIdentity`). The SDK default `<pid>@<host>` carries
+  neither marker.
+- **Poller check.** Before polling, `lha worker` calls `DescribeTaskQueue` for `LHA_TASK_QUEUE`
+  (workflow and activity task types). If any poller's identity contains the other implementation's
+  marker, the worker refuses to start: exit code 2 and a message naming the poller and suggesting
+  another queue (`LHA_TASK_QUEUE=<queue>-go`, or `-py`). A server that cannot answer
+  `DescribeTaskQueue` also stops the worker.
+- Temporal keeps listing a poller for a few minutes after it stops, so moving a queue from one
+  implementation to the other means waiting that long, or using a new queue. The check runs once,
+  at startup: two workers of different implementations started within the same second can both
+  pass it.
+
+Everything outside the workflow task is shared: either CLI starts a mission on either
+implementation's queue (`lha mission-start` with that `LHA_TASK_QUEUE`), queries it, signals it and
+aborts it; the payloads, the ClaimCheck codec and object store, the `.lha/` anchor, the spend
+journal (`.git/lha/spend.ndjson`) and the workdir lock (`flock` on `.git/lha-cycle.lock`) are the
+same. `go/cmd/lha/durable_e2e_test.go` drives a Go-served mission with the Python CLI and a
+Python-served mission with the Go CLI (identical `mission-status` output), and checks that each
+worker refuses a queue the other polls. It needs `uv` and a Temporal server
+(`LHA_IT_TEMPORAL_ADDRESS`, or the `temporal` CLI on `PATH`).
 
 ## Mission anchor (`.lha/`)
 
@@ -409,6 +448,9 @@ Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit
 Go in `go/internal/spec/conformance_*_test.go`. `shared_paths.json` waits for a Go port of the
 ownership map.
 
-The Go port has no Temporal worker, so the payload types, queries and fingerprints above have no
-Go implementation yet; the Go `config` package already reads the new settings
-([18-configuration.md](18-configuration.md)).
+The Go worker implements the payload types, queries and fingerprints above for single-agent
+missions ([`go/internal/durable/`](../go/internal/durable/)). It does not implement the
+organization's activities (`plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`)
+or a working `run_subagent`: a mission that sets `research_per_item`, `review` or
+`max_parallel >= 2` fails on a Go worker with `MissionConfigError`, and the Go `mission-start`
+refuses those options.

@@ -2,9 +2,10 @@
 
 The local commands (`lha run-local`, `lha mission`, `lha orchestrate`) run a mission in one
 process. The durable path runs the same agent loop inside a Temporal activity, so a mission
-survives worker crashes and restarts. This page covers the durable path with the Python
-implementation; the Go port does not have a Temporal worker yet (see [23-roadmap.md](23-roadmap.md)).
-Background on the design is in [08-durable-execution.md](08-durable-execution.md).
+survives worker crashes and restarts. The commands below are the Python implementation's; the Go
+binary has the same `worker` and `mission-*` commands, options and output for single-agent
+missions (see [Go worker](#go-worker)). Background on the design is in
+[08-durable-execution.md](08-durable-execution.md).
 
 ## 1. Start the stack
 
@@ -56,6 +57,22 @@ allow-list, `LHA_WEB_ALLOW_HOSTS`, `LHA_TRUSTED_CHECKS`, `LHA_HARNESS_PATHS`, re
 budget ceiling and `max_turns_per_cycle` used by a mission are the **worker's**, not the settings
 of the process that started the mission. Trusted checks run on the worker's host. Settings are read once per process, so a change takes effect after a worker
 restart. If the server is unreachable, the command exits with a Python traceback.
+
+Before it polls, the worker asks Temporal who already polls `LHA_TASK_QUEUE`
+(`DescribeTaskQueue`). Python workers identify as `lha-py:<pid>@<host>` and Go workers as
+`lha-go:<pid>@<host>`; if a worker of the other implementation is listed, `lha worker` exits 2:
+
+```text
+error: task queue 'lha-mission' is already polled by a Go lha worker (lha-go:4242@build-1). A Go and
+a Python worker cannot serve the same missions: ... start this worker on another queue, e.g.
+LHA_TASK_QUEUE=lha-mission-py (and start its missions with the same LHA_TASK_QUEUE)
+```
+
+The two SDKs record a workflow's timers and activities with different command ids, so a mission
+whose history was written by a Python worker cannot continue on a Go worker, and the reverse.
+Give each implementation its own queue. Temporal keeps listing a stopped worker as a poller for a
+few minutes, so switching a queue to the other implementation means waiting that long (or using a
+new queue name).
 
 [`python/Dockerfile`](../python/Dockerfile) builds a worker image whose default command is
 `lha worker`. Do not mount the host Docker socket into it; point `DOCKER_HOST` at a separate
@@ -280,3 +297,32 @@ If a cycle fails 5 times with retryable errors (an outage), the mission parks: s
 `DEGRADED_PARK`, a durable timer of 60 s doubling to at most 3600 s, and a `check_mission_health`
 probe after each sleep. See [15-operations-runbook.md](15-operations-runbook.md) for what the
 probe checks and what ends a mission.
+
+## Go worker
+
+The Go binary runs the same durable path for single-agent missions:
+
+```bash
+cd go && go build -o lha ./cmd/lha
+LHA_TASK_QUEUE=lha-mission-go ./lha worker
+LHA_TASK_QUEUE=lha-mission-go ./lha mission-start --task "Add a slugify() helper with tests" \
+  --workdir .lha/workspaces/slugify
+./lha mission-status mission_3f9a1c0b2d4e
+```
+
+`worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze` and
+`mission-abort` take the options above and print the same output with the same exit codes. The
+worker registers the same workflows and activities; it runs the cycle with the Go agent loop in
+the `local` or `docker` sandbox and probes the model with the same cheap requests while parked.
+Differences:
+
+- It needs its own task queue (see [2. Run a worker](#2-run-a-worker)): it refuses one that a
+  Python worker polls. Start the missions it should run with the same `LHA_TASK_QUEUE`. The
+  `mission-status`, `mission-approve`, `mission-snooze` and `mission-abort` commands of either
+  implementation work on any mission, whichever worker serves it.
+- `mission-start --research`, `--review` and `--max-parallel 2..8` exit 2 ("not yet available in
+  the Go implementation"), and a mission that sets them fails on a Go worker.
+- The worker does not write the mission store yet (no rows for `lha missions`, `lha costs` or
+  `lha gates`); the `.lha/` anchor events, the spend journal and the webhook are written as in
+  Python.
+- If the server is unreachable, the commands print `error: ...` and exit 1.
