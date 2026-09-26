@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "url": "https://docs.example.com/",
+   "content_type": "text/html",
+   "path": "docs.example.com/index.html"
+  },
+  {
+   "url": "https://docs.example.com/api/v1/guide",
+   "content_type": "text/html",
+   "path": "docs.example.com/api/v1/guide.html"
+  },
+  {
+   "url": "https://docs.example.com/api/v1/guide",
+   "content_type": "application/json",
+   "path": "docs.example.com/api/v1/guide"
+  },
+  {
+   "url": "https://docs.example.com/spec.json",
+   "content_type": "application/json",
+   "path": "docs.example.com/spec.json"
+  },
+  {
+   "url": "https://docs.example.com/a/./b/../c",
+   "content_type": "text/plain",
+   "path": "docs.example.com/a/c"
+  },
+  {
+   "url": "https://docs.example.com/page?x=1&y=2",
+   "content_type": "text/html",
+   "path": "docs.example.com/page_dd41ca6a.html"
+  },
+  {
+   "url": "https://docs.example.com/page.html?x=1",
+   "content_type": "text/html",
+   "path": "docs.example.com/page.html_1f206b11"
+  },
+  {
+   "url": "https://docs.example.com/we%20ird/na%2Fme/..hidden./x",
+   "content_type": "text/html",
+   "path": "docs.example.com/we_ird/na/me/hidden/x.html"
+  },
+  {
+   "url": "https://docs.example.com/über/straße",
+   "content_type": "text/html",
+   "path": "docs.example.com/ber/stra_e.html"
+  },
+  {
+   "url": "https://Docs.Example.COM:8443/x",
+   "content_type": "",
+   "path": "docs.example.com/x"
+  },
+  {
+   "url": "https://docs.example.com//double//slash/",
+   "content_type": "application/xhtml+xml",
+   "path": "docs.example.com/double/slash.html"
+  },
+  {
+   "url": "http://127.0.0.1/raw",
+   "content_type": "text/plain",
+   "path": "127.0.0.1/raw"
+  },
+  {
+   "url": "https://xn--bcher-kva.example/buch",
+   "content_type": "text/html",
+   "path": "b_cher.example/buch.html"
+  },
+  {
+   "url": "https://docs.example.com/~user/-_.ok",
+   "content_type": "text/html",
+   "path": "docs.example.com/user/-_.ok"
+  },
+  {
+   "url": "https://docs.example.com/?",
+   "content_type": "text/html",
+   "path": "docs.example.com/index.html"
+  },
+  {
+   "url": "https://docs.example.com/p?q=%C3%A9",
+   "content_type": "text/html",
+   "path": "docs.example.com/p_53538de6.html"
+  }
+ ]
+}
