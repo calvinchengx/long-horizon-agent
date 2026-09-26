@@ -11,6 +11,15 @@ opts in with `--research`, `--review` or `--max-parallel`. Code:
 [`python/src/lha/coordination/`](../python/src/lha/coordination/),
 [`python/src/lha/durable/org_round.py`](../python/src/lha/durable/org_round.py).
 
+The Go implementation runs the same organization for `lha orchestrate`
+([`go/internal/agents/org/`](../go/internal/agents/org/),
+[`go/internal/coordination/`](../go/internal/coordination/)): the same prompts (pinned in
+[`spec/agent/org.json`](../spec/agent/org.json)), ownership refusals, commit messages, event
+kinds and payloads, so a mission started by one implementation can be resumed by the other.
+Its durable organization rounds are not ported yet; the wave functions (`ImplementInWorktree`,
+`IntegrateRun`, `BranchIntegrator`, `ResearchFanout`, `Reviewer.Review`,
+`coordination.LeaseBroker`) are plain functions so they can become activities.
+
 ## Why asymmetric
 
 Parallel writers to the same code make design decisions that conflict, and merging them costs
@@ -291,8 +300,8 @@ integrator's check reads the committed map, which has the lease. The tool's repl
 agent the decision and why; after a refusal it must not write the file and says what still needs
 it in its summary. A leased file is released with the writer's other files when its item is done.
 In `orchestrate` every decision is also a `lease` trace event, and the ticket event lists the
-run's leases. `ownership.json` keeps its format (`{"owners": {...}}`), so the Go anchor reader is
-unaffected.
+run's leases. `ownership.json` keeps its format (`{"owners": {...}}`), and the Go `LeaseBroker` takes the
+same `flock`, so a Python and a Go process never both grant one file.
 
 ## Tickets and blackboard
 

@@ -7,7 +7,8 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 when one is configured ([16-observability.md](16-observability.md)).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission` and `decisions`; the
+ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission`, `orchestrate` and
+`decisions`; the
 other commands print that they are not yet available in Go and exit 2; see
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
@@ -63,7 +64,7 @@ translate errors: an unreachable server or unknown workflow id ends in a traceba
 | `--approve-interactive` | off | ask on the terminal before an irreversible command (not on `mission-start`; see below) |
 | `--allow-host TEXT` | none | add a host to this run's web allow-list, on top of `LHA_WEB_ALLOW_HOSTS`; repeatable. A non-empty allow-list registers the web tools (`fetch_url`, and `web_search` when configured) (not on `mission-start`, where the worker's settings apply) |
 
-`run-local`, `mission` and `mission-start` also take `--checklist FILE`: seed the mission with a
+`run-local`, `mission`, `orchestrate` and `mission-start` also take `--checklist FILE`: seed the mission with a
 `.json` checklist or a `.md` roadmap instead of planning (format in
 [06-mission-anchor.md](06-mission-anchor.md#importing-a-checklist)). The file's title,
 description and references are used unless given on the command line; `--reference` paths are
@@ -189,12 +190,14 @@ role uses its tier's model ([13-models.md](13-models.md#per-role-routing-lha-orc
 
 | Option | Default | Meaning |
 |---|---|---|
-| `--task TEXT` | `""` | mission description (required unless `--resume`) |
-| `--title TEXT` | `mission` | mission title |
+| `--task TEXT` | `""` | mission description (required unless `--resume` or `--checklist`) |
+| `--title TEXT` | the checklist's, else `mission` | mission title |
+| `--checklist FILE` | none | run this checklist instead of planning (no ownership map, so no parallel waves) |
 | `--workdir TEXT` | `.lha/workspaces/org` | workspace |
 | `--resume` | off | continue the mission already anchored in `--workdir` instead of planning a new one |
 
-`orchestrate` has no `--checklist` option; without `--resume` it always plans. A workdir that
+Without `--resume` or `--checklist` it plans. `--checklist` cannot be combined with `--resume`
+(exit `2`): a resumed mission keeps its committed checklist. A workdir that
 already holds a mission (`.lha/mission.json` committed) is refused without `--resume` (exit `2`),
 so a second invocation never replaces a mission's checklist; `--resume` on a workdir without one
 is refused too. With `--resume` there is no planning, and `--task`, `--title` and `--reference`
