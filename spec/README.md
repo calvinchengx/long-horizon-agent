@@ -20,6 +20,8 @@ the matching package is ported; it runs every file below.
 | `coordination/shared_paths.json` | files only the lead engineer may write |
 | `verify/harness_files.json` | test/harness files the agent may not weaken |
 | `model/pricing.json` | Claude price table and per-call cost |
+| `model/fallback_models.json` | `LHA_FALLBACK_MODELS` entries -> backend, model and price, or the exact error |
+| `state/vendor_paths.json` | where `lha vendor` stores a fetched URL (`<host>/<path>`, query hash, `.html`) |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
 
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |

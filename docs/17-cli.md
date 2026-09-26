@@ -7,8 +7,9 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 when one is configured ([16-observability.md](16-observability.md)).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission` and `decisions`; the
-other commands print that they are not yet available in Go and exit 2; see
+ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission`, `decisions` and
+`vendor`, and installs the trace exporter at start like Python; the other commands print that
+they are not yet available in Go and exit 2; see
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
@@ -132,7 +133,9 @@ then the manifest path.
 
 Fetching uses the egress policy: http(s) only, no credentials in the URL, public addresses only,
 at most 5 redirects, each of which must stay on one of the hosts in the given URLs, and at most
-10,000,000 bytes per page. A refused or failed URL exits `2`. Run it inside the mission workspace
+10,000,000 bytes per page. Each hop's host is resolved once and only the checked addresses are
+dialled (no DNS rebinding between the check and the connection). A refused or failed URL exits
+`2`. The Go `lha vendor` writes the same files and `MANIFEST.json`. Run it inside the mission workspace
 (or point `--into` there), then pass the paths to a mission with `--reference`. See
 [06-mission-anchor.md](06-mission-anchor.md#references).
 
