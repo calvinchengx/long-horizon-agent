@@ -9,6 +9,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety/pystr"
 )
 
@@ -67,12 +68,12 @@ func (RecordDecisionTool) Spec() contracts.ToolSpec {
 			"every later cycle. Record the decision, why, what you rejected, and affected files.",
 		Parameters: map[string]any{
 			"type": "object",
-			"properties": map[string]any{
-				"decision":              map[string]any{"type": "string"},
-				"rationale":             map[string]any{"type": "string"},
-				"alternatives_rejected": map[string]any{"type": "string"},
-				"affected":              map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
-			},
+			"properties": pyfmt.NewOrderedMap(
+				"decision", map[string]any{"type": "string"},
+				"rationale", map[string]any{"type": "string"},
+				"alternatives_rejected", map[string]any{"type": "string"},
+				"affected", pyfmt.NewOrderedMap("type", "array", "items", map[string]any{"type": "string"}),
+			),
 			"required":             []any{"decision", "rationale"},
 			"additionalProperties": false,
 		},

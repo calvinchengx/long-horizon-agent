@@ -256,6 +256,39 @@ func CommitAll(ctx context.Context, cwd, message string, forcePaths ...string) (
 	return HeadSHA(ctx, cwd)
 }
 
+// CommitPaths commits ONLY paths (force-added, so ignored files count) and returns the HEAD sha.
+// Every other change in the work tree or the index is left exactly as it was (git commit
+// --only). A no-op returning the current HEAD when those paths are unchanged.
+func CommitPaths(ctx context.Context, cwd, message string, paths ...string) (string, error) {
+	var existing []string
+	for _, p := range paths {
+		if _, err := os.Stat(filepath.Join(cwd, p)); err == nil {
+			existing = append(existing, p)
+		}
+	}
+	if len(existing) == 0 {
+		return HeadSHA(ctx, cwd)
+	}
+	if _, err := RunGit(ctx, cwd, append([]string{"add", "-f", "--"}, existing...)...); err != nil {
+		return "", err
+	}
+	staged, err := runRaw(ctx, cwd, append([]string{"diff", "--cached", "--quiet", "--"}, existing...), 0)
+	if err != nil {
+		return "", err
+	}
+	if staged.ReturnCode == 0 {
+		return HeadSHA(ctx, cwd)
+	}
+	if staged.ReturnCode != 1 {
+		return "", &GitError{fmt.Sprintf("git diff --cached failed (%d): %s",
+			staged.ReturnCode, pyStrip(staged.Stderr))}
+	}
+	if _, err := RunGit(ctx, cwd, append([]string{"commit", "--only", "-m", message, "--"}, existing...)...); err != nil {
+		return "", err
+	}
+	return HeadSHA(ctx, cwd)
+}
+
 // ExistsAtHead reports whether relpath (relative to cwd, not the repo root) exists in HEAD.
 func ExistsAtHead(ctx context.Context, cwd, relpath string) (bool, error) {
 	ok, err := HasCommits(ctx, cwd)

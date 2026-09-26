@@ -29,7 +29,12 @@ from lha.agent.prompt import (  # noqa: E402
     render_tools,
 )
 from lha.agents.planner import Planner, assign_ownership, parse_plan  # noqa: E402
+from lha.agents.reflection import reflect_on_failure  # noqa: E402
 from lha.agents.replanner import Replanner  # noqa: E402
+from lha.agents.reviewer import Reviewer, ReviewResult, parse_review  # noqa: E402
+from lha.agents.roles import ROLES, claude_model_for  # noqa: E402
+from lha.agents.subagent import SubAgent  # noqa: E402
+from lha.agents.waves import implementer_objective, new_implementer_run  # noqa: E402
 from lha.contracts.model import ModelMessage, TurnResult, Usage  # noqa: E402
 from lha.contracts.state import (  # noqa: E402
     Checklist,
@@ -45,9 +50,14 @@ from lha.coordination.decision_log import (  # noqa: E402
     encode_link,
     verify_chain,
 )
-from lha.coordination.ownership import is_shared  # noqa: E402
+from lha.coordination.enforcement import OwnershipGuard  # noqa: E402
+from lha.coordination.leases import decide_lease  # noqa: E402
+from lha.coordination.ownership import FileOwnershipMap, LeaseRequest, is_shared  # noqa: E402
+from lha.coordination.ticket import TaskContract, Ticket, TicketStatus  # noqa: E402
 from lha.execution.tools import default_local_tools  # noqa: E402
 from lha.execution.tools.decisions import DecisionBuffer, RecordDecisionTool  # noqa: E402
+from lha.execution.tools.leases import LEASE_SPEC  # noqa: E402
+from lha.execution.tools.web import FetchUrlTool, WebSearchTool  # noqa: E402
 from lha.model.pricing import CLAUDE_PRICES, lookup_claude_price  # noqa: E402
 from lha.model.stub import StubModel  # noqa: E402
 from lha.obs.redact import is_secret_key, redact_text  # noqa: E402
@@ -865,6 +875,315 @@ async def _capture(call: Any) -> list[ModelMessage]:
     return seen
 
 
+# --- agent/org --------------------------------------------------------------------------------
+# The multi-agent organization's prompts and parsers: the role chart, the sub-agent prompt (tool
+# visibility by role), the Reviewer's prompt and verdict parsing, reflection, the implementer's
+# objective, the ownership guard's refusals, lease decisions and the ticket lifecycle.
+
+
+class _SpecsOnly:
+    """A dispatcher that only lists specs (the sub-agents under test never call a tool)."""
+
+    def __init__(self, specs: list[ToolSpec]) -> None:
+        self._specs = specs
+
+    def specs(self) -> list[ToolSpec]:
+        return list(self._specs)
+
+    async def dispatch(self, call: Any, ctx: Any) -> Any:  # pragma: no cover - never called
+        raise AssertionError("no tool call expected")
+
+
+def _org_specs() -> list[ToolSpec]:
+    return [
+        *(t.spec for t in default_local_tools()),
+        RecordDecisionTool(DecisionBuffer()).spec,
+        LEASE_SPEC,
+        FetchUrlTool.spec,
+        WebSearchTool.spec,
+    ]
+
+
+def _messages(seen: list[ModelMessage]) -> list[dict[str, str]]:
+    return [{"role": m.role, "content": m.content} for m in seen]
+
+
+_SUBAGENT_RUNS = [
+    ("researcher", "Find context relevant to: add a CLI", ""),
+    ("reviewer", "Review it", "  Acceptance criteria: x\n\n"),
+    ("implementer", "Checklist item [01]: do it", "Mission: M\n\nResearch briefs:\nB"),
+]
+
+
+def _subagent_messages(role: str, objective: str, extra: str) -> list[dict[str, str]]:
+    dispatcher = _SpecsOnly(_org_specs())
+    return _messages(
+        asyncio.run(
+            _capture(
+                lambda m: SubAgent(role=ROLES[role], model=m, dispatcher=dispatcher).run(
+                    objective=objective,
+                    ctx=None,  # type: ignore[arg-type]
+                    extra_context=extra,
+                )
+            )
+        )
+    )
+
+
+def _subagent_cases() -> list[dict[str, Any]]:
+    cases = []
+    for role, objective, extra in _SUBAGENT_RUNS:
+        agent = SubAgent(role=ROLES[role], model=StubModel(), dispatcher=_SpecsOnly(_org_specs()))
+        cases.append(
+            {
+                "role": role,
+                "objective": objective,
+                "extra_context": extra,
+                "visible": [s.name for s in agent.visible_specs()],
+                "messages": _subagent_messages(role, objective, extra),
+            }
+        )
+    return cases
+
+
+_REVIEW_REPLIES = [
+    '{"done": true, "verdict": "approve", "blocking_issues": [], "advisory": ["docs"]}',
+    '{"done": true, "verdict": "APPROVED ", "blocking_issues": ["no tests"]}',
+    '{"done": true, "verdict": "request_changes", "blocking_issues": [" a ", "", 3, null]}',
+    '{"done": true, "verdict": "maybe", "blocking_issues": []}',
+    '{"done": true, "verdict": "maybe", "blocking_issues": ["x"]}',
+    '{"done": true, "verdict": "maybe"}',
+    '{"done": true, "blocking_issues": "not a list"}',
+    '{"done": true, "summary": "no verdict"}',
+    "Looks fine.\n  block: missing error handling\nBLOCK:  and no tests \n",
+    "No blocking issues found.",
+    "",
+    '{"verdict": 7, "advisory": [1.5, true, {"k": "v"}]}',
+]
+
+
+def _review_cases() -> list[dict[str, Any]]:
+    cases = []
+    for text in _REVIEW_REPLIES:
+        verdict, blocking, issues, advisory = parse_review(text)
+        notes = ReviewResult(
+            brief=text,
+            blocking=blocking,
+            tool_calls=0,
+            verdict=verdict,
+            blocking_issues=issues,
+            advisory=advisory,
+        ).notes()
+        cases.append(
+            {
+                "text": text,
+                "verdict": verdict,
+                "blocking": blocking,
+                "blocking_issues": issues,
+                "advisory": advisory,
+                "notes": notes,
+            }
+        )
+    return cases
+
+
+def _reviewer_messages(criteria: str, diff: str) -> list[dict[str, str]]:
+    dispatcher = _SpecsOnly(_org_specs())
+    return _messages(
+        asyncio.run(
+            _capture(
+                lambda m: Reviewer(m, dispatcher).review(
+                    diff=diff,
+                    criteria=criteria,
+                    ctx=None,  # type: ignore[arg-type]
+                )
+            )
+        )
+    )
+
+
+_LONG_DIFF = "diff --git a/x b/x\n+é" * 1200
+
+
+def _implementer_cases() -> list[dict[str, Any]]:
+    owners = FileOwnershipMap()
+    owners.assign("src/a.py", "implementer-01")
+    owners.assign("src/B.py", "implementer-01")
+    plain = ChecklistItem(id="01", description="Add the model")
+    failed = ChecklistItem(
+        id="01", description="Add the model", attempts=2, last_failure="boom é " * 700
+    )
+    runs: list[tuple[str, ChecklistItem, list[str], dict[str, Any]]] = [
+        ("minimal", plain, ["pytest", "ruff"], {"mission_text": ""}),
+        (
+            "full",
+            failed,
+            [],
+            {
+                "mission_text": "Mission: M\n\nBuild it.",
+                "reflection": "\n  Reflection on 01: try again  \n",
+                "decisions_text": "Design decisions already recorded: x",
+                "briefs": ["B1", "B2"],
+                "board": "Team board (earlier rounds):\n[a] b",
+            },
+        ),
+        (
+            "no_lease_tool",
+            plain,
+            ["pytest"],
+            {"mission_text": "M", "lease_tool": False, "reflection": "  "},
+        ),
+    ]
+    cases = []
+    for name, item, acceptance, kwargs in runs:
+        run = new_implementer_run(item, "c3", owners, tool_budget=12, acceptance=acceptance)
+        objective, extra = implementer_objective(run, **kwargs)
+        cases.append(
+            {
+                "name": name,
+                "item": item.model_dump(mode="json"),
+                "owners": owners.owners,
+                "cycle_id": "c3",
+                "acceptance": acceptance,
+                "inputs": kwargs,
+                "ticket_id": run.ticket.id,
+                "write_set": run.ticket.contract.write_set,
+                "objective": objective,
+                "extra": extra,
+            }
+        )
+    return cases
+
+
+def _guard_cases() -> list[dict[str, Any]]:
+    owners = FileOwnershipMap()
+    owners.assign("mine.py", "implementer-01")
+    owners.assign("theirs.py", "implementer-02")
+    cases = []
+    for writers, lease_tool, path in [
+        (["implementer-01"], False, "mine.py"),
+        (["implementer-01"], False, "./Theirs.py"),
+        (["implementer-01"], True, "theirs.py"),
+        (["implementer-01"], False, "pyproject.toml"),
+        (["implementer-01"], True, "src/__init__.py"),
+        (["implementer-01"], False, "new.py"),
+        (["implementer-01"], True, "../x.py"),
+        (["implementer-01"], False, "/etc/passwd"),
+        (["lead", "implementer-02"], False, "theirs.py"),
+        (["lead", "implementer-02"], False, "new.py"),
+        (["lead", "implementer-02"], False, "mine.py"),
+        (["lead"], False, "pyproject.toml"),
+    ]:
+        guard = OwnershipGuard(_SpecsOnly([]), owners, writers=writers, lease_tool=lease_tool)
+        cases.append(
+            {
+                "owners": owners.owners,
+                "writers": writers,
+                "lease_tool": lease_tool,
+                "path": path,
+                "refusal": guard.refusal(path),
+            }
+        )
+    return cases
+
+
+def _lease_cases() -> list[dict[str, Any]]:
+    owners = FileOwnershipMap()
+    owners.assign("a.py", "implementer-01")
+    owners.assign("b.py", "implementer-02")
+    owners.assign("c.py", "lead")
+    cases = []
+    for writer, path, reason, finished in [
+        ("implementer-01", "src/new.py", " why ", []),
+        ("implementer-01", "./a.py", "mine", []),
+        ("implementer-01", "b.py", "need it", []),
+        ("implementer-01", "B.py", "now", ["implementer-02"]),
+        ("implementer-01", "c.py", "lead's", []),
+        ("implementer-01", "pyproject.toml", "deps", []),
+        ("implementer-01", ".lha/ownership.json", "x", []),
+        ("implementer-01", ".GIT/config", "x", []),
+        ("implementer-01", "../x.py", "x", []),
+        ("lead", "d.py", "x", []),
+        ("implementer-03", "e.py", "r" * 600, []),
+    ]:
+        decision = decide_lease(
+            owners, LeaseRequest(writer=writer, path=path, reason=reason), finished=finished
+        )
+        cases.append(
+            {
+                "owners": owners.owners,
+                "writer": writer,
+                "path": path,
+                "reason": reason,
+                "finished": finished,
+                "decision": decision.model_dump(),
+                "message": decision.message(),
+            }
+        )
+    return cases
+
+
+def _ticket_cases() -> list[dict[str, Any]]:
+    contract = TaskContract(objective="o")
+    return [
+        {
+            "from": start.value,
+            "to": to.value,
+            "legal": Ticket(id="t", contract=contract, status=start).can_transition(to),
+        }
+        for start in TicketStatus
+        for to in TicketStatus
+    ]
+
+
+def export_agent_org() -> None:
+    failure = "FAILED ✗ " * 800
+    reflection_seen = asyncio.run(
+        _capture(
+            lambda m: reflect_on_failure(
+                model=m, item_description="Wire the API", failure_summary=failure
+            )
+        )
+    )
+    _write(
+        "agent/org.json",
+        {
+            "roles": {
+                name: {
+                    "tier": role.tier.value,
+                    "claude_model": claude_model_for(role.tier),
+                    "system_prompt": role.system_prompt,
+                    "allow_mutating": role.allow_mutating,
+                    "allow_egress": role.allow_egress,
+                    "max_turns": role.max_turns,
+                }
+                for name, role in ROLES.items()
+            },
+            "specs": [s.model_dump(mode="json") for s in _org_specs()],
+            "rendered_specs": render_tools(_org_specs()),
+            "subagent": _subagent_cases(),
+            "reviewer_messages": [
+                {
+                    "criteria": criteria,
+                    "diff": diff,
+                    "messages": _reviewer_messages(criteria, diff),
+                }
+                for criteria, diff in [("Add the model", "(empty diff)"), ("Ünïcode", _LONG_DIFF)]
+            ],
+            "parse_review": _review_cases(),
+            "reflection": {
+                "item_description": "Wire the API",
+                "failure_summary": failure,
+                "messages": _messages(reflection_seen),
+            },
+            "implementer_objective": _implementer_cases(),
+            "ownership_guard": _guard_cases(),
+            "leases": _lease_cases(),
+            "tickets": _ticket_cases(),
+        },
+    )
+
+
 # --- execution/paths --------------------------------------------------------------------------
 
 _REL_PATHS = [
@@ -1094,6 +1413,7 @@ def main() -> None:
     export_harness_files()
     export_pricing()
     export_agent_prompts()
+    export_agent_org()
 
 
 if __name__ == "__main__":
