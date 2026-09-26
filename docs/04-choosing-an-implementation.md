@@ -14,7 +14,7 @@ process can observe:
 
 | Surface | Shared definition |
 |---|---|
-| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has `version`, `config`, `run-local`, `mission` and `decisions`. |
+| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has `version`, `config`, `run-local`, `mission`, `decisions` and `vendor`. |
 | Settings | The `LHA_*` environment variables and `.env` file, with the same names and defaults ([`python/src/lha/config.py`](../python/src/lha/config.py), [`go/internal/config/`](../go/internal/config/)) |
 | Mission anchor | The `.lha/` files and their JSON shapes ([the mission anchor](06-mission-anchor.md)) |
 | Postgres schema | [`db/migrations/`](../db/migrations/) |
@@ -61,17 +61,17 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
 | `config` | `lha.config` | Committed: every Python setting, with the same names, defaults and validation; `lha config` output is byte-identical |
 | `spec` | conformance harness | Committed: runs every file in `spec/`, including `agent/prompts.json` and `coordination/shared_paths.json` |
-| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, failover, retry, pricing) | Committed, including the `claude_code` backend (`claude -p`, the same argv, result parsing, errors and reported cost). `BuildProvider` does not build a fallback chain from settings, and there is no health probe |
+| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, failover, retry, pricing) | Committed, including the `claude_code` backend (`claude -p`, the same argv, result parsing, errors and reported cost), `LHA_FALLBACK_MODELS` chains (same `backend:model[@in/out]` format, errors and per-member pricing) and the model health probe (`ProbeModel`) |
 | `safety` | `lha.safety` (command classifier, egress policy with credential broker, Rule of Two) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
-| `obs` | `lha.obs` (events, redaction) | Committed |
-| `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, and carrying `.lha/ownership.json` along; no `vendor` |
+| `obs` | `lha.obs` (events, redaction, OpenTelemetry) | Committed, including OTLP/HTTP trace export (`obs/tracing`: the same settings, span names and redacted attributes) |
+| `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, and carrying `.lha/ownership.json` along; `state/vendor` is `lha vendor` (same layout and `MANIFEST.json` bytes) |
 | `checklistimport` | `lha.state.checklist_import` | Committed (`.json` and `.md` checklists) |
 | `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`); no mutation testing or trust bootstrap |
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed |
 | `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local`; the `claude_code` lead engine and its MCP bridge (`agent/mcpbridge`: the same MCP config, tools and results as `lha.agent.mcp_bridge`). No tiered memory |
 | `agents` | `lha.agents.planner`, `lha.agents.replanner` | Committed (Planner with file ownership, Replanner); not the orchestrator or the other roles |
-| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions` (and the hidden `egress-proxy`). The other commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
-| `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox |
+| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `decisions`, `vendor` (and the hidden `egress-proxy`). The other commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
+| `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox ([see below](#e2b-is-not-supported-in-go)) |
 | `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's. No `DeferredApprovalGate` (it belongs to the durable workflow) |
 | `memory`, `persistence`, durable worker, orchestrator | | Not started |
 
@@ -91,6 +91,11 @@ What the Go CLI can do today:
   (reminders at `LHA_GATE_ESCALATION_SECONDS`, rejection after `LHA_CONSOLE_APPROVAL_TIMEOUT_S`,
   the optional `LHA_GATE_WEBHOOK_URL`); the answers are committed as `tool_approval` and
   `gate_reminder` events.
+- `lha vendor` snapshots reference pages with the same egress rules, DNS pinning (each hop is
+  resolved once and only a vetted address is dialled), output, exit codes and `MANIFEST.json`.
+- `LHA_FALLBACK_MODELS` builds a failover chain, and OTLP trace export
+  (`LHA_OTEL_EXPORTER_OTLP_ENDPOINT` or Langfuse) emits the same spans as Python
+  ([observability](16-observability.md)).
 - For the same inputs a Go run and a Python run leave the same checkpoint commits, the same
   `.lha/` files and the same exit code; `go/cmd/lha/e2e_test.go` checks this by running both side
   by side (event payload keys are written in a different order; the JSON is otherwise equal).
@@ -99,13 +104,24 @@ What remains Python-only:
 
 - The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
   `mission-abort`, `mission-snooze` and `missions` commands.
-- `lha orchestrate` (the multi-agent organization), `vendor` and `db`.
+- `lha orchestrate` (the multi-agent organization) and `db`.
 - Persistence and memory: Go runs do not write the mission store or the persistent cost ledger
   (so `lha costs` has nothing from them) and the lead has no tiered memory.
-- The E2B sandbox, fallback model chains (`LHA_FALLBACK_MODELS`) and OTLP trace export.
+- The E2B sandbox (E2B has no Go SDK; see below).
 - The Docker sandbox's egress proxy container runs the Python proxy source by default in both
   implementations; the Go proxy (`lha egress-proxy`) is used only when the sandbox is given a
   proxy command and an image containing a Linux `lha` binary, which no setting selects yet.
+
+## E2B is not supported in Go
+
+`LHA_SANDBOX=e2b` (or `--sandbox e2b`) is refused by the Go CLI with exit 2 and a message
+pointing to `docker` or the Python implementation. E2B publishes SDKs for Python and JavaScript
+only. A Go adapter would have to speak E2B's REST control plane and the in-VM `envd` API
+(Connect-RPC process streaming and file transfer) directly, and re-implement the Python adapter's
+two-way workspace sync, whose copy-back is a security boundary (only requested regular files and
+symlinks, no `.git`/`.lha`, no writes through host symlinks, a 256 MiB cap, fail closed on any
+error or missing exit code). Without an SDK that contract could only be tested against a fake of
+our own making, not the real service, so the Go implementation does not offer it.
 
 ## Known limitation: mixed Python/Go workers on one mission
 

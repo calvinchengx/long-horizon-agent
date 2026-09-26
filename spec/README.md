@@ -21,6 +21,8 @@ the matching package is ported; it runs every file below.
 | `verify/harness_files.json` | test/harness files the agent may not weaken |
 | `verify/flaky_retry.json` | flaky-check re-runs and quarantine: re-run order, verdicts, output tails, and the `check_quarantined` / `quarantined_check_failed` event payloads |
 | `model/pricing.json` | Claude price table and per-call cost |
+| `model/fallback_models.json` | `LHA_FALLBACK_MODELS` entries -> backend, model and price, or the exact error |
+| `state/vendor_paths.json` | where `lha vendor` stores a fetched URL (`<host>/<path>`, query hash, `.html`) |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
 | `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |

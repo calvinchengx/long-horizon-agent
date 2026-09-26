@@ -21,6 +21,7 @@ from lha.coordination.decision_log import _canonical, _chain_hash, parse_chain, 
 from lha.coordination.ownership import is_shared
 from lha.execution.dispatcher import _missing_required, validate_arguments
 from lha.execution.paths import PathEscapeError, contained_posix, is_protected, normalize_relpath
+from lha.model import parse_fallback_entry
 from lha.model.pricing import lookup_claude_price
 from lha.model.stub import StubModel
 from lha.obs.redact import is_secret_key, redact_text
@@ -32,6 +33,7 @@ from lha.safety.egress import (
     normalize_host,
     parse_url,
 )
+from lha.state.vendor import _target_path
 from lha.verify.harness_integrity import _is_harness_file
 
 SPEC = Path(__file__).resolve().parents[3] / "spec"
@@ -177,6 +179,27 @@ def test_pricing() -> None:
         for cost in case["costs"]:
             assert price is not None
             assert price.cost(Usage(**cost["usage"])) == pytest.approx(cost["usd"], rel=1e-12)
+
+
+def test_fallback_models() -> None:
+    for case in _load("model/fallback_models.json")["cases"]:
+        if "error" in case:
+            with pytest.raises(ValueError) as exc:
+                parse_fallback_entry(case["entry"])
+            assert str(exc.value) == case["error"], case
+            continue
+        spec = parse_fallback_entry(case["entry"])
+        assert (spec.backend, spec.model) == (case["backend"], case["model"]), case
+        price = case["price"]
+        assert (spec.price is None) == (price is None), case
+        if spec.price is not None:
+            assert spec.price.input_per_mtok == price["input_per_mtok"], case
+            assert spec.price.output_per_mtok == price["output_per_mtok"], case
+
+
+def test_vendor_paths() -> None:
+    for case in _load("state/vendor_paths.json")["cases"]:
+        assert str(_target_path(case["url"], case["content_type"])) == case["path"], case
 
 
 class _Recording(StubModel):
