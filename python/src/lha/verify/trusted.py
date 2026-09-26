@@ -46,7 +46,7 @@ from typing import Protocol, runtime_checkable
 
 from lha.contracts.sandbox import SandboxSession
 from lha.contracts.verify import Check, CheckResult, VerificationResult, Verifier
-from lha.state.git_ops import GIT_TIMEOUT_S, GitError, _git_env, has_commits, run_git, toplevel
+from lha.state.git_ops import GitError, has_commits, run_git, run_git_env, toplevel
 from lha.verify.verifier import OUTPUT_TAIL_CHARS, clip_output_tail
 
 CANDIDATE_MESSAGE = "lha: candidate commit for trusted checks"
@@ -123,23 +123,7 @@ def trusted_env(
 
 
 def _git_with_env(cwd: str | Path, args: list[str], extra_env: dict[str, str]) -> str:
-    env = _git_env()
-    env.update(extra_env)
-    try:
-        proc = subprocess.run(
-            ["git", *args],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            env=env,
-            timeout=GIT_TIMEOUT_S,
-            stdin=subprocess.DEVNULL,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise GitError(f"git {' '.join(args)} timed out after {exc.timeout}s") from exc
-    if proc.returncode != 0:
-        raise GitError(f"git {' '.join(args)} failed ({proc.returncode}): {proc.stderr.strip()}")
-    return proc.stdout.strip()
+    return run_git_env(cwd, args, extra_env)  # the hardened harness git (lha.state.git_ops)
 
 
 def candidate_commit(workdir: str | Path, *, message: str = CANDIDATE_MESSAGE) -> str:

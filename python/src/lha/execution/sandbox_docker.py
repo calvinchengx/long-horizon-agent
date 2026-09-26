@@ -40,6 +40,7 @@ from typing import Any
 from lha.contracts.sandbox import ExecResult, Sandbox, SandboxSession, Snapshot
 from lha.execution.paths import PROTECTED_DIRS, PathEscapeError, contained_posix
 from lha.execution.proc import DEFAULT_MAX_OUTPUT_BYTES, BoundedBuffer, validate_timeout
+from lha.state.git_link import git_dirs_in_tree
 
 _WORKDIR = "/workspace"
 _CONTAINER_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -70,6 +71,27 @@ def _validate_egress_hosts(hosts: Sequence[str]) -> None:
     from lha.execution.egress_proxy import parse_allow_list
 
     parse_allow_list(hosts)
+
+
+def _protected_mounts(host: Path) -> dict[str, dict[str, str]]:
+    """Read-only binds over the writable work tree for everything git trusts in it.
+
+    ``.git`` and ``.lha`` whether a directory OR a file: in a linked worktree (every parallel
+    implementer's, or a mission workdir that is one) ``.git`` is a ``gitdir: <path>`` FILE, and
+    a writable one would let sandboxed code repoint the host's next ``git add``/``commit`` at a
+    repository it planted. The git dir it names normally lies outside the mount (the parent
+    repository's ``.git/worktrees/<name>``); should it (or its common dir) lie inside the work
+    tree, that directory is bound read-only too.
+    """
+    mounts: dict[str, dict[str, str]] = {}
+    for name in sorted(PROTECTED_DIRS):
+        path = host / name
+        if path.exists() or path.is_symlink():  # a dangling symlink fails the run: closed
+            mounts[str(path)] = {"bind": f"{_WORKDIR}/{name}", "mode": "ro"}
+    for inner in git_dirs_in_tree(host):
+        rel = inner.relative_to(host).as_posix()
+        mounts[str(inner)] = {"bind": f"{_WORKDIR}/{rel}", "mode": "ro"}
+    return mounts
 
 
 class DockerSandboxSession(SandboxSession):
@@ -383,9 +405,7 @@ class DockerSandbox(Sandbox):
         """
         host = Path(workdir).resolve()
         volumes: dict[str, dict[str, str]] = {str(host): {"bind": _WORKDIR, "mode": "rw"}}
-        for name in sorted(PROTECTED_DIRS):
-            if (host / name).is_dir():
-                volumes[str(host / name)] = {"bind": f"{_WORKDIR}/{name}", "mode": "ro"}
+        volumes.update(_protected_mounts(host))
         networking: dict[str, Any]
         if egress_network is not None:
             networking = {"network": egress_network}
