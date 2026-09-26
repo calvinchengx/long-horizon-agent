@@ -239,9 +239,13 @@ so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` and its timeout are read b
 with the same names, defaults and validation (`lha config` prints the same output). The Go CLI
 uses the model, governor, sandbox, web-tool, trusted-check, harness and human-gate settings
 (`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL`,
-`LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`). Settings of features that are Python-only are read but have
-no effect in a Go run: Temporal, persistence (`LHA_SQLITE_PATH`, `LHA_POSTGRES_*`), the
-`LHA_MEMORY_*` settings, `LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
+`LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`), the mission store (`LHA_SQLITE_PATH`, `LHA_POSTGRES_DSN`,
+`LHA_POSTGRES_FALLBACK_TO_SQLITE`) and the `LHA_MEMORY_*` settings. Two memory values name
+Python-only extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
+`LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
+extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` is the Go choice for real embeddings).
+Settings of features that are Python-only are read but have no effect in a Go run: Temporal,
+`LHA_FALLBACK_MODELS`, `LHA_FALLBACK_MAX_ROUNDS`,
 `LHA_MODEL_PROBE_TIMEOUT_S`, `LHA_MAX_PARALLEL_IMPLEMENTERS`, `LHA_FLAKY_RETRIES`, the
 `LHA_CLAUDE_CODE_*` settings and the `LHA_OTEL_*` settings (`LHA_LEAD_ENGINE=claude_code` and
 `LHA_MODEL_BACKEND=claude_code` are refused). See
