@@ -433,3 +433,42 @@ def asyncio_run(coro: Any) -> Any:
     import asyncio
 
     return asyncio.run(coro)
+
+
+def test_cli_orchestrate_runs_a_checklist_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lha.agent.runner import MissionSummary
+    from lha.cli import main as cli
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake_run_mission(self: Orchestrator, **kwargs: Any) -> MissionSummary:
+        calls.append(kwargs)
+        return MissionSummary("m", True, 1, 1, 1, 0.0, "sha", "complete", "")
+
+    def no_planning(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("--checklist must not plan")
+
+    monkeypatch.setattr(Orchestrator, "run_mission", fake_run_mission)
+    monkeypatch.setattr("lha.model.build_provider", no_planning)
+    roadmap = tmp_path / "roadmap.md"
+    roadmap.write_text("# Greeter\n\n## Build\n\n- [ ] say hello\n", encoding="utf-8")
+    base = ["--sandbox", "local", "--unsafe-local", "--no-default-checks", "--check", "true"]
+    runner = CliRunner()
+    work = tmp_path / "w"
+    result = runner.invoke(
+        cli.app, ["orchestrate", "--checklist", str(roadmap), "--workdir", str(work), *base]
+    )
+    assert result.exit_code == 0, result.output
+    call = calls[-1]
+    assert call["title"] == "Greeter" and call.get("ownership") is None
+    assert [i.description for i in call["checklist"].items] == ["say hello"]
+    asyncio_run(
+        GitMissionAnchor(work).initialize(title="T", description="D", items=call["checklist"])
+    )
+    both = runner.invoke(
+        cli.app,
+        ["orchestrate", "--resume", "--checklist", str(roadmap), "--workdir", str(work), *base],
+    )
+    assert both.exit_code == 2 and "--checklist cannot be combined with --resume" in both.output

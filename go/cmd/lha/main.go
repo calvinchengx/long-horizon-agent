@@ -1,5 +1,5 @@
 // Command lha is the Go implementation of the LHA command line (python: lha.cli.main), built on
-// the standard library flag package. It implements version, config, run-local, mission,
+// the standard library flag package. It implements version, config, run-local, mission, orchestrate,
 // decisions and vendor with the Python CLI's options, output and exit codes; every other Python command
 // prints that it is not yet available and exits 2. The hidden egress-proxy command serves the
 // Docker sandbox's allow-list egress proxy.
@@ -40,7 +40,7 @@ const appHelp = "LHA — a durable, self-improving agent organization for long-h
 
 // notPorted are the Python commands the Go CLI does not implement yet.
 var notPorted = []string{
-	"orchestrate", "worker", "mission-start", "mission-status", "mission-approve", "mission-abort",
+	"worker", "mission-start", "mission-status", "mission-approve", "mission-abort",
 	"mission-snooze", "missions", "costs", "gates", "db",
 }
 
@@ -49,6 +49,7 @@ var commandHelp = []struct{ name, help string }{
 	{"config", "Show the resolved runtime configuration (secrets redacted), and where the store is."},
 	{"run-local", "Run a mission locally (no Temporal) until complete / deadlocked / over-budget."},
 	{"mission", "Plan a task into a checklist (or import one), then run it locally to completion."},
+	{"orchestrate", orchestrateHelp},
 	{"decisions", "Print the mission's committed design decisions (.lha/decisions.ndjson), or verify them."},
 	{"vendor", vendorHelp},
 }
@@ -71,6 +72,8 @@ type cli struct {
 	ctx            context.Context
 	// leadModel overrides the configured model for the planner and the lead (tests only).
 	leadModel contracts.ModelProvider
+	// orgModels are per-role provider overrides for orchestrate (tests only).
+	orgModels map[string]contracts.ModelProvider
 }
 
 func main() {
@@ -116,6 +119,8 @@ func (c *cli) run(args []string) int {
 		err = c.runLocal(rest)
 	case "mission":
 		err = c.mission(rest)
+	case "orchestrate":
+		err = c.orchestrate(rest)
 	case "decisions":
 		err = c.decisions(rest)
 	case "vendor":
@@ -549,7 +554,7 @@ func (c *cli) egressProxy(args []string) error {
 // --- decisions -------------------------------------------------------------------------------
 
 func (c *cli) decisions(args []string) error {
-	fs := c.newFlags("decisions", commandHelp[4].help)
+	fs := c.newFlags("decisions", commandHelp[5].help)
 	workdir := fs.String("workdir", ".", "The mission workspace (the git repo holding .lha/).")
 	verifyChain := fs.Bool("verify", false, "Verify the hash chain; exit 1 if it does not verify.")
 	limit := fs.Int("limit", 0, "Print only the newest N decisions (0 = all).")

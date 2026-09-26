@@ -24,6 +24,8 @@ the matching package is ported; it runs every file below.
 | `model/fallback_models.json` | `LHA_FALLBACK_MODELS` entries -> backend, model and price, or the exact error |
 | `state/vendor_paths.json` | where `lha vendor` stores a fetched URL (`<host>/<path>`, query hash, `.html`) |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
+| `agent/org.json` | the organization: role chart and per-role models, sub-agent prompts and tool visibility, the Reviewer's prompt and verdict parsing, reflection, the implementer's objective, ownership-guard refusals, lease decisions and the ticket lifecycle |
+
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
 | `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
 | `execution/sandbox_egress.json` | the sandbox egress lists (package-fetch, extra and write hosts) and their errors, the run-level Rule of Two with sandbox egress, and `sandbox_egress` events parsed from the proxy log |

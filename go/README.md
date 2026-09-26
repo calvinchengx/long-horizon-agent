@@ -17,6 +17,11 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   (plan a task, or import a `.json`/`.md` checklist, then run it), with Python's options, output
   and exit codes. For the same inputs a Go run leaves the same checkpoint commits and `.lha/`
   anchor as a Python run (`cmd/lha/e2e_test.go` runs both side by side).
+- `orchestrate`: the multi-agent organization (`internal/agents/org`, `internal/coordination`):
+  research fan-out, the Lead, reflection, the fresh-context Reviewer, parallel implementer waves in
+  worktrees with leases, and the integrator; `--checklist` skips planning and `--resume`
+  continues a mission anchored by either implementation (`cmd/lha/orchestrate_test.go` runs
+  both side by side, and resumes each one's interrupted mission with the other).
 - Sandboxes: `local` (only with `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) and `docker`
   (`LHA_SANDBOX_IMAGE`; the `LHA_SANDBOX_EGRESS*` settings route egress through a per-session
   allow-list proxy, and its requests are committed as `sandbox_egress` events).
@@ -46,11 +51,20 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
 ## Python-only
 
 The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
+<<<<<<< HEAD
 `mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
 organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
 mission rows) and tiered memory. The unported commands print that they are not available and
 exit 2. The E2B sandbox is not supported in Go (E2B has no Go SDK; see
 [choosing an implementation](../docs/04-choosing-an-implementation.md#e2b-is-not-supported-in-go)).
+=======
+`mission-abort`, `mission-snooze` and `missions` commands; the durable multi-agent
+organization rounds; the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
+mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
+E2B sandbox; re-running failing checks (`LHA_FLAKY_RETRIES`); fallback model chains
+(`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
+available and exit 2.
+>>>>>>> worktree-agent-ae3d870d1cbd3ff8e
 
 The Docker sandbox's egress proxy container runs the stdlib-only Python proxy source on
 `python:3.12-alpine` by default, exactly like Python. `internal/execution/egressproxy` is the same
@@ -64,7 +78,7 @@ that contains a Linux `lha` binary, which no setting selects yet.
 gofmt -l . && go vet ./... && go test ./...
 ```
 
-Tests that compare with Python (`cmd/lha/e2e_test.go`, `internal/hitl`, `internal/state`) run
+Tests that compare with Python (`cmd/lha/e2e_test.go`, `cmd/lha/orchestrate_test.go`, `internal/hitl`, `internal/state`) run
 it with `uv run --project ../python` and skip that half when `uv` is not on `PATH`. The Docker
 tests against a real daemon are opt-in, like Python's integration tests:
 `LHA_IT_DOCKER=1 go test ./internal/execution/ ./cmd/lha/ -run Docker`.
