@@ -70,3 +70,27 @@ func TestRunExternalAuthorizesReservesAndRecordsTheReportedCost(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type hookEntries struct{ entries []CostEntry }
+
+func (h *hookEntries) RecordCost(_ context.Context, e CostEntry) error {
+	h.entries = append(h.entries, e)
+	return nil
+}
+
+// External work's reported cost reaches the meter's CostHook like a Complete's (python: on_record
+// in run_external), so a claude_code session lands in the persistent ledger.
+func TestRunExternalReachesTheCostHook(t *testing.T) {
+	meter := NewCostMeter(NewCostLedger(), NewBudgetGovernor(10, 10, false))
+	hook := &hookEntries{}
+	meter.SetHook(hook)
+	reported := 0.42
+	if err := RunExternal(context.Background(), meter.Wrap(freeModel{}, "lead"), 1, func(context.Context) (contracts.Usage, error) {
+		return contracts.Usage{Provider: "p", ReportedCostUSD: &reported}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(hook.entries) != 1 || hook.entries[0].Role != "lead" || hook.entries[0].USD != 0.42 {
+		t.Fatalf("%+v", hook.entries)
+	}
+}

@@ -21,7 +21,16 @@ import (
 
 func TestMain(m *testing.M) {
 	claudecodetest.Main() // this binary doubles as the fake claude
-	os.Exit(m.Run())
+	// Runs persist to the mission store (and memory): never the developer's per-user one.
+	dir, err := os.MkdirTemp("", "lha-cli-store-")
+	if err != nil {
+		panic(err)
+	}
+	packageXDG = dir
+	os.Setenv("XDG_DATA_HOME", dir)
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 var (
@@ -109,7 +118,7 @@ func TestE2EClaudeCodeEngineMatchesPython(t *testing.T) {
 	args := []string{"run-local", "--title", "Greeter", "--item", "write hello.txt",
 		"--no-default-checks", "--check", helloCheck, "--workdir", "ws"}
 	envFor := func(dir string) []string {
-		return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_MEMORY_ENABLED=false", "LHA_LEAD_ENGINE=claude_code",
+		return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_LEAD_ENGINE=claude_code",
 			"LHA_CLAUDE_CODE_BIN="+fake, "LHA_CLAUDE_CODE_MAX_BUDGET_USD=1.5", "LHA_MODEL_NAME=sonnet",
 			claudecodetest.EnvFake+"=1", "FAKE_CLAUDE_MODE=mcp", "FAKE_CLAUDE_CALLS="+string(calls),
 			"FAKE_CLAUDE_LOG="+filepath.Join(dir, "claude.log"))
@@ -145,6 +154,13 @@ func TestE2EClaudeCodeEngineMatchesPython(t *testing.T) {
 		t.Fatalf("decisions: %+v", r)
 	}
 	goWS := snapshot(t, workdir)
+	// The session's reported cost reached the persistent ledger (the meter's hook), and the cycle
+	// reached memory.
+	goStore := storeDigest(t, bin, filepath.Join(goDir, ".lha-xdg", "lha", "lha.sqlite3"), missionIDRE.FindString(goRun.stdout))
+	if !strings.Contains(goStore, "DONE") || !strings.Contains(goStore, " lead ") || !strings.Contains(goStore, "$0.4200") ||
+		!strings.Contains(goStore, "cycle_outcome 1") {
+		t.Fatalf("store:\n%s", goStore)
+	}
 	if !pythonAvailable(t) {
 		return
 	}
@@ -158,6 +174,9 @@ func TestE2EClaudeCodeEngineMatchesPython(t *testing.T) {
 	}
 	compareWorkspaces(t, goWS, snapshot(t, filepath.Join(pyDir, "ws")))
 	compareCalls(t, goCalls, claudecodetest.Calls(t, filepath.Join(pyDir, "claude.log")), goDir, pyDir)
+	if pyStore := storeDigest(t, bin, filepath.Join(pyDir, "lha.sqlite3"), missionIDRE.FindString(pyRun.stdout)); pyStore != goStore {
+		t.Errorf("stores differ:\ngo:\n%s\npy:\n%s", goStore, pyStore)
+	}
 }
 
 // TestE2EClaudeCodeNativeEngineMatchesPython: LHA_CLAUDE_CODE_TOOLS=native keeps Claude Code's own
@@ -170,7 +189,7 @@ func TestE2EClaudeCodeNativeEngineMatchesPython(t *testing.T) {
 	args := []string{"run-local", "--title", "Greeter", "--item", "write hello.txt",
 		"--no-default-checks", "--check", helloCheck, "--workdir", "ws"}
 	envFor := func(dir string) []string {
-		return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_MEMORY_ENABLED=false",
+		return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true",
 			"LHA_LEAD_ENGINE=claude_code", "LHA_CLAUDE_CODE_TOOLS=native", "LHA_MAX_REPLANS=0",
 			"LHA_CLAUDE_CODE_BIN="+fake, claudecodetest.EnvFake+"=1", "FAKE_CLAUDE_MODE=mcp",
 			"FAKE_CLAUDE_CALLS="+string(calls), "FAKE_CLAUDE_LOG="+filepath.Join(dir, "claude.log"))
@@ -221,7 +240,7 @@ func TestE2EClaudeCodeModelBackendMatchesPython(t *testing.T) {
 			args := []string{"run-local", "--title", "Greeter", "--item", "write hello.txt",
 				"--no-default-checks", "--check", helloCheck, "--workdir", "ws"}
 			envFor := func(dir string) []string {
-				return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_MEMORY_ENABLED=false", "LHA_MODEL_BACKEND=claude_code",
+				return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_MODEL_BACKEND=claude_code",
 					"LHA_CLAUDE_CODE_BIN="+fake, "LHA_MAX_TURNS_PER_CYCLE=2", "LHA_MAX_REPLANS=0",
 					"LHA_BUDGET_USD_CEILING=100", claudecodetest.EnvFake+"=1", "FAKE_CLAUDE_MODE="+c.mode,
 					"FAKE_CLAUDE_REPLY="+c.reply, "FAKE_CLAUDE_LOG="+filepath.Join(dir, "claude.log"))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"sync"
 	"unicode/utf8"
@@ -86,6 +87,39 @@ type CostMeter struct {
 	mu       sync.Mutex
 	cycleID  string
 	reserved float64
+	hook     CostHook
+}
+
+// CostHook receives every entry the meter records (python: CostMeter.on_record), e.g. the
+// persistent cost ledger (persistence.LedgerSink). A failing hook is logged, never returned: the
+// model call already happened and its spend is already in the in-memory ledger.
+type CostHook interface {
+	RecordCost(ctx context.Context, entry CostEntry) error
+}
+
+// SetHook installs (or, with nil, removes) the meter's CostHook.
+func (m *CostMeter) SetHook(h CostHook) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hook = h
+}
+
+// Hook is the installed CostHook (nil when none).
+func (m *CostMeter) Hook() CostHook {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.hook
+}
+
+// record appends an entry to the ledger under the current cycle and hands it to the hook (if
+// any). A failing hook is logged, never returned: persistence never fails completed work.
+func (m *CostMeter) record(ctx context.Context, usage contracts.Usage, usd *float64, role string) {
+	entry := m.Ledger.Record(m.CycleID(), usage, usd, role)
+	if hook := m.Hook(); hook != nil {
+		if err := hook.RecordCost(ctx, entry); err != nil {
+			slog.Default().With("logger", "lha.governor").Warn("cost_hook_failed", "error", err.Error())
+		}
+	}
 }
 
 // NewCostMeter returns a meter attributing calls to cycle "c0" until SetCycleID is called.
@@ -216,7 +250,7 @@ func (mm *MeteredModel) complete(ctx context.Context, messages []contracts.Model
 	if err != nil {
 		return contracts.TurnResult{}, err
 	}
-	meter.Ledger.Record(meter.CycleID(), result.Usage, usd, mm.Role)
+	meter.record(ctx, result.Usage, usd, mm.Role)
 	*cost = usd
 	return result, nil
 }

@@ -229,4 +229,17 @@ Postgres-only helper with the same insert; the run paths use `PostgresStore`.
 Reported cost on the terminal still comes from the in-memory ledger (`lha run-local` / `mission` /
 `orchestrate` print `cost $…`) and, for durable runs, from `spent_usd` in each `CycleResult`.
 
+### In the Go implementation
+
+The Go `lha run-local`, `lha mission` and `lha orchestrate` persist the same way:
+`governor.CostMeter` has a `CostHook` (`SetHook`, python's `on_record`) and the run services
+install `persistence.LedgerSink` there, backfilling the Planner's call (the `planner` role, cycle
+`c0`), with the same key prefixes (empty, or `run<N>` for a resumed `orchestrate`) and the same
+row key, so a Go run's ledger rows are the ones a Python run would write. Every org role's calls
+land there, and so does a `claude_code` session metered by `RunExternal` (its reported cost, or
+the worst case when it reported none); a failing hook is logged (`cost_hook_failed`) and never
+fails the call.
+The Go `lha missions` and `lha costs` read either implementation's store with the same output.
+The Postgres backend is built in (no extra); `lha db migrate` works from the Go binary too.
+
 Related: [Models](13-models.md), [Configuration](18-configuration.md).

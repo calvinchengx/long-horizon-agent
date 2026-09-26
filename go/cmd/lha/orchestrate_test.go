@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +18,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	_ "modernc.org/sqlite"
 )
 
 // `lha orchestrate`: the refusals, --checklist, the planned ownership reaching the anchor, and —
@@ -266,6 +269,13 @@ func TestE2EOrchestrateBinaryMatchesPython(t *testing.T) {
 		t.Fatalf("go: %+v", goRun)
 	}
 	goWS := orgWorkspace(t, filepath.Join(goDir, "ws"), false)
+	// The run persisted: its mission row, every org role's calls in the ledger, and memory.
+	goStore := storeDigest(t, bin, filepath.Join(goDir, ".lha-xdg", "lha", "lha.sqlite3"), missionIDRE.FindString(goRun.stdout))
+	for _, want := range []string{"ABORTED", " planner ", " researcher ", " lead ", " reviewer ", "cycle_outcome 5"} {
+		if !strings.Contains(goStore, want) {
+			t.Fatalf("store lacks %q:\n%s", want, goStore)
+		}
+	}
 	if !pythonAvailable(t) {
 		return
 	}
@@ -278,6 +288,56 @@ func TestE2EOrchestrateBinaryMatchesPython(t *testing.T) {
 		t.Errorf("reports differ:\ngo: %s\npy: %s", g, p)
 	}
 	compareOrgWorkspaces(t, goWS, orgWorkspace(t, filepath.Join(pyDir, "ws"), false))
+	if pyStore := storeDigest(t, bin, filepath.Join(pyDir, "lha.sqlite3"), missionIDRE.FindString(pyRun.stdout)); pyStore != goStore {
+		t.Errorf("stores differ:\ngo:\n%s\npy:\n%s", goStore, pyStore)
+	}
+}
+
+var timestampRE = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}`)
+
+// storeDigest is what a run left in the mission store at path, comparable across
+// implementations: `lha missions` and `lha costs` (ids, shas and times masked; ledger lines
+// sorted, since the researchers run in parallel) and the memory tiers' row counts.
+func storeDigest(t *testing.T, bin, path, missionID string) string {
+	t.Helper()
+	env := processEnv("LHA_SQLITE_PATH=" + path)
+	mask := func(s string) string {
+		s = strings.ReplaceAll(s, missionID, "mission_X")
+		s = timestampRE.ReplaceAllString(s, "T")
+		return regexp.MustCompile(`\bhead [0-9a-f]{12}\b`).ReplaceAllString(s, "head SHA")
+	}
+	missions := runProcess(t, t.TempDir(), env, bin, "missions")
+	costs := runProcess(t, t.TempDir(), env, bin, "costs", missionID)
+	if missions.code != 0 || costs.code != 0 {
+		t.Fatalf("missions %+v\ncosts %+v", missions, costs)
+	}
+	lines := strings.Split(strings.TrimSpace(mask(costs.stdout)), "\n")
+	sort.Strings(lines)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	counts := []string{}
+	for _, q := range []string{
+		"SELECT kind || ' ' || count(*) FROM episodic_events GROUP BY kind ORDER BY kind",
+		"SELECT 'semantic_memory ' || count(*) FROM semantic_memory",
+		"SELECT 'skills ' || count(*) FROM skills",
+	} {
+		rows, err := db.Query(q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatal(err)
+			}
+			counts = append(counts, line)
+		}
+		rows.Close()
+	}
+	return fmt.Sprintf("%s\n%s\n%s\n", mask(missions.stdout), strings.Join(lines, "\n"), strings.Join(counts, "\n"))
 }
 
 type lhaRunner func(t *testing.T, dir string, env []string, args ...string) result

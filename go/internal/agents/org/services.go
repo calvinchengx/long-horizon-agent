@@ -6,13 +6,17 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/hitl"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence/services"
 )
 
 // What a run persists besides the anchor (python: lha.persistence.services.open_run_services):
 // the mission row, the persistent cost ledger (a sink on the meter) and tiered memory. The
-// orchestrator talks to it through this small interface; the default is a no-op until the
-// persistence plane is linked (set DefaultServices, or OrchestratorOptions.Services).
+// orchestrator talks to it through this small interface; DefaultServices opens the persistence
+// plane (PersistentServices), and OrchestratorOptions.Services can replace it (NoopServices
+// persists nothing).
 
 // ServicesRequest is what a ServicesOpener gets (python: open_run_services' arguments).
 type ServicesRequest struct {
@@ -40,6 +44,8 @@ type RunServices interface {
 	Finish(ctx context.Context, stoppedReason, headSHA string) error
 	// Close releases the store and memory and detaches the ledger sink.
 	Close(ctx context.Context) error
+	// Memory is the lead's tiered memory (python: services.memory); nil when there is none.
+	Memory() memory.CycleMemory
 }
 
 // ServicesOpener opens a run's services.
@@ -57,7 +63,43 @@ func (NoopServices) Finish(context.Context, string, string) error { return nil }
 // Close implements RunServices.
 func (NoopServices) Close(context.Context) error { return nil }
 
-// DefaultServices is the opener an Orchestrator uses when its options name none.
-var DefaultServices ServicesOpener = func(context.Context, ServicesRequest) (RunServices, error) {
-	return NoopServices{}, nil
+// Memory implements RunServices.
+func (NoopServices) Memory() memory.CycleMemory { return nil }
+
+// DefaultServices is the opener an Orchestrator uses when its options name none: the persistence
+// plane (mission row, persistent cost ledger for every org role, tiered memory for the lead).
+var DefaultServices ServicesOpener = PersistentServices
+
+// PersistentServices opens the run's store, mission row, ledger sink and memory (python:
+// open_run_services) and points a gate that records its events at the store (python:
+// bind_gate_store), so `lha missions`, `lha costs` and `lha gates` see the orchestrated run.
+func PersistentServices(ctx context.Context, req ServicesRequest) (RunServices, error) {
+	svc, err := services.Open(ctx, req.Settings, services.Request{
+		MissionID: req.MissionID, Workdir: req.Workdir, Meter: req.Meter,
+		Title: req.Title, Description: req.Description, Model: req.Model,
+		Recorder: req.Recorder, KeyPrefix: req.KeyPrefix,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if binder, ok := req.Gate.(interface{ BindStore(hitl.GateRecorder) }); ok {
+		binder.BindStore(svc.Store)
+	}
+	return persistentServices{svc}, nil
 }
+
+type persistentServices struct{ svc *services.RunServices }
+
+func (p persistentServices) Running(ctx context.Context) error {
+	p.svc.Tracker.Running(ctx, "")
+	return nil
+}
+
+func (p persistentServices) Finish(ctx context.Context, stoppedReason, headSHA string) error {
+	p.svc.Finish(ctx, stoppedReason, headSHA)
+	return nil
+}
+
+func (p persistentServices) Close(context.Context) error { return p.svc.Close() }
+
+func (p persistentServices) Memory() memory.CycleMemory { return p.svc.CycleMemory() }

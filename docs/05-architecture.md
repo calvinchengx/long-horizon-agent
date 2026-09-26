@@ -39,7 +39,7 @@ flowchart TB
         STORE[("Mission store<br/>SQLite (default) or<br/>Postgres + pgvector")]
         OBJ[("Object store<br/>large payloads")]
         HOOK["Gate webhook<br/>(LHA_GATE_WEBHOOK_URL)"]
-        LF["Langfuse / OTel collector<br/>(OTLP/HTTP; Python only)"]
+        LF["Langfuse / OTel collector<br/>(OTLP/HTTP)"]
         NET["Internet"]
     end
 
@@ -319,7 +319,7 @@ from `LHA_MODEL_BACKEND`:
 | `ollama` | `OpenAICompatModel` against `LHA_OLLAMA_BASE_URL/v1` | Priced at $0 |
 | `openai_compat` | `OpenAICompatModel` against `LHA_OPENAI_BASE_URL` | Unknown unless `LHA_OPENAI_PRICE_*_PER_MTOK` are set |
 | `claude` | `ClaudeModel`, Messages API over HTTP | Built-in price table, overridable |
-| `claude_code` (Python only) | `ClaudeCodeModel`, the `claude -p` CLI | The `total_cost_usd` Claude Code reports |
+| `claude_code` | `ClaudeCodeModel` (Go: `model.ClaudeCodeModel`), the `claude -p` CLI | The `total_cost_usd` Claude Code reports |
 
 Cost is computed from the token usage in each provider response. Under the `claude` backend,
 `lha orchestrate` routes roles to model tiers (planner, lead and reviewer to Opus, implementers

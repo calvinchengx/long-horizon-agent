@@ -786,6 +786,12 @@ func pyJoin(base string, parts ...string) string {
 	return pyPath(strings.Join(append([]string{base}, parts...), string(filepath.Separator)))
 }
 
+// ExpandUser is pathlib's Path.expanduser ("~" and "~user" prefixes).
+func ExpandUser(p string) string { return expandUser(p) }
+
+// ResolvePath is pathlib's Path.resolve(strict=False).
+func ResolvePath(p string) string { return resolvePath(p) }
+
 // expandUser mirrors pathlib's Path.expanduser for "~" and "~user" prefixes.
 func expandUser(p string) string {
 	if !strings.HasPrefix(p, "~") {

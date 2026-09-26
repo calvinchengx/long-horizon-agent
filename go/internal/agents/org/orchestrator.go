@@ -332,6 +332,7 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	if r.lead, err = agent.BuildLeadLoop(settings, r.leadModel, r.anchor, tools.WithDecisionTool(r.leadGuard, r.anchor), r.recorder); err != nil {
 		return agent.MissionSummary{}, err
 	}
+	r.lead.SetMemory(services.Memory())
 	r.reviewer = NewReviewer(r.reviewModel, r.readTools)
 	// Integration is gated exactly like a Lead cycle would be for the same item: the mission
 	// checks plus the item's witnesses, on the lead verifier.

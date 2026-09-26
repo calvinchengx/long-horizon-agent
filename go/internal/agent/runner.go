@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
@@ -15,6 +16,8 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence/services"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -289,7 +292,20 @@ func runMissionLocal(ctx context.Context, o RunOptions) (MissionSummary, error) 
 	return summary, nil
 }
 
-func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, meter *governor.CostMeter, detector *governor.LoopDetector, checks []contracts.Check, anchor *state.GitMissionAnchor, toolbox Toolbox, recorder *obs.TraceRecorder, missionID string) (MissionSummary, error) {
+// GateStoreBinder is implemented by a Toolbox whose human gate records its events (the terminal
+// approver): the runner points it at the run's mission store (python: bind_gate_store).
+type GateStoreBinder interface {
+	BindGateStore(store persistence.Store)
+}
+
+// errorStop is python's f"error: {type(exc).__name__}" stop reason for a run that raised.
+func errorStop(err error) string {
+	name := fmt.Sprintf("%T", err)
+	name = strings.TrimLeft(name[strings.LastIndex(name, ".")+1:], "*")
+	return "error: " + name
+}
+
+func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, meter *governor.CostMeter, detector *governor.LoopDetector, checks []contracts.Check, anchor *state.GitMissionAnchor, toolbox Toolbox, recorder *obs.TraceRecorder, missionID string) (_ MissionSummary, runErr error) {
 	lead := o.Model
 	if lead == nil {
 		built, err := model.BuildProvider(settings, "", nil)
@@ -299,6 +315,32 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 		// A provider built here owns its HTTP client and is closed here; a caller's is not.
 		defer CloseProvider(context.WithoutCancel(ctx), built)
 		lead = built
+	}
+	// Persistence + memory: mission row, persistent cost ledger (incl. a Planner call made before
+	// the mission id existed), tiered memory for the lead.
+	svc, err := services.Open(ctx, settings, services.Request{
+		MissionID: missionID, Workdir: o.Workdir, Meter: meter, Title: o.Title, Description: o.Description,
+		Model: meter.Wrap(lead, "librarian"), Recorder: recorder,
+	})
+	if err != nil {
+		return MissionSummary{}, err
+	}
+	cycles := 0
+	lastHead := ""
+	stopped := "max_cycles"
+	defer func() {
+		if runErr != nil {
+			stopped = errorStop(runErr)
+		}
+		bg := context.WithoutCancel(ctx)
+		svc.Finish(bg, stopped, lastHead)
+		if err := svc.Close(); err != nil && runErr == nil {
+			runErr = err
+		}
+	}()
+	svc.Tracker.Running(ctx, "")
+	if binder, ok := toolbox.(GateStoreBinder); ok {
+		binder.BindGateStore(svc.Store) // a terminal approver writes hitl_gates rows
 	}
 	if _, err := anchor.InitializeSpec(ctx, contracts.MissionSpec{
 		Title: o.Title, Description: o.Description, References: o.References,
@@ -312,11 +354,9 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 	if err != nil {
 		return MissionSummary{}, err
 	}
+	loop.SetMemory(svc.CycleMemory())
 	tctx := contracts.ToolContext{MissionID: missionID, Session: toolbox.Session()}
 
-	cycles := 0
-	lastHead := ""
-	stopped := "max_cycles"
 cycleLoop:
 	for cycles < settings.MaxCycles {
 		decision := meter.Governor.AuthorizeNext(meter.Ledger, cycles, nil)

@@ -18,6 +18,7 @@ from lha.agents.reviewer import Reviewer, ReviewResult, parse_review
 from lha.agents.roles import ROLES, claude_model_for
 from lha.agents.subagent import SubAgent
 from lha.agents.waves import implementer_objective, new_implementer_run
+from lha.contracts.memory import MemoryRecord
 from lha.contracts.model import ModelMessage, TurnResult, Usage
 from lha.contracts.state import Checklist, ChecklistItem, SituationSnapshot
 from lha.contracts.tools import ToolResult, ToolSpec
@@ -29,6 +30,10 @@ from lha.coordination.ownership import FileOwnershipMap, LeaseRequest, is_shared
 from lha.coordination.ticket import TaskContract, Ticket, TicketStatus
 from lha.execution.dispatcher import _missing_required, validate_arguments
 from lha.execution.paths import PathEscapeError, contained_posix, is_protected, normalize_relpath
+from lha.memory.embeddings import HashEmbedder
+from lha.memory.hybrid import BM25Index, reciprocal_rank_fusion
+from lha.memory.semantic_memory import cosine
+from lha.memory.service import _render_episode, _terms
 from lha.model import parse_fallback_entry
 from lha.model.pricing import lookup_claude_price
 from lha.model.stub import StubModel
@@ -456,3 +461,38 @@ def test_agent_org() -> None:
             id="t", contract=TaskContract(objective="o"), status=TicketStatus(case["from"])
         )
         assert ticket.can_transition(TicketStatus(case["to"])) == case["legal"], case
+
+
+def test_memory_embedder_and_cosine() -> None:
+    spec = _load("memory/hash_embedder.json")
+    for case in spec["hash"]:
+        (vector,) = asyncio.run(HashEmbedder(dim=case["dim"]).embed([case["text"]]))
+        assert vector == case["vector"], case["text"]  # byte-identical, not approximately equal
+    for case in spec["cosine"]:
+        assert cosine(case["a"], case["b"]) == case["cosine"], case
+
+
+def test_memory_retrieval() -> None:
+    spec = _load("memory/retrieval.json")
+    bm25 = BM25Index()
+    for doc_id, text in spec["bm25_docs"]:
+        bm25.add([MemoryRecord(id=doc_id, kind="semantic", text=text)])
+    for case in spec["bm25"]:
+        got = bm25.query(case["query"], k=case["k"])
+        assert [d for d, _ in got] == [d for d, _ in case["hits"]], case["query"]
+        assert [s for _, s in got] == pytest.approx([s for _, s in case["hits"]], rel=1e-12)
+    for case in spec["fusion"]:
+        got = reciprocal_rank_fusion(case["rankings"])
+        assert [[d, s] for d, s in got] == case["fused"], case["rankings"]
+
+
+def test_memory_recall() -> None:
+    from tests.unit.memory_spec_fixture import run_case
+
+    spec = _load("memory/recall.json")
+    for case in spec["episodes"]:
+        assert _render_episode(case["payload"], case["cycle_id"]) == case["rendered"], case
+    for case in spec["terms"]:
+        assert _terms(case["text"]) == case["terms"], case
+    for case in spec["cases"]:
+        assert asyncio.run(run_case(case)) == case["blocks"], case["name"]
