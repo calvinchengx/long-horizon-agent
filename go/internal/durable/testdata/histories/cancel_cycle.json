@@ -1,0 +1,329 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-09-26T10:25:42.314Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "MissionWorkflow"
+        },
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiY2FuY2VsX2N5Y2xlIiwid29ya2RpciI6Ii92YXIvZm9sZGVycy95Yy92bWJmcGg0ZDN2OTkxNHg5ZnhmZjgzNGMwMDAwZ24vVC9UZXN0UmVjb3JkSGlzdG9yaWVzY2FuY2VsX2N5Y2xlNDUzMjQ1MTgwLzAwNCIsIm1heF9jeWNsZXMiOjUwLCJjeWNsZXNfYmVmb3JlX2NhbiI6MjAwLCJjaGVja19jb21tYW5kcyI6W1sic2giLCItYyIsImRvbmU9JChncmVwIC1vICdcInN0YXR1c1wiOiAqXCJkb25lXCInIC5saGEvY2hlY2tsaXN0Lmpzb24gfCB3YyAtbCk7IHdvcms9JChscyB3b3JrLyoudHh0IDJcdTAwM2UvZGV2L251bGwgfCB3YyAtbCk7IFsgXCIkd29ya1wiIC1ndCBcIiRkb25lXCIgXSJdXSwiYnVkZ2V0X3VzZCI6bnVsbCwicGFya19pbml0aWFsX3NlY29uZHMiOjMwLCJwYXJrX21heF9zZWNvbmRzIjo2MDAsImRlYWRsb2NrX2dhdGVfc2Vjb25kcyI6MCwiYXBwcm92YWxfdGltZW91dF9zZWNvbmRzIjo4NjQwMCwiZ2F0ZV9lc2NhbGF0aW9uX3NlY29uZHMiOls5MDAsMjcwMCwxNDQwMCw0MzIwMF0sImRlYWRsb2NrX2dhdGVfZGVmYXVsdCI6ImFib3J0IiwiaW1wb3NzaWJsZV9hZnRlcl9mYWlsdXJlcyI6MywiY3ljbGVfcGF1c2Vfc2Vjb25kcyI6MCwicmVzdW1lX2F0IjowLCJyZXNlYXJjaF9wZXJfaXRlbSI6MCwicmV2aWV3IjpmYWxzZSwibWF4X3BhcmFsbGVsIjowLCJzdGF0ZSI6bnVsbH0="
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "cda9c252-c089-4052-a738-35fef41157c6",
+        "identity": "5635@cx6.local@",
+        "firstExecutionRunId": "cda9c252-c089-4052-a738-35fef41157c6",
+        "attempt": 1,
+        "firstWorkflowTaskBackoff": "0s",
+        "header": {}
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-09-26T10:25:42.314Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-09-26T10:25:42.314Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "lha-go:5635@cx6.local",
+        "historySizeBytes": "1015"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-09-26T10:25:42.316Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "lha-go:5635@cx6.local",
+        "binaryChecksum": "a8f90934299b553b5ce85b9a08a980ba",
+        "sdkMetadata": {
+          "langUsedFlags": [
+            3
+          ],
+          "sdkName": "temporal-go",
+          "sdkVersion": "1.49.0"
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-09-26T10:25:42.316Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "5",
+        "activityType": {
+          "name": "run_agent_cycle"
+        },
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiY2FuY2VsX2N5Y2xlIiwid29ya2RpciI6Ii92YXIvZm9sZGVycy95Yy92bWJmcGg0ZDN2OTkxNHg5ZnhmZjgzNGMwMDAwZ24vVC9UZXN0UmVjb3JkSGlzdG9yaWVzY2FuY2VsX2N5Y2xlNDUzMjQ1MTgwLzAwNCIsImN5Y2xlX2lkIjoiYzEiLCJjaGVja19jb21tYW5kcyI6W1sic2giLCItYyIsImRvbmU9JChncmVwIC1vICdcInN0YXR1c1wiOiAqXCJkb25lXCInIC5saGEvY2hlY2tsaXN0Lmpzb24gfCB3YyAtbCk7IHdvcms9JChscyB3b3JrLyoudHh0IDJcdTAwM2UvZGV2L251bGwgfCB3YyAtbCk7IFsgXCIkd29ya1wiIC1ndCBcIiRkb25lXCIgXSJdXSwiYnVkZ2V0X3VzZCI6bnVsbCwibWF4X2N5Y2xlcyI6NTAsInN0ZWVyX25vdGVzIjpbXSwiYXBwcm92ZWRfYWN0aW9ucyI6W10sInJlc2VhcmNoX2l0ZW0iOm51bGwsInJlc2VhcmNoX2JyaWVmcyI6W10sInJlc2VhcmNoX2ZhaWx1cmVzIjpbXX0="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "3600s",
+        "heartbeatTimeout": "120s",
+        "workflowTaskCompletedEventId": "3",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "30s",
+          "maximumAttempts": 5,
+          "nonRetryableErrorTypes": [
+            "BudgetExceeded",
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-09-26T10:25:43.317Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCEL_REQUESTED",
+      "workflowExecutionCancelRequestedEventAttributes": {
+        "identity": "5635@cx6.local@"
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-09-26T10:25:43.317Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-09-26T10:25:43.317Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "7",
+        "identity": "lha-go:5635@cx6.local",
+        "historySizeBytes": "1961"
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-09-26T10:25:43.319Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "7",
+        "identity": "lha-go:5635@cx6.local",
+        "binaryChecksum": "a8f90934299b553b5ce85b9a08a980ba",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-09-26T10:25:43.319Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_CANCEL_REQUESTED",
+      "activityTaskCancelRequestedEventAttributes": {
+        "scheduledEventId": "5",
+        "workflowTaskCompletedEventId": "8"
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-09-26T10:25:43.328Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_CANCELED",
+      "activityTaskCanceledEventAttributes": {
+        "scheduledEventId": "5",
+        "startedEventId": "-1"
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-09-26T10:25:43.328Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-09-26T10:25:43.328Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "12",
+        "identity": "lha-go:5635@cx6.local",
+        "historySizeBytes": "2226"
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-09-26T10:25:43.330Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "12",
+        "identity": "lha-go:5635@cx6.local",
+        "binaryChecksum": "a8f90934299b553b5ce85b9a08a980ba",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-09-26T10:25:43.330Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "15",
+        "activityType": {
+          "name": "record_mission_status"
+        },
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiY2FuY2VsX2N5Y2xlIiwid29ya2RpciI6Ii92YXIvZm9sZGVycy95Yy92bWJmcGg0ZDN2OTkxNHg5ZnhmZjgzNGMwMDAwZ24vVC9UZXN0UmVjb3JkSGlzdG9yaWVzY2FuY2VsX2N5Y2xlNDUzMjQ1MTgwLzAwNCIsInN0YXR1cyI6IkFCT1JURUQiLCJoZWFkX3NoYSI6bnVsbCwicmVhc29uIjoibWlzc2lvbiBjYW5jZWxsZWQifQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "120s",
+        "scheduleToStartTimeout": "120s",
+        "startToCloseTimeout": "30s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "13",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "5s",
+          "maximumAttempts": 3,
+          "nonRetryableErrorTypes": [
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-09-26T10:25:43.330Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "15",
+        "identity": "lha-go:5635@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-09-26T10:25:43.331Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "dHJ1ZQ=="
+            }
+          ]
+        },
+        "scheduledEventId": "15",
+        "startedEventId": "16",
+        "identity": "lha-go:5635@cx6.local"
+      }
+    },
+    {
+      "eventId": "18",
+      "eventTime": "2026-09-26T10:25:43.331Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-cancel_cycle-1790418342078649000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "19",
+      "eventTime": "2026-09-26T10:25:43.331Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "18",
+        "identity": "lha-go:5635@cx6.local",
+        "historySizeBytes": "2952"
+      }
+    },
+    {
+      "eventId": "20",
+      "eventTime": "2026-09-26T10:25:43.332Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "18",
+        "identity": "lha-go:5635@cx6.local",
+        "binaryChecksum": "a8f90934299b553b5ce85b9a08a980ba",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "21",
+      "eventTime": "2026-09-26T10:25:43.332Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_CANCELED",
+      "workflowExecutionCanceledEventAttributes": {
+        "workflowTaskCompletedEventId": "19",
+        "details": {}
+      }
+    }
+  ]
+}

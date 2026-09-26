@@ -1,0 +1,1077 @@
+{
+  "events": [
+    {
+      "eventId": "1",
+      "eventTime": "2026-09-26T10:26:20.038Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_STARTED",
+      "workflowExecutionStartedEventAttributes": {
+        "workflowType": {
+          "name": "MissionWorkflow"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwibWF4X2N5Y2xlcyI6NTAsImN5Y2xlc19iZWZvcmVfY2FuIjoyMDAsImNoZWNrX2NvbW1hbmRzIjpbWyJzaCIsIi1jIiwiZG9uZT0kKGdyZXAgLW8gJ1wic3RhdHVzXCI6ICpcImRvbmVcIicgLmxoYS9jaGVja2xpc3QuanNvbiB8IHdjIC1sKTsgd29yaz0kKGxzIHdvcmsvKi50eHQgMlx1MDAzZS9kZXYvbnVsbCB8IHdjIC1sKTsgWyBcIiR3b3JrXCIgLWd0IFwiJGRvbmVcIiBdIl1dLCJidWRnZXRfdXNkIjpudWxsLCJwYXJrX2luaXRpYWxfc2Vjb25kcyI6MzAsInBhcmtfbWF4X3NlY29uZHMiOjYwMCwiZGVhZGxvY2tfZ2F0ZV9zZWNvbmRzIjozNjAwLCJhcHByb3ZhbF90aW1lb3V0X3NlY29uZHMiOjg2NDAwLCJnYXRlX2VzY2FsYXRpb25fc2Vjb25kcyI6WzkwMCwyNzAwLDE0NDAwLDQzMjAwXSwiZGVhZGxvY2tfZ2F0ZV9kZWZhdWx0IjoiYWJvcnQiLCJpbXBvc3NpYmxlX2FmdGVyX2ZhaWx1cmVzIjozLCJjeWNsZV9wYXVzZV9zZWNvbmRzIjowLCJyZXN1bWVfYXQiOjAsInJlc2VhcmNoX3Blcl9pdGVtIjowLCJyZXZpZXciOmZhbHNlLCJtYXhfcGFyYWxsZWwiOjAsInN0YXRlIjpudWxsfQ=="
+            }
+          ]
+        },
+        "workflowExecutionTimeout": "315360000s",
+        "workflowRunTimeout": "315360000s",
+        "workflowTaskTimeout": "10s",
+        "originalExecutionRunId": "2f2018b5-ef28-42a3-8491-26f49e08afe9",
+        "identity": "9378@cx6.local@",
+        "firstExecutionRunId": "2f2018b5-ef28-42a3-8491-26f49e08afe9",
+        "attempt": 1,
+        "firstWorkflowTaskBackoff": "0s",
+        "header": {}
+      }
+    },
+    {
+      "eventId": "2",
+      "eventTime": "2026-09-26T10:26:20.038Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "3",
+      "eventTime": "2026-09-26T10:26:20.042Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "1001"
+      }
+    },
+    {
+      "eventId": "4",
+      "eventTime": "2026-09-26T10:26:20.081Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "2",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {
+          "langUsedFlags": [
+            3
+          ],
+          "sdkName": "temporal-go",
+          "sdkVersion": "1.49.0"
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "5",
+      "eventTime": "2026-09-26T10:26:20.081Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "5",
+        "activityType": {
+          "name": "run_agent_cycle"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwiY3ljbGVfaWQiOiJjMSIsImNoZWNrX2NvbW1hbmRzIjpbWyJzaCIsIi1jIiwiZG9uZT0kKGdyZXAgLW8gJ1wic3RhdHVzXCI6ICpcImRvbmVcIicgLmxoYS9jaGVja2xpc3QuanNvbiB8IHdjIC1sKTsgd29yaz0kKGxzIHdvcmsvKi50eHQgMlx1MDAzZS9kZXYvbnVsbCB8IHdjIC1sKTsgWyBcIiR3b3JrXCIgLWd0IFwiJGRvbmVcIiBdIl1dLCJidWRnZXRfdXNkIjpudWxsLCJtYXhfY3ljbGVzIjo1MCwic3RlZXJfbm90ZXMiOltdLCJhcHByb3ZlZF9hY3Rpb25zIjpbXSwicmVzZWFyY2hfaXRlbSI6bnVsbCwicmVzZWFyY2hfYnJpZWZzIjpbXSwicmVzZWFyY2hfZmFpbHVyZXMiOltdfQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "3600s",
+        "heartbeatTimeout": "120s",
+        "workflowTaskCompletedEventId": "3",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "30s",
+          "maximumAttempts": 5,
+          "nonRetryableErrorTypes": [
+            "BudgetExceeded",
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "6",
+      "eventTime": "2026-09-26T10:26:20.081Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 2
+      }
+    },
+    {
+      "eventId": "7",
+      "eventTime": "2026-09-26T10:26:20.082Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "6",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "1890"
+      }
+    },
+    {
+      "eventId": "8",
+      "eventTime": "2026-09-26T10:26:20.090Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "6",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "9",
+      "eventTime": "2026-09-26T10:26:20.090Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "10",
+      "eventTime": "2026-09-26T10:26:20.091Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "9",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "2089"
+      }
+    },
+    {
+      "eventId": "11",
+      "eventTime": "2026-09-26T10:26:20.096Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "9",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "12",
+      "eventTime": "2026-09-26T10:26:20.082Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "5",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "13",
+      "eventTime": "2026-09-26T10:26:23.252Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJpdGVtX2lkIjoiMDEiLCJhZHZhbmNlZCI6dHJ1ZSwiaGVhZF9zaGEiOiI5ZWU3NzY1OWVhNTU3YTAwMDhiM2M4M2VhY2Q3NGJhZmRhNmZhNzgzIiwiaXNfY29tcGxldGUiOmZhbHNlLCJpdGVtc19kb25lIjowLCJpdGVtc190b3RhbCI6MSwibm90ZSI6InZlcmRpY3Q9ZmFpbGVkIHRvb2xzPTAgdHVybnM9NCIsInZlcmRpY3QiOiJmYWlsZWQiLCJpc19kZWFkbG9ja2VkIjpmYWxzZSwiaXRlbV9ibG9ja2VkIjpmYWxzZSwicmVhc29uIjoiLSBzaCBGQUlMRUQgKGV4aXQgMSk6XG4obm8gb3V0cHV0KSIsInNwZW50X3VzZCI6MCwiaXRlbV9zcGxpdCI6ZmFsc2UsInBlbmRpbmdfYXBwcm92YWxzIjpbXSwidXNlZF9hcHByb3ZhbHMiOltdLCJiYXNlX3NoYSI6Ijc0ODE5MDlkYzVmOWFiMGNkMWEyNjU3NGUyMjYyOTAwNjAxYTI3NmMifQ=="
+            }
+          ]
+        },
+        "scheduledEventId": "5",
+        "startedEventId": "12",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "14",
+      "eventTime": "2026-09-26T10:26:23.252Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "15",
+      "eventTime": "2026-09-26T10:26:23.253Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "2831"
+      }
+    },
+    {
+      "eventId": "16",
+      "eventTime": "2026-09-26T10:26:23.263Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "14",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "17",
+      "eventTime": "2026-09-26T10:26:23.263Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "17",
+        "activityType": {
+          "name": "run_agent_cycle"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwiY3ljbGVfaWQiOiJjMiIsImNoZWNrX2NvbW1hbmRzIjpbWyJzaCIsIi1jIiwiZG9uZT0kKGdyZXAgLW8gJ1wic3RhdHVzXCI6ICpcImRvbmVcIicgLmxoYS9jaGVja2xpc3QuanNvbiB8IHdjIC1sKTsgd29yaz0kKGxzIHdvcmsvKi50eHQgMlx1MDAzZS9kZXYvbnVsbCB8IHdjIC1sKTsgWyBcIiR3b3JrXCIgLWd0IFwiJGRvbmVcIiBdIl1dLCJidWRnZXRfdXNkIjpudWxsLCJtYXhfY3ljbGVzIjo1MCwic3RlZXJfbm90ZXMiOltdLCJhcHByb3ZlZF9hY3Rpb25zIjpbXSwicmVzZWFyY2hfaXRlbSI6bnVsbCwicmVzZWFyY2hfYnJpZWZzIjpbXSwicmVzZWFyY2hfZmFpbHVyZXMiOltdfQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "3600s",
+        "heartbeatTimeout": "120s",
+        "workflowTaskCompletedEventId": "15",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "30s",
+          "maximumAttempts": 5,
+          "nonRetryableErrorTypes": [
+            "BudgetExceeded",
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "18",
+      "eventTime": "2026-09-26T10:26:23.264Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "17",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "19",
+      "eventTime": "2026-09-26T10:26:25.700Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJpdGVtX2lkIjoiMDEiLCJhZHZhbmNlZCI6dHJ1ZSwiaGVhZF9zaGEiOiIzOTY4NzQ1YjZjNGQ3ODAyYWVkZmQxMmY4NDM1Y2ZjYzgzN2QxN2JhIiwiaXNfY29tcGxldGUiOmZhbHNlLCJpdGVtc19kb25lIjowLCJpdGVtc190b3RhbCI6MSwibm90ZSI6InZlcmRpY3Q9ZmFpbGVkIHRvb2xzPTAgdHVybnM9NCIsInZlcmRpY3QiOiJmYWlsZWQiLCJpc19kZWFkbG9ja2VkIjpmYWxzZSwiaXRlbV9ibG9ja2VkIjpmYWxzZSwicmVhc29uIjoiLSBzaCBGQUlMRUQgKGV4aXQgMSk6XG4obm8gb3V0cHV0KSIsInNwZW50X3VzZCI6MCwiaXRlbV9zcGxpdCI6ZmFsc2UsInBlbmRpbmdfYXBwcm92YWxzIjpbXSwidXNlZF9hcHByb3ZhbHMiOltdLCJiYXNlX3NoYSI6IjllZTc3NjU5ZWE1NTdhMDAwOGIzYzgzZWFjZDc0YmFmZGE2ZmE3ODMifQ=="
+            }
+          ]
+        },
+        "scheduledEventId": "17",
+        "startedEventId": "18",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "20",
+      "eventTime": "2026-09-26T10:26:25.700Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "21",
+      "eventTime": "2026-09-26T10:26:25.700Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "20",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "4242"
+      }
+    },
+    {
+      "eventId": "22",
+      "eventTime": "2026-09-26T10:26:25.703Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "20",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "23",
+      "eventTime": "2026-09-26T10:26:25.703Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "23",
+        "activityType": {
+          "name": "run_agent_cycle"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwiY3ljbGVfaWQiOiJjMyIsImNoZWNrX2NvbW1hbmRzIjpbWyJzaCIsIi1jIiwiZG9uZT0kKGdyZXAgLW8gJ1wic3RhdHVzXCI6ICpcImRvbmVcIicgLmxoYS9jaGVja2xpc3QuanNvbiB8IHdjIC1sKTsgd29yaz0kKGxzIHdvcmsvKi50eHQgMlx1MDAzZS9kZXYvbnVsbCB8IHdjIC1sKTsgWyBcIiR3b3JrXCIgLWd0IFwiJGRvbmVcIiBdIl1dLCJidWRnZXRfdXNkIjpudWxsLCJtYXhfY3ljbGVzIjo1MCwic3RlZXJfbm90ZXMiOltdLCJhcHByb3ZlZF9hY3Rpb25zIjpbXSwicmVzZWFyY2hfaXRlbSI6bnVsbCwicmVzZWFyY2hfYnJpZWZzIjpbXSwicmVzZWFyY2hfZmFpbHVyZXMiOltdfQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "3600s",
+        "heartbeatTimeout": "120s",
+        "workflowTaskCompletedEventId": "21",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "30s",
+          "maximumAttempts": 5,
+          "nonRetryableErrorTypes": [
+            "BudgetExceeded",
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "24",
+      "eventTime": "2026-09-26T10:26:25.703Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "23",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "25",
+      "eventTime": "2026-09-26T10:26:28.191Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJpdGVtX2lkIjoiMDEiLCJhZHZhbmNlZCI6dHJ1ZSwiaGVhZF9zaGEiOiJiNGI3ZDQ2YTUxODJmMGVhOGQyNjY4YTAwYzRhY2IyZDhkZDQzNGYwIiwiaXNfY29tcGxldGUiOmZhbHNlLCJpdGVtc19kb25lIjowLCJpdGVtc190b3RhbCI6MSwibm90ZSI6InZlcmRpY3Q9ZmFpbGVkIHRvb2xzPTAgdHVybnM9NCIsInZlcmRpY3QiOiJmYWlsZWQiLCJpc19kZWFkbG9ja2VkIjp0cnVlLCJpdGVtX2Jsb2NrZWQiOnRydWUsInJlYXNvbiI6ImJsb2NrZWQ6IDAxIiwic3BlbnRfdXNkIjowLCJpdGVtX3NwbGl0IjpmYWxzZSwicGVuZGluZ19hcHByb3ZhbHMiOltdLCJ1c2VkX2FwcHJvdmFscyI6W10sImJhc2Vfc2hhIjoiMzk2ODc0NWI2YzRkNzgwMmFlZGZkMTJmODQzNWNmY2M4MzdkMTdiYSJ9"
+            }
+          ]
+        },
+        "scheduledEventId": "23",
+        "startedEventId": "24",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "26",
+      "eventTime": "2026-09-26T10:26:28.191Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "27",
+      "eventTime": "2026-09-26T10:26:28.192Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "26",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "5630"
+      }
+    },
+    {
+      "eventId": "28",
+      "eventTime": "2026-09-26T10:26:28.199Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "26",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "29",
+      "eventTime": "2026-09-26T10:26:28.199Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "29",
+        "activityType": {
+          "name": "record_mission_status"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0Iiwic3RhdHVzIjoiV0FJVElOR19PTl9IVU1BTiIsImhlYWRfc2hhIjoiYjRiN2Q0NmE1MTgyZjBlYThkMjY2OGEwMGM0YWNiMmQ4ZGQ0MzRmMCIsInJlYXNvbiI6ImRlYWRsb2NrIGdhdGUgZGVhZGxvY2stMyJ9"
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "120s",
+        "scheduleToStartTimeout": "120s",
+        "startToCloseTimeout": "30s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "27",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "5s",
+          "maximumAttempts": 3,
+          "nonRetryableErrorTypes": [
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "30",
+      "eventTime": "2026-09-26T10:26:28.199Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "29",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "31",
+      "eventTime": "2026-09-26T10:26:28.202Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "dHJ1ZQ=="
+            }
+          ]
+        },
+        "scheduledEventId": "29",
+        "startedEventId": "30",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "32",
+      "eventTime": "2026-09-26T10:26:28.202Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "33",
+      "eventTime": "2026-09-26T10:26:28.202Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "32",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "6389"
+      }
+    },
+    {
+      "eventId": "34",
+      "eventTime": "2026-09-26T10:26:28.204Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "32",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "35",
+      "eventTime": "2026-09-26T10:26:28.204Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "35",
+        "activityType": {
+          "name": "notify_gate"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwiZ2F0ZV9pZCI6ImRlYWRsb2NrLTMiLCJraW5kIjoiZGVhZGxvY2siLCJldmVudCI6Im9wZW5lZCIsInF1ZXN0aW9uIjoiTWlzc2lvbiBkZWFkbG9jayBpcyBkZWFkbG9ja2VkIChibG9ja2VkOiAwMSkuIFJldHJ5IHRoZSBibG9ja2VkIGl0ZW1zLCBhYm9ydCwgb3IgZGVjbGFyZSB0aGUgbWlzc2lvbiBpbXBvc3NpYmxlPyBSZWNvbW1lbmRlZDogaW1wb3NzaWJsZSAoaXRlbSAwMSBmYWlsZWQgMyB0aW1lcyBpbiBhIHJvdykuIiwib3B0aW9ucyI6WyJyZXRyeSIsImFib3J0IiwiaW1wb3NzaWJsZSJdLCJkZWZhdWx0X2FjdGlvbiI6ImFib3J0IiwiZGVjaXNpb24iOiIiLCJzdGVwIjowLCJkZWFkbGluZSI6IjIwMjYtMDktMjZUMTE6MjY6MjgrMDA6MDAiLCJyZXF1ZXN0IjpudWxsLCJhdCI6IjIwMjYtMDktMjZUMTA6MjY6MjgrMDA6MDAifQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "180s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "33",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "100s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "36",
+      "eventTime": "2026-09-26T10:26:28.204Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "35",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "37",
+      "eventTime": "2026-09-26T10:26:29.078Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJyZWNvcmRlZCI6dHJ1ZSwid2ViaG9vayI6Im9mZiIsInN0b3JlZCI6ZmFsc2V9"
+            }
+          ]
+        },
+        "scheduledEventId": "35",
+        "startedEventId": "36",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "38",
+      "eventTime": "2026-09-26T10:26:29.078Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "39",
+      "eventTime": "2026-09-26T10:26:29.078Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "38",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "7472"
+      }
+    },
+    {
+      "eventId": "40",
+      "eventTime": "2026-09-26T10:26:29.081Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "38",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "41",
+      "eventTime": "2026-09-26T10:26:29.081Z",
+      "eventType": "EVENT_TYPE_TIMER_STARTED",
+      "userMetadata": {
+        "summary": {
+          "metadata": {
+            "encoding": "anNvbi9wbGFpbg=="
+          },
+          "data": "IkF3YWl0V2l0aFRpbWVvdXQi"
+        }
+      },
+      "timerStartedEventAttributes": {
+        "timerId": "41",
+        "startToFireTimeout": "899.114s",
+        "workflowTaskCompletedEventId": "39"
+      }
+    },
+    {
+      "eventId": "42",
+      "eventTime": "2026-09-26T10:26:29.310Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_SIGNALED",
+      "workflowExecutionSignaledEventAttributes": {
+        "signalName": "human_decision_v1",
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "ImltcG9zc2libGUi"
+            }
+          ]
+        },
+        "identity": "9378@cx6.local@"
+      }
+    },
+    {
+      "eventId": "43",
+      "eventTime": "2026-09-26T10:26:29.310Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "44",
+      "eventTime": "2026-09-26T10:26:29.311Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "43",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "7856"
+      }
+    },
+    {
+      "eventId": "45",
+      "eventTime": "2026-09-26T10:26:29.314Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "43",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {
+          "langUsedFlags": [
+            5,
+            8
+          ]
+        },
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "46",
+      "eventTime": "2026-09-26T10:26:29.314Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "46",
+        "activityType": {
+          "name": "notify_gate"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwiZ2F0ZV9pZCI6ImRlYWRsb2NrLTMiLCJraW5kIjoiZGVhZGxvY2siLCJldmVudCI6InJlc29sdmVkIiwicXVlc3Rpb24iOiJNaXNzaW9uIGRlYWRsb2NrIGlzIGRlYWRsb2NrZWQgKGJsb2NrZWQ6IDAxKS4gUmV0cnkgdGhlIGJsb2NrZWQgaXRlbXMsIGFib3J0LCBvciBkZWNsYXJlIHRoZSBtaXNzaW9uIGltcG9zc2libGU/IFJlY29tbWVuZGVkOiBpbXBvc3NpYmxlIChpdGVtIDAxIGZhaWxlZCAzIHRpbWVzIGluIGEgcm93KS4iLCJvcHRpb25zIjpbInJldHJ5IiwiYWJvcnQiLCJpbXBvc3NpYmxlIl0sImRlZmF1bHRfYWN0aW9uIjoiYWJvcnQiLCJkZWNpc2lvbiI6ImltcG9zc2libGUiLCJzdGVwIjowLCJkZWFkbGluZSI6IjIwMjYtMDktMjZUMTE6MjY6MjgrMDA6MDAiLCJyZXF1ZXN0IjpudWxsLCJhdCI6IjIwMjYtMDktMjZUMTA6MjY6MjkrMDA6MDAifQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "180s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "44",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "100s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "47",
+      "eventTime": "2026-09-26T10:26:29.314Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "46",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "48",
+      "eventTime": "2026-09-26T10:26:29.963Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJyZWNvcmRlZCI6dHJ1ZSwid2ViaG9vayI6Im9mZiIsInN0b3JlZCI6ZmFsc2V9"
+            }
+          ]
+        },
+        "scheduledEventId": "46",
+        "startedEventId": "47",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "49",
+      "eventTime": "2026-09-26T10:26:29.963Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "50",
+      "eventTime": "2026-09-26T10:26:29.963Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "49",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "8961"
+      }
+    },
+    {
+      "eventId": "51",
+      "eventTime": "2026-09-26T10:26:29.967Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "49",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "52",
+      "eventTime": "2026-09-26T10:26:29.967Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "52",
+        "activityType": {
+          "name": "declare_impossible"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0IiwiY3ljbGVfaWQiOiJpbXBvc3NpYmxlLTMiLCJyZWFzb24iOiJkZWNsYXJlZCBpbXBvc3NpYmxlIGJ5IGEgaHVtYW46IGJsb2NrZWQ6IDAxIn0="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "315360000s",
+        "scheduleToStartTimeout": "315360000s",
+        "startToCloseTimeout": "300s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "50",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "100s",
+          "maximumAttempts": 3
+        }
+      }
+    },
+    {
+      "eventId": "53",
+      "eventTime": "2026-09-26T10:26:29.969Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "52",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "54",
+      "eventTime": "2026-09-26T10:26:30.980Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJpdGVtX2lkIjpudWxsLCJhZHZhbmNlZCI6ZmFsc2UsImhlYWRfc2hhIjoiMjY3NDBkNzJmZmNjZjk5ZGYwMzYzMzY0ZTI0ZDQ0ZGU0NjFiMDQwOSIsImlzX2NvbXBsZXRlIjpmYWxzZSwiaXRlbXNfZG9uZSI6MCwiaXRlbXNfdG90YWwiOjEsIm5vdGUiOiJkZWNsYXJlZCBpbXBvc3NpYmxlIiwidmVyZGljdCI6IiIsImlzX2RlYWRsb2NrZWQiOnRydWUsIml0ZW1fYmxvY2tlZCI6ZmFsc2UsInJlYXNvbiI6ImRlY2xhcmVkIGltcG9zc2libGUgYnkgYSBodW1hbjogYmxvY2tlZDogMDEiLCJzcGVudF91c2QiOjAsIml0ZW1fc3BsaXQiOmZhbHNlLCJwZW5kaW5nX2FwcHJvdmFscyI6W10sInVzZWRfYXBwcm92YWxzIjpbXSwiYmFzZV9zaGEiOiIifQ=="
+            }
+          ]
+        },
+        "scheduledEventId": "52",
+        "startedEventId": "53",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "55",
+      "eventTime": "2026-09-26T10:26:30.980Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "56",
+      "eventTime": "2026-09-26T10:26:30.980Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "55",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "10042"
+      }
+    },
+    {
+      "eventId": "57",
+      "eventTime": "2026-09-26T10:26:30.983Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "55",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "58",
+      "eventTime": "2026-09-26T10:26:30.983Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_SCHEDULED",
+      "activityTaskScheduledEventAttributes": {
+        "activityId": "58",
+        "activityType": {
+          "name": "record_mission_status"
+        },
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "header": {},
+        "input": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJ3b3JrZGlyIjoiL3Zhci9mb2xkZXJzL3ljL3ZtYmZwaDRkM3Y5OTE0eDlmeGZmODM0YzAwMDBnbi9UL1Rlc3RSZWNvcmRIaXN0b3JpZXNkZWFkbG9jazE1ODI5NDY0NjAvMDA0Iiwic3RhdHVzIjoiSU1QT1NTSUJMRSIsImhlYWRfc2hhIjoiMjY3NDBkNzJmZmNjZjk5ZGYwMzYzMzY0ZTI0ZDQ0ZGU0NjFiMDQwOSIsInJlYXNvbiI6ImltcG9zc2libGU6IGRlY2xhcmVkIGltcG9zc2libGUgYnkgYSBodW1hbjogYmxvY2tlZDogMDEifQ=="
+            }
+          ]
+        },
+        "scheduleToCloseTimeout": "120s",
+        "scheduleToStartTimeout": "120s",
+        "startToCloseTimeout": "30s",
+        "heartbeatTimeout": "0s",
+        "workflowTaskCompletedEventId": "56",
+        "retryPolicy": {
+          "initialInterval": "1s",
+          "backoffCoefficient": 2,
+          "maximumInterval": "5s",
+          "maximumAttempts": 3,
+          "nonRetryableErrorTypes": [
+            "MissionConfigError"
+          ]
+        }
+      }
+    },
+    {
+      "eventId": "59",
+      "eventTime": "2026-09-26T10:26:30.983Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_STARTED",
+      "activityTaskStartedEventAttributes": {
+        "scheduledEventId": "58",
+        "identity": "lha-go:9378@cx6.local",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "60",
+      "eventTime": "2026-09-26T10:26:30.984Z",
+      "eventType": "EVENT_TYPE_ACTIVITY_TASK_COMPLETED",
+      "activityTaskCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "dHJ1ZQ=="
+            }
+          ]
+        },
+        "scheduledEventId": "58",
+        "startedEventId": "59",
+        "identity": "lha-go:9378@cx6.local"
+      }
+    },
+    {
+      "eventId": "61",
+      "eventTime": "2026-09-26T10:26:30.984Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_SCHEDULED",
+      "workflowTaskScheduledEventAttributes": {
+        "taskQueue": {
+          "name": "lha-record-deadlock-1790418379169906000",
+          "kind": "TASK_QUEUE_KIND_NORMAL"
+        },
+        "startToCloseTimeout": "10s",
+        "attempt": 1
+      }
+    },
+    {
+      "eventId": "62",
+      "eventTime": "2026-09-26T10:26:30.984Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_STARTED",
+      "workflowTaskStartedEventAttributes": {
+        "scheduledEventId": "61",
+        "identity": "lha-go:9378@cx6.local",
+        "historySizeBytes": "10832"
+      }
+    },
+    {
+      "eventId": "63",
+      "eventTime": "2026-09-26T10:26:30.986Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_TASK_COMPLETED",
+      "workflowTaskCompletedEventAttributes": {
+        "scheduledEventId": "61",
+        "identity": "lha-go:9378@cx6.local",
+        "binaryChecksum": "672773399cf602d089e446bd9fd1e49b",
+        "sdkMetadata": {},
+        "meteringMetadata": {}
+      }
+    },
+    {
+      "eventId": "64",
+      "eventTime": "2026-09-26T10:26:30.986Z",
+      "eventType": "EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED",
+      "workflowExecutionCompletedEventAttributes": {
+        "result": {
+          "payloads": [
+            {
+              "metadata": {
+                "encoding": "anNvbi9wbGFpbg=="
+              },
+              "data": "eyJtaXNzaW9uX2lkIjoiZGVhZGxvY2siLCJjb21wbGV0ZWQiOmZhbHNlLCJjeWNsZXMiOjMsImhlYWRfc2hhIjoiMjY3NDBkNzJmZmNjZjk5ZGYwMzYzMzY0ZTI0ZDQ0ZGU0NjFiMDQwOSIsIml0ZW1zX2RvbmUiOjAsIml0ZW1zX3RvdGFsIjoxLCJvdXRjb21lIjoiaW1wb3NzaWJsZSIsInJlYXNvbiI6ImRlY2xhcmVkIGltcG9zc2libGUgYnkgYSBodW1hbjogYmxvY2tlZDogMDEiLCJzdGF0dXMiOiJJTVBPU1NJQkxFIn0="
+            }
+          ]
+        },
+        "workflowTaskCompletedEventId": "62"
+      }
+    }
+  ]
+}

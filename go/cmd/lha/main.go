@@ -1,9 +1,11 @@
 // Command lha is the Go implementation of the LHA command line (python: lha.cli.main), built on
-// the standard library flag package. It implements version, config, run-local, mission, orchestrate,
-// decisions, vendor and the mission-store commands (missions, costs, gates, db migrate) with the
-// Python CLI's options, output and exit codes; every other Python command
-// prints that it is not yet available and exits 2. The hidden egress-proxy command serves the
-// Docker sandbox's allow-list egress proxy.
+// the standard library flag package. It implements every command of the Python CLI — version,
+// config, run-local, mission, orchestrate, decisions, vendor, the mission-store commands
+// (missions, costs, gates, db migrate) and the durable commands (worker, mission-start,
+// mission-status, mission-approve, mission-snooze, mission-abort; durable.go) — with the Python
+// CLI's options, output and exit codes. mission-start's organization options (--research,
+// --review, --max-parallel >= 2) are not yet available and exit 2. The hidden egress-proxy
+// command serves the Docker sandbox's allow-list egress proxy.
 //
 //	go build -o lha ./cmd/lha
 package main
@@ -41,10 +43,8 @@ const Version = "0.1.0"
 const appHelp = "LHA — a durable, self-improving agent organization for long-horizon software missions."
 
 // notPorted are the Python commands the Go CLI does not implement yet.
-var notPorted = []string{
-	"worker", "mission-start", "mission-status", "mission-approve", "mission-abort",
-	"mission-snooze",
-}
+// Every Python command is implemented; mission-start refuses its organization options itself.
+var notPorted = []string{}
 
 var commandHelp = []struct{ name, help string }{
 	{"version", "Print the installed LHA version."},
@@ -58,6 +58,21 @@ var commandHelp = []struct{ name, help string }{
 	{"costs", costsHelp},
 	{"gates", gatesHelp},
 	{"db", dbHelp},
+	{"worker", "Run a Temporal worker that serves missions (requires a Temporal server)."},
+	{"mission-start", "Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."},
+	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action) and gate events."},
+	{"mission-approve", "Resolve an open human gate on a mission with a decision."},
+	{"mission-snooze", "Park a mission on a durable timer (SLEEPING) before its next cycle, or wake it."},
+	{"mission-abort", "Cancel a running mission workflow."},
+}
+
+func commandHelpFor(name string) string {
+	for _, c := range commandHelp {
+		if c.name == name {
+			return c.help
+		}
+	}
+	return ""
 }
 
 // exitError ends a command with an exit code (message "" prints nothing).
@@ -101,8 +116,10 @@ func (c *cli) usage(w io.Writer) {
 	for _, cmd := range commandHelp {
 		fmt.Fprintf(w, "  %-12s %s\n", cmd.name, cmd.help)
 	}
-	fmt.Fprintf(w, "\nNot yet available in the Go implementation (use the Python lha): %s\n",
-		strings.Join(notPorted, ", "))
+	if len(notPorted) > 0 {
+		fmt.Fprintf(w, "\nNot yet available in the Go implementation (use the Python lha): %s\n",
+			strings.Join(notPorted, ", "))
+	}
 }
 
 // run executes one command line and returns the process exit code.
@@ -139,6 +156,18 @@ func (c *cli) run(args []string) int {
 		err = c.gates(rest)
 	case "db":
 		err = c.db(rest)
+	case "worker":
+		err = c.worker(rest)
+	case "mission-start":
+		err = c.missionStart(rest)
+	case "mission-status":
+		err = c.missionStatus(rest)
+	case "mission-approve":
+		err = c.missionApprove(rest)
+	case "mission-snooze":
+		err = c.missionSnooze(rest)
+	case "mission-abort":
+		err = c.missionAbort(rest)
 	case "egress-proxy": // hidden: the Docker sandbox's allow-list egress proxy
 		err = c.egressProxy(rest)
 	default:

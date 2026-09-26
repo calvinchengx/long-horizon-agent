@@ -47,10 +47,20 @@ func (c *cli) parseInterleaved(fs *flag.FlagSet, args []string, maxPositional in
 	return positional, nil
 }
 
-// rangeError is click's IntRange usage error.
-func rangeError(command, option string, value, minimum int) error {
-	return &exitError{code: 2, message: fmt.Sprintf("Usage: lha %s [OPTIONS]\nTry 'lha %s --help' for help.\n\n"+
-		"Error: Invalid value for '--%s': %d is not in the range x>=%d.", command, command, option, value, minimum)}
+// rangeError is click's IntRange usage error: x>=lo, or lo<=x<=hi when hasHi. usage is the
+// command's usage line after "lha " (e.g. "mission-snooze [OPTIONS] MISSION_ID"); a bare command
+// name means "<command> [OPTIONS]".
+func rangeError(usage, option string, value, lo, hi int, hasHi bool) error {
+	command, _, _ := strings.Cut(usage, " ")
+	if command == usage {
+		usage += " [OPTIONS]"
+	}
+	bound := fmt.Sprintf("x>=%d", lo)
+	if hasHi {
+		bound = fmt.Sprintf("%d<=x<=%d", lo, hi)
+	}
+	return &exitError{code: 2, message: fmt.Sprintf("Usage: lha %s\nTry 'lha %s --help' for help.\n\n"+
+		"Error: Invalid value for '--%s': %d is not in the range %s.", usage, command, option, value, bound)}
 }
 
 // withStore opens the configured store (no workdir) for a read command.
@@ -95,7 +105,7 @@ func (c *cli) missions(args []string) error {
 		return err
 	}
 	if *limit < 1 {
-		return rangeError("missions", "limit", *limit, 1)
+		return rangeError("missions", "limit", *limit, 1, 0, false)
 	}
 	return c.withStore(func(store persistence.Store) error {
 		rows, err := store.ListMissions(c.ctx, *limit)
@@ -135,7 +145,7 @@ func (c *cli) costs(args []string) error {
 			"Error: Missing argument 'MISSION_ID'."}
 	}
 	if *limit < 0 {
-		return rangeError("costs", "limit", *limit, 0)
+		return rangeError("costs", "limit", *limit, 0, 0, false)
 	}
 	missionID := positional[0]
 	return c.withStore(func(store persistence.Store) error {
@@ -210,7 +220,7 @@ func (c *cli) gates(args []string) error {
 		return err
 	}
 	if *limit < 1 {
-		return rangeError("gates", "limit", *limit, 1)
+		return rangeError("gates", "limit", *limit, 1, 0, false)
 	}
 	missionID := ""
 	if len(positional) > 0 {

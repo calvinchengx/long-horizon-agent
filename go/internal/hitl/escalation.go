@@ -3,7 +3,8 @@
 // console y/N gate of `lha run-local --approve-interactive`).
 //
 // The durable gates (DeferredApprovalGate, the workflow's signal-based gate) belong to the
-// Temporal spine, which the Go implementation does not have.
+// Temporal spine, internal/durable, which uses the ladder here (pure and deterministic, so safe in
+// workflow code).
 package hitl
 
 import "sort"

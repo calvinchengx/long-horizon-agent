@@ -80,6 +80,8 @@ func writeJSONValue(b *bytes.Buffer, v any) {
 		b.WriteString(strconv.Itoa(x))
 	case bool:
 		b.WriteString(strconv.FormatBool(x))
+	case Payload: // a nested object (e.g. a durable gate notice's request)
+		b.Write(x.JSON())
 	case nil:
 		b.WriteString("null")
 	default:

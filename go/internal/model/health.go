@@ -55,7 +55,7 @@ func HTTPFailure(err error) ModelHealth {
 	}
 	var netErr net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &netErr) && netErr.Timeout()) {
-		return ModelHealth{false, "timed out (TimeoutException)"}
+		return ModelHealth{false, "timed out (" + timeoutTypeName(err) + ")"}
 	}
 	return ModelHealth{false, errorTypeName(err) + ": " + unwrapURLError(err).Error()}
 }
@@ -78,6 +78,21 @@ func errorTypeName(err error) string {
 		return "RuntimeError"
 	}
 	return "ValueError"
+}
+
+// timeoutTypeName names a timeout the way python's type(exc).__name__ does: httpx's
+// ConnectTimeout (the dial) or ReadTimeout (the request), or asyncio's TimeoutError when the
+// probe's overall bound (ProbeProvider) fired outside any request.
+func timeoutTypeName(err error) string {
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return "ConnectTimeout"
+	}
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		return "ReadTimeout"
+	}
+	return "TimeoutError"
 }
 
 // unwrapURLError drops net/http's `Get "<url>": ` prefix.
@@ -135,6 +150,9 @@ func ProbeModel(ctx context.Context, settings *config.Settings, timeout time.Dur
 	return ProbeProvider(ctx, provider, timeout)
 }
 
+// probeBodyLimit bounds a probe's response body (an Ollama tag list is a few KiB).
+const probeBodyLimit = 8 << 20
+
 // getOK GETs url with header, bounded by timeout, and returns the (2xx) body.
 func (c *httpClient) getOK(ctx context.Context, url string, header http.Header, timeout time.Duration) ([]byte, error) {
 	if c.closed.Load() {
@@ -154,7 +172,7 @@ func (c *httpClient) getOK(ctx context.Context, url string, header http.Header, 
 		return nil, err
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, probeBodyLimit))
 	if err != nil {
 		return nil, &transportError{op: "read response body", err: err}
 	}

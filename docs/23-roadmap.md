@@ -129,8 +129,9 @@ These limitations are in the current code:
   the implementers of one durable wave see each other's spend only after they finish, so the
   budget ceiling can be overshot by up to one wave's spend. A durable mission gets parallel waves
   only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
-- The Go CLI runs local single-agent missions only (no Temporal worker), and Temporal histories with
-  timers do not replay across the two languages (see [Go phase 2](#go-phase-2-temporal-not-started)).
+- The Go CLI runs single-agent missions only (locally and on its own Temporal worker), and
+  Temporal histories do not replay across the two languages, so each implementation's workers
+  need their own task queue (see [Go phase 2](#go-phase-2-temporal-single-agent-done)).
 - `lha orchestrate --resume` rebuilds the blackboard and reflections from committed events, so
   posts made after the interrupted run's last checkpoint are lost; the budget and cycle ceilings
   apply per invocation.
@@ -151,7 +152,7 @@ use the Python implementation for that feature
 
 | Component | Package | State |
 |---|---|---|
-| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. Settings of Python-only features (Temporal) are read but have no effect in Go runs |
+| `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. `LHA_SANDBOX=e2b` (a Python-only sandbox) is refused |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
 | Model backends: stub, OpenAI-compatible, Claude, Claude Code (`claude -p`), pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
@@ -162,18 +163,25 @@ use the Python implementation for that feature
 | Checklist import, `vendor` | `internal/checklistimport`, `internal/state/vendor` | present |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
 | Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` lead engine with its MCP bridge |
-| CLI | `cmd/lha` | present: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`; the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python) |
+| CLI | `cmd/lha` | present: every command (`version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `worker` and `mission-*`); the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python). `mission-start` refuses the durable organization's `--research`, `--review` and `--max-parallel` 2 or more |
 
 `go test ./...` passes for the present packages; the `go` CI job runs it with the race detector,
 plus `gofmt`, `go vet` and a Windows `go vet`.
 
-### Go phase 2: Temporal (not started)
+### Go phase 2: Temporal, single-agent (done)
 
-A Go worker serving `MissionWorkflow` and `SubAgentWorkflow` with the same names, payloads and
-ClaimCheck codec, and the `worker` and `mission-*` commands. Known limitation to resolve or
-document: the Go SDK shares one sequence counter between activities and timers while the Python
-SDK keeps separate ones, so histories with timers do not replay across languages
-([19-wire-contract.md](19-wire-contract.md#known-cross-language-limitation)).
+`go/internal/durable`: a Go worker serving `MissionWorkflow` and `SubAgentWorkflow` with the same
+names, payloads and ClaimCheck codec, and the `worker` and `mission-*` commands, for single-agent
+missions ([08-durable-execution.md](08-durable-execution.md#the-go-worker)). The Go SDK shares
+one sequence counter between activities and timers while the Python SDK keeps separate ones, so
+histories do not replay across languages: each worker marks its identity and refuses a task
+queue the other implementation polls
+([19-wire-contract.md](19-wire-contract.md#cross-language-workers)). The activities write the
+missions row, `hitl_gates` and every metered call's `cost_ledger` row (keyed
+`<cycle>@<attempt>#<n>`, as in Python) to the Go mission store, and the cycle runs with tiered
+memory and, when the mission has an ownership map, the Lead's ownership guard. Not yet: the
+durable organization (`plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`, a
+working `run_subagent`).
 
 ### Go phase 3: organization, memory, Postgres, observability (landed, except the durable rounds)
 
@@ -181,6 +189,6 @@ Landed: the reviewer, researchers and orchestrator (`lha orchestrate`, `internal
 file ownership enforcement, tickets, the blackboard, parallel implementers and the integrator
 (`internal/coordination`); tiered memory (`internal/memory`); the mission store (SQLite and
 Postgres, `internal/persistence`) with `missions`, `costs`, `gates` and `db migrate`; OTLP trace
-export (`internal/obs/tracing`); and every `spec/` file. The durable organization rounds wait for
-phase 2. Not planned: E2B, the `sentence_transformers` / `cross_encoder` extras and
+export (`internal/obs/tracing`); and every `spec/` file. The durable organization rounds (on the
+phase 2 worker) are not yet ported. Not planned: E2B, the `sentence_transformers` / `cross_encoder` extras and
 `VoyageEmbedder`.

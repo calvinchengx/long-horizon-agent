@@ -4,8 +4,10 @@ The durable path runs a mission as a Temporal workflow. The workflow body is a d
 scheduler. The real work (model calls, tool calls in the sandbox, verification, git commits)
 happens inside activities. Code: [`python/src/lha/durable/`](../python/src/lha/durable/).
 
-The Go port does not have a Temporal layer yet. Use the Python worker for everything on this
-page.
+The Go port ([`go/internal/durable/`](../go/internal/durable/)) implements the same workflow for
+single-agent missions, under the same names and payloads; the organization (research, review,
+parallel waves) and `run_subagent` are Python-only. The two implementations' workers must not
+share a task queue: see [the Go worker](#the-go-worker).
 
 ## Components
 
@@ -17,7 +19,7 @@ page.
 | Activities | [activities.py](../python/src/lha/durable/activities.py), [agent_activities.py](../python/src/lha/durable/agent_activities.py), [org_activities.py](../python/src/lha/durable/org_activities.py) | Non-deterministic work |
 | Types | [types.py](../python/src/lha/durable/types.py) | Plain dataclasses that cross the Temporal boundary |
 | Names | [signals.py](../python/src/lha/durable/signals.py) | Versioned signal and query names, status constants |
-| Worker | [worker.py](../python/src/lha/durable/worker.py) | `lha worker` / `python -m lha.durable.worker` |
+| Worker | [worker.py](../python/src/lha/durable/worker.py) | `lha worker` / `python -m lha.durable.worker`; identity `lha-py:<pid>@<host>`, refuses a task queue a Go worker polls ([the Go worker](#the-go-worker)) |
 | Codec | [codec.py](../python/src/lha/durable/codec.py), [data_converter.py](../python/src/lha/durable/data_converter.py) | ClaimCheck payload offload |
 
 The worker registers both workflows and these activities (Temporal activity type = function name):
@@ -542,3 +544,49 @@ the interpreter becomes `python3`) so the committed history is portable. The cod
 configure worker versioning or Build IDs. Pinning builds is an operational step outside the
 repository. See [Running on Temporal](14-running-on-temporal.md) and the
 [operations runbook](15-operations-runbook.md).
+
+## The Go worker
+
+[`go/internal/durable/`](../go/internal/durable/) is the Go port of this page for single-agent
+missions: `MissionWorkflow` and `SubAgentWorkflow` (`workflow.go`, `subagent.go`), the activities
+(`activities.go`, calling the Go agent loop, verifier, anchor and execution toolbox that
+`lha run-local` uses; `cmd/lha` passes its `openToolbox`), the payload types (`types.go`, the
+Python field names), the names (`names.go`), the ClaimCheck codec and object store (`codec.go`,
+`objectstore.go`), the spend journal, workdir lock and exactly-once check (`journal.go`) and the
+worker (`worker.go`). `lha worker`, `lha mission-start` and the other `mission-*` commands of the
+Go CLI use it.
+
+The workflow behaves as the latest Python code: every `workflow.patched` branch above is taken,
+none is recorded. The timeouts, retry policies, cycle ids, gate ids, gate-log lines, statuses and
+outcomes are Python's. A mission that opts into the organization fails with
+`MissionConfigError` ("not yet available in the Go implementation") and its row is written
+`ABORTED`; Go's `run_subagent` refuses the same way.
+
+What differs:
+
+- **One implementation per task queue.** Python and Go number timer and activity commands
+  differently, so a history recorded by one worker implementation never replays on the other.
+  Each `lha worker` marks its identity (`lha-py:` / `lha-go:`) and, before polling, refuses to
+  start (exit 2) when `DescribeTaskQueue` lists a poller of the other implementation on
+  `LHA_TASK_QUEUE` ([wire contract](19-wire-contract.md#cross-language-workers)). Clients are not
+  affected: either CLI drives missions served by either worker.
+- **Versioning.** A Go behaviour change after histories are recorded is guarded with
+  `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", workflow.DefaultVersion, <n>)` instead of
+  `workflow.patched`.
+- **Replay tests.** `go/internal/durable/replay_test.go` replays the Go histories in
+  [`testdata/histories/`](../go/internal/durable/testdata/histories/) (a completed mission, an
+  approval gate with an escalation reminder, `SLEEPING` with a snooze, a deadlock gate declared
+  impossible, a park with health probes, Continue-As-New, and a cancellation that waited for the
+  cycle), checks that each covers what it claims, and checks that a changed workflow fails replay.
+  `TestRecordHistories` records them against a Temporal server (`LHA_IT_TEMPORAL_ADDRESS`, or the
+  `temporal` CLI on `PATH`) and replays the fresh histories; `LHA_RECORD_HISTORIES=1` rewrites the
+  committed ones.
+- **Mission store and memory.** The activities write the mission row, `hitl_gates` events and
+  cost-ledger rows to the Go mission store (`durable.DefaultStoreOpener`, over
+  `go/internal/persistence`): the cycle installs a ledger hook on its meter, so each metered call
+  is written as it happens under Python's `<cycle>@<attempt>#<n>` key. The cycle's lead gets the
+  tiered memory plane over the same store, and when the mission has an ownership map its
+  dispatcher sits behind the Lead's `OwnershipGuard` (python: `lead_guard`).
+- The workflow unit tests (`spine_test.go`, `gates_test.go`, `row_test.go`) mirror
+  `tests/durability` on the Go SDK's test environment, with the real activities, a scripted stub
+  model and a real gating check in the local sandbox.

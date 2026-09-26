@@ -5,8 +5,10 @@ LHA has two implementations of the same system: Python in [`python/`](../python/
 The Go CLI runs missions locally in the local or Docker sandbox: single-agent (`lha run-local`,
 `lha mission`) and the multi-agent organization (`lha orchestrate`, including `--resume`), with
 the built-in turn loop or the `claude_code` lead engine, the mission store, the persistent cost
-ledger and tiered memory. Everything durable (the Temporal worker and `mission-*` commands, and
-with them the durable organization rounds) and E2B are Python-only.
+ledger and tiered memory. It also runs single-agent missions durably on Temporal (`lha worker`,
+`lha mission-start` and the other `mission-*` commands), writing the same mission store and
+ledger and with the same tiered memory. The durable organization rounds
+(`mission-start --research / --review / --max-parallel`) and E2B are Python-only.
 
 ## What the two share
 
@@ -15,7 +17,7 @@ process can observe:
 
 | Surface | Shared definition |
 |---|---|
-| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates` and `db migrate`. |
+| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has every command: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze` and `mission-abort` (`mission-start` refuses the durable organization's options). |
 | Settings | The `LHA_*` environment variables and `.env` file, with the same names and defaults ([`python/src/lha/config.py`](../python/src/lha/config.py), [`go/internal/config/`](../go/internal/config/)) |
 | Mission anchor | The `.lha/` files and their JSON shapes ([the mission anchor](06-mission-anchor.md)) |
 | Mission store | The SQLite file (same tables, migration ids and JSON columns) and the Postgres schema in [`db/migrations/`](../db/migrations/), with the same `schema_migrations` bookkeeping |
@@ -34,7 +36,9 @@ The Temporal names the Python worker registers are:
 
 Payloads are the dataclasses in [`python/src/lha/durable/types.py`](../python/src/lha/durable/types.py),
 serialized by Temporal's default JSON converter plus a claim-check codec that moves large
-payloads to the object store.
+payloads to the object store. The Go worker ([`go/internal/durable/`](../go/internal/durable/))
+registers the same workflows and activities under the same names; its `run_subagent` refuses with
+`MissionConfigError` and it has no organization activities (see below).
 
 ## Wire compatibility
 
@@ -67,7 +71,7 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
 | `config` | `lha.config` | Committed: every Python setting, with the same names, defaults and validation; `lha config` output is byte-identical |
 | `spec` | conformance harness | Committed: runs every file in `spec/`, including `agent/prompts.json`, `agent/org.json`, `coordination/shared_paths.json` and `memory/` |
-| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, failover, retry, pricing) | Committed, including the `claude_code` backend (`claude -p`, the same argv, result parsing, errors and reported cost), `LHA_FALLBACK_MODELS` chains (same `backend:model[@in/out]` format, errors and per-member pricing) and the model health probe (`ProbeModel`) |
+| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, failover, retry, pricing, health probe) | Committed, including the `claude_code` backend (`claude -p`, the same argv, result parsing, errors and reported cost), `LHA_FALLBACK_MODELS` chains (same `backend:model[@in/out]` format, errors and per-member pricing) and the model health probe a parked durable mission uses (`ProbeModel`) |
 | `safety` | `lha.safety` (command classifier, egress policy with credential broker, Rule of Two) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
 | `obs` | `lha.obs` (events, redaction, OpenTelemetry) | Committed, including OTLP/HTTP trace export (`obs/tracing`: the same settings, span names and redacted attributes) |
 | `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, the ownership map (`.lha/ownership.json`: read, staged, written at initialization), anchor-only commits (`CommitAnchorUpdate`, for lease decisions) and `ReadEvents`; `state/vendor` is `lha vendor` (same layout and `MANIFEST.json` bytes) |
@@ -78,12 +82,12 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `agents` | `lha.agents.planner`, `replanner`, `roles`, `router`, `reviewer` (verdict parsing), `reflection` | Committed: Planner with file ownership, Replanner, the role chart, per-role model routing, review parsing, reflection |
 | `agents/org` | `lha.agents.orchestrator`, `waves`, `integrator`, `reviewer`, `team`, `subagent`, `specialists` | Committed: the sub-agent loop, research fan-out, the Reviewer, implementer waves in `.git/lha-worktrees`, the `BranchIntegrator` and the `Orchestrator` with `--resume`. Its run services (`DefaultServices`, python `open_run_services`) write the mission row, every role's calls to the persistent ledger and the terminal gate's events, and give the Lead tiered memory. Not the durable (Temporal) rounds |
 | `coordination` | `lha.coordination` (ownership, enforcement, leases, ticket, blackboard) | Committed: the ownership map and `OwnershipGuard` (same refusal messages), the git-layer check, the `LeaseBroker` (sharing Python's `.git/lha-cycle.lock` flock) and `request_lease`, tickets, the blackboard |
-| `cmd/lha` | `lha.cli.main` | Committed: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate` (and the hidden `egress-proxy`). The durable commands say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner (python: `lha.agent.assembly`) |
+| `cmd/lha` | `lha.cli.main` | Committed: every command — `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, the durable `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-abort` (and the hidden `egress-proxy`). `mission-start --research / --review / --max-parallel` 2 or more say they are not yet available and exit 2. `go/cmd/lha/wiring.go` links the execution layer into the runner and the worker's activities (python: `lha.agent.assembly`) |
+| `durable` | `lha.durable` (workflows, activities, types, signals, codec, worker, replay harness) | Committed for single-agent missions: `MissionWorkflow` (cycle loop, Continue-As-New, parking with health probes, SLEEPING, the deadlock and tool-approval gates with the escalation ladder, cancellation that waits for the cycle), `SubAgentWorkflow`, the activities, the ClaimCheck codec and the worker guard. The activities write the missions row, `hitl_gates` and every metered call's ledger row to the Go mission store (`DefaultStoreOpener`), and the cycle gets tiered memory and, with an ownership map, the Lead's `OwnershipGuard`, as Python's `_execute_cycle` does. Not the organization rounds or a working `run_subagent` |
 | `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox ([see below](#e2b-is-not-supported-in-go)) |
-| `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's; every gate event is written to `hitl_gates`. No `DeferredApprovalGate` (it belongs to the durable workflow) |
-| `persistence` | `lha.persistence` (store, SQLite, Postgres, tracking, services, `db migrate`) | Committed: one `Store` interface with a pure-Go SQLite backend and a pgx Postgres backend on Python's schemas, the fallback from Postgres to SQLite, monotonic terminal statuses, the idempotent cost ledger, `hitl_gates`, `MissionTracker`, `LedgerSink` on the `CostMeter`, and run services. No object store (it has its own port) |
-| `memory`, `ops` | `lha.memory`, `lha.ops.degradation` | Committed: episodic recall, BM25 + dense retrieval fused with RRF, skills, extractive and model consolidation, the hash and Ollama embedders (padded for pgvector), pgvector on Postgres, stored vectors on SQLite, and the degradation to BM25 + `git grep`. `sentence_transformers` and the `cross_encoder` reranker are Python-only extras: Go falls back exactly as Python does without the extra. No `VoyageEmbedder` (a Python library class no setting selects) |
-| durable worker | `lha.durable` | Not started in this tree (in progress on a separate branch) |
+| `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's; every gate event is written to `hitl_gates`. The durable `DeferredApprovalGate` is in `durable` |
+| `persistence` | `lha.persistence` (store, SQLite, Postgres, tracking, services, `db migrate`) | Committed: one `Store` interface with a pure-Go SQLite backend and a pgx Postgres backend on Python's schemas, the fallback from Postgres to SQLite, monotonic terminal statuses, the idempotent cost ledger, `hitl_gates`, `MissionTracker`, `LedgerSink` on the `CostMeter`, and run services. The durable object store is `durable/objectstore.go` |
+| `memory`, `ops` | `lha.memory`, `lha.ops` (degradation, lifecycle) | Committed: episodic recall, BM25 + dense retrieval fused with RRF, skills, extractive and model consolidation, the hash and Ollama embedders (padded for pgvector), pgvector on Postgres, stored vectors on SQLite, and the degradation to BM25 + `git grep`; the safe-park decision and mission lifecycle the durable workflow uses. `sentence_transformers` and the `cross_encoder` reranker are Python-only extras: Go falls back exactly as Python does without the extra. No `VoyageEmbedder` (a Python library class no setting selects) |
 
 What the Go CLI can do today:
 
@@ -122,11 +126,26 @@ What the Go CLI can do today:
   applies `db/migrations/`. Either implementation reads what the other wrote, and the parity
   tests compare the stores the two leave (ledger, mission row, memory tiers) as well.
 
+What the Go worker runs:
+
+- `lha worker` serves `MissionWorkflow` for single-agent missions on `LHA_TASK_QUEUE`: the cycle
+  loop on the real agent loop, parking on a degraded model, checkout or sandbox with health
+  probes, `SLEEPING` (scheduled start, pause between cycles, snooze), the tool-approval and
+  deadlock gates with the escalation ladder and the gate webhook, Continue-As-New, and
+  cancellation that waits for the cycle in flight. The same workdir lock, spend journal and
+  exactly-once checkpoint check as Python make a retried attempt safe. The activities write the
+  mission row, `hitl_gates` and every metered call's ledger row (keyed `<cycle>@<attempt>#<n>`)
+  to the mission store, and each cycle's lead gets tiered memory and, when the mission has an
+  ownership map, the ownership guard, as in Python.
+- `lha mission-start` plans (or imports) a checklist and starts a mission; `mission-status`,
+  `mission-approve`, `mission-snooze` and `mission-abort` work on missions served by either
+  implementation, with the same output and exit codes as Python.
+
 What remains Python-only:
 
-- The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
-  `mission-abort` and `mission-snooze` commands, and with them the durable multi-agent
-  organization rounds (a Go port of the worker is in progress on a separate branch).
+- The durable multi-agent organization: `mission-start --research / --review / --max-parallel`
+  2 or more are refused by the Go CLI, a mission that sets them fails on a Go worker, and
+  `run_subagent` is not available on a Go worker.
 - The E2B sandbox (E2B has no Go SDK; see below).
 - The `sentence_transformers` embedder and the `cross_encoder` reranker (Python extras): the Go
   memory plane falls back to lexical retrieval, and keeps fusion order, as Python does when the
@@ -146,27 +165,35 @@ symlinks, no `.git`/`.lha`, no writes through host symlinks, a 256 MiB cap, fail
 error or missing exit code). Without an SDK that contract could only be tested against a fake of
 our own making, not the real service, so the Go implementation does not offer it.
 
-## Known limitation: mixed Python/Go workers on one mission
+## One task queue per implementation
 
-The wire contract lets both implementations serve the same task queue, but sharing one
-*running* mission between them is not currently possible when the history contains timers.
+A mission started by either CLI can be queried, signalled and aborted by either CLI, but its
+workflow must be served by workers of ONE implementation, from its first workflow task to its
+last.
 
 Temporal replays a workflow by matching the commands the code issues against the recorded
 history, and those commands carry sequence-numbered IDs. Python's Temporal SDK numbers activity
 IDs and timer IDs with separate counters; the Go SDK uses one counter shared by both. A history
 recorded by one SDK therefore does not replay under the other once it contains a timer:
-`MissionWorkflow` creates timers when it parks (`workflow.sleep` in `DEGRADED_PARK`), while it
-is `SLEEPING` (scheduled start, cycle pause, snooze) and while it waits on a human gate with a
-timeout and escalation reminders. This was verified experimentally.
+`MissionWorkflow` creates timers when it parks (`DEGRADED_PARK`), while it is `SLEEPING`
+(scheduled start, cycle pause, snooze) and while it waits on a human gate with a timeout and
+escalation reminders.
 
-The design for missions that mix Python and Go workers is still open. Until it is settled, run
-each mission's workflow on workers of one implementation.
+So each implementation's workers poll their own task queue, and `lha worker` enforces it (fail
+closed): it marks its identity (`lha-py:<pid>@<host>` or `lha-go:<pid>@<host>`), asks Temporal
+who polls `LHA_TASK_QUEUE` (`DescribeTaskQueue`) before it starts, and exits 2 when a poller of
+the other implementation is listed, suggesting another `LHA_TASK_QUEUE`. Start a mission on the
+queue of the implementation that should run it (`LHA_TASK_QUEUE=... lha mission-start`). Temporal
+keeps listing a poller for a few minutes after it stops, so moving a queue from one
+implementation to the other means waiting that long or using a new queue name. Details:
+[wire contract](19-wire-contract.md#cross-language-workers).
 
 ## Recommendation
 
 | If you want to | Use |
 |---|---|
-| Run missions on Temporal | Python |
+| Run single-agent missions on Temporal, with persistence and memory | Go (`lha worker`, `lha mission-start`) or Python |
+| Run durable missions with the multi-agent organization (`--research`, `--review`, `--max-parallel`) | Python |
 | Run a mission locally from one static binary, with persistence and memory | Go (`lha run-local`, `lha mission`) or Python |
 | Run the multi-agent flow locally (`lha orchestrate`) | Go or Python |
 | Use `sentence_transformers` embeddings or a cross-encoder reranker | Python |
