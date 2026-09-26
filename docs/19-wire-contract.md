@@ -3,8 +3,9 @@
 What the Python and Go implementations must agree on so that one deployment can mix them: the
 same Temporal names and payloads, the same on-disk mission anchor, the same Postgres schema, and
 the same observable behaviour pinned by [`spec/`](../spec/). The Python implementation is the
-reference; every name below is taken from its code. The Go port implements the anchor and the
-spec'd behaviours, and its CLI runs local single-agent missions; it has no Temporal worker yet
+reference; every name below is taken from its code. The Go port implements the anchor, the
+mission store (SQLite and Postgres) and the spec'd behaviours, and its CLI runs local
+single-agent missions with persistence and memory; it has no Temporal worker yet
 (see [23-roadmap.md](23-roadmap.md)).
 
 ## Temporal
@@ -387,6 +388,30 @@ Every gate event is also written to `hitl_gates` (above); the anchor's `gate_*` 
 mission's cost summary and its most recent ledger rows, and `lha gates [mission id]` lists the
 recorded gates, from the same store.
 
+### The Go store
+
+[`go/internal/persistence`](../go/internal/persistence/) is the same store in Go: one `Store`
+interface, `SQLiteStore` (the pure-Go `modernc.org/sqlite` driver, no cgo) and `PostgresStore`
+(`pgx`), opened by `OpenStore` with the same backend choice, path resolution, relocation out of a
+checkout and fallback. The SQLite migration list, versions and scripts are Python's, and every
+JSON column is written as Python's `json.dumps` writes it (ASCII-escaped, `", "` / `": "`
+separators, sorted keys; vectors as Python float reprs), so the same writes leave byte-identical
+rows. Timestamps are ISO 8601 UTC with microseconds, as in Python. The ledger key is the same
+`sha256("cost\x1f<mission>\x1f<cycle>\x1f<prefix>#<n>")[:32]`, so a write replayed by the other
+implementation is still a no-op. On Postgres, `PostgresStore` needs the same five migrations,
+`lha db migrate` applies them with the same advisory lock and `schema_migrations` rows, and
+vectors are sent to pgvector as text literals (no client adapter).
+[`crossimpl_test.go`](../go/internal/persistence/crossimpl_test.go) writes a store in each
+implementation and reads it with the other, on SQLite always and on Postgres with
+`LHA_IT_POSTGRES_DSN`.
+
+For the durable port, the Go activities use the same API as the local runner:
+`persistence.OpenStore(ctx, settings, workdir)`, `Store.UpsertMission` (or
+`MissionTracker.SetStatus`, which logs instead of failing) for `record_mission_status`,
+`NewLedgerSink(store, missionID, keyPrefix).Attach(meter)` for the ledger, and
+`Store.RecordGateEvent` for `hitl_gates`; `persistence/services.Open` opens store, sink,
+tracker and memory together.
+
 ## Conformance cases (`spec/`)
 
 JSON files exported from the Python implementation by
@@ -404,6 +429,9 @@ JSON files exported from the Python implementation by
 | `coordination/shared_paths.json` | files only the lead engineer may write | yes | not yet |
 | `verify/harness_files.json` | test/harness files the agent may not weaken | yes | yes |
 | `model/pricing.json` | Claude price table and per-call cost | yes | yes |
+| `memory/hash_embedder.json` | the hash embedder's vectors and cosine similarity, exactly (CPython's compensated `sum`) | yes | yes |
+| `memory/retrieval.json` | BM25 ranking and scores, Reciprocal Rank Fusion order and scores | yes | yes |
+| `memory/recall.json` | episodic lines, search terms, and the memory blocks `MissionMemory` recalls for a fixture (hybrid on SQLite, lexical with `git grep`, a tight budget) | yes | yes |
 
 Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit/test_spec_conformance.py),
 Go in `go/internal/spec/conformance_*_test.go`. `shared_paths.json` waits for a Go port of the

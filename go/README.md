@@ -30,13 +30,23 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   prompt text, the `gate_reminder` / `tool_approval` events and the webhook body are
   byte-identical to Python's.
 - Model backends `stub`, `ollama`, `openai_compat` and `claude`.
+- The mission store (`internal/persistence`): a run writes its mission row and every metered
+  model call (the Planner's included) to the per-user SQLite file (`LHA_SQLITE_PATH`, pure-Go
+  driver) or Postgres (`LHA_POSTGRES_DSN`, falling back to SQLite unless
+  `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`), and terminal gates to `hitl_gates`. `missions`,
+  `costs`, `gates` and `db migrate` read and migrate it with Python's output. The tables, JSON
+  columns and ledger keys are Python's: either implementation reads what the other wrote.
+- Tiered memory (`internal/memory`): episodic recall, skills and hybrid retrieval (BM25 + the
+  `hash` or `ollama` embedder, pgvector on Postgres) in the lead's prompt, with consolidation and
+  the same degradation to BM25 + `git grep`; the memory block is byte-identical to Python's
+  (`spec/memory/`).
 
 ## Python-only
 
 The Temporal worker and the `worker`, `mission-start`, `mission-status`, `mission-approve`,
-`mission-abort`, `mission-snooze` and `missions` commands; `orchestrate` (the multi-agent
-organization); the mission store and persistent cost ledger (`costs`, `db`; Go runs write no
-mission rows) and tiered memory; `vendor`; the `claude_code` model backend and lead engine; the
+`mission-abort` and `mission-snooze` commands; `orchestrate` (the multi-agent organization);
+the `sentence_transformers` embedder and `cross_encoder` reranker (Python extras: Go degrades
+as Python does without them); `vendor`; the `claude_code` model backend and lead engine; the
 E2B sandbox; re-running failing checks (`LHA_FLAKY_RETRIES`); fallback model chains
 (`LHA_FALLBACK_MODELS`); OTLP trace export. The unported commands print that they are not
 available and exit 2.
@@ -56,7 +66,15 @@ gofmt -l . && go vet ./... && go test ./...
 Tests that compare with Python (`cmd/lha/e2e_test.go`, `internal/hitl`, `internal/state`) run
 it with `uv run --project ../python` and skip that half when `uv` is not on `PATH`. The Docker
 tests against a real daemon are opt-in, like Python's integration tests:
-`LHA_IT_DOCKER=1 go test ./internal/execution/ ./cmd/lha/ -run Docker`.
+`LHA_IT_DOCKER=1 go test ./internal/execution/ ./cmd/lha/ -run Docker`. The Postgres tests
+(the store, pgvector memory, a run on Postgres, and the store shared with Python) need an admin
+DSN of a Postgres with pgvector:
+
+```bash
+docker run -d --rm --name lha-pg -e POSTGRES_USER=lha -e POSTGRES_PASSWORD=lha -e POSTGRES_DB=lha \
+  -p 127.0.0.1:55432:5432 pgvector/pgvector:pg16
+LHA_IT_POSTGRES_DSN=postgresql://lha:lha@127.0.0.1:55432/lha go test ./internal/persistence/ ./internal/memory/ ./internal/agent/
+```
 
 ## Layout
 
@@ -64,6 +82,8 @@ Layout mirrors the Python packages: `internal/contracts` (shared types), `intern
 (`LHA_*` settings), `internal/spec` (the conformance runner), `internal/safety` (command
 classifier, egress policy, Rule of Two), `internal/model` (backends, pricing, retry, failover),
 `internal/state` (git ops, the mission anchor and the hash-chained decision log),
+`internal/persistence` (the mission store; `services` opens store, ledger sink, mission tracker
+and memory for a run), `internal/memory` (the memory plane), `internal/ops` (degradation rules),
 `internal/checklistimport`, `internal/verify` (verifier, harness integrity, witnesses, trusted
 runner), `internal/governor`, `internal/obs`, `internal/execution` (local and Docker sandboxes,
 the egress proxy, path containment, the allow-list dispatcher and the tools), `internal/hitl`

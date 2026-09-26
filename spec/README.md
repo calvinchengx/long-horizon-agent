@@ -24,6 +24,9 @@ the matching package is ported; it runs every file below.
 
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
 | `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
+| `memory/hash_embedder.json` | hash-embedder vectors and cosine similarity, exactly |
+| `memory/retrieval.json` | BM25 ranking and scores, Reciprocal Rank Fusion order and scores |
+| `memory/recall.json` | episodic lines, search terms, and the memory blocks recalled for a fixture ([`python/tests/unit/memory_spec_fixture.py`](../python/tests/unit/memory_spec_fixture.py)) |
 
 ## Changing behaviour
 

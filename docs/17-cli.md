@@ -7,8 +7,10 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 when one is configured ([16-observability.md](16-observability.md)).
 
 The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission` and `decisions`; the
-other commands print that they are not yet available in Go and exit 2; see
+ported. `go/cmd/lha` implements `version`, `config`, `run-local`, `mission`, `decisions`,
+`missions`, `costs`, `gates` and `db migrate` (Go needs no extra for `db migrate`: the Postgres
+driver is built in); the other commands print that they are not yet available in Go and exit 2;
+see
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
@@ -117,6 +119,8 @@ otherwise `../db/migrations`, so it works from the repository root and from `pyt
 exists it exits `2`. Prints `migrations applied: [...]` with the versions applied by
 this run (`[]` when up to date). Exits `2` if `LHA_POSTGRES_DSN` is unset or `psycopg` is missing
 (`uv sync --extra postgres`). Details in [19-wire-contract.md](19-wire-contract.md#postgres-schema).
+The Go `lha db migrate` applies the same files with the same `schema_migrations` bookkeeping and
+advisory lock, so either implementation sees what the other applied.
 
 ## `lha vendor`
 
@@ -256,6 +260,9 @@ also writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and t
 outcome. A row that reached `DONE`, `IMPOSSIBLE` or `ABORTED` keeps it (a late write from a
 cycle that was still finishing cannot turn it back to `RUNNING`). Those writes are best effort,
 so [`mission-status`](#lha-mission-status) is the live source.
+
+`missions`, `costs` and `gates` print the same lines in both implementations, and each reads a
+store the other wrote (`go/cmd/lha/store_cmds_test.go` compares their output on one store).
 
 ## `lha costs`
 
