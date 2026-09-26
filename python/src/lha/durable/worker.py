@@ -3,12 +3,23 @@
 Tests construct their own worker against an in-process time-skipping test server (no Docker, no
 API key); this module is the production entrypoint (``python -m lha.durable.worker``) and the
 helpers shared by both.
+
+Cross-language guard: the Python and Go Temporal SDKs number timers and activities differently,
+so a history recorded by one implementation's worker does not replay on the other's. Workers
+therefore mark their identity (``lha-py:<pid>@<host>`` here, ``lha-go:...`` in Go) and, before
+polling, refuse to start when the task queue is already polled by the other implementation
+(``check_task_queue_pollers``). Temporal lists a poller for a few minutes after it stopped.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import socket
 
+from temporalio.api.enums.v1 import TaskQueueType
+from temporalio.api.taskqueue.v1 import TaskQueue
+from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
 from temporalio.worker import Worker
 
@@ -45,11 +56,54 @@ async def connect_client(settings: Settings | None = None) -> Client:
     )
 
 
+#: Marks the workers of each implementation in Temporal's poller list.
+IDENTITY_MARKER = "lha-py"
+GO_IDENTITY_MARKER = "lha-go"
+
+
+def worker_identity() -> str:
+    """This process's worker identity: ``lha-py:<pid>@<host>`` (the SDK default is
+    ``<pid>@<host>``)."""
+    return f"{IDENTITY_MARKER}:{os.getpid()}@{socket.gethostname()}"
+
+
+class MixedWorkersError(RuntimeError):
+    """The task queue is already polled by the Go implementation's workers."""
+
+
+async def check_task_queue_pollers(client: Client, task_queue: str) -> None:
+    """Raise ``MixedWorkersError`` when a poller of ``task_queue`` (workflow or activity tasks)
+    is a Go lha worker (fail closed: one mission's history must stay with one implementation)."""
+    for kind in (
+        TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW,
+        TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY,
+    ):
+        resp = await client.workflow_service.describe_task_queue(
+            DescribeTaskQueueRequest(
+                namespace=client.namespace,
+                task_queue=TaskQueue(name=task_queue),
+                task_queue_type=kind,
+            )
+        )
+        for identity in sorted(p.identity for p in resp.pollers):
+            if GO_IDENTITY_MARKER in identity:
+                raise MixedWorkersError(
+                    f"task queue {task_queue!r} is already polled by a Go lha worker ({identity}). "
+                    "A Go and a Python worker cannot serve the same missions: their Temporal SDKs "
+                    "number timers and activities differently, so a history recorded by one does "
+                    "not replay on the other. Stop the Go workers (Temporal lists a poller for a "
+                    "few minutes after it stops), or start this worker on another queue, e.g. "
+                    f"LHA_TASK_QUEUE={task_queue}-py (and start its missions with the same "
+                    "LHA_TASK_QUEUE)"
+                )
+
+
 def build_worker(client: Client, task_queue: str) -> Worker:
     """Construct a Worker that hosts the mission + sub-agent workflows and their activities."""
     return Worker(
         client,
         task_queue=task_queue,
+        identity=worker_identity(),
         workflows=[MissionWorkflow, SubAgentWorkflow],
         activities=[
             run_agent_cycle,
@@ -87,6 +141,7 @@ async def run_worker() -> None:
     """Connect to the configured Temporal server and serve missions until cancelled."""
     settings = get_settings()
     client = await connect_client(settings)
+    await check_task_queue_pollers(client, settings.task_queue)
     worker = build_worker(client, settings.task_queue)
     async with worker:
         await asyncio.Event().wait()

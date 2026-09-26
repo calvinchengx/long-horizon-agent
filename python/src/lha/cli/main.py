@@ -625,9 +625,12 @@ def worker() -> None:
     """Run a Temporal worker that serves missions (requires a Temporal server)."""
     import asyncio
 
-    from lha.durable.worker import run_worker
+    from lha.durable.worker import MixedWorkersError, run_worker
 
-    asyncio.run(run_worker())
+    try:
+        asyncio.run(run_worker())
+    except MixedWorkersError as exc:  # a Go worker already polls this task queue
+        _fail(str(exc))
 
 
 @app.command(name="mission-start")
