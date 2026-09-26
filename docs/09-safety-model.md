@@ -7,7 +7,8 @@ Safety is enforced in code below the model, never through a prompt. There are se
 3. a command classifier that routes irreversible commands to a human gate;
 4. an egress policy for in-process HTTP, and an allow-list proxy for the sandbox's network;
 5. a Rule-of-Two capability check;
-6. secret hygiene in child processes and in traces.
+6. secret hygiene in child processes and in traces;
+7. a hardened host-side git that nothing in the work tree can make run code.
 
 Each layer assumes the others can fail.
 
@@ -42,9 +43,13 @@ Docker hardening, from `DockerSandbox.run_kwargs()` in
 - `read_only=True` root filesystem, `tmpfs /tmp` (`rw,exec,nosuid,nodev,size=1g`). `/tmp` is
   mounted `exec` because toolchains such as `go test` build and run binaries there; code can
   already run from `/workspace`, so this grants nothing new.
-- The host workdir is bind-mounted read-write at `/workspace`. Its `.git` and `.lha` directories,
-  if present, are re-mounted read-only, so code in the container cannot plant hooks or rewrite
-  mission state.
+- The host workdir is bind-mounted read-write at `/workspace`. Its `.git` and `.lha`, if present,
+  are re-mounted read-only whether they are directories or files, so code in the container cannot
+  plant hooks or rewrite mission state. In a linked git worktree (every parallel implementer's, or
+  a mission workdir that is one) `.git` is a `gitdir: <path>` file; mounted read-only it cannot be
+  repointed at a repository the agent planted. The git dir it names normally lies outside the
+  mount (`<repo>/.git/worktrees/<name>`); if it or its common dir lies inside the work tree, it is
+  bound read-only too (and the host refuses that layout, see [section 7](#7-host-side-git)).
 - Every exec is wrapped in `timeout -k 5 <n>s`, with a host-side deadline of `n + 30` s. Each
   output stream is kept in a bounded head+tail buffer (1 MB per stream). The environment is a
   fixed minimal set (`PATH`, `HOME=/workspace`, locale, `TMPDIR`, `GIT_TERMINAL_PROMPT=0`).
@@ -345,6 +350,53 @@ gate.
   structlog processor, so direct `structlog` calls are not redacted. Cases are in
   [`spec/obs/redact.json`](../spec/obs/redact.json).
 
+## 7. Host-side git
+
+The harness runs git on the host in a work tree the agent has just written: `add`, `commit`,
+`merge`, `checkout`, `reset`, `clean`, `worktree add`, `show`, `diff` and plumbing
+([git_ops.py](../python/src/lha/state/git_ops.py), `go/internal/state/gitops.go`). Nothing the
+agent wrote may make that git execute code:
+
+- **Minimal environment.** `PATH` (and `TMPDIR`) only, a private empty `HOME` and
+  `XDG_CONFIG_HOME`, `LC_ALL=C`, `GIT_TERMINAL_PROMPT=0`, empty askpass. No operator `GIT_*`
+  variable passes through (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_CONFIG_COUNT`/
+  `KEY`/`VALUE`, `GIT_CONFIG_PARAMETERS`, ...). The system and global config and the system
+  attributes file are not read (`GIT_CONFIG_NOSYSTEM=1`, `GIT_CONFIG_GLOBAL=/dev/null`,
+  `GIT_ATTR_NOSYSTEM=1`). The commit identity is the repository's own `user.name`/`user.email`,
+  which `init_repo` sets (trusted checks set `GIT_AUTHOR_*`/`GIT_COMMITTER_*` explicitly).
+- **Fixed overrides.** Every invocation carries `-c core.hooksPath=/dev/null -c
+  core.fsmonitor=false` and empties `core.sshCommand`, `core.gitProxy`, `core.askPass`,
+  `credential.helper`, `diff.external`, `gpg.program` and `core.alternateRefsCommand`; the editor
+  is `:`, the pager `cat`, signing is off and `protocol.allow=never` (LHA never pushes or
+  fetches). A command-line `-c` wins over every config file.
+- **Attribute drivers.** `.gitattributes` is agent-writable, but an attribute only *names* a
+  driver (`filter=x`, `diff=x`, `merge=x`); the command is *defined* in config
+  (`filter.x.clean|smudge|process`, `diff.x.textconv|command`, `merge.x.driver`). The names cannot
+  be known in advance, so before every command that can run a driver (everything but plumbing such
+  as `rev-parse`, `cat-file`, `for-each-ref`, `update-ref`, `write-tree`) the harness enumerates the
+  remaining config (`git config --list --show-origin`, under the same hardened environment) and
+  overrides each defined driver with an empty command. An attribute that names an undefined driver
+  runs nothing, so no driver runs at all. A `merge=x` file overridden this way merges as a
+  conflict, which fails the attempt instead of running the driver.
+- **Config from the work tree is refused.** If any config value comes from a file inside the work
+  tree, outside its `.git` directory (an `include.path` into it) or under `.git/lha-worktrees/`
+  (where implementers write), the git command is refused with a `GitError`.
+- **The `.git` pointer is re-validated.** Before every harness git invocation, a `.git` that is a
+  file must be a single `gitdir: <path>` line naming an existing git dir outside the work tree.
+  For a linked worktree that git dir must sit under `<common>/worktrees/`, its `commondir` must
+  lead to that repository and its `gitdir` back-link to this `.git`. A symlinked `.git` is
+  refused. Before an implementer's branch is committed (`commit_worktree`), the worktree's common
+  dir must also be the mission repository's. Anything else is refused with a `GitError` naming the
+  problem before git runs, and the attempt fails closed
+  ([git_link.py](../python/src/lha/state/git_link.py), `go/internal/state/gitlink.go`).
+
+The repository's own config (`<repo>/.git/config`, and `config.worktree`) is still read: it is
+the operator's, and the Docker sandbox cannot write it. Dropping the global config has
+consequences: a filter the operator configured globally (for example Git LFS's `filter.lfs.*`)
+does not run, so LFS-tracked files are committed as they are; a `filter.<x>.required` driver
+makes the command fail; and `safe.directory` exceptions in `~/.gitconfig` do not apply, so git
+refuses a repository owned by another user.
+
 ## Residual risks
 
 - The classifier is a guardrail, not a sandbox. An arbitrary program (`python -c …`, a test
@@ -362,8 +414,14 @@ gate.
 - An allow-listed host can still serve prompt injection. With web tools on, the Lead can act on
   what it read (edit files, run commands in the sandbox). The Rule of Two keeps private data out of
   such runs; it does not make the content safe.
-- The Docker container can write anything in the workspace except `.git` and `.lha`. The harness
-  checks for weakened test files after the fact ([Verification](07-verification.md)).
+- The Docker container can write anything in the workspace except `.git` and `.lha` (as files or
+  directories). The harness checks for weakened test files after the fact
+  ([Verification](07-verification.md)). Host-side git ignores everything exec-capable the agent
+  could plant in the work tree ([section 7](#7-host-side-git)).
+- The `local` sandbox has no mounts: code it runs can rewrite `.git` itself, the repository's
+  config and hooks included. Host-side git still refuses a tampered pointer and ignores hooks,
+  fsmonitor and drivers, but other repository settings the agent could write there (for example
+  `core.worktree`) are only as safe as the host.
 - Redaction is pattern-based. Secrets in unrecognized formats pass through.
 - The E2B adapter's workspace sync is tested against a fake SDK, not the E2B service. Files a
   background process writes in the VM after a command returns reach the host only with the next

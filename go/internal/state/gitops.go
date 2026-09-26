@@ -4,6 +4,19 @@
 // the durable substrate); every invocation runs with a locale-independent, non-interactive
 // environment (LC_ALL=C, GIT_TERMINAL_PROMPT=0) and a timeout, and decisions are made from exit
 // codes / plumbing output, never from localizable porcelain messages.
+//
+// Hardening (as in python/src/lha/state/git_ops.py): the work tree a harness git command runs in
+// was just written by an untrusted agent, so nothing in it (nor anything in the operator's
+// environment) may make git execute code. Every invocation gets a MINIMAL environment (PATH, a
+// private empty HOME, C locale, no prompts; no operator GIT_* variable passes through, and neither
+// the system nor the global config is read); fixed -c overrides of every exec-capable scalar key
+// (HardeningConfig: hooks, fsmonitor, ssh/editor/pager/askpass/credential helpers, external diff,
+// signing, transports); and, before every command that may run one, an empty -c override of each
+// attribute-driven driver (filter.<x>.clean|smudge|process, diff.<x>.textconv|command,
+// merge.<x>.driver) the repository's config defines: .gitattributes (agent-writable) only NAMES
+// a driver, config DEFINES it, and the config is enumerated with the same hardened environment. A
+// config value from a file inside the work tree (an include.path into it) is refused, and a .git
+// FILE (linked worktree) is re-validated first (gitlink.go).
 package state
 
 import (
@@ -14,8 +27,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -32,26 +47,210 @@ type GitError struct{ Message string }
 
 func (e *GitError) Error() string { return e.Message }
 
-// gitEnv is the process environment with the non-interactive C-locale overrides applied.
-func gitEnv() []string {
-	overrides := map[string]string{
-		"LC_ALL":              "C",
-		"LANG":                "C",
-		"GIT_TERMINAL_PROMPT": "0", // never block on a credential prompt
-		"GIT_ASKPASS":         "",
-		"SSH_ASKPASS":         "",
+// HardeningConfig is the exec-capable config with a scalar key, always overridden on the
+// command line (-c beats every config file). See the package doc.
+var HardeningConfig = [][2]string{
+	{"core.hooksPath", os.DevNull}, // no hook can exist under /dev/null
+	{"core.fsmonitor", "false"},
+	{"core.sshCommand", ""},
+	{"core.gitProxy", ""},
+	{"core.askPass", ""},
+	{"core.editor", ":"},
+	{"sequence.editor", ":"},
+	{"core.pager", "cat"},
+	{"core.alternateRefsCommand", ""},
+	{"credential.helper", ""},
+	{"diff.external", ""},
+	{"commit.gpgSign", "false"},
+	{"tag.gpgSign", "false"},
+	{"gpg.program", ""},
+	{"protocol.allow", "never"}, // push/fetch-free: no transport, no remote helper
+}
+
+// driverKey matches the attribute-driven drivers: the attribute (agent-writable) only names one;
+// config defines it.
+var driverKey = regexp.MustCompile(`(?i)^(filter\..+\.(clean|smudge|process)|diff\..+\.(textconv|command)|merge\..+\.driver)$`)
+
+// noDriverSubcommands never run a filter, textconv or merge driver (as LHA invokes them): they
+// skip the per-command config enumeration.
+var noDriverSubcommands = map[string]bool{
+	"branch": true, "cat-file": true, "commit-tree": true, "config": true, "for-each-ref": true,
+	"init": true, "ls-files": true, "read-tree": true, "rev-list": true, "rev-parse": true,
+	"symbolic-ref": true, "update-ref": true, "write-tree": true,
+}
+
+// passthroughEnv are the only operator variables a harness git inherits; every GIT_* and
+// everything else is dropped.
+var passthroughEnv = []string{"PATH", "TMPDIR", "SYSTEMROOT"}
+
+var (
+	homeMu  sync.Mutex
+	homeDir string
+)
+
+// safeHome is a private, empty directory used as git's HOME (no ~/.gitconfig, no XDG config).
+func safeHome() string {
+	homeMu.Lock()
+	defer homeMu.Unlock()
+	if homeDir == "" || !isDir(homeDir) {
+		dir, err := os.MkdirTemp("", "lha-git-home-")
+		if err != nil {
+			dir = os.DevNull // still no config: git finds no file under it
+		}
+		homeDir = dir
 	}
-	env := make([]string, 0, len(os.Environ())+len(overrides))
-	for _, kv := range os.Environ() {
-		k, _, _ := strings.Cut(kv, "=")
-		if _, ok := overrides[k]; !ok {
-			env = append(env, kv)
+	return homeDir
+}
+
+// gitEnv is the minimal environment every harness git runs with (nothing GIT_* inherited).
+func gitEnv() []string {
+	env := []string{}
+	havePath := false
+	for _, k := range passthroughEnv {
+		if v, ok := os.LookupEnv(k); ok {
+			env = append(env, k+"="+v)
+			havePath = havePath || k == "PATH"
 		}
 	}
-	for _, k := range []string{"LC_ALL", "LANG", "GIT_TERMINAL_PROMPT", "GIT_ASKPASS", "SSH_ASKPASS"} {
-		env = append(env, k+"="+overrides[k])
+	if !havePath {
+		env = append(env, "PATH=/usr/bin:/bin")
 	}
-	return env
+	home := safeHome()
+	return append(env,
+		"HOME="+home,
+		"XDG_CONFIG_HOME="+home,
+		"LC_ALL=C",
+		"LANG=C",
+		"GIT_TERMINAL_PROMPT=0", // never block on a credential prompt
+		"GIT_ASKPASS=",
+		"SSH_ASKPASS=",
+		"GIT_CONFIG_NOSYSTEM=1",
+		"GIT_CONFIG_GLOBAL="+os.DevNull,
+		"GIT_ATTR_NOSYSTEM=1",
+	)
+}
+
+func configArgs(pairs [][2]string) []string {
+	args := make([]string, 0, 2*len(pairs))
+	for _, kv := range pairs {
+		args = append(args, "-c", kv[0]+"="+kv[1])
+	}
+	return args
+}
+
+func subcommand(args []string) string {
+	for _, a := range args {
+		if !strings.HasPrefix(a, "-") {
+			return a
+		}
+	}
+	return ""
+}
+
+// discoveredRoot is the work tree git will use from cwd: the nearest ancestor holding a .git
+// (git's own discovery, which the minimal environment leaves unconfigured); cwd itself, resolved,
+// when there is none. Relative config origins are relative to this directory.
+func discoveredRoot(cwd string) string {
+	here := resolvePath(cwd)
+	for dir := here; ; {
+		if _, err := os.Lstat(filepath.Join(dir, ".git")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return here
+		}
+		dir = parent
+	}
+}
+
+// untrustedOrigin is the config file behind origin if it lies in the agent-writable part of root.
+func untrustedOrigin(root, origin string) (string, bool) {
+	rest, ok := strings.CutPrefix(origin, "file:")
+	if !ok {
+		return "", false
+	}
+	source := rest
+	if !filepath.IsAbs(source) {
+		source = filepath.Join(root, source)
+	}
+	source = resolvePath(source)
+	if !isWithin(source, root) {
+		return "", false
+	}
+	dotgit := filepath.Join(root, ".git")
+	st, err := os.Lstat(dotgit)
+	protected := err == nil && st.IsDir() && isWithin(source, dotgit) &&
+		!isWithin(source, filepath.Join(dotgit, "lha-worktrees")) // implementers write there
+	return source, !protected
+}
+
+// driverOverrides returns {key, ""} for every filter/textconv/merge driver defined in cwd's
+// config. A config value from a file inside the work tree (outside .git) is a *GitError.
+func driverOverrides(ctx context.Context, cwd string) ([][2]string, error) {
+	tctx, cancel := context.WithTimeout(ctx, GitTimeout)
+	defer cancel()
+	args := append(configArgs(HardeningConfig), "config", "--list", "--show-origin", "--name-only", "-z")
+	cmd := exec.CommandContext(tctx, "git", args...)
+	cmd.Dir = cwd
+	cmd.Env = gitEnv()
+	cmd.WaitDelay = 5 * time.Second
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("git config --list: %w", ctx.Err())
+		}
+		if tctx.Err() != nil {
+			return nil, &GitError{fmt.Sprintf("git config --list timed out after %ss", pyFloatRepr(GitTimeout.Seconds()))}
+		}
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, nil // not a repository (yet): the command itself fails or creates one
+		}
+		return nil, err
+	}
+	fields := strings.Split(stdout.String(), "\x00")
+	root := discoveredRoot(cwd)
+	var out [][2]string
+	seen := map[string]bool{}
+	for i := 0; i+1 < len(fields); i += 2 {
+		origin, key := fields[i], fields[i+1]
+		if source, bad := untrustedOrigin(root, origin); bad {
+			return nil, &GitError{fmt.Sprintf("refusing to run git in %s: config '%s' comes from %s, a file inside the work tree", cwd, key, source)}
+		}
+		if driverKey.MatchString(key) && !seen[key] {
+			seen[key] = true
+			out = append(out, [2]string{key, ""})
+		}
+	}
+	return out, nil
+}
+
+// CheckGitLink refuses (*GitError) a .git in cwd that is not the repository it should be (see
+// CheckGitLinkPath); expectedCommonDir may be "".
+func CheckGitLink(cwd, expectedCommonDir string) error {
+	if err := CheckGitLinkPath(cwd, expectedCommonDir); err != nil {
+		return &GitError{fmt.Sprintf("refusing to run git in %s: %s", cwd, err)}
+	}
+	return nil
+}
+
+// GitArgv is the hardened git argument list (without "git") for args run in cwd; a *GitError
+// when cwd's .git pointer or its config cannot be trusted.
+func GitArgv(ctx context.Context, cwd string, args []string) ([]string, error) {
+	if err := CheckGitLink(discoveredRoot(cwd), ""); err != nil {
+		return nil, err
+	}
+	pairs := append([][2]string(nil), HardeningConfig...)
+	if !noDriverSubcommands[subcommand(args)] {
+		extra, err := driverOverrides(ctx, cwd)
+		if err != nil {
+			return nil, err
+		}
+		pairs = append(pairs, extra...)
+	}
+	return append(configArgs(pairs), args...), nil
 }
 
 // gitResult is a completed git process (stdout/stderr decoded with universal newlines).
@@ -69,9 +268,13 @@ func runRawEnv(ctx context.Context, cwd string, args []string, timeout time.Dura
 	if timeout <= 0 {
 		timeout = GitTimeout
 	}
+	argv, err := GitArgv(ctx, cwd, args)
+	if err != nil {
+		return gitResult{}, err
+	}
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(tctx, "git", args...)
+	cmd := exec.CommandContext(tctx, "git", argv...)
 	cmd.Dir = cwd
 	cmd.Env = gitEnv()
 	for k, v := range extraEnv {
@@ -80,7 +283,7 @@ func runRawEnv(ctx context.Context, cwd string, args []string, timeout time.Dura
 	cmd.WaitDelay = 5 * time.Second
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	if ctx.Err() != nil {
 		return gitResult{}, fmt.Errorf("git %s: %w", strings.Join(args, " "), ctx.Err())
 	}
@@ -293,6 +496,19 @@ func ShowAtHeadRaw(ctx context.Context, cwd, relpath string) ([]byte, error) {
 // GitDir returns the absolute path of the repository's .git directory.
 func GitDir(ctx context.Context, cwd string) (string, error) {
 	return RunGit(ctx, cwd, "rev-parse", "--absolute-git-dir")
+}
+
+// CommonDir returns the resolved shared repository directory (GitDir for all but a linked
+// worktree).
+func CommonDir(ctx context.Context, cwd string) (string, error) {
+	out, err := RunGit(ctx, cwd, "rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(out) {
+		out = filepath.Join(cwd, out)
+	}
+	return resolvePath(out), nil
 }
 
 // ResetToHead discards ALL uncommitted work (tracked edits, staged changes, untracked and ignored
