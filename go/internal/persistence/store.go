@@ -39,7 +39,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -407,9 +406,4 @@ func errorTypeName(err error) string {
 		return "OperationalError"
 	}
 	return "Error"
-}
-
-func fileExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
