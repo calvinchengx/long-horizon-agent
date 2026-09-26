@@ -113,6 +113,11 @@ func IsRetryable(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Non-HTTP backends mark their own transient failures (claude -p: *ClaudeCodeError).
+	var marked interface{ Retryable() bool }
+	if errors.As(err, &marked) && marked.Retryable() {
+		return true
+	}
 	var status *HTTPStatusError
 	if errors.As(err, &status) {
 		s := status.StatusCode
