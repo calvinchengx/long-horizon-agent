@@ -39,6 +39,7 @@ from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import span
 from lha.persistence.services import RunServices, open_run_services
 from lha.state.mission_anchor import GitMissionAnchor
+from lha.systemone.build import build_system_one
 from lha.verify.verifier import default_python_checks
 
 # ``stopped_reason`` prefix when the committed decision log fails hash-chain verification.
@@ -192,6 +193,7 @@ async def _run_mission_local(
             mission_id=mission_id,
             workdir=workdir,
             meter=meter,
+            system_one=build_system_one(settings, meter),
             title=title,
             description=description,
             model=meter.wrap(model, role="librarian"),
@@ -217,6 +219,7 @@ async def _run_mission_local(
             recorder=recorder,
             memory=services.memory,
             allow_egress=allow_egress,
+            system_one=services.system_one,
         )
         ctx = ToolContext(mission_id=mission_id, session=session)
 

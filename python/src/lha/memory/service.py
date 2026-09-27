@@ -42,6 +42,7 @@ from lha.config import Settings
 from lha.contracts.memory import Embedder, MemoryRecord, RetrievalHit, SemanticIndex
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import ChecklistItem, SituationSnapshot
+from lha.contracts.system_one import SystemOneModel
 from lha.memory.consolidation import consolidate
 from lha.memory.embeddings import (
     VOYAGE_DEFAULT_MODEL,
@@ -56,7 +57,7 @@ from lha.memory.embeddings import (
     embed_queries,
 )
 from lha.memory.hybrid import BM25Index, reciprocal_rank_fusion
-from lha.memory.rerank import CrossEncoderReranker, NoopReranker
+from lha.memory.rerank import CrossEncoderReranker, NoopReranker, SystemOneReranker
 from lha.memory.semantic_memory import cosine
 from lha.memory.skills import Skill
 from lha.obs.events import TraceRecorder, get_logger
@@ -844,11 +845,13 @@ async def open_mission_memory(
     recorder: TraceRecorder | None = None,
     embedder_transport: httpx.AsyncBaseTransport | None = None,
     embedder_resolver: Resolver | None = None,
+    system_one: SystemOneModel | None = None,
 ) -> MissionMemory | None:
     """The run's memory plane per settings (``None`` when ``memory_enabled`` is false).
 
     ``embedder_transport`` is a test seam for the Ollama / Voyage embedder's HTTP client, and
     ``embedder_resolver`` for the Voyage endpoint's DNS resolution (egress check).
+    ``system_one`` serves ``memory_rerank=system_one`` (without it, fusion order is kept).
     """
     if not settings.memory_enabled:
         return None
@@ -886,6 +889,14 @@ async def open_mission_memory(
             reranker = CrossEncoderReranker()
         except Exception as exc:
             _log.warning("memory_rerank_unavailable", error=f"{type(exc).__name__}: {exc}")
+    elif settings.memory_rerank == "system_one":
+        if system_one is None:
+            _log.warning(
+                "memory_rerank_unavailable",
+                error="memory_rerank=system_one needs LHA_SYSTEM_ONE_BACKEND",
+            )
+        else:
+            reranker = SystemOneReranker(system_one, min_p=settings.system_one_rerank_min)
     memory = MissionMemory(
         store=store,
         workdir=workdir,

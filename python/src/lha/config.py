@@ -229,8 +229,9 @@ class Settings(BaseSettings):
     # endpoint (default https://api.voyageai.com/v1/embeddings; https on a public address only).
     voyage_api_key: SecretStr | None = None
     voyage_endpoint: str | None = None
-    # Second-stage rerank: "none" keeps fusion order; "cross_encoder" needs the embeddings extra.
-    memory_rerank: Literal["none", "cross_encoder"] = "none"
+    # Second-stage rerank: "none" keeps fusion order; "cross_encoder" needs the embeddings extra;
+    # "system_one" asks the System One model (below) whether each passage helps with the task.
+    memory_rerank: Literal["none", "cross_encoder", "system_one"] = "none"
     # Consolidate episodic -> semantic every N recorded cycles (0 disables). "extractive" is
     # deterministic and free; "model" asks the (metered) lead model to distill facts.
     memory_consolidate_every: int = 5
@@ -256,6 +257,32 @@ class Settings(BaseSettings):
     # Declare that the workspace/sandbox exposes secrets or customer data (Rule of Two: a run
     # with web tools may not also hold private data). ``sandbox=local`` always counts as private.
     private_data: bool = False
+
+    # --- System One decision models (lha.systemone; docs/25-system-one.md) --------------
+    # A model that answers typed questions with calibrated probabilities instead of text:
+    # TypeSafe's hosted Jev, or a self-hosted server with the same API (Kev). LHA uses it only
+    # to stop work earlier or reorder memory, never to allow an action or mark work done.
+    # "off" (default) changes nothing; "stub" answers uniformly (tests).
+    system_one_backend: Literal["off", "systemone", "stub"] = "off"
+    # POST /v1/systemone URL: https for a remote host; http is allowed on loopback (Kev).
+    system_one_endpoint: str = "https://api.typesafe.ai/v1/systemone"
+    system_one_api_key: SecretStr | None = None
+    # Pin a version, not "jev-latest": thresholds are tuned per model version.
+    system_one_model: str = "jev-1.13.0"
+    system_one_timeout_s: float = Field(default=5.0, gt=0)
+    # USD per million input tokens (output is free). Unset: Jev's price for TypeSafe's host, $0
+    # on loopback; any other endpoint must set it (or ``allow_unpriced_models``).
+    system_one_price_in_per_mtok: float | None = Field(default=None, ge=0)
+    # With ``private_data``, a non-loopback endpoint is refused unless this says the endpoint
+    # may receive workspace text (task descriptions, redacted failure output, memory passages).
+    system_one_private_data_ok: bool = False
+    # Stall triage: after ``..._min_failures`` failures in a row, a confident "needs splitting"
+    # splits the item now and a confident "environment problem" blocks it now.
+    system_one_triage: bool = True
+    system_one_triage_threshold: float = Field(default=0.9, ge=0, le=1)
+    system_one_triage_min_failures: int = Field(default=2, ge=1)
+    # ``memory_rerank=system_one``: drop passages whose relevance probability is below this.
+    system_one_rerank_min: float = Field(default=0.0, ge=0, le=1)
 
     # --- Model resilience -------------------------------------------------------------
     # Ordered fallback chain tried on transient model errors, comma-separated

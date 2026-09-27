@@ -20,6 +20,10 @@ Harness truth (the agent can never write its own verdict):
     unresolvable witness is a failing check, never a skipped one.
   * With a ``replanner``, a newly blocked item is split into smaller children (bounded by
     ``max_replans`` per mission and ``max_split_depth``); the parent's witnesses gate the last one.
+  * With a ``triage`` (``lha.systemone``), an item that keeps failing may be split or blocked
+    BEFORE ``max_consecutive_failures`` when a System One model is confident the item is too big
+    or the failure is environmental. Triage can only stop work on an item sooner; its answers are
+    committed as ``system_one`` events, and a failed call changes nothing.
   * A FAILED attempt's code is never committed to the mission's branch: its work tree is saved as
     ``refs/lha/attempts/<mission>/<cycle>`` and the checkout returns to the last verified state,
     so the next attempt starts clean (it is told what was rolled back and where it is kept). Only
@@ -63,6 +67,7 @@ if TYPE_CHECKING:
     from lha.agent.claude_code_engine import ClaudeCodeEngine
     from lha.agents.replanner import Replanner
     from lha.memory.service import CycleMemory
+    from lha.systemone.triage import StallTriage
 
 _OBSERVATION_CAP = 4000
 _TRUNCATED_STOP_REASONS = frozenset({"max_tokens", "length", "model_length"})
@@ -190,6 +195,7 @@ class AgentLoop:
         max_split_depth: int = 2,
         memory: CycleMemory | None = None,
         engine: ClaudeCodeEngine | None = None,
+        triage: StallTriage | None = None,
     ) -> None:
         self._model = model
         self._dispatcher = dispatcher
@@ -211,6 +217,7 @@ class AgentLoop:
         # session instead of ``model`` turns (``model`` still meters it and serves the
         # replanner). Everything before and after acting is the same.
         self._engine = engine
+        self._triage = triage
 
     async def run_cycle(
         self,
@@ -612,6 +619,7 @@ class AgentLoop:
     ) -> str:
         split_into: list[str] = []
         rolled_back: list[str] = []
+        triaged: list[EventRecord] = []
         if verification.all_green:
             checklist.record_success(
                 item.id, [r.name for r in verification.results if r.gating and r.passed]
@@ -627,14 +635,34 @@ class AgentLoop:
                     "\n\nThis attempt's changes were rolled back to the last verified state "
                     f"(kept at {ref}): {shown}. Start again from the committed code."
                 )
+            previous_failure = item.last_failure
             checklist.record_failure(item.id, report, max_consecutive_failures=self._max_failures)
+            action = "continue"
+            if self._triage is not None and self._triage.applies(item):
+                action, triage_event = await self._triage_failure(
+                    checklist, item, report, previous_failure, mission_id, cycle_id
+                )
+                triaged.append(triage_event)
+                if action != "continue":
+                    item.status = "blocked"
             verb = "block" if item.status == "blocked" else "attempt"
             note = f"{verification.verdict} (attempt {item.attempts}, status {item.status})"
-            if item.status == "blocked":
+            if action == "block":
+                note += "; blocked early: system one triage found an environment problem"
+                item.last_failure = (
+                    "Blocked before the failure limit: System One triage judged this failure to "
+                    "be environmental (a tool, dependency, network, permission or resource "
+                    "problem), which another attempt cannot fix.\n\n" + report
+                )
+            if item.status == "blocked" and action != "block":
                 split_into = await self._maybe_split(checklist, item, mission_text)
                 if split_into:
                     verb = "split"
                     note += f"; split into {', '.join(split_into)}"
+                elif action == "split":  # the replanner could not split it: carry on as before
+                    item.status = "in_progress"
+                    verb = "attempt"
+                    note = f"{verification.verdict} (attempt {item.attempts}, status {item.status})"
         return await self._anchor.commit_checkpoint(
             Checkpoint(
                 cycle_id=cycle_id,
@@ -644,6 +672,7 @@ class AgentLoop:
                     *self._gate_events(cycle_id),
                     *self._verifier_events(mission_id, cycle_id),
                     *(egress or []),
+                    *triaged,
                     EventRecord(
                         kind="cycle",
                         cycle_id=cycle_id,
@@ -692,20 +721,42 @@ class AgentLoop:
         git_ops.discard_changes(workdir)
         return changed
 
+    def _split_allowed(self, checklist: Checklist, item: ChecklistItem) -> bool:
+        """Whether the replanner may split ``item`` (replan budget and nesting depth)."""
+        if self._replanner is None or self._max_replans <= 0:
+            return False
+        if sum(1 for i in checklist.items if i.status == "split") >= self._max_replans:
+            return False
+        return item.id.count(".") < self._max_split_depth
+
     async def _maybe_split(
         self, checklist: Checklist, item: ChecklistItem, mission_text: str
     ) -> list[str]:
         """Split a newly blocked item via the replanner, within the mission's replan budget."""
-        if self._replanner is None or self._max_replans <= 0:
-            return []
-        if sum(1 for i in checklist.items if i.status == "split") >= self._max_replans:
-            return []
-        if item.id.count(".") >= self._max_split_depth:
+        if self._replanner is None or not self._split_allowed(checklist, item):
             return []
         drafts = await self._replanner.split(mission_text=mission_text, item=item)
         if len(drafts) < 2:
             return []
         return [child.id for child in checklist.split(item.id, drafts)]
+
+    async def _triage_failure(
+        self,
+        checklist: Checklist,
+        item: ChecklistItem,
+        report: str,
+        previous_failure: str,
+        mission_id: str,
+        cycle_id: str,
+    ) -> tuple[str, EventRecord]:
+        """Ask the triage why ``item`` keeps failing; return its action and the event to commit."""
+        assert self._triage is not None
+        verdict = await self._triage.assess(
+            item, report, previous_failure, can_split=self._split_allowed(checklist, item)
+        )
+        payload = verdict.payload(item.id, self._triage.threshold)
+        self._emit("system_one", mission_id, cycle_id, **payload)
+        return verdict.action, EventRecord(kind="system_one", cycle_id=cycle_id, payload=payload)
 
     def _gate_events(self, cycle_id: str) -> list[EventRecord]:
         """Human-gate answers/reminders the dispatcher kept this cycle (committed with it)."""

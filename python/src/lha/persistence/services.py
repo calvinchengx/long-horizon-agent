@@ -25,11 +25,13 @@ from pathlib import Path
 
 from lha.config import Settings
 from lha.contracts.model import ModelProvider
+from lha.contracts.system_one import SystemOneModel
 from lha.governor.metering import CostMeter
 from lha.memory.service import MissionMemory, open_mission_memory
 from lha.obs.events import TraceRecorder
 from lha.persistence.store import MissionStore, open_store
 from lha.persistence.tracking import LedgerSink, MissionTracker
+from lha.systemone.build import close_system_one
 
 
 @dataclass
@@ -39,6 +41,7 @@ class RunServices:
     sink: LedgerSink
     memory: MissionMemory | None
     meter: CostMeter | None = None
+    system_one: SystemOneModel | None = None
 
     async def finish(self, stopped_reason: str, *, head_sha: str | None = None) -> str:
         return await self.tracker.finish(stopped_reason, head_sha=head_sha)
@@ -50,7 +53,10 @@ class RunServices:
             if self.memory is not None:
                 await self.memory.close()
         finally:
-            await self.store.close()
+            try:
+                await close_system_one(self.system_one)
+            finally:
+                await self.store.close()
 
 
 async def open_run_services(
@@ -66,9 +72,18 @@ async def open_run_services(
     key_prefix: str = "",
     backfill: bool = True,
     workflow_id: str | None = None,
+    system_one: SystemOneModel | None = None,
 ) -> RunServices:
-    """Open the store, hook the meter to the persistent ledger, and open memory."""
-    store = await open_store(settings, workdir=workdir)
+    """Open the store, hook the meter to the persistent ledger, and open memory.
+
+    ``system_one`` (``lha.systemone.build_system_one``, metered by ``meter``) serves memory
+    reranking; the returned services own it and close it.
+    """
+    try:
+        store = await open_store(settings, workdir=workdir)
+    except BaseException:
+        await close_system_one(system_one)
+        raise
     try:
         sink = LedgerSink(store, mission_id, key_prefix=key_prefix)
         if backfill:
@@ -84,8 +99,17 @@ async def open_run_services(
             mission_id=mission_id,
             model=model,
             recorder=recorder,
+            system_one=system_one,
         )
     except BaseException:
         await store.close()
+        await close_system_one(system_one)
         raise
-    return RunServices(store=store, tracker=tracker, sink=sink, memory=memory, meter=meter)
+    return RunServices(
+        store=store,
+        tracker=tracker,
+        sink=sink,
+        memory=memory,
+        meter=meter,
+        system_one=system_one,
+    )

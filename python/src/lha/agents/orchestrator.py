@@ -108,6 +108,7 @@ from lha.obs.otel import agent_span, span
 from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, MISSION_FILE, GitMissionAnchor
+from lha.systemone.build import build_system_one
 from lha.verify.verifier import default_python_checks
 
 __all__ = ["MissionResumeError", "Orchestrator", "anchor_exists", "parallel_batch"]
@@ -326,6 +327,7 @@ class _MissionRun:
                 mission_id=self.mission_id,
                 workdir=self.workdir,
                 meter=meter,
+                system_one=build_system_one(settings, meter),
                 title=title,
                 description=description,
                 model=meter.wrap(raw["lead"], role="librarian"),
@@ -352,6 +354,7 @@ class _MissionRun:
                 recorder=self.recorder,
                 dispatcher=self.lead_guard,
                 memory=self.services.memory,
+                system_one=self.services.system_one,
             )
             self.reviewer = Reviewer(self.review_model, self.read_tools)
             # Integration is gated exactly like a Lead cycle would be for the same item: the

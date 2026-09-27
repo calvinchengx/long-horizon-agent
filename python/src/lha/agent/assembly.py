@@ -21,6 +21,7 @@ from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
 from lha.contracts.model import ModelProvider
 from lha.contracts.sandbox import SandboxSession
+from lha.contracts.system_one import SystemOneModel
 from lha.contracts.tools import Tool, ToolDispatcher
 from lha.contracts.verify import Verifier
 from lha.execution.dispatcher import AllowListDispatcher
@@ -30,6 +31,7 @@ from lha.execution.tools.toolset import build_run_dispatcher, run_tools
 from lha.model.claude_code import DEFAULT_MODEL
 from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
+from lha.systemone.build import build_stall_triage
 from lha.verify.flaky_quarantine import FlakyRetryVerifier
 from lha.verify.trusted import CommandTrustedRunner, TrustedAwareVerifier
 from lha.verify.verifier import DeterministicVerifier
@@ -133,6 +135,7 @@ def build_lead_loop(
     memory: CycleMemory | None = None,
     allow_egress: bool | None = None,
     dispatcher: ToolDispatcher | None = None,
+    system_one: SystemOneModel | None = None,
 ) -> AgentLoop:
     """The lead's ``AgentLoop`` with every large-mission capability wired from settings.
 
@@ -141,7 +144,8 @@ def build_lead_loop(
     decisions are queued there and chained into ``.lha/decisions.ndjson`` by the cycle's
     checkpoint commit. ``dispatcher`` replaces ``lead_dispatcher(settings, gate)`` (the
     orchestrator passes that dispatcher wrapped in an ownership guard); ``record_decision`` is
-    added to it either way.
+    added to it either way. ``system_one`` (the run services' System One model) enables stall
+    triage when ``system_one_triage`` is on.
     """
     return AgentLoop(
         model=model,
@@ -159,4 +163,5 @@ def build_lead_loop(
         max_split_depth=settings.max_split_depth,
         memory=memory,
         engine=lead_engine(settings, guarded=dispatcher is not None),
+        triage=build_stall_triage(settings, system_one),
     )

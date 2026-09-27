@@ -84,6 +84,7 @@ from lha.persistence.store import GateEvent, StoreUnavailableError, open_store
 from lha.state import git_ops
 from lha.state.locks import CYCLE_LOCK, LOCK_WAIT_S, WorkdirBusyError, workdir_flock
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
+from lha.systemone.build import build_system_one
 from lha.verify.verifier import default_python_checks
 
 #: Builds the lead model for one cycle (tests inject scripted models here).
@@ -385,11 +386,18 @@ async def _execute_cycle(
         # while a replayed write of the same call is a no-op. The seeded "(prior)" entries are
         # already in the ledger from earlier attempts: no backfill.
         try:
+            system_one = build_system_one(settings, meter)
+        except ValueError as exc:  # e.g. a remote System One endpoint without a key
+            await session.close()
+            await model.aclose()
+            raise _config_error(f"cannot build the System One model: {exc}", exc) from exc
+        try:
             services = await open_run_services(
                 settings,
                 mission_id=inp.mission_id,
                 workdir=inp.workdir,
                 meter=meter,
+                system_one=system_one,
                 title=snapshot.mission.title if snapshot.mission else "",
                 description=snapshot.mission.description if snapshot.mission else "",
                 model=meter.wrap(model.inner, role="librarian"),
@@ -421,6 +429,7 @@ async def _execute_cycle(
                         gate=gate,
                         memory=services.memory,
                         dispatcher=await lead_guard(settings, anchor, gate, active),
+                        system_one=services.system_one,
                     )
                 except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
                     raise _config_error(f"invalid configuration: {exc}", exc) from exc
