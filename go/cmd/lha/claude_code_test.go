@@ -265,7 +265,7 @@ func TestE2EClaudeCodeModelBackendMatchesPython(t *testing.T) {
 				}
 				compareWorkspaces(t, snapshot(t, filepath.Join(goDir, "ws")), snapshot(t, filepath.Join(pyDir, "ws")))
 			} else if want := "claude -p failed: Failed to authenticate: OAuth session expired\n"; !strings.HasSuffix(goRun.stderr, "error: "+want) ||
-				!strings.HasSuffix(pyRun.stderr, "ClaudeCodeError: "+want) { // Python's CLI prints a traceback
+				!strings.HasSuffix(pyRun.stderr, "error: "+want) {
 				t.Errorf("errors differ:\ngo: %q\npy: %q", goRun.stderr, pyRun.stderr)
 			}
 			compareCalls(t, goCalls, claudecodetest.Calls(t, filepath.Join(pyDir, "claude.log")), goDir, pyDir)

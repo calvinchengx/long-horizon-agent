@@ -165,3 +165,15 @@ def test_mission_start_passes_check_commands(
     )
     assert result.exit_code == 0, result.output
     assert started[0].check_commands == [*_DEFAULTS, ["make", "test"]]
+
+
+def test_claude_code_failure_is_a_clean_cli_error() -> None:
+    """An expired `claude` login is an operator error: `error: ...` and exit 1 (as Go), no traceback."""
+    from lha.model.claude_code import ClaudeCodeError
+
+    async def boom() -> None:
+        raise ClaudeCodeError("claude -p failed: Failed to authenticate: OAuth session expired")
+
+    with pytest.raises(cli.typer.Exit) as exited:
+        cli._run(boom())
+    assert exited.value.exit_code == 1

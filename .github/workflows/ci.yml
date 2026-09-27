@@ -34,7 +34,7 @@ jobs:
         run: uv run ty check
 
       - name: Pytest (unit)
-        run: uv run pytest -q --cov --cov-report= tests/unit
+        run: uv run pytest -q --cov --cov-report= --cov-fail-under=0 tests/unit
 
       # The Temporal CLI, a pinned release verified by its checksum: `temporal server start-dev` is
       # a real server (the time-skipping test server lacks DescribeTaskQueue, which the
@@ -71,10 +71,12 @@ jobs:
       - name: Pytest (integration - Temporal test server + dev server)
         env:
           LHA_IT_TEMPORAL_ADDRESS: 127.0.0.1:7233
-        run: uv run pytest -q --cov --cov-append --cov-report= tests/durability tests/load
+        run: uv run pytest -q --cov --cov-append --cov-report= --cov-fail-under=0 tests/durability tests/load
         timeout-minutes: 12
 
-      # Unit + durability + load coverage, gated by fail_under in pyproject.toml (one floor).
+      # Unit + durability + load coverage, gated by fail_under in pyproject.toml (one floor). The
+      # pytest steps above pass --cov-fail-under=0: pytest-cov would otherwise apply the floor to
+      # the unit share alone, before the durability tests append theirs.
       - name: Coverage (floor)
         run: uv run coverage report
 
