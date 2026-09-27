@@ -21,8 +21,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: python/uv.lock
 
-      - name: Sync (core + dev)
-        run: uv sync --locked
+      - name: Sync (core + dev + e2b SDK)
+        run: uv sync --locked --extra e2b
 
       - name: Ruff (lint)
         run: uv run ruff check .

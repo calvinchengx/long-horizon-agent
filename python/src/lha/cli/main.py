@@ -95,7 +95,7 @@ def _gate(approve_interactive: bool, settings: Settings | None = None) -> HITLGa
 # Optional third-party modules -> the pip extra / package that provides them.
 _OPTIONAL_MODULES = {
     "docker": "the 'sandbox' extra (lha[sandbox])",
-    "e2b_code_interpreter": "the 'e2b-code-interpreter' package",
+    "e2b_code_interpreter": "the 'e2b' extra (lha[e2b])",
     "psycopg": "the 'postgres' extra (lha[postgres])",
 }
 
