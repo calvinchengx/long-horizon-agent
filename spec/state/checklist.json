@@ -979,6 +979,22 @@
      "schema_version": 1
     },
     {
+     "id": "03",
+     "description": "task 03",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "02.2"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
      "id": "02.1",
      "description": "first half",
      "status": "todo",
@@ -1011,22 +1027,6 @@
       "go:TestCoarse"
      ],
      "notes": "split from 02",
-     "schema_version": 1
-    },
-    {
-     "id": "03",
-     "description": "task 03",
-     "status": "todo",
-     "verified_by": [],
-     "depends_on": [
-      "02.2"
-     ],
-     "attempts": 0,
-     "consecutive_failures": 0,
-     "last_failure": "",
-     "allow_harness_edits": false,
-     "witnesses": [],
-     "notes": "",
      "schema_version": 1
     }
    ],

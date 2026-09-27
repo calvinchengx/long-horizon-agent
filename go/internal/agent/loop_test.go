@@ -548,7 +548,7 @@ func TestBlockedItemIsSplitInsteadOfDeadlocking(t *testing.T) {
 	for _, it := range cl.Items {
 		got = append(got, it.ID+":"+it.Status)
 	}
-	if strings.Join(got, " ") != "01:split 01.1:todo 01.2:todo 02:todo" {
+	if strings.Join(got, " ") != "01:split 02:todo 01.1:todo 01.2:todo" {
 		t.Fatalf("items: %v", got)
 	}
 	if w := cl.Get("01.2").Witnesses; len(w) != 1 || w[0] != "cmd:exit 1" {
@@ -681,5 +681,24 @@ func TestRecordedDecisionIsChainedByTheCheckpoint(t *testing.T) {
 	records, err := f.anchor.ReadDecisions(context.Background())
 	if err != nil || len(records) != 1 || records[0].CycleID != "c3" {
 		t.Fatalf("%+v %v", records, err)
+	}
+}
+
+// python: test_large_missions.py::test_a_split_item_does_not_starve_independent_items.
+func TestASplitItemDoesNotStarveIndependentItems(t *testing.T) {
+	f := setup(t, withWitnesses(item("01", "hard"), "cmd:exit 1"), item("02", "easy, independent"))
+	plan := text(`[{"description": "part A"}, {"description": "part B"}]`)
+	m := model.NewStub([]contracts.TurnResult{done, done, plan, done, done})
+	l := f.loop(m, func(o *LoopOptions) {
+		o.MaxTurns, o.MaxConsecutiveFailures, o.MaxReplans = 2, 1, 5
+		o.Replanner = agents.NewReplanner(m)
+	})
+	first := f.run(t, l, "c1", passCheck)
+	second := f.run(t, l, "c2", passCheck)
+	if first.ItemID != "01" || !first.ItemSplit {
+		t.Fatalf("first: %+v", first)
+	}
+	if second.ItemID != "02" || !second.Verified {
+		t.Fatalf("second worked %q, want the independent item 02: %+v", second.ItemID, second)
 	}
 }

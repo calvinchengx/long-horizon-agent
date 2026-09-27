@@ -196,13 +196,33 @@ async def test_blocked_item_is_split_instead_of_deadlocking(tmp_path: Path) -> N
     checklist = await anchor.read_checklist()
     assert [(i.id, i.status) for i in checklist.items] == [
         ("01", "split"),
-        ("01.1", "todo"),
-        ("01.2", "todo"),
         ("02", "todo"),
+        ("01.1", "todo"),  # children join the back of the queue
+        ("01.2", "todo"),
     ]
     assert checklist.get("01.2").witnesses == ["cmd:exit 1"]  # type: ignore[union-attr]
     assert checklist.get("02").depends_on == ["01.2"]  # type: ignore[union-attr]
     assert "lha: split 01" in git_ops.log_oneline(tmp_path, 1)[0]
+
+
+@pytest.mark.asyncio
+async def test_a_split_item_does_not_starve_independent_items(tmp_path: Path) -> None:
+    # 01 keeps failing and splits; 02 is independent and was already waiting, so it gets the
+    # next cycle instead of queueing behind 01's children.
+    items = [
+        ChecklistItem(id="01", description="hard", witnesses=["cmd:exit 1"]),
+        ChecklistItem(id="02", description="easy, independent"),
+    ]
+    anchor, ctx = await _setup(tmp_path, items)
+    plan = TurnResult(text='[{"description": "part A"}, {"description": "part B"}]')
+    model = StubModel(script=[DONE, DONE, plan, DONE, DONE])
+    loop = _loop(
+        model, anchor, max_consecutive_failures=1, replanner=Replanner(model), max_replans=5
+    )
+    first = await loop.run_cycle(ctx=ctx, mission_id="m", cycle_id="c1", checks=[PASS])
+    second = await loop.run_cycle(ctx=ctx, mission_id="m", cycle_id="c2", checks=[PASS])
+    assert first.item_id == "01" and first.item_split
+    assert second.item_id == "02" and second.verified  # not 01.1
 
 
 @pytest.mark.asyncio

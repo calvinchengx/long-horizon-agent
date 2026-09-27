@@ -254,7 +254,9 @@ class Checklist(BaseModel):
         and dependencies are assigned here: the first child inherits the parent's dependencies,
         each later child depends on the one before it, and the parent's witnesses move to the LAST
         child (so the original acceptance still gates the result). Items that depended on the
-        parent now depend on the last child. The parent becomes ``split`` (never ``done``).
+        parent now depend on the last child. The parent becomes ``split`` (never ``done``). The
+        children go to the END of the checklist, behind every item already waiting, so an item
+        that keeps splitting cannot starve independent work.
         """
         parent = self._require(item_id)
         if parent.status not in ("todo", "in_progress", "blocked"):
@@ -286,8 +288,10 @@ class Checklist(BaseModel):
         parent.status = "split"
         note = f"split into {', '.join(ids)}"
         parent.notes = f"{parent.notes}; {note}" if parent.notes else note
-        at = self.items.index(parent) + 1
-        self.items[at:at] = children
+        # The children join the back of the queue: ``next_actionable`` takes the first ready item
+        # in list order, so children placed right after the parent would run before every
+        # independent item already waiting, and an item that keeps splitting would starve them.
+        self.items.extend(children)
         return children
 
     def _require(self, item_id: str) -> ChecklistItem:

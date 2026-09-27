@@ -194,7 +194,8 @@ stateDiagram-v2
   item becomes `blocked`. The `AgentLoop` uses 3; this is not an `LHA_*` setting.
 - **Split.** When a failure blocks an item and a replanner is configured, the model is asked to
   break it into 2 to 6 smaller steps ([`agents/replanner.py`](../python/src/lha/agents/replanner.py)).
-  `Checklist.split` inserts children `<id>.1` .. `<id>.n` after the parent: the first child
+  `Checklist.split` adds children `<id>.1` .. `<id>.n` at the end of the checklist, behind every
+  item already waiting, so an item that keeps splitting cannot starve independent work: the first child
   inherits the parent's dependencies, each later child depends on the one before, the parent's
   witnesses move to the last child, and items that depended on the parent now depend on the last
   child. The parent becomes `split` and is never counted as done. Splitting is bounded by

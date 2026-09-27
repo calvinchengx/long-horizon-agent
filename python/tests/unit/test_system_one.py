@@ -427,8 +427,9 @@ async def test_confident_scope_splits_the_item_before_the_failure_limit(tmp_path
     assert not first.item_split and len(stub.calls) == 1  # asked only after 2 failures in a row
     assert second.item_split  # at 2 failures, not 5
     checklist = await anchor.read_checklist()
-    assert [(i.id, i.status) for i in checklist.items][:3] == [
+    assert [(i.id, i.status) for i in checklist.items] == [
         ("01", "split"),
+        ("02", "todo"),
         ("01.1", "todo"),
         ("01.2", "todo"),
     ]

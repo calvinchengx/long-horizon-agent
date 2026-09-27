@@ -487,16 +487,10 @@ func (c *Checklist) Split(id string, drafts []ChecklistItem) ([]ChecklistItem, e
 	} else {
 		parent.Notes = note
 	}
-	at := 0
-	for i := range c.Items {
-		if c.Items[i].ID == parentID {
-			at = i + 1
-			break
-		}
-	}
-	items := append([]ChecklistItem{}, c.Items[:at]...)
-	items = append(items, children...)
-	c.Items = append(items, c.Items[at:]...)
+	// The children join the back of the queue: NextActionable takes the first ready item in list
+	// order, so children placed right after the parent would run before every independent item
+	// already waiting, and an item that keeps splitting would starve them.
+	c.Items = append(c.Items, children...)
 	return children, nil
 }
 
