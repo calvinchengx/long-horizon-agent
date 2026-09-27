@@ -105,6 +105,7 @@ def _build_backend(
             price_in_per_mtok=0.0,
             price_out_per_mtok=0.0,
             client=client,
+            timeout_s=settings.model_timeout_s,
             max_retries=max_retries,
         )
 
@@ -119,6 +120,7 @@ def _build_backend(
             price_in_per_mtok=price.input_per_mtok if price else None,
             price_out_per_mtok=price.output_per_mtok if price else None,
             client=client,
+            timeout_s=settings.model_timeout_s,
             max_retries=max_retries,
         )
 

@@ -35,7 +35,7 @@ def status_for_stop(stopped_reason: str) -> str:
     """Terminal ``missions.status`` for a local runner's ``stopped_reason``.
 
     Mirrors the durable workflow: complete → DONE, deadlocked → IMPOSSIBLE, budget / max cycles /
-    loop / error → ABORTED.
+    loop / model unavailable / error → ABORTED.
     """
     if stopped_reason == "complete":
         return STATUS_DONE

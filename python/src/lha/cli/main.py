@@ -168,6 +168,7 @@ def _run[T](coro: Awaitable[T]) -> T:
     from lha.execution.factory import UnsafeSandboxError
     from lha.governor.metering import BudgetExceeded
     from lha.model.claude_code import ClaudeCodeError
+    from lha.model.retry import ModelUnavailableError
     from lha.persistence.store import StoreUnavailableError
     from lha.safety.rule_of_two import RuleOfTwoViolation
 
@@ -181,6 +182,8 @@ def _run[T](coro: Awaitable[T]) -> T:
     except BudgetExceeded as exc:
         _fail(str(exc), code=3)
     except ClaudeCodeError as exc:  # e.g. an expired `claude` login: an operator error, not a crash
+        _fail(str(exc), code=1)
+    except ModelUnavailableError as exc:  # the Planner's model is down: no mission was started
         _fail(str(exc), code=1)
     except RPCError as exc:  # e.g. "workflow not found for ID: mission:..." (as the Go lha prints)
         _fail(str(exc), code=1)

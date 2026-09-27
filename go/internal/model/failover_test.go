@@ -52,7 +52,7 @@ func TestFailoverBacksOffBetweenRounds(t *testing.T) {
 	s := &sleeps{}
 	f := mustFailover(t, []contracts.ModelProvider{primary}, FailoverOptions{MaxRounds: Int(3), Sleep: s.sleep})
 	_, err := f.Complete(ctx, []contracts.ModelMessage{user("hi")}, nil, 0)
-	if err != primary.err || primary.calls != 3 || !reflect.DeepEqual(s.calls, []float64{3, 3}) {
+	if !errors.Is(err, primary.err) || AttemptsOf(err) != 3 || primary.calls != 3 || !reflect.DeepEqual(s.calls, []float64{3, 3}) {
 		t.Errorf("err=%v calls=%d sleeps=%v", err, primary.calls, s.calls)
 	}
 }

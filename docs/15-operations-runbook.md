@@ -31,7 +31,9 @@ workflow's writes are best effort; `lha mission-status` is the live source.
 
 Local runs (`run-local`, `mission`, `orchestrate`) have no status query. They print a summary and
 exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason>`,
-`loop on item <id>` or `max_cycles`. They write the mission row too: `DONE` for `complete`,
+`loop on item <id>`, `model unavailable: <error> after <n> attempts` (the model kept failing
+after its retries and fallbacks; raise `LHA_MODEL_TIMEOUT_S` for a slow local model, or add
+`LHA_FALLBACK_MODELS`) or `max_cycles`. They write the mission row too: `DONE` for `complete`,
 `IMPOSSIBLE` for a deadlock, `ABORTED` for anything else.
 
 ## Observe a mission

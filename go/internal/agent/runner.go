@@ -230,8 +230,11 @@ func buildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 }
 
 // RunMissionLocal initializes the anchor and runs cycles until done / deadlocked / over-budget /
-// looping. A *governor.BudgetExceeded or a *state.DecisionChainError from a cycle ends the run
-// with a StoppedReason (not an error); any other failure is returned as an error.
+// looping / the model is unavailable. A *governor.BudgetExceeded, a *state.DecisionChainError or
+// a transient model error that outlived its retries and LHA_FALLBACK_MODELS chain ("model
+// unavailable: ReadTimeout after 4 attempts") from a cycle ends the run with a StoppedReason
+// (not an error); any other failure is returned as an error. The durable path parks in
+// DEGRADED_PARK instead, but a local run has no durable timer to wait on.
 //
 // The run is one "lha.mission" span (internal/obs/tracing) carrying MissionSpanAttributes.
 func RunMissionLocal(ctx context.Context, o RunOptions) (MissionSummary, error) {
@@ -385,7 +388,14 @@ cycleLoop:
 				recorder.Record("decision_chain_invalid", missionID, "", obs.F("reason", err.Error()))
 				stopped = DecisionChainStop + ": " + err.Error()
 			default:
-				return MissionSummary{}, err
+				reason, unavailable := model.UnavailableReason(err)
+				if !unavailable || ctx.Err() != nil {
+					return MissionSummary{}, err
+				}
+				// Retries and fallbacks are spent. Nothing of this cycle was checkpointed, so
+				// the anchor still holds the last committed cycle: stop like a budget stop.
+				recorder.Record("model_unavailable", missionID, "", obs.F("reason", reason))
+				stopped = reason
 			}
 			break cycleLoop
 		}
@@ -448,7 +458,8 @@ type PlanOptions struct {
 
 // PlanAndRunLocal is mission intake -> execution: the Planner decomposes Task into a checklist,
 // then the mission runs. Planner and lead share one CostMeter; a *governor.BudgetExceeded from
-// the planning call is returned as an error (nothing has run yet).
+// the planning call is returned as an error (nothing has run yet), and so is a
+// *model.UnavailableError when the planning call's model stays unreachable.
 func PlanAndRunLocal(ctx context.Context, o PlanOptions) (MissionSummary, error) {
 	settings, err := loadSettings(o.Settings)
 	if err != nil {
@@ -474,6 +485,9 @@ func PlanAndRunLocal(ctx context.Context, o PlanOptions) (MissionSummary, error)
 	}
 	checklist, err := agents.NewPlanner(meter.Wrap(plannerModel, "planner")).Plan(ctx, o.Title, o.Task, "")
 	if err != nil {
+		if reason, ok := model.UnavailableReason(err); ok && ctx.Err() == nil {
+			return MissionSummary{}, &model.UnavailableError{Reason: reason, Err: err}
+		}
 		return MissionSummary{}, err
 	}
 	run := o.RunOptions

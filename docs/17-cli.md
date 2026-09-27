@@ -41,7 +41,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | Code | Meaning |
 |---|---|
 | `0` | success; for the local mission commands, every item verified done |
-| `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`, decision log failed verification); `decisions` found a broken chain; `costs` found no ledger rows; or an unhandled error (Python traceback) |
+| `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`, decision log failed verification, model unavailable); `mission`'s Planner call failed because the model stayed unavailable (`error: model unavailable: ...`); `decisions` found a broken chain; `costs` found no ledger rows; or an unhandled error (Python traceback) |
 | `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, a Rule-of-Two violation or invalid web settings, an invalid `--checklist` file, neither or both of `--item`/`--checklist`, an unknown `--decision` or one the open gate does not offer, a refused `vendor` URL) |
 | `3` | the budget governor refused the planning call (`mission`, `orchestrate`, `mission-start`) |
 

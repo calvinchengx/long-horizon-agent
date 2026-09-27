@@ -175,8 +175,10 @@ type Settings struct {
 	SystemOneRerankMin         float64  `env:"system_one_rerank_min" default:"0.0" ge:"0" le:"1"`
 
 	// --- Model resilience
-	FallbackModels     string  `env:"fallback_models" default:""`
-	FallbackMaxRounds  int     `env:"fallback_max_rounds" default:"2" ge:"1"`
+	FallbackModels    string `env:"fallback_models" default:""`
+	FallbackMaxRounds int    `env:"fallback_max_rounds" default:"2" ge:"1"`
+	// Client timeout of one Ollama / OpenAI-compatible model call (connect + read), in seconds.
+	ModelTimeoutS      float64 `env:"model_timeout_s" default:"120.0" gt:"0"`
 	ModelProbeTimeoutS float64 `env:"model_probe_timeout_s" default:"10.0" gt:"0"`
 
 	// --- Human gates

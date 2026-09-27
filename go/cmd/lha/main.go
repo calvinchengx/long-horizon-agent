@@ -29,6 +29,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
@@ -415,15 +416,19 @@ func mergeReferences(references, extra []string) []string {
 }
 
 // runError maps a run's error to python's _run exit codes: operator errors exit 2, a budget
-// refusal exits 3, anything else is an unexpected failure (exit 1).
+// refusal exits 3, the Planner's model being unavailable exits 1, anything else is an unexpected
+// failure (exit 1).
 func runError(err error) error {
 	var budget *governor.BudgetExceeded
+	var modelDown *model.UnavailableError
 	var unsafeLocal *execution.UnsafeSandboxError
 	var e2b execution.E2BUnsupportedError
 	var unavailable *persistence.StoreUnavailableError
 	switch {
 	case errors.As(err, &budget):
 		return fail(3, "%s", err)
+	case errors.As(err, &modelDown):
+		return fail(1, "%s", err)
 	case errors.Is(err, safety.ErrRuleOfTwoViolation), errors.As(err, &unsafeLocal), errors.As(err, &unavailable),
 		errors.As(err, &e2b), errors.Is(err, agent.ErrExecutionNotLinked):
 		return fail(2, "%s", err)

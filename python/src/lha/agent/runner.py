@@ -2,7 +2,9 @@
 
 Drives the ``AgentLoop`` cycle-by-cycle until the mission completes, deadlocks (nothing actionable
 but items still open — never reported as complete), the budget governor refuses the next step or a
-model call (``BudgetExceeded``), or a loop is detected. Every model call (planner + lead) goes
+model call (``BudgetExceeded``), a loop is detected, or the model stays unreachable after its
+retries and ``LHA_FALLBACK_MODELS`` chain (``model unavailable: ...``; the durable path parks in
+DEGRADED_PARK instead, but a local run has no durable timer to wait on). Every model call (planner + lead) goes
 through ONE ``CostMeter`` so a single ledger/governor sees all spend. The sandbox comes from
 ``settings.sandbox`` via ``open_sandbox`` (``local`` requires ``settings.allow_unsafe_local``). This is the simplest way to run a real mission end-to-end at
 $0 (stub/Ollama) on one machine — no Temporal server required. The durable spine runs the same
@@ -35,6 +37,7 @@ from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.hitl.approvals import bind_gate_store
 from lha.ids import new_id
 from lha.model import build_provider
+from lha.model.retry import ModelUnavailableError, model_unavailable_reason
 from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import span
 from lha.persistence.services import RunServices, open_run_services
@@ -52,7 +55,8 @@ class MissionSummary:
 
     ``stopped_reason`` is ``"complete"`` ONLY when every item is verified done; otherwise e.g.
     ``"deadlocked: <reason>"``, ``"governor: <reason>"`` (budget / max cycles),
-    ``"loop on item <id>"``, ``"decision log failed verification: <why>"`` or ``"max_cycles"``.
+    ``"loop on item <id>"``, ``"decision log failed verification: <why>"``,
+    ``"model unavailable: <error> after <n> attempts"`` or ``"max_cycles"``.
     """
 
     mission_id: str
@@ -247,6 +251,15 @@ async def _run_mission_local(
                 recorder.record("decision_chain_invalid", mission_id=mission_id, reason=str(exc))
                 stopped = f"{DECISION_CHAIN_STOP}: {exc}"
                 break
+            except Exception as exc:
+                unavailable = model_unavailable_reason(exc)
+                if unavailable is None:
+                    raise
+                # Retries and fallbacks are spent. Nothing of this cycle was checkpointed, so the
+                # anchor still holds the last committed cycle: stop like a budget stop.
+                recorder.record("model_unavailable", mission_id=mission_id, reason=unavailable)
+                stopped = unavailable
+                break
             if outcome.advanced:
                 cycles += 1
             last_head = outcome.head_sha or last_head
@@ -311,7 +324,8 @@ async def plan_and_run_local(
     """Mission intake → execution: the Planner decomposes ``task`` into a checklist, then run it.
 
     Planner and lead share one ``CostMeter``; ``BudgetExceeded`` from the planning call
-    propagates (nothing has run yet).
+    propagates (nothing has run yet), and so does ``ModelUnavailableError`` when the planning
+    call's model stays unreachable.
     """
     settings = settings or get_settings()
     preflight_run_tools(settings)  # fail before the planning call spends anything
@@ -321,6 +335,11 @@ async def plan_and_run_local(
         checklist = await Planner(meter.wrap(planner_model, role="planner")).plan(
             title=title, description=task
         )
+    except Exception as exc:
+        unavailable = model_unavailable_reason(exc)
+        if unavailable is None:
+            raise
+        raise ModelUnavailableError(unavailable) from exc
     finally:
         await aclose_provider(planner_model)
     return await run_mission_local(

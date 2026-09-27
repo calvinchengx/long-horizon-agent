@@ -89,6 +89,7 @@ func (f *FailoverModel) DefaultMaxTokens() int { return f.defaultMaxTokens }
 // Complete runs the turn on the first provider that succeeds; Usage.Provider names it.
 func (f *FailoverModel) Complete(ctx context.Context, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int) (contracts.TurnResult, error) {
 	var lastErr error
+	attempts := 0 // model calls made across every provider and round (for the stop reason)
 	for round := 0; round < f.maxRounds; round++ {
 		if round > 0 {
 			delay := BackoffDelay(round-1, lastErr, f.baseDelaySeconds, f.maxDelaySeconds)
@@ -103,6 +104,7 @@ func (f *FailoverModel) Complete(ctx context.Context, messages []contracts.Model
 					return contracts.TurnResult{}, err
 				}
 				lastErr = err
+				attempts += AttemptsOf(err)
 				continue
 			}
 			if result.Usage.Provider == "" {
@@ -111,7 +113,7 @@ func (f *FailoverModel) Complete(ctx context.Context, messages []contracts.Model
 			return result, nil
 		}
 	}
-	return contracts.TurnResult{}, lastErr
+	return contracts.TurnResult{}, withAttempts(lastErr, attempts)
 }
 
 func (f *FailoverModel) providerFor(u contracts.Usage) (contracts.ModelProvider, error) {

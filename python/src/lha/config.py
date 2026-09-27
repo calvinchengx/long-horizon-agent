@@ -295,6 +295,8 @@ class Settings(BaseSettings):
     # ``claude:claude-haiku-4-5,openai_compat:llama-3.3-70b@0.59/0.79,ollama:qwen3:8b``.
     fallback_models: str = ""
     fallback_max_rounds: int = Field(default=2, ge=1)
+    # Client timeout of one Ollama / OpenAI-compatible model call (connect + read), in seconds.
+    model_timeout_s: float = Field(default=120.0, gt=0)
     # Timeout of the model health probe a parked durable mission runs before resuming.
     model_probe_timeout_s: float = Field(default=10.0, gt=0)
 
