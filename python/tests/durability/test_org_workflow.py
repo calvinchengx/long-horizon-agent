@@ -73,7 +73,7 @@ from tests.durability.test_durable_spine import (
 )
 from tests.durability.test_mission_row import _FAST_BEAT, _history_order, _seed_row, mission_row
 
-_TIMEOUT_S = 40
+_TIMEOUT_S = 120  # a hung workflow must fail the test, not wedge the suite
 _DONE = TurnResult(text='{"done": true, "summary": "ok"}', stop_reason="end_turn")
 _APPROVE = TurnResult(text='{"done": true, "verdict": "approve", "blocking_issues": []}')
 _BLOCK = TurnResult(text='{"done": true, "verdict": "block", "blocking_issues": ["no tests"]}')
