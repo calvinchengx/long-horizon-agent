@@ -11,6 +11,7 @@ the model is scripted.
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -34,6 +35,12 @@ FAKE_CLAUDE = r"""
 import json, os, sys, urllib.request
 
 args = sys.argv[1:]
+if args == ["--version"]:
+    print("9.9.9 (Claude Code)")
+    sys.exit(0)
+if args == ["auth", "status"]:
+    print(json.dumps({"loggedIn": os.environ.get("FAKE_CLAUDE_LOGGED_IN", "1") == "1"}))
+    sys.exit(0)
 prompt = sys.stdin.read()
 log = os.environ.get("FAKE_CLAUDE_LOG")
 if log:
@@ -455,3 +462,22 @@ def test_native_mode_denies_history_publishing_and_the_web() -> None:
     denied = args[args.index("--disallowedTools") + 1 :]
     assert denied == list(NATIVE_DENY)
     assert {"Bash(git commit:*)", "Bash(git push:*)", "WebFetch"} <= set(denied)
+
+
+@pytest.mark.asyncio
+async def test_health_requires_a_logged_in_cli(
+    fake_claude: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PATH", f"{fake_claude.parent}:{os.environ['PATH']}")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    model = ClaudeCodeModel(binary=str(fake_claude))
+    healthy = await model.health_check(timeout_s=10)
+    assert healthy.ok and "9.9.9" in healthy.detail
+
+    # Logged out: DOWN, so a parked mission does not resume just to fail on authentication.
+    monkeypatch.setenv("FAKE_CLAUDE_LOGGED_IN", "0")
+    down = await model.health_check(timeout_s=10)
+    assert not down.ok and "claude auth login" in down.detail
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")  # the key authenticates instead
+    assert (await model.health_check(timeout_s=10)).ok
