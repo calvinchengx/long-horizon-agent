@@ -111,7 +111,10 @@ type Settings struct {
 	// check otherwise gets only PATH, the locale and a fresh HOME/TMPDIR. LHA_* names are refused.
 	TrustedCheckEnv string `env:"trusted_check_env" default:""`
 	HarnessPaths    string `env:"harness_paths" default:""`
-	FlakyRetries    int    `env:"flaky_retries" default:"1" ge:"0" le:"5"`
+	// ResetKeep lists extra ignored paths that survive the clean at the start of every durable
+	// cycle attempt (python: reset_keep; see ResetKeepPaths).
+	ResetKeep    string `env:"reset_keep" default:""`
+	FlakyRetries int    `env:"flaky_retries" default:"1" ge:"0" le:"5"`
 
 	// --- Multi-agent coordination
 	MaxParallelImplementers int `env:"max_parallel_implementers" default:"3"`
@@ -553,6 +556,42 @@ func (s *Settings) FallbackModelEntries() []string { return CSV(s.FallbackModels
 
 // HarnessGlobs is harness_paths split (python: harness_globs).
 func (s *Settings) HarnessGlobs() []string { return CSV(s.HarnessPaths) }
+
+// ResetKeepPaths is reset_keep parsed (python: reset_keep_paths). An entry that could keep the
+// work tree, the repository or the anchor (".", "*", "**", "..", an absolute path, anything under
+// .git or .lha) is an error.
+func (s *Settings) ResetKeepPaths() ([]string, error) {
+	entries := CSV(s.ResetKeep)
+	for _, entry := range entries {
+		parts := []string{}
+		for _, p := range strings.Split(strings.Trim(entry, "/"), "/") {
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		onlyWild := true
+		for _, p := range parts {
+			if strings.Trim(p, "*.") != "" {
+				onlyWild = false
+			}
+		}
+		bad := strings.HasPrefix(entry, "/") || len(parts) == 0 || onlyWild
+		for _, p := range parts {
+			bad = bad || p == ".."
+		}
+		if len(parts) > 0 {
+			switch parts[0] {
+			case ".", "*", "**", ".git", ".lha":
+				bad = true
+			}
+		}
+		if bad {
+			return nil, fmt.Errorf("LHA_RESET_KEEP entry %s is not allowed: list workspace-relative "+
+				"ignored paths such as 'target' or '.cache', not the whole tree, .git or .lha", contracts.PyRepr(entry))
+		}
+	}
+	return entries, nil
+}
 
 // TrustedCheckEnvNames is trusted_check_env split and validated (python: trusted_check_env_names).
 func (s *Settings) TrustedCheckEnvNames() ([]string, error) {

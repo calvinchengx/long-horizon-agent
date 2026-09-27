@@ -70,6 +70,7 @@ from lha.durable.activities import (
     ModelFactory,
     _config_error,
     _default_model_factory,
+    _reset_workdir,
     _result_from_snapshot,
     _with_heartbeat,
     build_cycle_meter,
@@ -431,7 +432,7 @@ async def _integrate_branch(
     branch = inp.output.branch if inp.output is not None else ""
     async with workdir_lock(inp.workdir):
         await asyncio.to_thread(_abort_merge, inp.workdir)
-        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        await asyncio.to_thread(_reset_workdir, inp.workdir, settings)
         anchor = GitMissionAnchor(inp.workdir)
         payload = await asyncio.to_thread(committed_cycle_event, inp.workdir, inp.cycle_id)
         if payload is not None:  # a previous attempt committed this integration, then crashed
@@ -607,7 +608,7 @@ async def _review_cycle(
     factory = model_factory or _role_factory("reviewer")
     review_id = f"{inp.cycle_id}-review"
     async with workdir_lock(inp.workdir):
-        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        await asyncio.to_thread(_reset_workdir, inp.workdir, settings)
         anchor = GitMissionAnchor(inp.workdir)
         payload = await asyncio.to_thread(
             committed_cycle_event, inp.workdir, review_id, kind=REVIEW_EVENT

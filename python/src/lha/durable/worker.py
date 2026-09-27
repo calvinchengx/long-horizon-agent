@@ -170,6 +170,7 @@ async def start_mission(client: Client, inp: MissionInput, task_queue: str) -> M
 async def run_worker() -> None:
     """Connect to the configured Temporal server and serve missions until cancelled."""
     settings = get_settings()
+    settings.reset_keep_paths()  # a bad LHA_RESET_KEEP fails here, not in every cycle
     client = await connect_client(settings)
     await check_task_queue_pollers(client, settings.task_queue)
     worker = build_worker(client, settings.task_queue)

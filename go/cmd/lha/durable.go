@@ -109,6 +109,9 @@ func (c *cli) worker(args []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := settings.ResetKeepPaths(); err != nil { // fails here, not in every cycle
+		return fail(2, "%s", err.Error())
+	}
 	obs.ConfigureLogging(c.stderr, false)
 	cl, err := durable.Dial(c.ctx, settings, durable.Logger(c.stderr, slog.LevelInfo))
 	if err != nil {

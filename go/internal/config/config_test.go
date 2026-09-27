@@ -89,7 +89,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 97 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 98 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -480,5 +480,21 @@ func TestOTelAliasesAndPrecedence(t *testing.T) {
 	}
 	if _, err := LoadFrom([]string{"LHA_FLAKY_RETRIES=6"}, ""); err == nil {
 		t.Fatal("flaky_retries > 5 must be rejected")
+	}
+}
+
+func TestResetKeepPaths(t *testing.T) {
+	for _, entry := range []string{".", "*", "**", "*/*", "/abs", "../up", "a/../b", ".git", ".git/hooks", ".lha", "./"} {
+		s, err := LoadFrom([]string{"LHA_RESET_KEEP=" + entry}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.ResetKeepPaths(); err == nil || !strings.Contains(err.Error(), "LHA_RESET_KEEP") {
+			t.Errorf("%q: %v", entry, err)
+		}
+	}
+	s, _ := LoadFrom([]string{"LHA_RESET_KEEP=target,.cache/,build/out"}, "")
+	if got, err := s.ResetKeepPaths(); err != nil || strings.Join(got, "|") != "target|.cache/|build/out" {
+		t.Fatalf("%v %v", got, err)
 	}
 }

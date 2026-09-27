@@ -88,6 +88,29 @@ type Activities struct {
 	HeartbeatEvery time.Duration
 }
 
+// resetKeep is state.ResetKeep plus LHA_RESET_KEEP.
+func resetKeep(settings *config.Settings) ([]string, error) {
+	extra, err := settings.ResetKeepPaths()
+	if err != nil {
+		return nil, err
+	}
+	return append(append([]string{}, state.ResetKeep...), extra...), nil
+}
+
+// resetWorkdir resets workdir to HEAD at the start of an attempt, keeping the built-in paths
+// plus LHA_RESET_KEEP (python: _reset_workdir). An invalid LHA_RESET_KEEP is a config error.
+func (a *Activities) resetWorkdir(ctx context.Context, workdir string) error {
+	settings, err := a.settings()
+	if err != nil {
+		return err
+	}
+	keep, err := resetKeep(settings)
+	if err != nil {
+		return configError(fmt.Sprintf("invalid configuration: %v", err), err)
+	}
+	return state.ResetToHeadKeep(ctx, workdir, keep)
+}
+
 func (a *Activities) settings() (*config.Settings, error) {
 	if a.Settings != nil {
 		return a.Settings, nil
@@ -338,7 +361,7 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 		return CycleResult{}, err
 	}
 	defer release()
-	if err := state.ResetToHead(ctx, inp.Workdir); err != nil {
+	if err := a.resetWorkdir(ctx, inp.Workdir); err != nil {
 		return CycleResult{}, err
 	}
 	anchor := state.NewGitMissionAnchor(inp.Workdir)
@@ -656,13 +679,13 @@ func GatePayloadMap(p hitl.Payload) *contracts.OrderedMap {
 
 // recordGateEvent commits the gate event to the anchor's event log (no cycle runs while a gate
 // is open; the reset only discards the partial work of a cycle that ended waiting for approval).
-func recordGateEvent(ctx context.Context, n GateNotice, payload hitl.Payload) bool {
+func recordGateEvent(ctx context.Context, n GateNotice, payload hitl.Payload, keep []string) bool {
 	release, err := lockWorkdir(ctx, n.Workdir, 60*time.Second)
 	if err != nil {
 		return false
 	}
 	defer release()
-	if err := state.ResetToHead(ctx, n.Workdir); err != nil {
+	if err := state.ResetToHeadKeep(ctx, n.Workdir, keep); err != nil {
 		return false
 	}
 	anchor := state.NewGitMissionAnchor(n.Workdir)
@@ -722,7 +745,11 @@ func (a *Activities) NotifyGate(ctx context.Context, n GateNotice) (NoticeResult
 		return NoticeResult{}, err
 	}
 	payload := GateNoticePayload(n)
-	recorded := recordGateEvent(ctx, n, payload)
+	keep, err := resetKeep(settings)
+	if err != nil {
+		return NoticeResult{}, configError(fmt.Sprintf("invalid configuration: %v", err), err)
+	}
+	recorded := recordGateEvent(ctx, n, payload, keep)
 	stored := false
 	if store, err := a.openStore(ctx, settings, n.Workdir); err == nil {
 		if err := store.RecordGateEvent(ctx, GateEventFromNotice(n, payload)); err == nil {
@@ -769,7 +796,7 @@ func (a *Activities) DeclareImpossible(ctx context.Context, inp FinalizeInput) (
 		return CycleResult{}, err
 	}
 	defer release()
-	if err := state.ResetToHead(ctx, inp.Workdir); err != nil {
+	if err := a.resetWorkdir(ctx, inp.Workdir); err != nil {
 		return CycleResult{}, err
 	}
 	anchor := state.NewGitMissionAnchor(inp.Workdir)
@@ -811,7 +838,7 @@ func (a *Activities) UnblockItems(ctx context.Context, inp UnblockInput) (CycleR
 		return CycleResult{}, err
 	}
 	defer release()
-	if err := state.ResetToHead(ctx, inp.Workdir); err != nil {
+	if err := a.resetWorkdir(ctx, inp.Workdir); err != nil {
 		return CycleResult{}, err
 	}
 	anchor := state.NewGitMissionAnchor(inp.Workdir)

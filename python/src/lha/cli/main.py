@@ -661,7 +661,7 @@ def worker() -> None:
 
     try:
         asyncio.run(run_worker())
-    except MixedWorkersError as exc:  # a Go worker already polls this task queue
+    except (MixedWorkersError, ValueError) as exc:  # a Go worker polls this queue; bad settings
         _fail(str(exc))
 
 

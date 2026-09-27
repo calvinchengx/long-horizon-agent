@@ -162,6 +162,11 @@ class Settings(BaseSettings):
     # Comma-separated globs (workspace-relative) the agent may not modify, on top of the test
     # files harness integrity always protects, e.g. "Makefile,e2e/**,.github/**".
     harness_paths: str = ""
+    # Comma-separated extra paths (gitignore patterns, workspace-relative) that survive the clean
+    # at the start of every durable cycle attempt, on top of .venv, venv, node_modules, .env*
+    # and .lha/objects: e.g. build caches ("target") or a local git remote. List only IGNORED
+    # paths: a kept untracked file that is not ignored would be committed by the next checkpoint.
+    reset_keep: str = ""
     # Re-runs of a failing (not timed-out) gating check on the same work tree before it counts
     # as failed; a check that passes on a re-run is quarantined (non-gating for the rest of the
     # mission, see lha.verify.flaky_quarantine). 0 = no re-runs and no quarantine.
@@ -362,6 +367,26 @@ class Settings(BaseSettings):
 
     def harness_globs(self) -> list[str]:
         return _csv(self.harness_paths)
+
+    def reset_keep_paths(self) -> list[str]:
+        """``reset_keep`` parsed; raises ``ValueError`` for an entry that could keep the work tree,
+        the repository or the harness's anchor (``.``, ``*``, ``**``, ``..``, absolute paths,
+        anything under ``.git`` or ``.lha``)."""
+        entries = _csv(self.reset_keep)
+        for entry in entries:
+            parts = [p for p in entry.strip("/").split("/") if p]
+            if (
+                entry.startswith("/")
+                or not parts
+                or ".." in parts
+                or parts[0] in (".", "*", "**", ".git", ".lha")
+                or all(set(p) <= {"*", "."} for p in parts)
+            ):
+                raise ValueError(
+                    f"LHA_RESET_KEEP entry {entry!r} is not allowed: list workspace-relative "
+                    "ignored paths such as 'target' or '.cache', not the whole tree, .git or .lha"
+                )
+        return entries
 
     def trusted_check_commands(self) -> dict[str, list[str]]:
         """``trusted_checks`` parsed (raises ``ValueError`` on malformed JSON or entries)."""

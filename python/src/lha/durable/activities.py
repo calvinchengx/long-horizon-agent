@@ -348,9 +348,13 @@ async def _execute_cycle(
     factory = model_factory or _default_model_factory
     checks = resolve_checks(inp.check_commands)
     attempt = activity.info().attempt if activity.in_activity() else 1
+    try:
+        settings.reset_keep_paths()
+    except ValueError as exc:
+        raise _config_error(f"invalid configuration: {exc}", exc) from exc
 
     async with workdir_lock(inp.workdir):
-        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        await asyncio.to_thread(_reset_workdir, inp.workdir, settings)
         anchor = GitMissionAnchor(inp.workdir)
         snapshot = await anchor.read_situational_awareness()
 
@@ -618,12 +622,18 @@ def gate_notice_payload(notice: GateNotice) -> dict[str, object]:
     return payload
 
 
+def _reset_workdir(workdir: str, settings: Settings | None = None) -> None:
+    """``git_ops.reset_to_head`` keeping the built-in paths plus ``LHA_RESET_KEEP``."""
+    extra = (settings or get_settings()).reset_keep_paths()
+    git_ops.reset_to_head(workdir, keep=(*git_ops.RESET_KEEP, *extra))
+
+
 async def _record_gate_event(notice: GateNotice, payload: dict[str, object]) -> bool:
     """Commit the gate event to the anchor's event log (no cycle runs while a gate is open, and
     the reset only discards the partial work of a cycle that ended waiting for approval)."""
     try:
         async with workdir_lock(notice.workdir, wait_s=60.0):
-            await asyncio.to_thread(git_ops.reset_to_head, notice.workdir)
+            await asyncio.to_thread(_reset_workdir, notice.workdir)
             anchor = GitMissionAnchor(notice.workdir)
             checklist = await anchor.read_checklist()
             await anchor.commit_checkpoint(
@@ -738,7 +748,7 @@ async def notify_gate(notice: GateNotice) -> NoticeResult:
 
 async def _declare_impossible(inp: FinalizeInput) -> CycleResult:
     async with workdir_lock(inp.workdir):
-        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        await asyncio.to_thread(_reset_workdir, inp.workdir)
         anchor = GitMissionAnchor(inp.workdir)
         checklist = await anchor.read_checklist()
         blocked = [item.id for item in checklist.blocked_items]
@@ -784,7 +794,7 @@ async def declare_impossible(inp: FinalizeInput) -> CycleResult:
 # --- human-approved retry of blocked items ------------------------------------------------
 async def _unblock(inp: UnblockInput) -> CycleResult:
     async with workdir_lock(inp.workdir):
-        await asyncio.to_thread(git_ops.reset_to_head, inp.workdir)
+        await asyncio.to_thread(_reset_workdir, inp.workdir)
         anchor = GitMissionAnchor(inp.workdir)
         checklist = await anchor.read_checklist()
         blocked = [item.id for item in checklist.blocked_items]

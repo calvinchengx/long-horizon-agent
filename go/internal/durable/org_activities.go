@@ -600,7 +600,7 @@ func (a *Activities) integrateBranch(ctx context.Context, inp IntegrateInput) (C
 	if err := org.AbortMerge(ctx, inp.Workdir); err != nil {
 		return CycleResult{}, err
 	}
-	if err := state.ResetToHead(ctx, inp.Workdir); err != nil {
+	if err := a.resetWorkdir(ctx, inp.Workdir); err != nil {
 		return CycleResult{}, err
 	}
 	anchor := state.NewGitMissionAnchor(inp.Workdir)
@@ -799,7 +799,7 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		return CycleResult{}, err
 	}
 	defer release()
-	if err := state.ResetToHead(ctx, inp.Workdir); err != nil {
+	if err := a.resetWorkdir(ctx, inp.Workdir); err != nil {
 		return CycleResult{}, err
 	}
 	anchor := state.NewGitMissionAnchor(inp.Workdir)

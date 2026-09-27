@@ -86,6 +86,34 @@ def test_reset_to_head_discards_all_residue_but_keeps_envs(tmp_path: Path) -> No
     assert git_ops.run_git(repo, "status", "--porcelain") == "?? .venv/"  # kept on purpose
 
 
+def test_reset_keep_setting_keeps_operator_paths(tmp_path: Path) -> None:
+    from lha.config import Settings
+    from lha.durable.activities import _reset_workdir
+
+    repo = _repo(tmp_path)
+    (repo / ".gitignore").write_text("target/\n.remote.git/\nbuild/\n", encoding="utf-8")
+    git_ops.commit_all(repo, "ignore outputs")
+    for kept in ("target", ".remote.git", "build"):
+        (repo / kept).mkdir()
+        (repo / kept / "f").write_text("x", encoding="utf-8")
+    settings = Settings(_env_file=None, reset_keep="target, .remote.git")  # type: ignore[call-arg]
+    _reset_workdir(str(repo), settings)
+    assert (repo / "target" / "f").exists() and (repo / ".remote.git" / "f").exists()
+    assert not (repo / "build").exists()  # not listed: cleaned as before
+
+
+@pytest.mark.parametrize(
+    "entry", [".", "*", "**", "*/*", "/abs", "../up", "a/../b", ".git", ".git/hooks", ".lha", "./"]
+)
+def test_reset_keep_refuses_entries_that_would_keep_the_tree(entry: str) -> None:
+    from lha.config import Settings
+
+    with pytest.raises(ValueError, match="LHA_RESET_KEEP"):
+        Settings(_env_file=None, reset_keep=entry).reset_keep_paths()  # type: ignore[call-arg]
+    ok = Settings(_env_file=None, reset_keep="target,.cache/,build/out")  # type: ignore[call-arg]
+    assert ok.reset_keep_paths() == ["target", ".cache/", "build/out"]
+
+
 def test_list_branches_and_commits_ahead(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     git_ops.run_git(repo, "branch", "empty")
