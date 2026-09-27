@@ -2,13 +2,16 @@ package durable
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -32,6 +35,12 @@ import (
 // implementation makes the worker refuse to start (fail closed). Temporal lists a poller for a
 // few minutes after it stopped, so switching a queue from one implementation to the other means
 // waiting for the old pollers to age out, or using another LHA_TASK_QUEUE.
+//
+// Two workers of different implementations started at the same moment can both pass that
+// startup check, so a running worker re-checks the pollers every LHA_WORKER_GUARD_INTERVAL_S
+// seconds (GuardTaskQueue, RunGuarded) and, when a poller of the other implementation appears,
+// stops polling (a graceful worker stop) and exits non-zero with the same message (fail closed:
+// in such a race both stop).
 
 // Identity markers of the two implementations' workers.
 const (
@@ -86,6 +95,58 @@ func CheckTaskQueuePollers(ctx context.Context, c TaskQueueDescriber, taskQueue 
 		}
 	}
 	return nil
+}
+
+// GuardTaskQueue re-checks the pollers of taskQueue every interval until ctx ends (nil) or a
+// poller of the other implementation appears (*MixedWorkersError). A failed check (the server
+// briefly unreachable) goes to onError and is retried at the next interval: the worker already
+// passed the fail-closed startup check.
+func GuardTaskQueue(ctx context.Context, c TaskQueueDescriber, taskQueue string, interval time.Duration, onError func(error)) error {
+	if interval <= 0 { // a huge LHA_WORKER_GUARD_INTERVAL_S overflowed time.Duration
+		interval = math.MaxInt64
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		}
+		err := CheckTaskQueuePollers(ctx, c, taskQueue)
+		var mixed *MixedWorkersError
+		switch {
+		case errors.As(err, &mixed):
+			return err
+		case err != nil && ctx.Err() == nil && onError != nil:
+			onError(err)
+		}
+	}
+}
+
+// RunGuarded runs w until ctx ends, the worker fails, or GuardTaskQueue sees a poller of the
+// other implementation on taskQueue: then w stops polling and shuts down (worker.Stop) and the
+// *MixedWorkersError is returned.
+func RunGuarded(ctx context.Context, w worker.Worker, c TaskQueueDescriber, taskQueue string, interval time.Duration, onError func(error)) error {
+	guardCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := make(chan any)
+	ran := make(chan error, 1)
+	go func() { ran <- w.Run(stop) }()
+	guarded := make(chan error, 1)
+	go func() { guarded <- GuardTaskQueue(guardCtx, c, taskQueue, interval, onError) }()
+	select {
+	case err := <-ran: // the worker failed to start or failed fatally
+		cancel()
+		<-guarded
+		return err
+	case err := <-guarded: // ctx ended (nil) or the guard tripped
+		close(stop)
+		if runErr := <-ran; err == nil {
+			return runErr
+		}
+		return err
+	}
 }
 
 // Logger is a Temporal SDK logger writing to w at level (the SDK's default logs to stdout).

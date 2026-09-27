@@ -166,7 +166,8 @@ func temporalServer(t *testing.T) string {
 	var cmd *exec.Cmd
 	if bin, err := exec.LookPath("temporal"); err == nil {
 		cmd = exec.Command(bin, "server", "start-dev", "--headless", "--ip", "127.0.0.1", "--port", strconv.Itoa(port),
-			"--http-port", strconv.Itoa(freeTCPPort(t)), "--metrics-port", strconv.Itoa(freeTCPPort(t)), "--log-level", "error")
+			"--ui-port", strconv.Itoa(freeTCPPort(t)), "--http-port", strconv.Itoa(freeTCPPort(t)), "--metrics-port", strconv.Itoa(freeTCPPort(t)),
+			"--db-filename", filepath.Join(t.TempDir(), "temporal.db"), "--log-level", "error")
 	} else if bin := cachedTestServer(); bin != "" {
 		cmd = exec.Command(bin, strconv.Itoa(port)) // the Python SDK's test server (normal time)
 	} else {
