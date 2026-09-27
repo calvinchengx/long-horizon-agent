@@ -17,29 +17,41 @@ type ExternalWork func(ctx context.Context) (contracts.Usage, error)
 // (Usage.ReportedCostUSD) is recorded. Work that reported nothing (killed on a timeout) is
 // charged its full worstCaseUSD: conservative, never $0. Work that fails records nothing.
 func (mm *MeteredModel) RunExternal(ctx context.Context, worstCaseUSD float64, run ExternalWork) error {
-	meter := mm.meter
 	worst := worstCaseUSD
-	meter.mu.Lock()
-	decision := meter.Governor.AuthorizeCall(meter.Ledger, &worst, meter.reserved)
+	return mm.meter.RunExternal(ctx, &worst, mm.Role, run)
+}
+
+// RunExternal meters work that is not a ModelProvider call (python: CostMeter.run_external, a
+// System One evaluation), recorded under role. A nil worstCaseUSD is work that cannot be priced,
+// which the governor refuses unless unknown cost is allowed; its cost is then recorded as unknown
+// unless the work reported one.
+func (m *CostMeter) RunExternal(ctx context.Context, worstCaseUSD *float64, role string, run ExternalWork) error {
+	reservation := 0.0
+	if worstCaseUSD != nil {
+		reservation = *worstCaseUSD
+	}
+	m.mu.Lock()
+	decision := m.Governor.AuthorizeCall(m.Ledger, worstCaseUSD, m.reserved)
 	if !decision.Allow {
-		meter.mu.Unlock()
+		m.mu.Unlock()
 		return &BudgetExceeded{Decision: decision}
 	}
-	meter.reserved += worstCaseUSD
-	meter.mu.Unlock()
+	m.reserved += reservation
+	m.mu.Unlock()
 
 	usage, err := run(ctx)
-	meter.mu.Lock()
-	meter.reserved = max(0.0, meter.reserved-worstCaseUSD)
-	meter.mu.Unlock()
+	m.mu.Lock()
+	m.reserved = max(0.0, m.reserved-reservation)
+	m.mu.Unlock()
 	if err != nil {
 		return err
 	}
 	usd := worstCaseUSD
 	if usage.ReportedCostUSD != nil {
-		usd = *usage.ReportedCostUSD
+		reported := *usage.ReportedCostUSD
+		usd = &reported
 	}
-	meter.record(ctx, usage, &usd, mm.Role) // reaches the CostHook too (python: on_record)
+	m.record(ctx, usage, usd, role) // reaches the CostHook too (python: on_record)
 	return nil
 }
 

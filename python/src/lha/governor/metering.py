@@ -105,6 +105,56 @@ class CostMeter:
     def _release(self, usd: float) -> None:
         self._reserved_usd = max(0.0, self._reserved_usd - usd)
 
+    async def run_external[T](
+        self,
+        run: Callable[[], Awaitable[tuple[T, Usage]]],
+        *,
+        worst_case_usd: float | None,
+        role: str = "",
+    ) -> T:
+        """Meter work that is not a ``ModelProvider`` call (a System One evaluation).
+
+        Authorized with ``worst_case_usd`` (``None``: the work cannot be priced, which the
+        governor refuses unless unknown cost is allowed) and recorded under ``role`` with the
+        cost the work reported (``Usage.reported_cost_usd``), else its worst case.
+        """
+        result, _usage = await self.run_metered(run, worst_case_usd=worst_case_usd, role=role)
+        return result
+
+    async def run_metered[T](
+        self,
+        run: Callable[[], Awaitable[tuple[T, Usage]]],
+        *,
+        worst_case_usd: float | None,
+        role: str = "",
+    ) -> tuple[T, Usage]:
+        """``run_external``, returning the recorded usage too."""
+        decision = self.governor.authorize_call(
+            self.ledger, worst_case_usd=worst_case_usd, reserved_usd=self.reserved_usd
+        )
+        if not decision.allow:
+            raise BudgetExceeded(decision)
+        reservation = worst_case_usd or 0.0
+        self._reserve(reservation)
+        try:
+            result, usage = await run()
+        finally:
+            self._release(reservation)
+        entry = self.ledger.record(
+            cycle_id=self.cycle_id,
+            usage=usage,
+            usd=worst_case_usd if usage.reported_cost_usd is None else usage.reported_cost_usd,
+            role=role,
+        )
+        if self.on_record is not None:
+            try:
+                await self.on_record(entry)
+            except Exception as exc:  # persistence must never fail completed work
+                structlog.get_logger("lha.governor").warning(
+                    "cost_hook_failed", error=f"{type(exc).__name__}: {exc}"
+                )
+        return result, usage
+
 
 class MeteredModel(ModelProvider):
     """A ``ModelProvider`` that enforces the budget per call and records every call's spend."""
@@ -118,6 +168,11 @@ class MeteredModel(ModelProvider):
     @property
     def inner(self) -> ModelProvider:
         return self._provider
+
+    @property
+    def meter(self) -> CostMeter:
+        """The shared meter this provider records into."""
+        return self._meter
 
     def worst_case_usd(
         self,
@@ -232,31 +287,7 @@ class MeteredModel(ModelProvider):
     async def _run_external[T](
         self, run: Callable[[], Awaitable[tuple[T, Usage]]], *, worst_case_usd: float
     ) -> tuple[T, Usage]:
-        meter = self._meter
-        decision = meter.governor.authorize_call(
-            meter.ledger, worst_case_usd=worst_case_usd, reserved_usd=meter.reserved_usd
-        )
-        if not decision.allow:
-            raise BudgetExceeded(decision)
-        meter._reserve(worst_case_usd)
-        try:
-            result, usage = await run()
-        finally:
-            meter._release(worst_case_usd)
-        entry = meter.ledger.record(
-            cycle_id=meter.cycle_id,
-            usage=usage,
-            usd=worst_case_usd if usage.reported_cost_usd is None else usage.reported_cost_usd,
-            role=self.role,
-        )
-        if meter.on_record is not None:
-            try:
-                await meter.on_record(entry)
-            except Exception as exc:  # persistence must never fail completed work
-                structlog.get_logger("lha.governor").warning(
-                    "cost_hook_failed", error=f"{type(exc).__name__}: {exc}"
-                )
-        return result, usage
+        return await self._meter.run_metered(run, worst_case_usd=worst_case_usd, role=self.role)
 
     def estimate_cost_usd(self, usage: Usage) -> float:
         return self._provider.estimate_cost_usd(usage)
