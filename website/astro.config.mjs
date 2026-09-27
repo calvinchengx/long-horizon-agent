@@ -40,6 +40,10 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Tutorials',
+          items: [{ slug: '26-tutorial-durable-mission' }],
+        },
+        {
           label: 'Concepts',
           items: [
             { slug: '05-architecture' },

@@ -131,6 +131,8 @@ stops with `error: python module 'docker' is not installed; install the 'sandbox
 
 ## Next steps
 
+- A durable mission end to end, with a crashed worker and an approved `git push`:
+  [the tutorial](26-tutorial-durable-mission.md).
 - Other model backends and prices: [installation](03-installation.md) and
   [models](13-models.md).
 - Durable runs on Temporal (`lha worker`, `lha mission-start`): [running on Temporal](14-running-on-temporal.md).
