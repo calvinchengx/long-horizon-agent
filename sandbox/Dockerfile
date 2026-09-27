@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
 # Reference polyglot sandbox image for LHA's Docker sandbox: git, make, curl, Go, uv + Python 3.12,
-# Node 22 + npm/pnpm/corepack. Built to run the way DockerSandbox runs it:
+# Node 22 + npm/pnpm/corepack, and ripwire (the code map behind LHA_CODE_MAP=ripwire). Built to run the way DockerSandbox runs it:
 #
 #   docker run --user <host uid>:<host gid> --read-only --tmpfs /tmp -e HOME=/workspace \
 #              -v <workdir>:/workspace --cap-drop ALL --security-opt no-new-privileges ...
@@ -56,6 +56,26 @@ RUN uv python install "${PYTHON_VERSION}" \
 RUN npm install -g "pnpm@${PNPM_VERSION}" \
     && npm cache clean --force \
     && rm -rf /root/.npm
+
+# ripwire: a static, dependency-free code-map CLI (LHA_CODE_MAP=ripwire runs it at the start of
+# each cycle). Pinned by version and by the release's published SHA-256 for each architecture.
+ARG RIPWIRE_VERSION=0.6.5
+ARG RIPWIRE_SHA256_ARM64=25e5f37e2985830bbff189879797988b862e36521413a6e3654630a0e1f0b108
+ARG RIPWIRE_SHA256_X64=5c5794612f5f06632ada7c27a0f5c8f400748a70f707b64ec4d238c4fba2f7ea
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+        arm64) arch=linux-arm64; sum="${RIPWIRE_SHA256_ARM64}" ;; \
+        amd64) arch=linux-x64; sum="${RIPWIRE_SHA256_X64}" ;; \
+        *) echo "no ripwire build for $(dpkg --print-architecture)" >&2; exit 1 ;; \
+    esac; \
+    name="ripwire-${RIPWIRE_VERSION}-${arch}"; \
+    curl -fsSL -o /tmp/ripwire.tar.gz \
+        "https://github.com/redhat-et/ripwire/releases/download/v${RIPWIRE_VERSION}/${name}.tar.gz"; \
+    echo "${sum}  /tmp/ripwire.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/ripwire.tar.gz -C /tmp "${name}/ripwire"; \
+    install -m 0755 "/tmp/${name}/ripwire" /usr/local/bin/ripwire; \
+    rm -rf /tmp/ripwire.tar.gz "/tmp/${name}"; \
+    ripwire --version
 
 ENV HOME=/workspace \
     LANG=C.UTF-8 \

@@ -9,6 +9,7 @@
 | Python | 3.12, managed by uv (`PYTHON_VERSION`) |
 | Node.js | 22.23.2 (`NODE_VERSION`), with npm and corepack |
 | pnpm | 10.34.5 (`PNPM_VERSION`) |
+| ripwire | 0.6.5 (`RIPWIRE_VERSION`, SHA-256 pinned per architecture); used by `LHA_CODE_MAP=ripwire` |
 | Other | git, make, curl, ca-certificates, openssh-client, xz-utils |
 
 The default image (`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`) covers Python projects. Use this

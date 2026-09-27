@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from lha.agent.claude_code_engine import ClaudeCodeEngine
+from lha.agent.code_map import RipwireCodeMap
 from lha.agent.loop import AgentLoop
 from lha.agents.replanner import Replanner
 from lha.config import Settings, get_settings
@@ -164,4 +165,11 @@ def build_lead_loop(
         memory=memory,
         engine=lead_engine(settings, guarded=dispatcher is not None),
         triage=build_stall_triage(settings, system_one),
+        code_map=(
+            RipwireCodeMap(
+                token_budget=settings.code_map_token_budget, timeout_s=settings.code_map_timeout_s
+            )
+            if settings.code_map == "ripwire"
+            else None
+        ),
     )

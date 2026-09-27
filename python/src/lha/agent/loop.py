@@ -65,6 +65,7 @@ from lha.verify.witnesses import parse_witness
 
 if TYPE_CHECKING:
     from lha.agent.claude_code_engine import ClaudeCodeEngine
+    from lha.agent.code_map import RipwireCodeMap
     from lha.agents.replanner import Replanner
     from lha.memory.service import CycleMemory
     from lha.systemone.triage import StallTriage
@@ -196,6 +197,7 @@ class AgentLoop:
         memory: CycleMemory | None = None,
         engine: ClaudeCodeEngine | None = None,
         triage: StallTriage | None = None,
+        code_map: RipwireCodeMap | None = None,
     ) -> None:
         self._model = model
         self._dispatcher = dispatcher
@@ -218,6 +220,8 @@ class AgentLoop:
         # replanner). Everything before and after acting is the same.
         self._engine = engine
         self._triage = triage
+        # Optional cycle-start code map (``lha.agent.code_map``), put after the memory block.
+        self._code_map = code_map
 
     async def run_cycle(
         self,
@@ -281,6 +285,10 @@ class AgentLoop:
             memory_text = await self._memory.recall(
                 mission_id=mission_id, cycle_id=cycle_id, item=item, snapshot=snapshot
             )
+        code_map_text = ""
+        if self._code_map is not None:
+            code_map_text, code_map_info = await self._code_map.render(ctx.session, item)
+            self._emit("code_map", mission_id, cycle_id, item_id=item.id, **code_map_info)
         messages = build_messages(
             anchor_text=anchor_text or "",
             mission_text=mission.render_anchor() if mission else snapshot.anchor_text(),
@@ -289,6 +297,7 @@ class AgentLoop:
             specs=self._dispatcher.specs(),
             memory_text=memory_text,
             engine=self._engine is not None,
+            code_map_text=code_map_text,
         )
         self._emit("cycle_started", mission_id, cycle_id, item_id=item.id)
 

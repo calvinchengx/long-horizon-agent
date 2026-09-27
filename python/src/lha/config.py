@@ -263,6 +263,14 @@ class Settings(BaseSettings):
     # with web tools may not also hold private data). ``sandbox=local`` always counts as private.
     private_data: bool = False
 
+    # --- Code map (lha.agent.code_map) ------------------------------------------------------
+    # "ripwire" runs `ripwire . --pack-task=<item> --token-budget=N` in the sandbox at the start of
+    # each cycle and puts the task bundle in the lead's first message. Needs ripwire in the
+    # sandbox (sandbox/Dockerfile has it); without it the cycle simply runs without a map.
+    code_map: Literal["off", "ripwire"] = "off"
+    code_map_token_budget: int = Field(default=2000, ge=200)
+    code_map_timeout_s: float = Field(default=60.0, gt=0)
+
     # --- System One decision models (lha.systemone; docs/25-system-one.md) --------------
     # A model that answers typed questions with calibrated probabilities instead of text:
     # TypeSafe's hosted Jev, or a self-hosted server with the same API (Kev). LHA uses it only

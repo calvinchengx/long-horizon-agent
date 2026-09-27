@@ -254,6 +254,7 @@ def test_agent_prompts() -> None:
             specs=[ToolSpec.model_validate(s) for s in case["specs"]],
             memory_text=case["memory_text"],
             engine=case["engine"],
+            code_map_text=case["code_map_text"],
         )
         got = [{"role": m.role, "content": m.content} for m in messages]
         assert got == case["messages"], case["name"]
@@ -265,6 +266,16 @@ def test_agent_prompts() -> None:
         rendered = render_memory_block(sections, budget_chars=case["budget_chars"], weights=weights)
         assert rendered == case["rendered"]
     assert corrective_message("no JSON object found in reply").content == spec["corrective"]
+    from lha.agent.code_map import code_map_argv
+    from lha.agent.prompt import CODE_MAP_HARD_CAP, CODE_MAP_HEADER, render_code_map
+
+    code_map = spec["code_map"]
+    assert (code_map["header"], code_map["hard_cap"]) == (CODE_MAP_HEADER, CODE_MAP_HARD_CAP)
+    for case in code_map["argv"]:
+        item = ChecklistItem.model_validate(case["item"])
+        assert code_map_argv(item, case["budget"]) == case["argv"]
+    for case in code_map["render"]:
+        assert render_code_map(case["output"]) == case["rendered"]
 
 
 def test_agent_reply_protocol_and_planning() -> None:

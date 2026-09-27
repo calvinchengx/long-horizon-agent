@@ -83,12 +83,26 @@ type promptSpec struct {
 		AnchorText  string                      `json:"anchor_text"`
 		MissionText string                      `json:"mission_text"`
 		MemoryText  string                      `json:"memory_text"`
+		CodeMapText string                      `json:"code_map_text"`
 		Engine      bool                        `json:"engine"`
 		Snapshot    contracts.SituationSnapshot `json:"snapshot"`
 		Item        contracts.ChecklistItem     `json:"item"`
 		Specs       []json.RawMessage           `json:"specs"`
 		Messages    []message                   `json:"messages"`
 	} `json:"build_messages"`
+	CodeMap struct {
+		Header  string `json:"header"`
+		HardCap int    `json:"hard_cap"`
+		Argv    []struct {
+			Item   contracts.ChecklistItem `json:"item"`
+			Budget int                     `json:"budget"`
+			Argv   []string                `json:"argv"`
+		} `json:"argv"`
+		Render []struct {
+			Output   string `json:"output"`
+			Rendered string `json:"rendered"`
+		} `json:"render"`
+	} `json:"code_map"`
 	LeadTools struct {
 		Specs    []json.RawMessage `json:"specs"`
 		Rendered string            `json:"rendered"`
@@ -145,7 +159,7 @@ func TestAgentBuildMessages(t *testing.T) {
 		}
 		got := messagesOf(agent.BuildMessages(agent.PromptInput{
 			AnchorText: c.AnchorText, MissionText: c.MissionText, Snapshot: c.Snapshot, Item: c.Item,
-			Specs: specs, MemoryText: c.MemoryText, Engine: c.Engine,
+			Specs: specs, MemoryText: c.MemoryText, CodeMapText: c.CodeMapText, Engine: c.Engine,
 		}))
 		if !reflect.DeepEqual(got, c.Messages) {
 			for i := range got {
@@ -276,6 +290,28 @@ func TestSharedPaths(t *testing.T) {
 		got, err := agents.IsShared(c.Path)
 		if err != nil || got != c.Shared {
 			t.Errorf("IsShared(%q) = %v, %v; want %v", c.Path, got, err, c.Shared)
+		}
+	}
+}
+
+// TestAgentCodeMap runs agent/prompts.json's code_map section: the ripwire command for an item and
+// how its output becomes the prompt section (python: lha.agent.code_map, render_code_map).
+func TestAgentCodeMap(t *testing.T) {
+	s := loadPrompts(t)
+	if s.CodeMap.Header != agent.CodeMapHeader || s.CodeMap.HardCap != agent.CodeMapHardCap {
+		t.Fatalf("constants differ from python: %q %d", s.CodeMap.Header, s.CodeMap.HardCap)
+	}
+	if len(s.CodeMap.Argv) == 0 || len(s.CodeMap.Render) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range s.CodeMap.Argv {
+		if got := agent.CodeMapArgv(c.Item, c.Budget); !reflect.DeepEqual(got, c.Argv) {
+			t.Errorf("CodeMapArgv(%q, %d) = %q, want %q", c.Item.Description, c.Budget, got, c.Argv)
+		}
+	}
+	for i, c := range s.CodeMap.Render {
+		if got := agent.RenderCodeMap(c.Output); got != c.Rendered {
+			t.Errorf("render %d differs (%d vs %d runes)", i, len([]rune(got)), len([]rune(c.Rendered)))
 		}
 	}
 }

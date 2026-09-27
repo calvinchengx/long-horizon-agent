@@ -102,6 +102,9 @@ type LoopOptions struct {
 	// failure is environmental (systemone.StallTriage). It can only stop work on an item sooner;
 	// its answers are committed as system_one events, and a failed call changes nothing.
 	Triage *systemone.StallTriage
+	// CodeMap, when set, puts ripwire's task bundle for the item into the first message, after the
+	// memory block (python: code_map; see code_map.go).
+	CodeMap *RipwireCodeMap
 }
 
 // DefaultLoopOptions are the Python defaults (max_turns=8, max_consecutive_failures=3,
@@ -218,6 +221,12 @@ func (l *AgentLoop) runCycle(ctx context.Context, tctx contracts.ToolContext, mi
 	if l.opts.Memory != nil {
 		memoryText = l.opts.Memory.Recall(ctx, missionID, cycleID, item, snapshot)
 	}
+	codeMapText := ""
+	if l.opts.CodeMap != nil {
+		var info *contracts.OrderedMap
+		codeMapText, info = l.opts.CodeMap.Render(ctx, tctx.Session, item)
+		l.emit("code_map", missionID, cycleID, append([]obs.Field{obs.F("item_id", item.ID)}, payloadFields(info)...)...)
+	}
 	messages := BuildMessages(PromptInput{
 		AnchorText:  anchorText,
 		MissionText: missionText,
@@ -226,6 +235,7 @@ func (l *AgentLoop) runCycle(ctx context.Context, tctx contracts.ToolContext, mi
 		Specs:       l.opts.Dispatcher.Specs(),
 		Engine:      l.opts.Engine != nil,
 		MemoryText:  memoryText,
+		CodeMapText: codeMapText,
 	})
 	l.emit("cycle_started", missionID, cycleID, obs.F("item_id", item.ID))
 

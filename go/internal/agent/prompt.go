@@ -48,6 +48,11 @@ const correctiveTemplate = "Your previous reply was not a valid action (%s). Rep
 const (
 	extraContextCap = 8000
 	lastFailureCap  = 3000
+	// CodeMapHeader heads the cycle-start code map (python: CODE_MAP_HEADER).
+	CodeMapHeader = "Code map for this item (from ripwire: ranked definitions, callers and tests; it can miss " +
+		"things, so read a file before you change it):"
+	// CodeMapHardCap is the ceiling on the code map in the prompt (python: CODE_MAP_HARD_CAP).
+	CodeMapHardCap = 16_000
 	// MemoryHardCap is the absolute ceiling on the memory block, whatever budget is asked for.
 	MemoryHardCap = memory.MemoryHardCap
 	// MemoryHeader heads the rendered memory block.
@@ -105,6 +110,16 @@ func CorrectiveMessage(reason string) contracts.ModelMessage {
 	return contracts.ModelMessage{Role: "user", Content: fmt.Sprintf(correctiveTemplate, reason)}
 }
 
+// RenderCodeMap is the code-map section for a ripwire task bundle, "" when there is none (python:
+// render_code_map).
+func RenderCodeMap(output string) string {
+	body := pyfmt.PyStrip(output)
+	if body == "" {
+		return ""
+	}
+	return clipLine(CodeMapHeader+"\n"+body, CodeMapHardCap)
+}
+
 func clipLine(line string, room int) string {
 	if pyfmt.RuneLen(line) <= room {
 		return line
@@ -132,6 +147,8 @@ type PromptInput struct {
 	Specs       []contracts.ToolSpec
 	// MemoryText is the already-budgeted memory block (capped again at MemoryHardCap).
 	MemoryText string
+	// CodeMapText is the rendered code map (RenderCodeMap), capped again at CodeMapHardCap.
+	CodeMapText string
 	// Engine selects the claude_code lead session prompt (tools are not listed, no JSON protocol).
 	Engine bool
 }
@@ -185,6 +202,9 @@ func BuildMessages(in PromptInput) []contracts.ModelMessage {
 	}
 	if memory := pyfmt.PyStrip(in.MemoryText); memory != "" {
 		user += clipLine(memory, MemoryHardCap) + "\n\n"
+	}
+	if codeMap := pyfmt.PyStrip(in.CodeMapText); codeMap != "" {
+		user += clipLine(codeMap, CodeMapHardCap) + "\n\n"
 	}
 	if decisions := RenderDecisions(in.Snapshot.LastDecisions); decisions != "" {
 		user += decisions + "\n\n"

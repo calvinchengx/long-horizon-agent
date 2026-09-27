@@ -64,6 +64,9 @@ func TestNewFieldDefaults(t *testing.T) {
 		"ImpossibleAfterFailures":    {s.ImpossibleAfterFailures, 3},
 		"CyclePauseSeconds":          {s.CyclePauseSeconds, 0},
 		"GateWebhookTimeoutSeconds":  {s.GateWebhookTimeoutSeconds, 5.0},
+		"CodeMap":                    {s.CodeMap, "off"},
+		"CodeMapTokenBudget":         {s.CodeMapTokenBudget, 2000},
+		"CodeMapTimeoutS":            {s.CodeMapTimeoutS, 60.0},
 		"SystemOneBackend":           {s.SystemOneBackend, "off"},
 		"SystemOneEndpoint":          {s.SystemOneEndpoint, "https://api.typesafe.ai/v1/systemone"},
 		"SystemOneModel":             {s.SystemOneModel, "jev-1.13.0"},
@@ -90,7 +93,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 99 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 102 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }

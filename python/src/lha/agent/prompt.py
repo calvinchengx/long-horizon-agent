@@ -51,6 +51,12 @@ _EXTRA_CONTEXT_CAP = 8000
 _LAST_FAILURE_CAP = 3000
 # Absolute ceiling on the memory block, whatever budget the caller asks for.
 MEMORY_HARD_CAP = 20_000
+#: The cycle-start code map (``lha.agent.code_map``): its header and its size cap in the prompt.
+CODE_MAP_HEADER = (
+    "Code map for this item (from ripwire: ranked definitions, callers and tests; it can miss "
+    "things, so read a file before you change it):"
+)
+CODE_MAP_HARD_CAP = 16_000
 MEMORY_HEADER = (
     "Relevant memory (retrieved from earlier cycles, skills and the repository; it may be "
     "stale, so verify before relying on it):"
@@ -95,6 +101,14 @@ def _clip_line(line: str, room: int) -> str:
     if len(line) <= room:
         return line
     return line[: max(0, room - 15)] + " ...[clipped]"
+
+
+def render_code_map(output: str) -> str:
+    """The code-map section for a ripwire task bundle (``""`` when there is none)."""
+    body = output.strip()
+    if not body:
+        return ""
+    return _clip_line(f"{CODE_MAP_HEADER}\n{body}", CODE_MAP_HARD_CAP)
 
 
 def render_memory_block(
@@ -150,13 +164,15 @@ def build_messages(
     mission_text: str = "",
     memory_text: str = "",
     engine: bool = False,
+    code_map_text: str = "",
 ) -> list[ModelMessage]:
     """Build the initial messages for one cycle: anchor recitation + active item + tools.
 
     ``mission_text`` is the immutable mission recitation (always first); ``anchor_text`` is
     optional caller context (progress, research, reflections), included when it adds anything.
     ``memory_text`` is the already-budgeted memory block (``render_memory_block``); it is capped
-    again at ``MEMORY_HARD_CAP`` here. ``engine``: the prompt for a ``claude_code`` lead session,
+    again at ``MEMORY_HARD_CAP`` here. ``code_map_text`` is the rendered code map
+    (``render_code_map``), capped again at ``CODE_MAP_HARD_CAP``. ``engine``: the prompt for a ``claude_code`` lead session,
     whose tools are real tool definitions, so they are not listed and no JSON protocol is asked.
     """
     anchor = mission_text.strip() or anchor_text.strip()
@@ -190,6 +206,9 @@ def build_messages(
     memory = memory_text.strip()
     if memory:
         user += f"{_clip_line(memory, MEMORY_HARD_CAP)}\n\n"
+    code_map = code_map_text.strip()
+    if code_map:
+        user += f"{_clip_line(code_map, CODE_MAP_HARD_CAP)}\n\n"
     decisions = render_decisions(snapshot.last_decisions)
     if decisions:
         user += f"{decisions}\n\n"

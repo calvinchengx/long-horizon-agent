@@ -23,8 +23,11 @@ sys.path.insert(0, str(ROOT / "python"))  # so ``tests.unit.*`` corpora import
 
 from lha.agent.loop import parse_action  # noqa: E402
 from lha.agent.prompt import (  # noqa: E402
+    CODE_MAP_HARD_CAP,
+    CODE_MAP_HEADER,
     build_messages,
     corrective_message,
+    render_code_map,
     render_memory_block,
     render_tools,
 )
@@ -772,6 +775,13 @@ def _prompt_cases() -> list[dict[str, Any]]:
             "memory_text": "\n  " + "mémoire " * 3000 + "  \n",
             "decisions": _decisions(),
         },
+        {
+            "name": "memory_and_code_map",
+            "mission_text": "Mission: M",
+            "item": base_item,
+            "memory_text": "Memory:\n- a fact",
+            "code_map_text": render_code_map("<ctx task='x'>" + "carte " * 4000 + "</ctx>"),
+        },
         {"name": "engine", "mission_text": "Mission: M", "item": failing, "engine": True},
         {"name": "no_tools", "mission_text": "Mission: M", "item": base_item, "specs": []},
     ]
@@ -794,6 +804,7 @@ def _prompt_cases() -> list[dict[str, Any]]:
             specs=specs,
             memory_text=str(case.get("memory_text", "")),
             engine=bool(case.get("engine", False)),
+            code_map_text=str(case.get("code_map_text", "")),
         )
         out.append(
             {
@@ -801,6 +812,7 @@ def _prompt_cases() -> list[dict[str, Any]]:
                 "anchor_text": case.get("anchor_text", ""),
                 "mission_text": case.get("mission_text", ""),
                 "memory_text": case.get("memory_text", ""),
+                "code_map_text": case.get("code_map_text", ""),
                 "engine": case.get("engine", False),
                 "snapshot": snapshot.model_dump(mode="json"),
                 "item": item.model_dump(mode="json"),
@@ -809,6 +821,27 @@ def _prompt_cases() -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def _code_map_cases() -> dict[str, Any]:
+    """The ripwire command for an item and how its output becomes the prompt section."""
+    from lha.agent.code_map import code_map_argv
+
+    items = [
+        ChecklistItem(id="01", description="add farewell()"),
+        ChecklistItem(id="02", description='quote " & -dash; $(rm -rf /) `x` déjà 🐟'),
+    ]
+    outputs = ["", "   \n\t ", " <ctx/> ", "<ctx>" + "déjà " * 5000 + "</ctx>"]
+    return {
+        "header": CODE_MAP_HEADER,
+        "hard_cap": CODE_MAP_HARD_CAP,
+        "argv": [
+            {"item": i.model_dump(mode="json"), "budget": b, "argv": code_map_argv(i, b)}
+            for i in items
+            for b in (200, 2000)
+        ],
+        "render": [{"output": o, "rendered": render_code_map(o)} for o in outputs],
+    }
 
 
 def _memory_cases() -> list[dict[str, Any]]:
@@ -926,6 +959,7 @@ def export_agent_prompts() -> None:
                 ),
             },
             "render_memory_block": _memory_cases(),
+            "code_map": _code_map_cases(),
             "corrective": corrective_message("no JSON object found in reply").content,
             "parse_action": _action_cases(),
             "parse_plan": _plan_cases(),

@@ -226,6 +226,9 @@ func buildLeadLoop(settings *config.Settings, leadModel contracts.ModelProvider,
 	opts.MaxReplans = settings.MaxReplans
 	opts.MaxSplitDepth = settings.MaxSplitDepth
 	opts.Engine = engine
+	if settings.CodeMap == "ripwire" {
+		opts.CodeMap = &RipwireCodeMap{TokenBudget: settings.CodeMapTokenBudget, TimeoutS: settings.CodeMapTimeoutS}
+	}
 	return NewAgentLoop(opts), nil
 }
 
