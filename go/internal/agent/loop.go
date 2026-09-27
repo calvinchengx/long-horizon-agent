@@ -13,6 +13,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -96,6 +97,11 @@ type LoopOptions struct {
 	// Memory is the optional tiered memory: recalled into the task message before the first turn
 	// and told the cycle's outcome after the checkpoint (nil = no memory).
 	Memory memory.CycleMemory
+	// Triage, when set, may split or block an item that keeps failing BEFORE
+	// MaxConsecutiveFailures when a System One model is confident the item is too big or the
+	// failure is environmental (systemone.StallTriage). It can only stop work on an item sooner;
+	// its answers are committed as system_one events, and a failed call changes nothing.
+	Triage *systemone.StallTriage
 }
 
 // DefaultLoopOptions are the Python defaults (max_turns=8, max_consecutive_failures=3,
@@ -140,6 +146,9 @@ type cycleState struct {
 // SetMemory installs (or, with nil, removes) the loop's tiered memory (python:
 // build_lead_loop(memory=)).
 func (l *AgentLoop) SetMemory(m memory.CycleMemory) { l.opts.Memory = m }
+
+// SetTriage installs (or, with nil, removes) stall triage (python: build_lead_loop(system_one=)).
+func (l *AgentLoop) SetTriage(t *systemone.StallTriage) { l.opts.Triage = t }
 
 // RunCycle runs one cycle on the next actionable item. anchorText is optional caller context;
 // checks are the mission's gating checks.
@@ -499,6 +508,7 @@ func (l *AgentLoop) withIntegrity(ctx context.Context, v contracts.VerificationR
 func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checklist, itemID, cycleID string, v contracts.VerificationResult, toolCalls int, missionText, missionID string, egress []contracts.EventRecord) (string, error) {
 	splitInto := []string{}
 	rolledBack := []string{}
+	triaged := []contracts.EventRecord{}
 	var verb, note string
 	if v.AllGreen {
 		proved := []string{}
@@ -531,16 +541,32 @@ func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checkli
 			report += "\n\nThis attempt's changes were rolled back to the last verified state " +
 				"(kept at " + ref + "): " + shown + ". Start again from the committed code."
 		}
+		previousFailure := checklist.Get(itemID).LastFailure
 		item, err := checklist.RecordFailure(itemID, report, l.opts.MaxConsecutiveFailures)
 		if err != nil {
 			return "", err
+		}
+		action := systemone.ActionContinue
+		if l.opts.Triage != nil && l.opts.Triage.Applies(*item) {
+			var event contracts.EventRecord
+			action, event = l.triageFailure(ctx, checklist, *item, report, previousFailure, missionID, cycleID)
+			triaged = append(triaged, event)
+			if action != systemone.ActionContinue {
+				item.Status = contracts.StatusBlocked
+			}
 		}
 		verb = "attempt"
 		if item.Status == contracts.StatusBlocked {
 			verb = "block"
 		}
 		note = fmt.Sprintf("%s (attempt %d, status %s)", v.Verdict, item.Attempts, item.Status)
-		if item.Status == contracts.StatusBlocked {
+		if action == systemone.ActionBlock {
+			note += "; blocked early: system one triage found an environment problem"
+			item.LastFailure = "Blocked before the failure limit: System One triage judged this failure to " +
+				"be environmental (a tool, dependency, network, permission or resource " +
+				"problem), which another attempt cannot fix.\n\n" + report
+		}
+		if item.Status == contracts.StatusBlocked && action != systemone.ActionBlock {
 			splitInto, err = l.maybeSplit(ctx, checklist, *item, missionText)
 			if err != nil {
 				return "", err
@@ -548,6 +574,11 @@ func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checkli
 			if len(splitInto) > 0 {
 				verb = "split"
 				note += "; split into " + strings.Join(splitInto, ", ")
+			} else if action == systemone.ActionSplit { // the replanner could not split it: carry on
+				item = checklist.Get(itemID)
+				item.Status = contracts.StatusInProgress
+				verb = "attempt"
+				note = fmt.Sprintf("%s (attempt %d, status %s)", v.Verdict, item.Attempts, item.Status)
 			}
 		}
 	}
@@ -562,6 +593,7 @@ func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checkli
 	events := l.gateEvents(cycleID)
 	events = append(events, l.verifierEvents(missionID, cycleID)...)
 	events = append(events, egress...)
+	events = append(events, triaged...)
 	events = append(events, contracts.EventRecord{
 		Kind:    "cycle",
 		CycleID: cycleID,
@@ -616,10 +648,10 @@ func (l *AgentLoop) rollBackAttempt(ctx context.Context, ref string) ([]string, 
 	return changed, nil
 }
 
-// maybeSplit splits a newly blocked item via the replanner, within the mission's replan budget.
-func (l *AgentLoop) maybeSplit(ctx context.Context, checklist *contracts.Checklist, item contracts.ChecklistItem, missionText string) ([]string, error) {
+// splitAllowed reports whether the replanner may split item (replan budget and nesting depth).
+func (l *AgentLoop) splitAllowed(checklist *contracts.Checklist, item contracts.ChecklistItem) bool {
 	if l.opts.Replanner == nil || l.opts.MaxReplans <= 0 {
-		return []string{}, nil
+		return false
 	}
 	splits := 0
 	for _, i := range checklist.Items {
@@ -627,7 +659,21 @@ func (l *AgentLoop) maybeSplit(ctx context.Context, checklist *contracts.Checkli
 			splits++
 		}
 	}
-	if splits >= l.opts.MaxReplans || strings.Count(item.ID, ".") >= l.opts.MaxSplitDepth {
+	return splits < l.opts.MaxReplans && strings.Count(item.ID, ".") < l.opts.MaxSplitDepth
+}
+
+// triageFailure asks the triage why item keeps failing; it returns the action and the event to
+// commit.
+func (l *AgentLoop) triageFailure(ctx context.Context, checklist *contracts.Checklist, item contracts.ChecklistItem, report, previousFailure, missionID, cycleID string) (string, contracts.EventRecord) {
+	verdict := l.opts.Triage.Assess(ctx, item, report, previousFailure, l.splitAllowed(checklist, item))
+	payload := verdict.Payload(item.ID, l.opts.Triage.Threshold)
+	l.emit("system_one", missionID, cycleID, payloadFields(payload)...)
+	return verdict.Action, contracts.EventRecord{Kind: "system_one", CycleID: cycleID, Payload: payload}
+}
+
+// maybeSplit splits a newly blocked item via the replanner, within the mission's replan budget.
+func (l *AgentLoop) maybeSplit(ctx context.Context, checklist *contracts.Checklist, item contracts.ChecklistItem, missionText string) ([]string, error) {
+	if !l.splitAllowed(checklist, item) {
 		return []string{}, nil
 	}
 	drafts, err := l.opts.Replanner.Split(ctx, missionText, item)

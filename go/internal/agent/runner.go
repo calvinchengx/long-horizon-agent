@@ -19,6 +19,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence/services"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -317,9 +318,13 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 	}
 	// Persistence + memory: mission row, persistent cost ledger (incl. a Planner call made before
 	// the mission id existed), tiered memory for the lead.
+	systemOne, err := systemone.Build(settings, meter)
+	if err != nil {
+		return MissionSummary{}, err
+	}
 	svc, err := services.Open(ctx, settings, services.Request{
 		MissionID: missionID, Workdir: o.Workdir, Meter: meter, Title: o.Title, Description: o.Description,
-		Model: meter.Wrap(lead, "librarian"), Recorder: recorder,
+		Model: meter.Wrap(lead, "librarian"), Recorder: recorder, SystemOne: systemOne,
 	})
 	if err != nil {
 		return MissionSummary{}, err
@@ -354,6 +359,7 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 		return MissionSummary{}, err
 	}
 	loop.SetMemory(svc.CycleMemory())
+	loop.SetTriage(systemone.BuildStallTriage(settings, svc.SystemOne))
 	tctx := contracts.ToolContext{MissionID: missionID, Session: toolbox.Session()}
 
 cycleLoop:

@@ -30,39 +30,47 @@ func TestNewFieldDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	checks := map[string][2]any{
-		"LeadEngine":                {s.LeadEngine, "loop"},
-		"ClaudeCodeBin":             {s.ClaudeCodeBin, "claude"},
-		"ClaudeCodeTools":           {s.ClaudeCodeTools, "lha"},
-		"ClaudeCodeMaxBudgetUSD":    {s.ClaudeCodeMaxBudgetUSD, 5.0},
-		"ClaudeCodeTimeoutS":        {s.ClaudeCodeTimeoutS, 3600.0},
-		"MaxParallelImplementers":   {s.MaxParallelImplementers, 3},
-		"SQLitePathSetting":         {s.SQLitePathSetting, ""},
-		"PostgresFallbackToSQLite":  {s.PostgresFallbackToSQLite, true},
-		"MemoryEnabled":             {s.MemoryEnabled, true},
-		"MemoryPromptBudgetChars":   {s.MemoryPromptBudgetChars, 4000},
-		"MemoryEpisodicK":           {s.MemoryEpisodicK, 4},
-		"MemorySemanticK":           {s.MemorySemanticK, 4},
-		"MemorySkillsK":             {s.MemorySkillsK, 2},
-		"MemoryEmbedder":            {s.MemoryEmbedder, "hash"},
-		"MemoryEmbeddingModel":      {s.MemoryEmbeddingModel, ""},
-		"MemoryRerank":              {s.MemoryRerank, "none"},
-		"MemoryConsolidateEvery":    {s.MemoryConsolidateEvery, 5},
-		"MemoryConsolidation":       {s.MemoryConsolidation, "extractive"},
-		"MemoryIndexRepoFiles":      {s.MemoryIndexRepoFiles, true},
-		"MemoryMaxRepoFiles":        {s.MemoryMaxRepoFiles, 400},
-		"WebAllowPorts":             {s.WebAllowPorts, ""},
-		"WebTimeoutS":               {s.WebTimeoutS, 30.0},
-		"WebMaxResponseBytes":       {s.WebMaxResponseBytes, 2000000},
-		"PrivateData":               {s.PrivateData, false},
-		"FallbackModels":            {s.FallbackModels, ""},
-		"FallbackMaxRounds":         {s.FallbackMaxRounds, 2},
-		"ModelProbeTimeoutS":        {s.ModelProbeTimeoutS, 10.0},
-		"WorkerGuardIntervalS":      {s.WorkerGuardIntervalS, 30.0},
-		"ConsoleApprovalTimeoutS":   {s.ConsoleApprovalTimeoutS, 3600},
-		"DeadlockGateDefault":       {s.DeadlockGateDefault, "abort"},
-		"ImpossibleAfterFailures":   {s.ImpossibleAfterFailures, 3},
-		"CyclePauseSeconds":         {s.CyclePauseSeconds, 0},
-		"GateWebhookTimeoutSeconds": {s.GateWebhookTimeoutSeconds, 5.0},
+		"LeadEngine":                 {s.LeadEngine, "loop"},
+		"ClaudeCodeBin":              {s.ClaudeCodeBin, "claude"},
+		"ClaudeCodeTools":            {s.ClaudeCodeTools, "lha"},
+		"ClaudeCodeMaxBudgetUSD":     {s.ClaudeCodeMaxBudgetUSD, 5.0},
+		"ClaudeCodeTimeoutS":         {s.ClaudeCodeTimeoutS, 3600.0},
+		"MaxParallelImplementers":    {s.MaxParallelImplementers, 3},
+		"SQLitePathSetting":          {s.SQLitePathSetting, ""},
+		"PostgresFallbackToSQLite":   {s.PostgresFallbackToSQLite, true},
+		"MemoryEnabled":              {s.MemoryEnabled, true},
+		"MemoryPromptBudgetChars":    {s.MemoryPromptBudgetChars, 4000},
+		"MemoryEpisodicK":            {s.MemoryEpisodicK, 4},
+		"MemorySemanticK":            {s.MemorySemanticK, 4},
+		"MemorySkillsK":              {s.MemorySkillsK, 2},
+		"MemoryEmbedder":             {s.MemoryEmbedder, "hash"},
+		"MemoryEmbeddingModel":       {s.MemoryEmbeddingModel, ""},
+		"MemoryRerank":               {s.MemoryRerank, "none"},
+		"MemoryConsolidateEvery":     {s.MemoryConsolidateEvery, 5},
+		"MemoryConsolidation":        {s.MemoryConsolidation, "extractive"},
+		"MemoryIndexRepoFiles":       {s.MemoryIndexRepoFiles, true},
+		"MemoryMaxRepoFiles":         {s.MemoryMaxRepoFiles, 400},
+		"WebAllowPorts":              {s.WebAllowPorts, ""},
+		"WebTimeoutS":                {s.WebTimeoutS, 30.0},
+		"WebMaxResponseBytes":        {s.WebMaxResponseBytes, 2000000},
+		"PrivateData":                {s.PrivateData, false},
+		"FallbackModels":             {s.FallbackModels, ""},
+		"FallbackMaxRounds":          {s.FallbackMaxRounds, 2},
+		"ModelProbeTimeoutS":         {s.ModelProbeTimeoutS, 10.0},
+		"WorkerGuardIntervalS":       {s.WorkerGuardIntervalS, 30.0},
+		"ConsoleApprovalTimeoutS":    {s.ConsoleApprovalTimeoutS, 3600},
+		"DeadlockGateDefault":        {s.DeadlockGateDefault, "abort"},
+		"ImpossibleAfterFailures":    {s.ImpossibleAfterFailures, 3},
+		"CyclePauseSeconds":          {s.CyclePauseSeconds, 0},
+		"GateWebhookTimeoutSeconds":  {s.GateWebhookTimeoutSeconds, 5.0},
+		"SystemOneBackend":           {s.SystemOneBackend, "off"},
+		"SystemOneEndpoint":          {s.SystemOneEndpoint, "https://api.typesafe.ai/v1/systemone"},
+		"SystemOneModel":             {s.SystemOneModel, "jev-1.13.0"},
+		"SystemOneTimeoutS":          {s.SystemOneTimeoutS, 5.0},
+		"SystemOneTriage":            {s.SystemOneTriage, true},
+		"SystemOneTriageThreshold":   {s.SystemOneTriageThreshold, 0.9},
+		"SystemOneTriageMinFailures": {s.SystemOneTriageMinFailures, 2},
+		"SystemOneRerankMin":         {s.SystemOneRerankMin, 0.0},
 	}
 	for name, c := range checks {
 		if c[0] != c[1] {
@@ -73,14 +81,15 @@ func TestNewFieldDefaults(t *testing.T) {
 		t.Errorf("GateEscalationSeconds = %v", s.GateEscalationSeconds)
 	}
 	if s.WebCredentials != nil || s.WebSearchProvider != nil || s.WebSearchAPIKey != nil ||
-		s.WebSearchEndpoint != nil || s.GateWebhookURL != nil {
+		s.WebSearchEndpoint != nil || s.GateWebhookURL != nil || s.SystemOneAPIKey != nil ||
+		s.SystemOnePriceInPerMTok != nil {
 		t.Error("optional web/gate fields should default to nil")
 	}
 	keys := []string{}
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 86 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 97 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }

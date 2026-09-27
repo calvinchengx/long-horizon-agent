@@ -10,6 +10,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence/services"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 // What a run persists besides the anchor (python: lha.persistence.services.open_run_services):
@@ -34,6 +35,8 @@ type ServicesRequest struct {
 	// Gate is the run's human gate, for services that record its events (python:
 	// bind_gate_store); nil when there is none.
 	Gate contracts.HITLGate
+	// SystemOne serves memory_rerank=system_one; the orchestrator owns it.
+	SystemOne systemone.Model
 }
 
 // RunServices is one run's persistence (python: RunServices).
@@ -77,7 +80,7 @@ func PersistentServices(ctx context.Context, req ServicesRequest) (RunServices, 
 	svc, err := services.Open(ctx, req.Settings, services.Request{
 		MissionID: req.MissionID, Workdir: req.Workdir, Meter: req.Meter,
 		Title: req.Title, Description: req.Description, Model: req.Model,
-		Recorder: req.Recorder, KeyPrefix: req.KeyPrefix,
+		Recorder: req.Recorder, KeyPrefix: req.KeyPrefix, SystemOne: req.SystemOne,
 	})
 	if err != nil {
 		return nil, err

@@ -140,7 +140,7 @@ type Settings struct {
 	// Voyage AI embedder (memory_embedder=voyage): the API key and an optional endpoint.
 	VoyageAPIKey           *Secret `env:"voyage_api_key"`
 	VoyageEndpoint         *string `env:"voyage_endpoint"`
-	MemoryRerank           string  `env:"memory_rerank" default:"none" choices:"none,cross_encoder"`
+	MemoryRerank           string  `env:"memory_rerank" default:"none" choices:"none,cross_encoder,system_one"`
 	MemoryConsolidateEvery int     `env:"memory_consolidate_every" default:"5"`
 	MemoryConsolidation    string  `env:"memory_consolidation" default:"extractive" choices:"extractive,model"`
 	MemoryIndexRepoFiles   bool    `env:"memory_index_repo_files" default:"true"`
@@ -155,6 +155,21 @@ type Settings struct {
 	WebTimeoutS         float64 `env:"web_timeout_s" default:"30.0" gt:"0"`
 	WebMaxResponseBytes int     `env:"web_max_response_bytes" default:"2000000" gt:"0"`
 	PrivateData         bool    `env:"private_data" default:"false"`
+
+	// --- System One decision models (systemone; docs/25-system-one.md): typed, calibrated
+	// answers (TypeSafe's Jev, or a self-hosted Kev), used only to stop work on an item sooner or
+	// to reorder recalled memory.
+	SystemOneBackend           string   `env:"system_one_backend" default:"off" choices:"off,systemone,stub"`
+	SystemOneEndpoint          string   `env:"system_one_endpoint" default:"https://api.typesafe.ai/v1/systemone"`
+	SystemOneAPIKey            *Secret  `env:"system_one_api_key"`
+	SystemOneModel             string   `env:"system_one_model" default:"jev-1.13.0"`
+	SystemOneTimeoutS          float64  `env:"system_one_timeout_s" default:"5.0" gt:"0"`
+	SystemOnePriceInPerMTok    *float64 `env:"system_one_price_in_per_mtok" ge:"0"`
+	SystemOnePrivateDataOK     bool     `env:"system_one_private_data_ok" default:"false"`
+	SystemOneTriage            bool     `env:"system_one_triage" default:"true"`
+	SystemOneTriageThreshold   float64  `env:"system_one_triage_threshold" default:"0.9" ge:"0" le:"1"`
+	SystemOneTriageMinFailures int      `env:"system_one_triage_min_failures" default:"2" ge:"1"`
+	SystemOneRerankMin         float64  `env:"system_one_rerank_min" default:"0.0" ge:"0" le:"1"`
 
 	// --- Model resilience
 	FallbackModels     string  `env:"fallback_models" default:""`
@@ -459,6 +474,8 @@ func (s *Settings) Clone() *Settings {
 	c.LangfuseSecretKey = cloneSecret(s.LangfuseSecretKey)
 	c.VoyageAPIKey = cloneSecret(s.VoyageAPIKey)
 	c.VoyageEndpoint = cloneStr(s.VoyageEndpoint)
+	c.SystemOneAPIKey = cloneSecret(s.SystemOneAPIKey)
+	c.SystemOnePriceInPerMTok = cloneF(s.SystemOnePriceInPerMTok)
 	c.WebCredentials = cloneSecret(s.WebCredentials)
 	c.WebSearchProvider = cloneStr(s.WebSearchProvider)
 	c.WebSearchAPIKey = cloneSecret(s.WebSearchAPIKey)

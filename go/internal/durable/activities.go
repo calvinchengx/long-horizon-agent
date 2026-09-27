@@ -27,6 +27,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -409,6 +410,13 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 		return CycleResult{}, err
 	}
 	defer store.Close(context.WithoutCancel(ctx))
+	systemOne, err := systemone.Build(settings, meter)
+	if err != nil { // e.g. a remote System One endpoint without a key
+		_ = toolbox.Close(context.WithoutCancel(ctx))
+		closeModel()
+		return CycleResult{}, configError(fmt.Sprintf("cannot build the System One model: %v", err), err)
+	}
+	defer func() { _ = systemone.Close(systemOne) }()
 	// Every metered call lands in cost_ledger as it happens (python: LedgerSink attached with
 	// key_prefix=f"{cycle_id}@{attempt}", backfill=False: the seeded prior spend is already there).
 	meter.SetHook(newLedgerHook(store, inp.MissionID, fmt.Sprintf("%s@%d", inp.CycleID, attempt)))
@@ -419,7 +427,7 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 	var cycleMemory memory.CycleMemory
 	if backed, ok := store.(persistenceBacked); ok {
 		if mem := memory.OpenMissionMemory(ctx, settings, backed.Persistence(), inp.Workdir, inp.MissionID,
-			memory.OpenOptions{Model: meter.Wrap(inner, "librarian")}); mem != nil {
+			memory.OpenOptions{Model: meter.Wrap(inner, "librarian"), SystemOne: systemOne}); mem != nil {
 			defer mem.Close()
 			cycleMemory = mem
 		}
@@ -468,6 +476,7 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 			return agent.CycleOutcome{}, configError(fmt.Sprintf("invalid configuration: %v", err), err)
 		}
 		loop.SetMemory(cycleMemory)
+		loop.SetTriage(systemone.BuildStallTriage(settings, systemOne))
 		tctx := contracts.ToolContext{MissionID: inp.MissionID, Session: toolbox.Session()}
 		return withHeartbeat(ctx, a.heartbeatEvery(), inp.CycleID, func() (agent.CycleOutcome, error) {
 			return loop.RunCycle(ctx, tctx, inp.MissionID, inp.CycleID, AnchorText(snapshot, inp), checks)

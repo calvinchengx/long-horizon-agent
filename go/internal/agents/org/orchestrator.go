@@ -23,6 +23,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -310,10 +311,15 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	if opener == nil {
 		opener = DefaultServices
 	}
+	systemOne, err := systemone.Build(settings, meter)
+	if err != nil {
+		return agent.MissionSummary{}, err
+	}
+	defer func() { _ = systemone.Close(systemOne) }()
 	services, err := opener(ctx, ServicesRequest{
 		Settings: settings, MissionID: r.missionID, Workdir: r.workdir, Meter: meter,
 		Title: title, Description: description, Model: meter.Wrap(raw["lead"], "librarian"),
-		Recorder: r.recorder, KeyPrefix: keyPrefix, Gate: r.gate,
+		Recorder: r.recorder, KeyPrefix: keyPrefix, Gate: r.gate, SystemOne: systemOne,
 	})
 	if err != nil {
 		return agent.MissionSummary{}, err
@@ -333,6 +339,7 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 		return agent.MissionSummary{}, err
 	}
 	r.lead.SetMemory(services.Memory())
+	r.lead.SetTriage(systemone.BuildStallTriage(settings, systemOne))
 	r.reviewer = NewReviewer(r.reviewModel, r.readTools)
 	// Integration is gated exactly like a Lead cycle would be for the same item: the mission
 	// checks plus the item's witnesses, on the lead verifier.

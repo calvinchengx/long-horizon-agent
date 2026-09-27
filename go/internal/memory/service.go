@@ -27,6 +27,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 // Tiered memory wired into the agent loop (python: lha.memory.service.MissionMemory).
@@ -40,7 +41,7 @@ import (
 //   - semantic: hybrid retrieval over distilled facts + progress notes (persisted), the anchor's
 //     recent decisions, and chunks of the checkout's tracked text files. BM25 and the dense
 //     channel (embedder cosine; pgvector on Postgres, stored vectors on SQLite) are fused with
-//     RRF, then reranked (NoopReranker in Go).
+//     RRF, then reranked (fusion order, or memory_rerank=system_one).
 //
 // AFTER the checkpoint, ObserveCycle appends the outcome as an episodic event, stores a progress
 // note, admits a skill when the item was VERIFIED, and every ConsolidateEvery outcomes
@@ -1310,6 +1311,8 @@ type OpenOptions struct {
 	// SentenceTransformer is a test seam standing in for the (Python-only) sentence_transformers
 	// embedder.
 	SentenceTransformer func(model string) (contracts.Embedder, error)
+	// SystemOne serves memory_rerank=system_one (nil: fusion order is kept).
+	SystemOne systemone.Model
 }
 
 // OpenMissionMemory is the run's memory plane per settings (nil when memory_enabled is false).
@@ -1339,11 +1342,18 @@ func OpenMissionMemory(ctx context.Context, s *config.Settings, store persistenc
 	}
 	mode := ops.DecideMemoryMode(statuses)
 	var reranker Reranker = NoopReranker{}
-	if s.MemoryRerank == "cross_encoder" {
+	switch s.MemoryRerank {
+	case "cross_encoder":
 		if r, err := NewCrossEncoderReranker(""); err != nil {
 			log().Warn("memory_rerank_unavailable", "error", errText(err))
 		} else {
 			reranker = r
+		}
+	case "system_one":
+		if o.SystemOne == nil {
+			log().Warn("memory_rerank_unavailable", "error", "memory_rerank=system_one needs LHA_SYSTEM_ONE_BACKEND")
+		} else {
+			reranker = &SystemOneReranker{Model: o.SystemOne, MinP: s.SystemOneRerankMin}
 		}
 	}
 	memory := New(Options{Store: store, Workdir: workdir, Config: ConfigFromSettings(s), Mode: mode,
