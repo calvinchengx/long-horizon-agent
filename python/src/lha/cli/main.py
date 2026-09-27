@@ -163,6 +163,8 @@ def _run[T](coro: Awaitable[T]) -> T:
     """Run a coroutine, turning expected operator errors into clean CLI errors."""
     import asyncio
 
+    from temporalio.service import RPCError
+
     from lha.execution.factory import UnsafeSandboxError
     from lha.governor.metering import BudgetExceeded
     from lha.model.claude_code import ClaudeCodeError
@@ -180,8 +182,14 @@ def _run[T](coro: Awaitable[T]) -> T:
         _fail(str(exc), code=3)
     except ClaudeCodeError as exc:  # e.g. an expired `claude` login: an operator error, not a crash
         _fail(str(exc), code=1)
+    except RPCError as exc:  # e.g. "workflow not found for ID: mission:..." (as the Go lha prints)
+        _fail(str(exc), code=1)
     except ModuleNotFoundError as exc:
         _fail_missing_module(exc)
+
+
+# The mission-* commands define their own inner ``_run`` coroutines, which shadow ``_run``.
+_run_cli = _run
 
 
 def _fail_missing_module(exc: ModuleNotFoundError) -> NoReturn:
@@ -911,7 +919,6 @@ async def _query_gate(handle: Any) -> GateView | None:
 @app.command(name="mission-status")
 def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) -> None:
     """Query a mission's status, cycles, sleep, open gate (+ pending action) and gate events."""
-    import asyncio
     from datetime import UTC, datetime
 
     from lha.config import get_settings
@@ -940,7 +947,7 @@ def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) ->
             lines += [f"  {line}" for line in log[-8:]]
         return lines
 
-    for line in asyncio.run(_run()):
+    for line in _run_cli(_run()):
         typer.echo(line)
 
 
@@ -958,7 +965,6 @@ def mission_approve(
     """Resolve an open human gate on a mission with a decision."""
     if decision.strip().lower() not in _ALL_DECISIONS:
         _fail(f"unknown --decision {decision!r}; expected {', '.join(_ALL_DECISIONS)}")
-    import asyncio
 
     from lha.config import get_settings
     from lha.durable.signals import SIGNAL_HUMAN_DECISION
@@ -977,7 +983,7 @@ def mission_approve(
         await handle.signal(SIGNAL_HUMAN_DECISION, choice)
         return choice
 
-    choice = asyncio.run(_run())
+    choice = _run_cli(_run())
     typer.echo(f"sent decision '{choice}' to mission {mission_id}")
 
 
@@ -989,7 +995,6 @@ def mission_snooze(
     ),
 ) -> None:
     """Park a mission on a durable timer (SLEEPING) before its next cycle, or wake it."""
-    import asyncio
 
     from lha.config import get_settings
     from lha.durable.signals import SIGNAL_SNOOZE
@@ -1000,14 +1005,13 @@ def mission_snooze(
         handle = client.get_workflow_handle(f"mission:{mission_id}")
         await handle.signal(SIGNAL_SNOOZE, seconds)
 
-    asyncio.run(_run())
+    _run_cli(_run())
     typer.echo(f"mission {mission_id}: " + (f"snoozed {seconds}s" if seconds else "woken"))
 
 
 @app.command(name="mission-abort")
 def mission_abort(mission_id: str = typer.Argument(..., help="Mission id.")) -> None:
     """Cancel a running mission workflow."""
-    import asyncio
 
     from lha.config import get_settings
     from lha.durable.worker import connect_client
@@ -1017,9 +1021,46 @@ def mission_abort(mission_id: str = typer.Argument(..., help="Mission id.")) -> 
         handle = client.get_workflow_handle(f"mission:{mission_id}")
         await handle.cancel()
 
-    asyncio.run(_run())
+    _run_cli(_run())
     typer.echo(f"cancelled mission {mission_id}")
 
 
+# Short-lived Temporal client commands. The Temporal Python SDK's native runtime can call into
+# Python while the interpreter finalizes and abort the process ("Fatal Python error:
+# PyGILState_Release", temporalio/sdk-python#300, still open), after the command has already
+# succeeded. These commands therefore end without interpreter finalization, once tracing and the
+# standard streams are flushed, keeping the command's exit code.
+_TEMPORAL_CLIENT_COMMANDS = frozenset(
+    {"mission-start", "mission-status", "mission-approve", "mission-snooze", "mission-abort"}
+)
+
+
+def main(argv: list[str] | None = None) -> None:
+    """The ``lha`` console script."""
+    import os
+    import sys
+
+    args = sys.argv[1:] if argv is None else argv
+    command = next((a for a in args if not a.startswith("-")), None)
+    if command not in _TEMPORAL_CLIENT_COMMANDS:
+        app(args=args, prog_name="lha")
+        return
+    try:
+        app(args=args, prog_name="lha")
+        code: int = 0
+    except SystemExit as exc:
+        if exc.code is None or isinstance(exc.code, int):
+            code = exc.code or 0
+        else:
+            print(exc.code, file=sys.stderr)
+            code = 1
+    from lha.obs.otel import shutdown_tracing
+
+    shutdown_tracing()
+    for stream in (sys.stdout, sys.stderr):
+        stream.flush()
+    os._exit(code)
+
+
 if __name__ == "__main__":
-    app()
+    main()

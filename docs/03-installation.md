@@ -20,7 +20,7 @@ uv run lha --help
 
 `uv sync` installs the core dependencies (pydantic, pydantic-settings, typer, structlog, orjson,
 tenacity, httpx, temporalio) and the dev group (ruff, pytest, pytest-asyncio, ty, pytest-cov).
-The project requires Python `>=3.12`. The `lha` console script is `lha.cli.main:app`.
+The project requires Python `>=3.12`. The `lha` console script is `lha.cli.main:main` (the Typer app is `lha.cli.main:app`).
 
 ### Optional extras
 

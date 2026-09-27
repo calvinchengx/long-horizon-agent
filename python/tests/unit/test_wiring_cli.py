@@ -177,3 +177,37 @@ def test_claude_code_failure_is_a_clean_cli_error() -> None:
     with pytest.raises(cli.typer.Exit) as exited:
         cli._run(boom())
     assert exited.value.exit_code == 1
+
+
+def test_temporal_rpc_error_is_a_clean_cli_error(capsys: pytest.CaptureFixture[str]) -> None:
+    """A mission-* command against a missing workflow prints `error: ...` and exits 1, as Go does."""
+    from temporalio.service import RPCError, RPCStatusCode
+
+    async def missing() -> None:
+        raise RPCError("workflow not found for ID: mission:m-nope", RPCStatusCode.NOT_FOUND, b"")
+
+    with pytest.raises(cli.typer.Exit) as exited:
+        cli._run(missing())
+    assert exited.value.exit_code == 1
+    assert capsys.readouterr().err == "error: workflow not found for ID: mission:m-nope\n"
+
+
+def test_main_hard_exits_only_temporal_client_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mission-* end via os._exit with the command's code (temporalio/sdk-python#300); others don't."""
+    import os
+
+    exits: list[int] = []
+    flushed: list[bool] = []
+    monkeypatch.setattr(os, "_exit", exits.append)
+    monkeypatch.setattr("lha.obs.otel.shutdown_tracing", lambda: flushed.append(True))
+
+    def fake_app(*, args: list[str], prog_name: str) -> None:
+        raise SystemExit(0 if args[0] == "mission-status" else 3)
+
+    monkeypatch.setattr(cli, "app", fake_app)
+    cli.main(["mission-status", "m1"])
+    cli.main(["--verbose", "mission-abort", "m1"])
+    assert exits == [0, 3] and flushed == [True, True]
+    with pytest.raises(SystemExit):
+        cli.main(["config"])  # not a Temporal client command: normal exit, no os._exit
+    assert exits == [0, 3]
