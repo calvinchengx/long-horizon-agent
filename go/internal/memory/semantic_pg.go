@@ -112,7 +112,7 @@ func (x *PgSemanticIndex) Add(ctx context.Context, records []contracts.MemoryRec
 
 // Query is the k nearest valid rows of this embedder's model+version (score = 1 - cosine distance).
 func (x *PgSemanticIndex) Query(ctx context.Context, text string, k int) ([]contracts.RetrievalHit, error) {
-	qv, err := x.embedder.Embed(ctx, []string{text})
+	qv, err := EmbedQueries(ctx, x.embedder, []string{text})
 	if err != nil {
 		return nil, err
 	}

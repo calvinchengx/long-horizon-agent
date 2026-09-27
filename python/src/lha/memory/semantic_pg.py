@@ -23,6 +23,7 @@ import json
 from typing import Any
 
 from lha.contracts.memory import Embedder, MemoryRecord, RetrievalHit
+from lha.memory.embeddings import embed_queries
 
 #: Width of ``semantic_memory.embedding`` in ``db/migrations/0001_init.sql`` (``vector(1024)``).
 DEFAULT_COLUMN_DIM = 1024
@@ -103,7 +104,7 @@ class PgSemanticIndex:
                 )
 
     async def query(self, text: str, *, k: int = 5) -> list[RetrievalHit]:
-        query_vec = (await self._embedder.embed([text]))[0]
+        query_vec = (await embed_queries(self._embedder, [text]))[0]
         self._check_vector(query_vec)
         pool = await self._ensure_pool()
         async with pool.connection() as conn:

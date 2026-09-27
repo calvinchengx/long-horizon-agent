@@ -36,6 +36,8 @@ _SECRET_VALUE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(_NB + r"(xox[abposr]-[A-Za-z0-9-]{10,})"), REDACTED),
     (re.compile(_NB + r"(AKIA[0-9A-Z]{16})\b"), REDACTED),
     (re.compile(_NB + r"(AIza[0-9A-Za-z_\-]{30,})"), REDACTED),
+    # Voyage AI API keys (pa-...).
+    (re.compile(_NB + r"(pa-[A-Za-z0-9_\-]{32,})"), REDACTED),
     # "Authorization: <scheme> <credentials>" (Basic/Bearer/Digest/Token, or a bare value).
     (
         re.compile(

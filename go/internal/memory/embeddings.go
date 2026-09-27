@@ -24,6 +24,9 @@ import (
 //   - OllamaEmbedder: a real local semantic embedder served by Ollama (POST /api/embed).
 //     ConnectOllama probes the server, the model and its digest; the memory service turns an
 //     unreachable server or an unpulled model into lexical-only retrieval.
+//   - VoyageEmbedder (voyage.go): the paid Voyage AI API over DNS-pinned, egress-checked HTTPS;
+//     ConnectVoyage probes the key, the endpoint and the dimension, and the memory service turns
+//     an unreachable API or a refused key into lexical-only retrieval.
 //   - PaddedEmbedder: zero-pads a narrower embedder to pgvector's vector(1024) column.
 //   - sentence_transformers is Python-only: NewSentenceTransformerEmbedder always returns
 //     ErrSentenceTransformersUnsupported, which the memory service turns into lexical-only
@@ -299,6 +302,16 @@ func (p *PaddedEmbedder) Dim() int { return p.dim }
 // Embed pads every inner vector with zeros.
 func (p *PaddedEmbedder) Embed(ctx context.Context, texts []string) ([][]float64, error) {
 	vectors, err := p.Inner.Embed(ctx, texts)
+	return p.pad(vectors, err)
+}
+
+// EmbedQuery pads the inner embedder's query vectors (EmbedQueries).
+func (p *PaddedEmbedder) EmbedQuery(ctx context.Context, texts []string) ([][]float64, error) {
+	vectors, err := EmbedQueries(ctx, p.Inner, texts)
+	return p.pad(vectors, err)
+}
+
+func (p *PaddedEmbedder) pad(vectors [][]float64, err error) ([][]float64, error) {
 	if err != nil {
 		return nil, err
 	}

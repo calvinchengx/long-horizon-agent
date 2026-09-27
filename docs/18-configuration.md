@@ -114,8 +114,10 @@ mission was aborted cannot turn `ABORTED` back into `RUNNING`.
 | `LHA_MEMORY_EPISODIC_K` | int | `4` | past outcomes of the active item recalled per cycle |
 | `LHA_MEMORY_SEMANTIC_K` | int | `4` | facts / progress / decisions / repo chunks recalled per cycle |
 | `LHA_MEMORY_SKILLS_K` | int | `2` | verified skills recalled per cycle |
-| `LHA_MEMORY_EMBEDDER` | `hash` \| `ollama` \| `sentence_transformers` \| `none` | `hash` | dense channel. `hash` is lexical and needs nothing; `ollama` is semantic, from the Ollama server at `LHA_OLLAMA_BASE_URL` ($0, no extra); `sentence_transformers` is semantic and needs the `embeddings` extra; `none` is lexical-only. `ollama` or `sentence_transformers` that cannot be used falls back to lexical-only. The default stays `hash` because `ollama` without a running server means no dense channel at all |
-| `LHA_MEMORY_EMBEDDING_MODEL` | string | unset | the embedding model; unset: `nomic-embed-text` for `ollama`, `BAAI/bge-m3` for `sentence_transformers`. On Postgres a model narrower than 1024 is zero-padded to the `vector(1024)` column; a wider one runs lexical-only |
+| `LHA_MEMORY_EMBEDDER` | `hash` \| `ollama` \| `voyage` \| `sentence_transformers` \| `none` | `hash` | dense channel. `hash` is lexical and needs nothing; `ollama` is semantic, from the Ollama server at `LHA_OLLAMA_BASE_URL` ($0, no extra); `voyage` is semantic, from the paid Voyage AI API (`LHA_VOYAGE_API_KEY`, public HTTPS only; memory text leaves the machine); `sentence_transformers` is semantic and needs the `embeddings` extra; `none` is lexical-only. `ollama`, `voyage` or `sentence_transformers` that cannot be used falls back to lexical-only. The default stays `hash` because `ollama` without a running server means no dense channel at all |
+| `LHA_MEMORY_EMBEDDING_MODEL` | string | unset | the embedding model; unset: `nomic-embed-text` for `ollama`, `voyage-4` (1024 wide) for `voyage`, `BAAI/bge-m3` for `sentence_transformers`. On Postgres a model narrower than 1024 is zero-padded to the `vector(1024)` column; a wider one runs lexical-only |
+| `LHA_VOYAGE_API_KEY` | secret | unset | the Voyage AI API key for `LHA_MEMORY_EMBEDDER=voyage`; unset: lexical-only. Sent only to the endpoint host |
+| `LHA_VOYAGE_ENDPOINT` | string | unset | the Voyage embeddings endpoint; unset: `https://api.voyageai.com/v1/embeddings`. Must be `https` and resolve to public addresses only, otherwise lexical-only ([Memory](12-memory.md#voyage)) |
 | `LHA_MEMORY_RERANK` | `none` \| `cross_encoder` | `none` | second-stage rerank; `cross_encoder` needs the `embeddings` extra |
 | `LHA_MEMORY_CONSOLIDATE_EVERY` | int | `5` | consolidate episodes into facts every N recorded cycles; `0` disables |
 | `LHA_MEMORY_CONSOLIDATION` | `extractive` \| `model` | `extractive` | `extractive` is deterministic and free; `model` asks the metered lead model |
@@ -254,7 +256,8 @@ Temporal and durable-gate settings (`LHA_TEMPORAL_*`, `LHA_TASK_QUEUE`, `LHA_OBJ
 `LHA_CYCLE_PAUSE_SECONDS`, `LHA_MODEL_PROBE_TIMEOUT_S`). Two memory values name Python-only
 extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
 `LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
-extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` is the Go choice for real embeddings).
+extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` or `voyage` are the Go choices for real
+embeddings).
 The one Python-only feature a setting selects is the E2B sandbox: `LHA_SANDBOX=e2b` is refused.
 (The durable organization is chosen by `mission-start` options, not settings; Go runs it too.)
 See
@@ -262,8 +265,9 @@ See
 
 ## Secrets
 
-Seven settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`,
-`LHA_POSTGRES_DSN`, `LHA_LANGFUSE_SECRET_KEY`, `LHA_WEB_CREDENTIALS`, `LHA_WEB_SEARCH_API_KEY` and
+Eight settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`,
+`LHA_POSTGRES_DSN`, `LHA_LANGFUSE_SECRET_KEY`, `LHA_VOYAGE_API_KEY`, `LHA_WEB_CREDENTIALS`,
+`LHA_WEB_SEARCH_API_KEY` and
 `LHA_GATE_WEBHOOK_URL` (chat webhook URLs embed their credential). Their `repr` never shows the
 value; code unwraps them with
 `get_secret_value()` only where the value is sent. `Settings.redacted()` masks every field whose

@@ -216,6 +216,8 @@ _TEXTS = [
     "https://example.com/path?q=1",
     "plain text with no secrets",
     "x_sk-abcdefghijklmnopqrst",
+    "voyage key pa-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy done",
+    "short pa-abcdefghijklmnopqrstuvwxyz01234 and spa-abcdefghijklmnopqrstuvwxyz0123456789",
 ]
 _KEYS = [
     "api_key",
@@ -1737,8 +1739,114 @@ def export_memory() -> None:
     _write("memory/recall.json", {"episodes": episodes, "terms": terms, "cases": recall})
 
 
+def _voyage_responses() -> list[tuple[int, object]]:
+    vec = [0.5, -1, 2.25e-3]
+    return [
+        (2, {"data": [{"index": 1, "embedding": [3, 4]}, {"index": 0, "embedding": vec}]}),
+        (1, {"object": "list", "data": [{"object": "embedding", "embedding": vec, "index": 0}]}),
+        (0, {"data": []}),
+        (1, {"data": {"index": 0}}),
+        (1, []),
+        (1, {"data": ["x"]}),
+        (1, {"data": [{"index": "0", "embedding": vec}]}),
+        (1, {"data": [{"index": 1.0, "embedding": vec}]}),
+        (1, {"data": [{"index": None, "embedding": vec}]}),
+        (1, {"data": [{"index": True, "embedding": vec}]}),
+        (2, {"data": [{"index": 2, "embedding": vec}]}),
+        (1, {"data": [{"index": -1, "embedding": vec}]}),
+        (1, {"data": [{"index": 0, "embedding": []}]}),
+        (1, {"data": [{"index": 0}]}),
+        (1, {"data": [{"index": 0, "embedding": [1, "2"]}]}),
+        (1, {"data": [{"index": 0, "embedding": [1, False]}]}),
+        (2, {"data": [{"index": 0, "embedding": vec}, {"index": 0, "embedding": vec}]}),
+        (2, {"data": [{"index": 0, "embedding": vec}]}),
+        (1, {"data": [{"index": 0, "embedding": vec}, {"index": 1, "embedding": vec}]}),
+    ]
+
+
+def export_voyage() -> None:
+    """spec/memory/voyage.json: the Voyage embedder's batching, the exact request bodies it
+    sends for the same inputs, how it reads (or rejects) a response, and its probe's HTTP-status
+    messages."""
+    from lha.memory.embeddings import (
+        VOYAGE_BATCH_CHARS,
+        VOYAGE_BATCH_TEXTS,
+        VOYAGE_DEFAULT_MODEL,
+        parse_voyage_response,
+        voyage_batches,
+        voyage_request_body,
+        voyage_status_message,
+    )
+
+    batch_inputs: list[tuple[list[str], int, int]] = [
+        ([], 3, 10),
+        (["a"], 3, 10),
+        (["a", "bb", "ccc", "dddd"], 3, 10),
+        (["a", "bb", "ccc", "dddd"], 2, 100),
+        (["0123456789abc", "x", "y"], 3, 10),  # one text over the budget travels alone
+        (["x", "0123456789abc", "y"], 5, 10),
+        (["déjà", "vu", "🐟🐟🐟", "日本語テキスト"], 10, 8),  # code points, not bytes
+        (["", "", "", ""], 3, 0),
+        (["abcde", "fghij", "k"], 10, 10),  # exactly at the budget stays together
+    ]
+    batches = [
+        {
+            "texts": texts,
+            "max_texts": n,
+            "max_chars": c,
+            "batches": voyage_batches(texts, max_texts=n, max_chars=c),
+        }
+        for texts, n, c in batch_inputs
+    ]
+    request_inputs: list[tuple[str, str, list[str]]] = [
+        (VOYAGE_DEFAULT_MODEL, "document", ["dimension probe"]),
+        (VOYAGE_DEFAULT_MODEL, "query", ["make the listen port configurable"]),
+        ("voyage-code-3", "document", ["def f():\n\treturn '<a & b>'", 'quote " and \\ slash']),
+        ("voyage-3.5-lite", "query", ["déjà vu — ÉCOLE", "🐟 \u2028 \x00 end"]),
+        (VOYAGE_DEFAULT_MODEL, "document", [f"chunk {i}" for i in range(130)]),
+        (VOYAGE_DEFAULT_MODEL, "document", []),
+    ]
+    requests = [
+        {
+            "model": model,
+            "input_type": input_type,
+            "texts": texts,
+            "bodies": [
+                voyage_request_body(model, batch, input_type) for batch in voyage_batches(texts)
+            ],
+        }
+        for model, input_type, texts in request_inputs
+    ]
+    responses = []
+    for count, data in _voyage_responses():
+        try:
+            responses.append(
+                {"count": count, "response": data, "vectors": parse_voyage_response(data, count)}
+            )
+        except ValueError as exc:
+            responses.append({"count": count, "response": data, "error": str(exc)})
+    statuses = [
+        {"model": model, "status": status, "message": voyage_status_message(model, status)}
+        for model in (VOYAGE_DEFAULT_MODEL, "it's-quoted")
+        for status in (400, 401, 403, 408, 429, 500, 503)
+    ]
+    _write(
+        "memory/voyage.json",
+        {
+            "default_model": VOYAGE_DEFAULT_MODEL,
+            "batch_texts": VOYAGE_BATCH_TEXTS,
+            "batch_chars": VOYAGE_BATCH_CHARS,
+            "batches": batches,
+            "requests": requests,
+            "responses": responses,
+            "statuses": statuses,
+        },
+    )
+
+
 def main() -> None:
     export_memory()
+    export_voyage()
     export_paths()
     export_arguments()
     export_sandbox_egress()

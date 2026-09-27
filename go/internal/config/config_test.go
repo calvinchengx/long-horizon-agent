@@ -79,7 +79,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 83 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 85 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -415,6 +415,7 @@ func TestConfigOutputMatchesPython(t *testing.T) {
 		"postgres": {
 			"LHA_POSTGRES_DSN=postgresql://u:p@h/db", "LHA_SQLITE_PATH=" + filepath.Join(tmp, "store", "lha.db"),
 			"LHA_MODEL_BACKEND=ollama", "LHA_LEAD_ENGINE=claude_code", "LHA_MODEL_PROBE_TIMEOUT_S=123456789.125",
+			"LHA_MEMORY_EMBEDDER=voyage", "LHA_VOYAGE_API_KEY=pa-secret", "LHA_VOYAGE_ENDPOINT=https://voyage.example/v1/embeddings",
 		},
 	}
 	for name, lha := range cases {

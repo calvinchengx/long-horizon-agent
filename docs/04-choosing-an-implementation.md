@@ -9,8 +9,7 @@ ledger and tiered memory. It also runs missions durably on Temporal (`lha worker
 `lha mission-start` and the other `mission-*` commands), the durable organization's research,
 review and parallel rounds included (`mission-start --research / --review / --max-parallel`),
 writing the same mission store and ledger and with the same tiered memory. Go implements
-everything except the E2B sandbox, the `sentence_transformers` / `cross_encoder` extras and the
-library-only `VoyageEmbedder`.
+everything except the E2B sandbox and the `sentence_transformers` / `cross_encoder` extras.
 
 ## What the two share
 
@@ -88,7 +87,7 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `execution` | `lha.execution` (sandboxes, egress proxy, dispatcher, tools including the web tools) | Committed: the `local` and `docker` sandboxes (image, egress allow-list proxy), path containment, the allow-list dispatcher with the Rule of Two and human gates, and every lead tool. No E2B sandbox ([see below](#e2b-is-not-supported-in-go)) |
 | `hitl` | `lha.hitl.approvals` (`TerminalApprover`, `console_gate`), `lha.hitl.escalation`, `lha.hitl.notify` | Committed: the console y/N gate of `--approve-interactive` with the escalation ladder and the gate webhook; prompts, events and webhook bodies are byte-identical to Python's; every gate event is written to `hitl_gates`. The durable `DeferredApprovalGate` is in `durable` |
 | `persistence` | `lha.persistence` (store, SQLite, Postgres, tracking, services, `db migrate`) | Committed: one `Store` interface with a pure-Go SQLite backend and a pgx Postgres backend on Python's schemas, the fallback from Postgres to SQLite, monotonic terminal statuses, the idempotent cost ledger, `hitl_gates`, `MissionTracker`, `LedgerSink` on the `CostMeter`, and run services. The durable object store is `durable/objectstore.go` |
-| `memory`, `ops` | `lha.memory`, `lha.ops` (degradation, lifecycle) | Committed: episodic recall, BM25 + dense retrieval fused with RRF, skills, extractive and model consolidation, the hash and Ollama embedders (padded for pgvector), pgvector on Postgres, stored vectors on SQLite, and the degradation to BM25 + `git grep`; the safe-park decision and mission lifecycle the durable workflow uses. `sentence_transformers` and the `cross_encoder` reranker are Python-only extras: Go falls back exactly as Python does without the extra. No `VoyageEmbedder` (a Python library class no setting selects) |
+| `memory`, `ops` | `lha.memory`, `lha.ops` (degradation, lifecycle) | Committed: episodic recall, BM25 + dense retrieval fused with RRF, skills, extractive and model consolidation, the hash, Ollama and Voyage embedders (padded for pgvector), pgvector on Postgres, stored vectors on SQLite, and the degradation to BM25 + `git grep`; the safe-park decision and mission lifecycle the durable workflow uses. `sentence_transformers` and the `cross_encoder` reranker are Python-only extras: Go falls back exactly as Python does without the extra. |
 
 What the Go CLI can do today:
 
@@ -154,7 +153,7 @@ What remains Python-only:
 - The E2B sandbox (E2B has no Go SDK; see below).
 - The `sentence_transformers` embedder and the `cross_encoder` reranker (Python extras): the Go
   memory plane falls back to lexical retrieval, and keeps fusion order, as Python does when the
-  extra is not installed; and the library-only `VoyageEmbedder`.
+  extra is not installed.
 - The Docker sandbox's egress proxy container runs the Python proxy source by default in both
   implementations; the Go proxy (`lha egress-proxy`) is used only when the sandbox is given a
   proxy command and an image containing a Linux `lha` binary, which no setting selects yet.

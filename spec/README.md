@@ -32,6 +32,7 @@ the matching package is ported; it runs every file below.
 | `memory/hash_embedder.json` | hash-embedder vectors and cosine similarity, exactly |
 | `memory/retrieval.json` | BM25 ranking and scores, Reciprocal Rank Fusion order and scores |
 | `memory/recall.json` | episodic lines, search terms, and the memory blocks recalled for a fixture ([`python/tests/unit/memory_spec_fixture.py`](../python/tests/unit/memory_spec_fixture.py)) |
+| `memory/voyage.json` | the Voyage embedder's batching, request bodies (documents and queries), response parsing and errors, and probe status messages |
 
 ## Changing behaviour
 
