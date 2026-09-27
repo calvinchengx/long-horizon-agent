@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/sdk/converter"
+	"go.temporal.io/sdk/worker"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -394,6 +397,93 @@ func TestWorkerGuardRefusesPythonPollers(t *testing.T) {
 	}
 	if !strings.HasPrefix(WorkerIdentity(), "lha-go:") {
 		t.Fatalf("identity %s", WorkerIdentity())
+	}
+}
+
+// sequenceDescriber answers its n-th DescribeTaskQueue call with answers[n] (the last repeats):
+// a list of poller identities, or an error.
+type sequenceDescriber struct {
+	mu      sync.Mutex
+	answers []any
+	calls   int
+}
+
+func (f *sequenceDescriber) DescribeTaskQueue(context.Context, string, enumspb.TaskQueueType) (*workflowservice.DescribeTaskQueueResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	answer := f.answers[min(f.calls, len(f.answers)-1)]
+	f.calls++
+	if err, ok := answer.(error); ok {
+		return nil, err
+	}
+	resp := &workflowservice.DescribeTaskQueueResponse{}
+	for _, id := range answer.([]string) {
+		resp.Pollers = append(resp.Pollers, &taskqueuepb.PollerInfo{Identity: id})
+	}
+	return resp, nil
+}
+
+// A running worker keeps re-checking; a failed check is reported and retried, a Python poller
+// that appears ends the guard.
+func TestWorkerGuardRechecksUntilAPythonPollerAppears(t *testing.T) {
+	goOnly, both := []string{"lha-go:1@h"}, []string{"lha-go:1@h", "lha-py:9@h"}
+	d := &sequenceDescriber{answers: []any{goOnly, goOnly, errors.New("unavailable"), both}}
+	var reported []error
+	err := GuardTaskQueue(context.Background(), d, "lha-mission", time.Millisecond, func(err error) { reported = append(reported, err) })
+	var mw *MixedWorkersError
+	if !errors.As(err, &mw) || mw.Identity != "lha-py:9@h" || len(reported) != 1 || d.calls != 4 {
+		t.Fatalf("err %v, reported %v, calls %d", err, reported, d.calls)
+	}
+	// Until ctx ends, when nobody else appears.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if err := GuardTaskQueue(ctx, &sequenceDescriber{answers: []any{goOnly}}, "q", time.Millisecond, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fakeWorker runs until stopped (or fails at once with err).
+type fakeWorker struct {
+	worker.Worker
+	err     error
+	stopped atomic.Bool
+}
+
+func (w *fakeWorker) Run(stop <-chan any) error {
+	if w.err != nil {
+		return w.err
+	}
+	<-stop
+	w.stopped.Store(true)
+	return nil
+}
+
+func TestRunGuardedStopsTheWorker(t *testing.T) {
+	// The guard trips: the worker is stopped and the mixed-workers error returned.
+	w := &fakeWorker{}
+	err := RunGuarded(context.Background(), w, &sequenceDescriber{answers: []any{[]string{}, []string{}, []string{"lha-py:3@h"}}},
+		"q", time.Millisecond, nil)
+	var mw *MixedWorkersError
+	if !errors.As(err, &mw) || !w.stopped.Load() || !strings.Contains(err.Error(), "LHA_TASK_QUEUE=q-go") {
+		t.Fatalf("err %v stopped %v", err, w.stopped.Load())
+	}
+	// ctx ends: a clean stop.
+	w = &fakeWorker{}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := RunGuarded(ctx, w, &sequenceDescriber{answers: []any{[]string{}}}, "q", time.Millisecond, nil); err != nil || !w.stopped.Load() {
+		t.Fatalf("err %v stopped %v", err, w.stopped.Load())
+	}
+	// The worker fails: its error, and the guard ends too.
+	boom := errors.New("boom")
+	if err := RunGuarded(context.Background(), &fakeWorker{err: boom}, &sequenceDescriber{answers: []any{[]string{}}}, "q", time.Hour, nil); !errors.Is(err, boom) {
+		t.Fatalf("err %v", err)
+	}
+	// An interval that overflowed time.Duration never ticks.
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel2()
+	if err := GuardTaskQueue(ctx2, &sequenceDescriber{answers: []any{[]string{"lha-py:1@h"}}}, "q", -1, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

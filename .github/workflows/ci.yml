@@ -36,10 +36,41 @@ jobs:
       - name: Pytest (unit)
         run: uv run pytest -q --cov --cov-report= tests/unit
 
+      # The Temporal CLI, a pinned release verified by its checksum: `temporal server start-dev` is
+      # a real server (the time-skipping test server lacks DescribeTaskQueue, which the
+      # cross-language worker guard needs).
+      - name: Install the Temporal CLI
+        working-directory: ${{ runner.temp }}
+        env:
+          TEMPORAL_CLI_VERSION: "1.9.1"
+          TEMPORAL_CLI_SHA256: 09a0326a51db84d02735e53542b9ebd8c4758daf47482a9ab0abce15844e60d5
+        run: |
+          curl -fsSLo temporal.tar.gz \
+            "https://github.com/temporalio/cli/releases/download/v${TEMPORAL_CLI_VERSION}/temporal_cli_${TEMPORAL_CLI_VERSION}_linux_amd64.tar.gz"
+          echo "${TEMPORAL_CLI_SHA256}  temporal.tar.gz" | sha256sum -c -
+          mkdir -p temporal-cli
+          tar -xzf temporal.tar.gz -C temporal-cli temporal
+          echo "${RUNNER_TEMP}/temporal-cli" >> "$GITHUB_PATH"
+
+      - name: Start a Temporal dev server
+        working-directory: ${{ runner.temp }}
+        run: |
+          nohup temporal server start-dev --headless --ip 127.0.0.1 --port 7233 \
+            --db-filename temporal.db --log-level error > temporal.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if temporal operator cluster health --address 127.0.0.1:7233; then exit 0; fi
+            sleep 1
+          done
+          cat temporal.log
+          exit 1
+
       # Durability + load tests boot a Temporal time-skipping test server (a binary that
-      # temporalio downloads on first use). They gate the build: the durability guarantees the
-      # README claims are only claimed because this step passes.
-      - name: Pytest (integration - Temporal test server)
+      # temporalio downloads on first use); the worker-guard tests (tests/durability/
+      # test_worker_guard.py) run against the dev server. They gate the build: the durability
+      # guarantees the README claims are only claimed because this step passes.
+      - name: Pytest (integration - Temporal test server + dev server)
+        env:
+          LHA_IT_TEMPORAL_ADDRESS: 127.0.0.1:7233
         run: uv run pytest -q --cov --cov-append --cov-report= tests/durability tests/load
         timeout-minutes: 12
 
@@ -88,8 +119,41 @@ jobs:
       - name: go vet (windows)
         run: GOOS=windows go vet ./...
 
-      # -race runs every test (and the race detector) in one pass.
+      # The Temporal CLI, a pinned release verified by its checksum: `temporal server start-dev` is
+      # a real server (the time-skipping test server lacks DescribeTaskQueue, which the
+      # cross-language worker guard needs).
+      - name: Install the Temporal CLI
+        working-directory: ${{ runner.temp }}
+        env:
+          TEMPORAL_CLI_VERSION: "1.9.1"
+          TEMPORAL_CLI_SHA256: 09a0326a51db84d02735e53542b9ebd8c4758daf47482a9ab0abce15844e60d5
+        run: |
+          curl -fsSLo temporal.tar.gz \
+            "https://github.com/temporalio/cli/releases/download/v${TEMPORAL_CLI_VERSION}/temporal_cli_${TEMPORAL_CLI_VERSION}_linux_amd64.tar.gz"
+          echo "${TEMPORAL_CLI_SHA256}  temporal.tar.gz" | sha256sum -c -
+          mkdir -p temporal-cli
+          tar -xzf temporal.tar.gz -C temporal-cli temporal
+          echo "${RUNNER_TEMP}/temporal-cli" >> "$GITHUB_PATH"
+
+      - name: Start a Temporal dev server
+        working-directory: ${{ runner.temp }}
+        run: |
+          nohup temporal server start-dev --headless --ip 127.0.0.1 --port 7233 \
+            --db-filename temporal.db --log-level error > temporal.log 2>&1 &
+          for _ in $(seq 1 60); do
+            if temporal operator cluster health --address 127.0.0.1:7233; then exit 0; fi
+            sleep 1
+          done
+          cat temporal.log
+          exit 1
+
+      # -race runs every test (and the race detector) in one pass. The cross-language durable
+      # e2e tests (a Go mission driven by the Python CLI and back), the worker guard (each
+      # implementation refuses, and stops on, a task queue the other polls) and the recorded
+      # histories run against the dev server started above.
       - name: go test -race
+        env:
+          LHA_IT_TEMPORAL_ADDRESS: 127.0.0.1:7233
         run: go test -race ./...
         timeout-minutes: 15
 

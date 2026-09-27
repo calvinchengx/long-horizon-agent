@@ -66,6 +66,7 @@ See [13-models.md](13-models.md).
 | `LHA_TEMPORAL_ADDRESS` | string | `localhost:7233` | Temporal frontend `host:port` |
 | `LHA_TEMPORAL_NAMESPACE` | string | `default` | Temporal namespace |
 | `LHA_TASK_QUEUE` | string | `lha-mission` | queue the worker polls and `mission-start` targets |
+| `LHA_WORKER_GUARD_INTERVAL_S` | float > 0 | `30.0` | how often a running `lha worker` re-checks who polls its task queue; a worker of the other implementation that appears stops it (exit 2, see [14-running-on-temporal.md](14-running-on-temporal.md#2-run-a-worker)) |
 
 ### Persistence
 
@@ -251,9 +252,10 @@ uses the model, governor, sandbox, web-tool, trusted-check, harness and human-ga
 (`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL`,
 `LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`), the mission store (`LHA_SQLITE_PATH`, `LHA_POSTGRES_DSN`,
 `LHA_POSTGRES_FALLBACK_TO_SQLITE`), the `LHA_MEMORY_*` settings, and for its durable commands the
-Temporal and durable-gate settings (`LHA_TEMPORAL_*`, `LHA_TASK_QUEUE`, `LHA_OBJECT_STORE_ROOT`,
-`LHA_APPROVAL_TIMEOUT_S`, `LHA_DEADLOCK_GATE_DEFAULT`, `LHA_IMPOSSIBLE_AFTER_FAILURES`,
-`LHA_CYCLE_PAUSE_SECONDS`, `LHA_MODEL_PROBE_TIMEOUT_S`). Two memory values name Python-only
+Temporal and durable-gate settings (`LHA_TEMPORAL_*`, `LHA_TASK_QUEUE`,
+`LHA_WORKER_GUARD_INTERVAL_S`, `LHA_OBJECT_STORE_ROOT`, `LHA_APPROVAL_TIMEOUT_S`,
+`LHA_DEADLOCK_GATE_DEFAULT`, `LHA_IMPOSSIBLE_AFTER_FAILURES`, `LHA_CYCLE_PAUSE_SECONDS`,
+`LHA_MODEL_PROBE_TIMEOUT_S`). Two memory values name Python-only
 extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
 `LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
 extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` or `voyage` are the Go choices for real

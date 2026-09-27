@@ -129,12 +129,16 @@ func (c *cli) worker(args []string) error {
 		acts.ModelFactory = func(*config.Settings, contracts.SituationSnapshot) (contracts.ModelProvider, error) { return lead, nil }
 	}
 	w := durable.NewWorker(cl, settings.TaskQueue, acts)
-	stop := make(chan any)
-	go func() {
-		<-c.ctx.Done()
-		close(stop)
-	}()
-	return w.Run(stop)
+	// Keep re-checking: a Python worker that raced past its own startup check stops this one.
+	interval := time.Duration(settings.WorkerGuardIntervalS * float64(time.Second))
+	err = durable.RunGuarded(c.ctx, w, cl, settings.TaskQueue, interval, func(err error) {
+		slog.Warn("cannot re-check who polls the task queue", "task_queue", settings.TaskQueue, "error", err)
+	})
+	var mixed *durable.MixedWorkersError
+	if errors.As(err, &mixed) {
+		return fail(2, "%s", err)
+	}
+	return err
 }
 
 // --- mission-start ---------------------------------------------------------------------------
