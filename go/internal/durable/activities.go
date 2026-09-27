@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -26,6 +25,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -106,20 +106,8 @@ func configError(message string, cause error) error {
 	return temporal.NewNonRetryableApplicationError(message, ErrorConfig, cause)
 }
 
-// pyTypeName names an error like the Python exception class it mirrors.
-func pyTypeName(err error) string {
-	if n, ok := err.(interface{ PyTypeName() string }); ok {
-		return n.PyTypeName()
-	}
-	t := reflect.TypeOf(err)
-	for t != nil && t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t == nil || t.Name() == "" {
-		return "Error"
-	}
-	return t.Name()
-}
+// pyTypeName names an error like the Python exception class it mirrors (pyfmt.ExcTypeName).
+func pyTypeName(err error) string { return pyfmt.ExcTypeName(err) }
 
 func heartbeat(ctx context.Context, details ...any) {
 	if activity.IsActivity(ctx) {
@@ -265,12 +253,12 @@ func researchEvent(inp CycleInput) *contracts.EventRecord {
 	return &contracts.EventRecord{
 		Kind:    "research",
 		CycleID: inp.CycleID,
-		Payload: map[string]any{
-			"item":     *inp.ResearchItem,
-			"n":        len(inp.ResearchBriefs),
-			"failed":   len(inp.ResearchFailures),
-			"failures": failures,
-		},
+		Payload: contracts.Payload(
+			"item", *inp.ResearchItem,
+			"n", len(inp.ResearchBriefs),
+			"failed", len(inp.ResearchFailures),
+			"failures", failures,
+		),
 	}
 }
 
@@ -641,16 +629,17 @@ func GateNoticePayload(n GateNotice) hitl.Payload {
 	return p
 }
 
-func payloadMap(p hitl.Payload) map[string]any {
-	m := map[string]any{}
+// GatePayloadMap is the gate payload as an event payload, in the same key order.
+func GatePayloadMap(p hitl.Payload) *contracts.OrderedMap {
+	m := contracts.Payload()
 	for _, f := range p {
 		switch v := f.Value.(type) {
 		case hitl.Payload:
-			m[f.Key] = payloadMap(v)
+			m.Set(f.Key, GatePayloadMap(v))
 		case []string:
-			m[f.Key] = append([]string{}, v...)
+			m.Set(f.Key, append([]string{}, v...))
 		default:
-			m[f.Key] = v
+			m.Set(f.Key, v)
 		}
 	}
 	return m
@@ -676,7 +665,7 @@ func recordGateEvent(ctx context.Context, n GateNotice, payload hitl.Payload) bo
 	_, err = anchor.CommitCheckpoint(ctx, contracts.Checkpoint{
 		CycleID:       cycleID,
 		Checklist:     checklist,
-		Events:        []contracts.EventRecord{{Kind: "gate_" + n.Event, CycleID: cycleID, Payload: payloadMap(payload)}},
+		Events:        []contracts.EventRecord{{Kind: "gate_" + n.Event, CycleID: cycleID, Payload: GatePayloadMap(payload)}},
 		CommitMessage: fmt.Sprintf("lha: gate %s (%s %s)", n.Event, n.Kind, n.GateID),
 	})
 	return err == nil
@@ -786,12 +775,12 @@ func (a *Activities) DeclareImpossible(ctx context.Context, inp FinalizeInput) (
 			ProgressSummary: fmt.Sprintf("- %s mission declared IMPOSSIBLE: %s", inp.CycleID, inp.Reason),
 			Checklist:       checklist,
 			Events: []contracts.EventRecord{
-				{Kind: "mission_impossible", CycleID: inp.CycleID, Payload: map[string]any{
-					"reason": inp.Reason, "blocked": blocked, "items_done": checklist.ItemsDone(),
-					"items_total": len(checklist.Items),
-				}},
+				{Kind: "mission_impossible", CycleID: inp.CycleID, Payload: contracts.Payload(
+					"reason", inp.Reason, "blocked", blocked, "items_done", checklist.ItemsDone(),
+					"items_total", len(checklist.Items),
+				)},
 				// Marks the final checkpoint as done for this id (a retry is a no-op).
-				{Kind: "cycle", CycleID: inp.CycleID, Payload: map[string]any{"outcome": "impossible", "blocked": blocked}},
+				{Kind: "cycle", CycleID: inp.CycleID, Payload: contracts.Payload("outcome", "impossible", "blocked", blocked)},
 			},
 			CommitMessage: "lha: mission declared impossible",
 		})
@@ -833,7 +822,7 @@ func (a *Activities) UnblockItems(ctx context.Context, inp UnblockInput) (CycleR
 			CycleID:         inp.CycleID,
 			ProgressSummary: fmt.Sprintf("- %s human retry: unblocked %s", inp.CycleID, joined),
 			Checklist:       checklist,
-			Events:          []contracts.EventRecord{{Kind: "unblock", CycleID: inp.CycleID, Payload: map[string]any{"items": blocked}}},
+			Events:          []contracts.EventRecord{{Kind: "unblock", CycleID: inp.CycleID, Payload: contracts.Payload("items", blocked)}},
 			CommitMessage:   fmt.Sprintf("lha: unblock %s (human retry)", joined),
 		})
 		if err != nil {

@@ -85,7 +85,7 @@ func TestExecutionSandboxEgress(t *testing.T) {
 		t.Fatalf("events = %v", events)
 	}
 	for i, want := range s.ProxyLog.Events {
-		got := events[i].Payload
+		got := events[i].Payload.Plain()
 		if events[i].Kind != "sandbox_egress" || got["decision"] != want.Decision || got["method"] != want.Method ||
 			got["host"] != want.Host || got["port"] != want.Port || got["detail"] != want.Detail ||
 			got["count"] != want.Count {

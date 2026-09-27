@@ -60,15 +60,15 @@ func (d LeaseDecision) Message() string {
 }
 
 // Payload is the decision's event payload (python: LeaseDecision.model_dump()).
-func (d LeaseDecision) Payload() map[string]any {
+func (d LeaseDecision) Payload() *contracts.OrderedMap {
 	var previous any
 	if d.HasPrevious {
 		previous = d.PreviousOwner
 	}
-	return map[string]any{
-		"writer": d.Writer, "path": d.Path, "reason": d.Reason, "granted": d.Granted,
-		"previous_owner": previous, "why": d.Why,
-	}
+	return contracts.Payload(
+		"writer", d.Writer, "path", d.Path, "reason", d.Reason, "granted", d.Granted,
+		"previous_owner", previous, "why", d.Why,
+	)
 }
 
 // FinishedWriters are the implementer ids whose item is finished (done or split): their leases

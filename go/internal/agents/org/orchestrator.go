@@ -263,9 +263,9 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	if err := PruneWorktrees(ctx, r.workdir); err != nil {
 		return agent.MissionSummary{}, err
 	}
-	if err := r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: RunEvent, Payload: map[string]any{
-		"mission_id": r.missionID, "resumed": m.Resume, "run": r.runNumber,
-	}}); err != nil {
+	if err := r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: RunEvent, Payload: contracts.Payload(
+		"mission_id", r.missionID, "resumed", m.Resume, "run", r.runNumber,
+	)}); err != nil {
 		return agent.MissionSummary{}, err
 	}
 	session, err := OpenLeadSandbox(ctx, settings, r.workdir)
@@ -462,8 +462,8 @@ func (r *missionRun) restoreRunState(ctx context.Context, title, description str
 }
 
 // payloadStr is str(payload.get(key, "")) for the string payloads the org writes.
-func payloadStr(payload map[string]any, key string) string {
-	v, ok := payload[key]
+func payloadStr(payload *contracts.OrderedMap, key string) string {
+	v, ok := payload.Get(key)
 	if !ok || v == nil {
 		return ""
 	}
@@ -476,9 +476,9 @@ func payloadStr(payload map[string]any, key string) string {
 // post writes to this round's response board, and records it for a later resume.
 func (r *missionRun) post(ctx context.Context, author, content string) error {
 	r.board.Respond(author, content)
-	return r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: BoardEvent, Payload: map[string]any{
-		"author": author, "text": pyfmt.Head(content, boardEntryCap),
-	}})
+	return r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: BoardEvent, Payload: contracts.Payload(
+		"author", author, "text", pyfmt.Head(content, boardEntryCap),
+	)})
 }
 
 // --- the mission loop --------------------------------------------------------------------------
@@ -733,9 +733,9 @@ func (r *missionRun) reflect(ctx context.Context, item contracts.ChecklistItem, 
 // setReflection remembers text for the item's next attempt (recorded for a later resume).
 func (r *missionRun) setReflection(ctx context.Context, itemID, text string) error {
 	r.reflections[itemID] = text
-	return r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: ReflectionEvent, Payload: map[string]any{
-		"item": itemID, "text": pyfmt.Head(text, 2_000),
-	}})
+	return r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: ReflectionEvent, Payload: contracts.Payload(
+		"item", itemID, "text", pyfmt.Head(text, 2_000),
+	)})
 }
 
 // review is the independent review of a verified item's base..head diff: "approved",

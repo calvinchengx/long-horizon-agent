@@ -11,10 +11,12 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Embedders (python: lha.memory.embeddings).
@@ -169,7 +171,7 @@ func ConnectOllama(ctx context.Context, o OllamaOptions) (*OllamaEmbedder, error
 	tags, err := getTags(ctx, client, base)
 	if err != nil {
 		client.CloseIdleConnections()
-		return nil, &OllamaUnavailableError{Message: fmt.Sprintf("ollama unreachable at %s (%s)", base, err)}
+		return nil, &OllamaUnavailableError{Message: fmt.Sprintf("ollama unreachable at %s (%s)", base, httpExcText(err))}
 	}
 	digest, ok := findDigest(tags, o.Model)
 	if !ok {
@@ -181,7 +183,7 @@ func ConnectOllama(ctx context.Context, o OllamaOptions) (*OllamaEmbedder, error
 	vectors, err := emb.Embed(ctx, []string{"dimension probe"})
 	if err != nil {
 		client.CloseIdleConnections()
-		return nil, &OllamaUnavailableError{Message: fmt.Sprintf("ollama could not embed with %s (%s)", contracts.PyRepr(o.Model), err)}
+		return nil, &OllamaUnavailableError{Message: fmt.Sprintf("ollama could not embed with %s (%s)", contracts.PyRepr(o.Model), httpExcText(err))}
 	}
 	if len(vectors) != 1 || len(vectors[0]) == 0 {
 		client.CloseIdleConnections()
@@ -242,7 +244,7 @@ func (o *OllamaEmbedder) Embed(ctx context.Context, texts []string) ([][]float64
 	out := [][]float64{}
 	for start := 0; start < len(texts); start += OllamaBatch {
 		batch := texts[start:min(len(texts), start+OllamaBatch)]
-		body, _ := json.Marshal(map[string]any{"model": o.model, "input": batch})
+		body, _ := json.Marshal(contracts.NewOrderedMap("model", o.model, "input", batch))
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.base+"/api/embed", bytes.NewReader(body))
 		if err != nil {
 			return nil, err
@@ -330,4 +332,15 @@ func (p *PaddedEmbedder) Close() error {
 		return c.Close()
 	}
 	return nil
+}
+
+// httpExcText is python's f"{type(exc).__name__}: {exc}" for an HTTP client failure (without Go's
+// `Get "<url>": ` prefix).
+func httpExcText(err error) string {
+	name := pyfmt.ExcTypeName(err)
+	var uerr *url.Error
+	if errors.As(err, &uerr) {
+		err = uerr.Err
+	}
+	return name + ": " + err.Error()
 }

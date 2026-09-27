@@ -111,8 +111,8 @@ func TestPassOnRerunQuarantinesWithAnEventAndNeverGates(t *testing.T) {
 		t.Fatalf("%+v", flaky)
 	}
 	events := v.DrainEvents()
-	if len(events) != 1 || events[0].Kind != QuarantineEvent || events[0].Payload["check"] != "flaky" ||
-		events[0].Payload["passes"] != 1 || events[0].Payload["fails"] != 1 {
+	if len(events) != 1 || events[0].Kind != QuarantineEvent || events[0].Payload.Plain()["check"] != "flaky" ||
+		events[0].Payload.Plain()["passes"] != 1 || events[0].Payload.Plain()["fails"] != 1 {
 		t.Fatalf("%+v", events)
 	}
 	if len(v.DrainEvents()) != 0 { // drained once
@@ -206,7 +206,7 @@ func flakyRepo(t *testing.T) string {
 
 func eventLine(t *testing.T, kind string, payload map[string]any) string {
 	t.Helper()
-	b, err := json.Marshal(contracts.EventRecord{Kind: kind, Payload: payload})
+	b, err := json.Marshal(contracts.EventRecord{Kind: kind, Payload: contracts.OrderedFromMap(payload)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestRevisionFallsBackOutsideGit(t *testing.T) {
 		t.Fatal(r.Verdict)
 	}
 	events := v.DrainEvents()
-	if len(events) != 1 || !strings.HasPrefix(events[0].Payload["revision"].(string), "call-") {
+	if len(events) != 1 || !strings.HasPrefix(events[0].Payload.Plain()["revision"].(string), "call-") {
 		t.Fatalf("%+v", events)
 	}
 }
@@ -289,7 +289,7 @@ func TestQuarantineUsesTheTreeRevisionInAGitWorkdir(t *testing.T) {
 	mustVerify(t, v, flakyChecks("t"))
 	tree, _ := TreeRevision(context.Background(), repo)
 	events := v.DrainEvents()
-	if len(events) != 1 || events[0].Payload["revision"] != tree {
+	if len(events) != 1 || events[0].Payload.Plain()["revision"] != tree {
 		t.Fatalf("%+v want revision %s", events, tree)
 	}
 	r := mustVerify(t, NewFlakyRetryVerifier(newScripted(map[string][]string{"t": {"fail", "pass"}}), 1, repo),

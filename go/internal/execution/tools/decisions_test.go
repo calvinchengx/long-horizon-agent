@@ -32,7 +32,7 @@ func (d *innerDispatcher) DrainEvents() []contracts.EventRecord {
 
 func TestRecordDecisionTool(t *testing.T) {
 	buf := &DecisionBuffer{}
-	inner := &innerDispatcher{events: []contracts.EventRecord{{Kind: "tool_approval", CycleID: "c1", Payload: map[string]any{"x": 1}}}}
+	inner := &innerDispatcher{events: []contracts.EventRecord{{Kind: "tool_approval", CycleID: "c1", Payload: contracts.Payload("x", 1)}}}
 	d := WithDecisionTool(inner, buf)
 	if WithDecisionTool(d, buf) != d {
 		t.Fatal("wrapped twice")

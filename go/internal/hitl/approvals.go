@@ -248,13 +248,13 @@ func (a *TerminalApprover) ask(ctx context.Context, req contracts.GateRequest) (
 			a.eventsMu.Lock()
 			a.events = append(a.events, contracts.EventRecord{
 				Kind: "gate_reminder",
-				Payload: map[string]any{
-					"gate_id":     req.GateID,
-					"gate":        "tool_call",
-					"step":        sent,
-					"tool":        req.Context["tool"],
-					"fingerprint": req.Context["fingerprint"],
-				},
+				Payload: contracts.Payload(
+					"gate_id", req.GateID,
+					"gate", "tool_call",
+					"step", sent,
+					"tool", req.Context["tool"],
+					"fingerprint", req.Context["fingerprint"],
+				),
 			})
 			a.eventsMu.Unlock()
 			a.send(req, "reminder", Field{"step", sent})

@@ -1,0 +1,156 @@
+{
+ "events": [
+  "{\"kind\":\"cycle\",\"cycle_id\":\"c1\",\"payload\":{},\"payload_ref\":null}",
+  "{\"kind\":\"started\",\"cycle_id\":\"\",\"payload\":{},\"payload_ref\":\"blobs/x\"}",
+  "{\"kind\":\"cycle\",\"cycle_id\":\"c2\",\"payload\":{\"item_id\":\"01\",\"verified\":true,\"verdict\":\"passed\",\"status\":\"done\",\"tool_calls\":3,\"split_into\":[],\"rolled_back\":false,\"checks\":[{\"name\":\"pytest\",\"passed\":true,\"gating\":true,\"exit_code\":0,\"duration_s\":0.0},{\"name\":\"ruff\",\"passed\":false,\"gating\":false,\"exit_code\":1,\"duration_s\":1.5}]},\"payload_ref\":null}",
+  "{\"kind\":\"ticket\",\"cycle_id\":\"c3\",\"payload\":{\"ticket_id\":\"c3-02\",\"item_id\":\"02\",\"history\":[{\"status\":\"created\",\"note\":\"\"},{\"status\":\"done\",\"note\":\"ok <&>\"}],\"leases\":[{\"path\":\"b.py\",\"granted\":true,\"why\":\"free\"}],\"branch\":null},\"payload_ref\":null}",
+  "{\"kind\":\"note\",\"cycle_id\":\"c4\",\"payload\":{\"zeta\":1,\"alpha\":1.0,\"big\":1e+16,\"small\":0.00001,\"tiny\":1.5e-7,\"neg\":-2.5,\"text\":\"é ü      \\\"q\\\" \\\\ \\t\\n\",\"nested\":{\"z\":{\"y\":[null,true,{\"b\":2,\"a\":1}]},\"a\":[]}},\"payload_ref\":null}"
+ ],
+ "anchor_events_file": "{\"kind\":\"cycle\",\"cycle_id\":\"c1\",\"payload\":{},\"payload_ref\":null}\n{\"kind\":\"started\",\"cycle_id\":\"\",\"payload\":{},\"payload_ref\":\"blobs/x\"}\n{\"kind\":\"cycle\",\"cycle_id\":\"c2\",\"payload\":{\"item_id\":\"01\",\"verified\":true,\"verdict\":\"passed\",\"status\":\"done\",\"tool_calls\":3,\"split_into\":[],\"rolled_back\":false,\"checks\":[{\"name\":\"pytest\",\"passed\":true,\"gating\":true,\"exit_code\":0,\"duration_s\":0.0},{\"name\":\"ruff\",\"passed\":false,\"gating\":false,\"exit_code\":1,\"duration_s\":1.5}]},\"payload_ref\":null}\n{\"kind\":\"ticket\",\"cycle_id\":\"c3\",\"payload\":{\"ticket_id\":\"c3-02\",\"item_id\":\"02\",\"history\":[{\"status\":\"created\",\"note\":\"\"},{\"status\":\"done\",\"note\":\"ok <&>\"}],\"leases\":[{\"path\":\"b.py\",\"granted\":true,\"why\":\"free\"}],\"branch\":null},\"payload_ref\":null}\n{\"kind\":\"note\",\"cycle_id\":\"c4\",\"payload\":{\"zeta\":1,\"alpha\":1.0,\"big\":1e+16,\"small\":0.00001,\"tiny\":1.5e-7,\"neg\":-2.5,\"text\":\"é ü      \\\"q\\\" \\\\ \\t\\n\",\"nested\":{\"z\":{\"y\":[null,true,{\"b\":2,\"a\":1}]},\"a\":[]}},\"payload_ref\":null}\n",
+ "lease_events": [
+  {
+   "decision": {
+    "writer": "implementer-02",
+    "path": "b.py",
+    "reason": "need it",
+    "granted": true,
+    "previous_owner": null,
+    "why": "unowned"
+   },
+   "line": "{\"kind\":\"lease\",\"cycle_id\":\"c9\",\"payload\":{\"writer\":\"implementer-02\",\"path\":\"b.py\",\"reason\":\"need it\",\"granted\":true,\"previous_owner\":null,\"why\":\"unowned\"},\"payload_ref\":null}"
+  },
+  {
+   "decision": {
+    "writer": "implementer-01",
+    "path": "a.py",
+    "reason": "x",
+    "granted": false,
+    "previous_owner": "implementer-03",
+    "why": "owned by 'implementer-03'"
+   },
+   "line": "{\"kind\":\"lease\",\"cycle_id\":\"c9\",\"payload\":{\"writer\":\"implementer-01\",\"path\":\"a.py\",\"reason\":\"x\",\"granted\":false,\"previous_owner\":\"implementer-03\",\"why\":\"owned by 'implementer-03'\"},\"payload_ref\":null}"
+  }
+ ],
+ "egress_events": [
+  "{\"kind\":\"sandbox_egress\",\"cycle_id\":\"\",\"payload\":{\"decision\":\"allow\",\"method\":\"CONNECT\",\"host\":\"pypi.org\",\"port\":443,\"detail\":\"151.101.0.223:443\",\"count\":2},\"payload_ref\":null}",
+  "{\"kind\":\"sandbox_egress\",\"cycle_id\":\"\",\"payload\":{\"decision\":\"deny\",\"method\":\"CONNECT\",\"host\":\"github.com\",\"port\":443,\"detail\":\"host not in egress allow-list: github.com\",\"count\":1},\"payload_ref\":null}",
+  "{\"kind\":\"sandbox_egress\",\"cycle_id\":\"\",\"payload\":{\"decision\":\"deny\",\"method\":\"GET\",\"host\":\"example.org\",\"port\":8080,\"detail\":\"host not in egress allow-list: example.org\",\"count\":1},\"payload_ref\":null}",
+  "{\"kind\":\"sandbox_egress\",\"cycle_id\":\"\",\"payload\":{\"decision\":\"allow\",\"method\":\"GET\",\"host\":\"files.example\",\"port\":80,\"detail\":\"93.184.216.34:80\",\"count\":1},\"payload_ref\":null}",
+  "{\"kind\":\"sandbox_egress\",\"cycle_id\":\"\",\"payload\":{\"decision\":\"fail\",\"method\":\"CONNECT\",\"host\":\"2001:db8::1\",\"port\":8443,\"detail\":\"upstream unreachable: x\",\"count\":1},\"payload_ref\":null}",
+  "{\"kind\":\"sandbox_egress\",\"cycle_id\":\"\",\"payload\":{\"decision\":\"deny\",\"method\":\"CONNECT\",\"host\":\"10.0.0.1\",\"port\":443,\"detail\":\"IP-literal hosts are not allowed: 10.0.0.1\",\"count\":1},\"payload_ref\":null}"
+ ],
+ "ownership": [
+  {
+   "items": [
+    "02",
+    "01",
+    "03"
+   ],
+   "files": {
+    "02": [
+     "src/zeta.py",
+     "src/Alpha.py",
+     "docs/b.md"
+    ],
+    "01": [
+     "README.md",
+     "src/mid.py"
+    ],
+    "03": [
+     "src/beta.py",
+     "src/alpha.py"
+    ]
+   },
+   "release": [],
+   "reassign": [],
+   "json": "{\n  \"owners\": {\n    \"src/zeta.py\": \"implementer-02\",\n    \"src/alpha.py\": \"implementer-02\",\n    \"docs/b.md\": \"implementer-02\",\n    \"readme.md\": \"implementer-01\",\n    \"src/mid.py\": \"implementer-01\"\n  }\n}"
+  },
+  {
+   "items": [
+    "01",
+    "02"
+   ],
+   "files": {
+    "01": [
+     "z.py",
+     "a.py",
+     "m.py"
+    ],
+    "02": [
+     "y.py",
+     "b.py"
+    ]
+   },
+   "release": [
+    "implementer-01"
+   ],
+   "reassign": [
+    [
+     "b.py",
+     "implementer-01"
+    ],
+    [
+     "c.py",
+     "lead"
+    ]
+   ],
+   "json": "{\n  \"owners\": {\n    \"y.py\": \"implementer-02\",\n    \"b.py\": \"implementer-01\",\n    \"c.py\": \"lead\"\n  }\n}"
+  }
+ ],
+ "gates": [
+  {
+   "notice": {
+    "mission_id": "m1",
+    "workdir": "/w",
+    "gate_id": "g1",
+    "kind": "tool_call",
+    "event": "opened",
+    "question": "Allow `git push` with token=sk-live-abcdefghijklmnop? <&> é",
+    "options": [
+     "approve",
+     "reject"
+    ],
+    "default_action": "reject",
+    "deadline": "2026-09-27T10:00:00Z",
+    "request": {
+     "fingerprint": "0c6efe57c6d81fa336b6a6459b37de23",
+     "tool": "run_command",
+     "reason": "git push (outward-facing / rewrites history)",
+     "arguments": "{'argv': ['git', 'push']}"
+    }
+   },
+   "body": "{\"source\":\"lha\",\"mission_id\":\"m1\",\"gate_id\":\"g1\",\"kind\":\"tool_call\",\"event\":\"opened\",\"question\":\"Allow `git push` with token=***? <&> é\",\"options\":[\"approve\",\"reject\"],\"default_action\":\"reject\",\"deadline\":\"2026-09-27T10:00:00Z\",\"request\":{\"fingerprint\":\"0c6efe57c6d81fa336b6a6459b37de23\",\"tool\":\"run_command\",\"arguments\":\"{'argv': ['git', 'push']}\",\"reason\":\"git push (outward-facing / rewrites history)\"}}",
+   "event": "{\"kind\":\"gate_opened\",\"cycle_id\":\"gate:g1\",\"payload\":{\"source\":\"lha\",\"mission_id\":\"m1\",\"gate_id\":\"g1\",\"kind\":\"tool_call\",\"event\":\"opened\",\"question\":\"Allow `git push` with token=***? <&> é\",\"options\":[\"approve\",\"reject\"],\"default_action\":\"reject\",\"deadline\":\"2026-09-27T10:00:00Z\",\"request\":{\"fingerprint\":\"0c6efe57c6d81fa336b6a6459b37de23\",\"tool\":\"run_command\",\"arguments\":\"{'argv': ['git', 'push']}\",\"reason\":\"git push (outward-facing / rewrites history)\"}},\"payload_ref\":null}"
+  },
+  {
+   "notice": {
+    "mission_id": "m1",
+    "workdir": "/w",
+    "gate_id": "g2",
+    "kind": "deadlock",
+    "event": "reminder",
+    "question": "Retry blocked items?",
+    "options": [
+     "retry",
+     "abort"
+    ],
+    "default_action": "abort",
+    "step": 2
+   },
+   "body": "{\"source\":\"lha\",\"mission_id\":\"m1\",\"gate_id\":\"g2\",\"kind\":\"deadlock\",\"event\":\"reminder\",\"question\":\"Retry blocked items?\",\"options\":[\"retry\",\"abort\"],\"default_action\":\"abort\",\"deadline\":\"\",\"step\":2}",
+   "event": "{\"kind\":\"gate_reminder\",\"cycle_id\":\"gate:g2\",\"payload\":{\"source\":\"lha\",\"mission_id\":\"m1\",\"gate_id\":\"g2\",\"kind\":\"deadlock\",\"event\":\"reminder\",\"question\":\"Retry blocked items?\",\"options\":[\"retry\",\"abort\"],\"default_action\":\"abort\",\"deadline\":\"\",\"step\":2},\"payload_ref\":null}"
+  },
+  {
+   "notice": {
+    "mission_id": "m1",
+    "workdir": "/w",
+    "gate_id": "g2",
+    "kind": "deadlock",
+    "event": "resolved",
+    "decision": "retry"
+   },
+   "body": "{\"source\":\"lha\",\"mission_id\":\"m1\",\"gate_id\":\"g2\",\"kind\":\"deadlock\",\"event\":\"resolved\",\"question\":\"\",\"options\":[],\"default_action\":\"\",\"deadline\":\"\",\"decision\":\"retry\"}",
+   "event": "{\"kind\":\"gate_resolved\",\"cycle_id\":\"gate:g2\",\"payload\":{\"source\":\"lha\",\"mission_id\":\"m1\",\"gate_id\":\"g2\",\"kind\":\"deadlock\",\"event\":\"resolved\",\"question\":\"\",\"options\":[],\"default_action\":\"\",\"deadline\":\"\",\"decision\":\"retry\"},\"payload_ref\":null}"
+  }
+ ]
+}

@@ -16,7 +16,9 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
 - `version`, `config`, `decisions` and the local mission commands `run-local` and `mission`
   (plan a task, or import a `.json`/`.md` checklist, then run it), with Python's options, output
   and exit codes. For the same inputs a Go run leaves the same checkpoint commits and `.lha/`
-  anchor as a Python run (`cmd/lha/e2e_test.go` runs both side by side).
+  anchor as a Python run, byte for byte (event payload and `ownership.json` keys in Python's
+  insertion order; `cmd/lha/e2e_test.go` runs both side by side, `spec/state/wire_bytes.json`
+  pins the bytes), and error messages name Python's exception classes.
 - `orchestrate`: the multi-agent organization (`internal/agents/org`, `internal/coordination`):
   research fan-out, the Lead, reflection, the fresh-context Reviewer, parallel implementer waves in
   worktrees with leases, and the integrator; `--checklist` skips planning and `--resume`
@@ -136,7 +138,8 @@ the egress proxy, path containment, the allow-list dispatcher and the tools), `i
 turn loop, compaction, the local runner, the `claude_code` engine and its MCP bridge),
 `internal/agents` (Planner, Replanner; `org`: the multi-agent organization),
 `internal/coordination` (ownership, leases, tickets),
-`internal/pyfmt` (Python string semantics for byte-identical prompts), `internal/ops`
+`internal/pyfmt` (Python string semantics for byte-identical prompts, and `ExcTypeName`: the Python
+exception class name a Go error is reported as), `internal/ops`
 (degradation / safe-park decisions, mission lifecycle), `internal/durable` (the Temporal
 workflows, activities, payload types, ClaimCheck codec and worker) and `cmd/lha`, whose
 `wiring.go` links the execution layer into the runner and the durable activities.

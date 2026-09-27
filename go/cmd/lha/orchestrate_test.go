@@ -146,9 +146,9 @@ func (implementerFake) Complete(_ context.Context, messages []contracts.ModelMes
 const orgPlan = `[{"description": "write a", "files": ["a.py"]}, {"description": "write b", "files": ["b.py"]}, ` +
 	`{"description": "wire them", "depends_on": [1, 2], "files": ["pyproject.toml"]}]`
 
-// orgWorkspace is a run's commits, tracked files and committed anchor (JSON files compared as
-// data; events with mission ids masked and durations zeroed, sorted when sortEvents: implementers
-// of one wave post to the board in whichever order they finish).
+// orgWorkspace is a run's commits, tracked files and committed anchor, all compared as raw bytes
+// (events with mission ids and durations masked, and sorted only when sortEvents: implementers of
+// one parallel wave post to the board in whichever order they finish).
 func orgWorkspace(t *testing.T, workdir string, sortEvents bool) workspace {
 	t.Helper()
 	w := workspace{
@@ -161,20 +161,12 @@ func orgWorkspace(t *testing.T, workdir string, sortEvents bool) workspace {
 		if ok, _ := state.ExistsAtHead(context.Background(), workdir, ".lha/"+f); ok {
 			body = git(t, workdir, "show", "HEAD:.lha/"+f)
 		}
-		switch {
-		case f == "events.ndjson":
+		if f == "events.ndjson" {
 			lines := strings.Split(missionIDRE.ReplaceAllString(normalizeNDJSON(t, body), "mission_X"), "\n")
 			if sortEvents {
 				sort.Strings(lines)
 			}
 			body = strings.Join(lines, "\n")
-		case strings.HasSuffix(f, ".json") && body != "":
-			var v any
-			if err := json.Unmarshal([]byte(body), &v); err != nil {
-				t.Fatal(err)
-			}
-			data, _ := json.Marshal(v)
-			body = string(data)
 		}
 		w.Anchor[f] = body
 	}

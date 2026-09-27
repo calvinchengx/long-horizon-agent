@@ -43,23 +43,3 @@ var strerrorTable = func() map[syscall.Errno]string {
 	}
 	return t
 }()
-
-func errnoType(errno syscall.Errno) string {
-	switch errno {
-	case syscall.ENOENT:
-		return "FileNotFoundError"
-	case syscall.EACCES, syscall.EPERM:
-		return "PermissionError"
-	case syscall.EEXIST:
-		return "FileExistsError"
-	case syscall.EISDIR:
-		return "IsADirectoryError"
-	case syscall.ENOTDIR:
-		return "NotADirectoryError"
-	case syscall.ETIMEDOUT:
-		return "TimeoutError"
-	case syscall.ECONNREFUSED:
-		return "ConnectionRefusedError"
-	}
-	return "OSError"
-}
