@@ -159,6 +159,8 @@ PATCH_GATE_LADDER = "lha-gate-escalation-v1"
 PATCH_SLEEPING = "lha-sleeping-v1"
 PATCH_MISSION_ROW = "lha-mission-row-v1"
 PATCH_CYCLE_CANCEL = "lha-cycle-wait-cancel-v1"
+# A cycle that completes the mission opens no approval gate: no later cycle could use it.
+PATCH_COMPLETE_SKIPS_APPROVALS = "lha-complete-skips-approvals-v1"
 # PATCH_ORG ("lha-durable-org-v1", ``lha.durable.org_round``): the multi-agent round, reached
 # only by missions that opt in, so every history recorded without it replays unchanged. The org
 # path always waits for a cancelled activity (see ``org_round``), so it needs no cancel patch.
@@ -312,7 +314,8 @@ class MissionWorkflow:
                 state.cycles_done += 1  # an org round counts its own cycles as it goes
             self._absorb(result)
             self._track_failures(result)
-            await self._resolve_approvals(inp, result)
+            if not (result.is_complete and workflow.patched(PATCH_COMPLETE_SKIPS_APPROVALS)):
+                await self._resolve_approvals(inp, result)
 
             if result.is_complete:
                 return await self._terminal(inp, OUTCOME_COMPLETED)

@@ -16,6 +16,8 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/converter"
 )
 
 // Human gates, the escalation ladder, SLEEPING and the deadlock gate (python:
@@ -321,5 +323,31 @@ func TestSteerNotesReachTheCycles(t *testing.T) {
 		if len(in.SteerNotes) != 1 || in.SteerNotes[0] != "prefer small commits" {
 			t.Fatalf("steer notes %v", in.SteerNotes)
 		}
+	}
+}
+
+// python: test_approvals.py::test_a_cycle_that_completes_the_mission_opens_no_gate.
+func TestACycleThatCompletesTheMissionOpensNoGate(t *testing.T) {
+	inp := initMission(t, 1)
+	cycles := 0
+	complete := func(_ context.Context, in CycleInput) (CycleResult, error) {
+		cycles++
+		return CycleResult{ItemID: contracts.Str("01"), Advanced: true, HeadSHA: "abc", IsComplete: true,
+			ItemsDone: 1, ItemsTotal: 1, PendingApprovals: []PendingApproval{{Fingerprint: "fp-push",
+				Tool: "run_command", Reason: "git push", Arguments: "['git', 'push']"}}}, nil
+	}
+	env := newEnv(t, newActs(t, nil, nil), map[string]any{ActivityRunAgentCycle: complete})
+	notified := 0
+	env.SetOnActivityStartedListener(func(info *activity.Info, _ context.Context, _ converter.EncodedValues) {
+		if info.ActivityType.Name == ActivityNotifyGate {
+			notified++
+		}
+	})
+	res, err := env.run(inp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.Completed || cycles != 1 || notified != 0 {
+		t.Fatalf("result %+v cycles %d gate notifications %d", res, cycles, notified)
 	}
 }

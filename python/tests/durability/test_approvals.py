@@ -111,3 +111,38 @@ async def test_rejected_action_is_not_asked_again(tmp_path: Path) -> None:
     # waiting for a second decision), and nothing was ever approved.
     assert len(seen) == 3
     assert all(not inp.approved_actions for inp in seen)
+
+
+@pytest.mark.asyncio
+async def test_a_cycle_that_completes_the_mission_opens_no_gate(tmp_path: Path) -> None:
+    # The model repeats an already-approved push in the cycle that completes the mission: the
+    # queued repeat could only be used by a later cycle, and there is none.
+    seen: list[CycleInput] = []
+
+    @activity.defn(name="run_agent_cycle")
+    async def cycle(inp: CycleInput) -> CycleResult:
+        seen.append(inp)
+        return _result(complete=True, pending=[PUSH], used=[])
+
+    inp = MissionInput(mission_id="m2", workdir=str(tmp_path), check_commands=[["true"]])
+    async with (
+        await WorkflowEnvironment.start_time_skipping() as env,
+        Worker(
+            env.client,
+            task_queue="lha-approvals-done",
+            workflows=[MissionWorkflow],
+            activities=[cycle, _healthy, _unblock_activity, _snapshot_activity, *GATE_ACTIVITIES],
+        ),
+    ):
+        handle = await env.client.start_workflow(
+            MissionWorkflow.run, inp, id="mission:m2", task_queue="lha-approvals-done"
+        )
+        result = await asyncio.wait_for(handle.result(), 60)
+        history = await handle.fetch_history()
+    scheduled = [
+        e.activity_task_scheduled_event_attributes.activity_type.name
+        for e in history.events
+        if e.HasField("activity_task_scheduled_event_attributes")
+    ]
+    assert result.completed and len(seen) == 1
+    assert "notify_gate" not in scheduled  # no gate was opened (or defaulted) at all

@@ -48,6 +48,12 @@ const (
 // the options with a configuration error.
 const VersionOrg = "lha-go-durable-org-v1"
 
+// VersionCompleteSkipsApprovals is the workflow.GetVersion change id of "a cycle that completes
+// the mission opens no approval gate" (python: PATCH_COMPLETE_SKIPS_APPROVALS
+// "lha-complete-skips-approvals-v1"). Consulted only when a completing cycle queued an approval;
+// a Go history recorded before it (DefaultVersion) replays down the old path, which asked.
+const VersionCompleteSkipsApprovals = "lha-go-complete-skips-approvals-v1"
+
 // Signals and queries (python: lha.durable.signals and the MissionWorkflow query methods).
 const (
 	SignalHumanDecision = "human_decision_v1"

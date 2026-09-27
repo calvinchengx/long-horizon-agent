@@ -370,8 +370,12 @@ func (w *missionRun) runMission(ctx workflow.Context) (MissionResult, error) {
 		}
 		w.absorb(result)
 		w.trackFailures(result)
-		if err := w.resolveApprovals(ctx, result); err != nil {
-			return MissionResult{}, err
+		skip := result.IsComplete && len(result.PendingApprovals) > 0 &&
+			workflow.GetVersion(ctx, VersionCompleteSkipsApprovals, workflow.DefaultVersion, 1) != workflow.DefaultVersion
+		if !skip { // no later cycle could use an approval the completing cycle queued
+			if err := w.resolveApprovals(ctx, result); err != nil {
+				return MissionResult{}, err
+			}
 		}
 		if result.IsComplete {
 			return w.terminal(ctx, OutcomeCompleted, "")
