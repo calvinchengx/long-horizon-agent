@@ -334,9 +334,13 @@ func PreflightRunTools(s *config.Settings) error {
 	return err
 }
 
-// RunTools are the default local tools, plus the web tools when web and the allow-list is set.
+// RunTools are the default local tools, plus code_query when LHA_CODE_QUERY is on, plus the web
+// tools when web and the allow-list is set.
 func RunTools(s *config.Settings, web bool, webIO *WebIO) ([]contracts.Tool, error) {
 	tools := DefaultLocalTools()
+	if s.CodeQuery {
+		tools = append(tools, CodeQueryTool{TokenBudget: s.CodeQueryTokenBudget, TimeoutS: s.CodeMapTimeoutS})
+	}
 	if !web {
 		return tools, nil
 	}

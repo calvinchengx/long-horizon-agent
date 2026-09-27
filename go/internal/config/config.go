@@ -162,7 +162,10 @@ type Settings struct {
 	// --- Code map (agent/code_map.go): ripwire's task bundle in the lead's first message.
 	CodeMap            string  `env:"code_map" default:"off" choices:"off,ripwire"`
 	CodeMapTokenBudget int     `env:"code_map_token_budget" default:"2000" ge:"200"`
-	CodeMapTimeoutS    float64 `env:"code_map_timeout_s" default:"60.0" gt:"0"`
+	CodeMapTimeoutS    float64 `env:"code_map_timeout_s" default:"60.0" gt:"0"` // also code_query's
+	// CodeQuery registers the read-only code_query tool (execution/tools/code_query.go).
+	CodeQuery            bool `env:"code_query" default:"false"`
+	CodeQueryTokenBudget int  `env:"code_query_token_budget" default:"1500" ge:"200"`
 
 	// --- System One decision models (systemone; docs/25-system-one.md): typed, calibrated
 	// answers (TypeSafe's Jev, or a self-hosted Kev), used only to stop work on an item sooner or

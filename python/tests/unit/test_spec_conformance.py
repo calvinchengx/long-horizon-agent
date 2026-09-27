@@ -714,3 +714,33 @@ def test_system_one_wire() -> None:
     for case in spec["endpoints"]:
         assert is_local_endpoint(parse_url(case["endpoint"])) == case["local"]
         assert default_price_in_per_mtok(case["endpoint"]) == case["default_price_in_per_mtok"]
+
+
+def test_execution_code_query() -> None:
+    from lha.execution.tools.code_query import (
+        KINDS,
+        MAX_ANSWER_CHARS,
+        MAX_FIND_CHARS,
+        MAX_SYMBOL_CHARS,
+        CodeQueryTool,
+        clip_answer,
+        code_query_argv,
+    )
+
+    spec = _load("execution/code_query.json")
+    assert spec["kinds"] == KINDS
+    assert (spec["max_symbol_chars"], spec["max_find_chars"], spec["max_answer_chars"]) == (
+        MAX_SYMBOL_CHARS,
+        MAX_FIND_CHARS,
+        MAX_ANSWER_CHARS,
+    )
+    assert spec["spec"] == CodeQueryTool.spec.model_dump(mode="json")
+    for case in spec["questions"]:
+        if case["error"] is None:
+            assert code_query_argv(case["kind"], case["target"], case["budget"]) == case["argv"]
+        else:
+            with pytest.raises(ValueError) as caught:
+                code_query_argv(case["kind"], case["target"], case["budget"])
+            assert str(caught.value) == case["error"]
+    for case in spec["clip"]:
+        assert clip_answer(case["text"]) == case["clipped"]

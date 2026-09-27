@@ -2417,6 +2417,63 @@ def export_system_one() -> None:
     )
 
 
+def export_code_query() -> None:
+    """spec/execution/code_query.json: the code_query tool's spec, the ripwire command for each
+    kind of question, which questions are refused, and how answers are clipped."""
+    from lha.execution.tools.code_query import (
+        KINDS,
+        MAX_ANSWER_CHARS,
+        MAX_FIND_CHARS,
+        MAX_SYMBOL_CHARS,
+        CodeQueryTool,
+        clip_answer,
+        code_query_argv,
+    )
+
+    questions = [
+        ("find", " refuse overlong URLs ", 1500),
+        ("find", "two\nlines déjà 🐟", 900),
+        ("find", "x" * MAX_FIND_CHARS, 200),
+        ("find", "x" * (MAX_FIND_CHARS + 1), 200),
+        ("definition", "redact_text", 1500),
+        ("callers", "redact_text", 1500),
+        ("uses", "src/a.py:Thing", 1500),
+        ("impact", "-rf", 1500),
+        ("impact", "x" * MAX_SYMBOL_CHARS, 1500),
+        ("impact", "x" * (MAX_SYMBOL_CHARS + 1), 1500),
+        ("callers", "   ", 1500),
+        ("callers", "a\nb", 1500),
+        ("callers", "a\x00b", 1500),
+        ("grep", "x", 1500),
+        ("", "x", 1500),
+    ]
+    cases = []
+    for kind, target, budget in questions:
+        try:
+            argv: object = code_query_argv(kind, target, budget)
+            error: object = None
+        except ValueError as exc:
+            argv, error = None, str(exc)
+        cases.append(
+            {"kind": kind, "target": target, "budget": budget, "argv": argv, "error": error}
+        )
+    _write(
+        "execution/code_query.json",
+        {
+            "kinds": KINDS,
+            "max_symbol_chars": MAX_SYMBOL_CHARS,
+            "max_find_chars": MAX_FIND_CHARS,
+            "max_answer_chars": MAX_ANSWER_CHARS,
+            "spec": CodeQueryTool.spec.model_dump(mode="json"),
+            "questions": cases,
+            "clip": [
+                {"text": t, "clipped": clip_answer(t)}
+                for t in ["", "short", "é" * MAX_ANSWER_CHARS, "é" * (MAX_ANSWER_CHARS + 3)]
+            ],
+        },
+    )
+
+
 def main() -> None:
     export_wire_bytes()
     export_memory()
@@ -2439,6 +2496,7 @@ def main() -> None:
     export_agent_prompts()
     export_agent_org()
     export_system_one()
+    export_code_query()
 
 
 if __name__ == "__main__":

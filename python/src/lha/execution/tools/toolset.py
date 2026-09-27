@@ -34,6 +34,7 @@ from lha.contracts.hitl import HITLGate
 from lha.contracts.tools import Tool
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.tools import default_local_tools
+from lha.execution.tools.code_query import CodeQueryTool
 from lha.execution.tools.web import FetchUrlTool, WebSearchTool
 from lha.safety.egress import (
     CredentialBroker,
@@ -232,8 +233,17 @@ def preflight_run_tools(settings: Settings) -> None:
 
 
 def run_tools(settings: Settings, *, web: bool = True, io: WebIO | None = None) -> list[Tool]:
-    """The default local tools, plus the web tools when ``web`` and the allow-list is set."""
-    return [*default_local_tools(), *(web_tools(settings, io=io) if web else [])]
+    """The default local tools, plus ``code_query`` when ``LHA_CODE_QUERY`` is on, plus the web
+    tools when ``web`` and the allow-list is set."""
+    tools: list[Tool] = [*default_local_tools()]
+    if settings.code_query:
+        tools.append(
+            CodeQueryTool(
+                token_budget=settings.code_query_token_budget,
+                timeout_s=settings.code_map_timeout_s,
+            )
+        )
+    return [*tools, *(web_tools(settings, io=io) if web else [])]
 
 
 def build_run_dispatcher(

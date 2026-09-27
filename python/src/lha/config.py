@@ -269,7 +269,11 @@ class Settings(BaseSettings):
     # sandbox (sandbox/Dockerfile has it); without it the cycle simply runs without a map.
     code_map: Literal["off", "ripwire"] = "off"
     code_map_token_budget: int = Field(default=2000, ge=200)
-    code_map_timeout_s: float = Field(default=60.0, gt=0)
+    code_map_timeout_s: float = Field(default=60.0, gt=0)  # also code_query's timeout
+    # The read-only ``code_query`` tool (lha.execution.tools.code_query): every role can ask
+    # ripwire find / definition / callers / uses / impact questions. Needs ripwire in the sandbox.
+    code_query: bool = False
+    code_query_token_budget: int = Field(default=1500, ge=200)
 
     # --- System One decision models (lha.systemone; docs/25-system-one.md) --------------
     # A model that answers typed questions with calibrated probabilities instead of text:
