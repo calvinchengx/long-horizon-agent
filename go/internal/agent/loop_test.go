@@ -655,7 +655,7 @@ func TestFailedAttemptWithoutCodeChangesCreatesNoRef(t *testing.T) {
 
 func TestGateEventsAndCycleEventAreCommitted(t *testing.T) {
 	f := setup(t, item("01", "x"))
-	f.disp.Events = []contracts.EventRecord{{Kind: "gate_resolved", Payload: map[string]any{"decision": "reject"}}}
+	f.disp.Events = []contracts.EventRecord{{Kind: "gate_resolved", Payload: contracts.Payload("decision", "reject")}}
 	f.run(t, f.loop(model.NewStub([]contracts.TurnResult{done}), nil), "c9", passCheck)
 	events := f.git(t, "show", "HEAD:.lha/events.ndjson")
 	lines := strings.Split(events, "\n")

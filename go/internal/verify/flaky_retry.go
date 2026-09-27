@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
@@ -43,9 +44,6 @@ const (
 	QuarantinedFailureEvent = "quarantined_check_failed"
 	quarantineEventsPath    = ".lha/events.ndjson"
 )
-
-// QuarantineEventFields is the payload key order of both flaky events (python dict order).
-var QuarantineEventFields = []string{"check", "revision", "passes", "fails"}
 
 // CommittedQuarantine returns the check names quarantined by check_quarantined events committed
 // at HEAD of workdir (the agent's uncommitted edits to .lha/ are ignored). Any git failure (no
@@ -196,7 +194,7 @@ func (v *FlakyRetryVerifier) retry(ctx context.Context, session contracts.Sandbo
 		}
 	}
 	passes, fails := v.Quarantine.Counts(name, revision)
-	payload := map[string]any{"check": name, "revision": revision, "passes": passes, "fails": fails}
+	payload := contracts.Payload("check", name, "revision", revision, "passes", passes, "fails", fails)
 	if passing == nil {
 		if quarantined { // rule 3: a consistent failure gates, quarantine or not
 			v.event(QuarantinedFailureEvent, payload)
@@ -231,16 +229,17 @@ func (v *FlakyRetryVerifier) revision(ctx context.Context) string {
 			return rev
 		}
 		// no git: evidence only within this Verify call
-		slog.Warn("flake_revision_unavailable", "error", fmt.Sprintf("%s: %s", errorTypeName(err), err))
+		slog.Warn("flake_revision_unavailable", "error", fmt.Sprintf("%s: %s", pyfmt.ExcTypeName(err), err))
 	}
 	return fmt.Sprintf("call-%p-%d", v, calls)
 }
 
-func (v *FlakyRetryVerifier) event(kind string, payload map[string]any) {
-	args := make([]any, 0, 2*len(QuarantineEventFields))
-	for _, k := range QuarantineEventFields {
-		args = append(args, k, payload[k])
-	}
+func (v *FlakyRetryVerifier) event(kind string, payload *contracts.OrderedMap) {
+	args := make([]any, 0, 2*payload.Len())
+	payload.Range(func(k string, val any) bool {
+		args = append(args, k, val)
+		return true
+	})
 	slog.Warn(kind, args...)
 	v.mu.Lock()
 	defer v.mu.Unlock()

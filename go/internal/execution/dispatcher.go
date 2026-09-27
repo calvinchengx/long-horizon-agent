@@ -322,16 +322,16 @@ func (d *AllowListDispatcher) record(req contracts.GateRequest, resolution *cont
 	}
 	d.events = append(d.events, contracts.EventRecord{
 		Kind: "tool_approval",
-		Payload: map[string]any{
-			"tool":        req.Context["tool"],
-			"arguments":   obs.RedactText(req.Context["arguments"]),
-			"reason":      req.Context["reason"],
-			"fingerprint": req.Context["fingerprint"],
-			"decision":    decision,
-			"approved":    decision == string(contracts.GateApprove),
-			"resolved_by": resolvedBy,
-			"defaulted":   defaulted,
-		},
+		Payload: contracts.Payload(
+			"tool", req.Context["tool"],
+			"arguments", obs.RedactText(req.Context["arguments"]),
+			"reason", req.Context["reason"],
+			"fingerprint", req.Context["fingerprint"],
+			"decision", decision,
+			"approved", decision == string(contracts.GateApprove),
+			"resolved_by", resolvedBy,
+			"defaulted", defaulted,
+		),
 	})
 }
 

@@ -149,7 +149,7 @@ func report(t *testing.T, stdout string) string {
 }
 
 // workspace is what a run leaves behind: checkpoint commits, tracked files and the committed
-// anchor files (events normalized: payload key order is not compared and durations are zeroed).
+// anchor files, compared as raw bytes (event durations masked).
 type workspace struct {
 	Commits []string
 	Files   []string
@@ -175,6 +175,11 @@ func snapshot(t *testing.T, workdir string) workspace {
 	return w
 }
 
+// durationRE matches a check's measured duration in an event line (the only run-to-run noise).
+var durationRE = regexp.MustCompile(`"duration_s":-?[0-9][0-9.e+-]*`)
+
+// normalizeNDJSON is the log's raw bytes (not parsed: key order, float formatting and escaping
+// are compared) with blank lines dropped and measured durations masked.
 func normalizeNDJSON(t *testing.T, body string) string {
 	t.Helper()
 	var lines []string
@@ -182,32 +187,12 @@ func normalizeNDJSON(t *testing.T, body string) string {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var v any
-		if err := json.Unmarshal([]byte(line), &v); err != nil {
-			t.Fatalf("bad ndjson line %q: %v", line, err)
+		if !json.Valid([]byte(line)) {
+			t.Fatalf("bad ndjson line %q", line)
 		}
-		out, _ := json.Marshal(zeroDurations(v))
-		lines = append(lines, string(out))
+		lines = append(lines, durationRE.ReplaceAllString(line, `"duration_s":0.0`))
 	}
 	return strings.Join(lines, "\n")
-}
-
-func zeroDurations(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		for k, val := range x {
-			if k == "duration_s" {
-				x[k] = 0
-			} else {
-				x[k] = zeroDurations(val)
-			}
-		}
-	case []any:
-		for i := range x {
-			x[i] = zeroDurations(x[i])
-		}
-	}
-	return v
 }
 
 func compareWorkspaces(t *testing.T, goW, pyW workspace) {

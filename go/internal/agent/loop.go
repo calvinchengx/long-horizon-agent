@@ -4,12 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 	"sync"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
-	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/egressproxy"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
@@ -556,10 +554,10 @@ func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checkli
 	item := checklist.Get(itemID)
 	checks := make([]any, 0, len(v.Results))
 	for _, r := range v.Results {
-		checks = append(checks, map[string]any{
-			"name": r.Name, "passed": r.Passed, "gating": r.Gating, "exit_code": r.ExitCode,
-			"duration_s": math.Round(r.DurationS*1000) / 1000,
-		})
+		checks = append(checks, contracts.NewOrderedMap(
+			"name", r.Name, "passed", r.Passed, "gating", r.Gating, "exit_code", r.ExitCode,
+			"duration_s", math.Round(r.DurationS*1000)/1000,
+		))
 	}
 	events := l.gateEvents(cycleID)
 	events = append(events, l.verifierEvents(missionID, cycleID)...)
@@ -567,16 +565,16 @@ func (l *AgentLoop) checkpoint(ctx context.Context, checklist *contracts.Checkli
 	events = append(events, contracts.EventRecord{
 		Kind:    "cycle",
 		CycleID: cycleID,
-		Payload: map[string]any{
-			"item_id":     item.ID,
-			"verified":    v.AllGreen,
-			"verdict":     v.Verdict,
-			"status":      item.Status,
-			"tool_calls":  toolCalls,
-			"split_into":  splitInto,
-			"rolled_back": rolledBack,
-			"checks":      checks,
-		},
+		Payload: contracts.Payload(
+			"item_id", item.ID,
+			"verified", v.AllGreen,
+			"verdict", v.Verdict,
+			"status", item.Status,
+			"tool_calls", toolCalls,
+			"split_into", splitInto,
+			"rolled_back", rolledBack,
+			"checks", checks,
+		),
 	})
 	return l.opts.Anchor.CommitCheckpoint(ctx, contracts.Checkpoint{
 		CycleID:         cycleID,
@@ -704,27 +702,13 @@ func (l *AgentLoop) egressEvents(ctx context.Context, session contracts.SandboxS
 	return events
 }
 
-// payloadFields orders an event payload for the trace: the flaky events' keys in Python's order,
-// then any other keys sorted.
-func payloadFields(payload map[string]any) []obs.Field {
+// payloadFields is an event payload as trace fields, in the payload's (Python's) key order.
+func payloadFields(payload *contracts.OrderedMap) []obs.Field {
 	fields := []obs.Field{}
-	seen := map[string]bool{}
-	for _, k := range append(append([]string{}, verify.QuarantineEventFields...), egressproxy.EgressEventFields...) {
-		if v, ok := payload[k]; ok {
-			fields = append(fields, obs.F(k, v))
-			seen[k] = true
-		}
-	}
-	rest := []string{}
-	for k := range payload {
-		if !seen[k] {
-			rest = append(rest, k)
-		}
-	}
-	sort.Strings(rest)
-	for _, k := range rest {
-		fields = append(fields, obs.F(k, payload[k]))
-	}
+	payload.Range(func(k string, v any) bool {
+		fields = append(fields, obs.F(k, v))
+		return true
+	})
 	return fields
 }
 

@@ -109,7 +109,7 @@ func TestCrossImplGoWritesPythonReads(t *testing.T) {
 	must(anchor.CommitCheckpoint(ctx, contracts.Checkpoint{
 		CycleID: "c1", ProgressSummary: "- go did 01", Checklist: cl,
 		Decisions: []contracts.DecisionRecord{{Decision: "go \u2029 decision & <b>", Rationale: "why", CycleID: "c1"}},
-		Events:    []contracts.EventRecord{{Kind: "cycle", CycleID: "c1", Payload: map[string]any{"id": "01"}}},
+		Events:    []contracts.EventRecord{{Kind: "cycle", CycleID: "c1", Payload: contracts.Payload("id", "01")}},
 	}))
 
 	var py struct {
@@ -156,7 +156,7 @@ async def main():
     await a.commit_checkpoint(Checkpoint(
         cycle_id="c1", progress_summary="- did 01", checklist=items,
         decisions=[DecisionRecord(decision="d \u2028 <&>", rationale="r", alternatives_rejected="x", affected=["a.py"], cycle_id="c1")],
-        events=[EventRecord(kind="cycle", cycle_id="c1", payload={"id": "01", "n": 1, "nested": {"l": [1, "two"]}, "ok": True})],
+        events=[EventRecord(kind="cycle", cycle_id="c1", payload={"z": "01", "id": "01", "n": 1, "f": 1.0, "nested": {"l": [1, "two"], "a": 0.5}, "ok": True})],
     ))
     snap = await a.read_situational_awareness()
     print(snap.model_dump_json())
@@ -176,9 +176,8 @@ func TestCrossImplPythonWritesGoReads(t *testing.T) {
 		t.Fatalf("%+v", snap)
 	}
 
-	// Byte parity: Go re-serializes what Python wrote to exactly the same bytes. (Event payload
-	// keys are written in sorted order here: Go's map[string]any payload cannot keep Python's
-	// insertion order, the one known byte-level difference; the JSON is semantically equal.)
+	// Byte parity: Go re-serializes what Python wrote to exactly the same bytes (event payloads
+	// included: their keys keep Python's insertion order, floats stay floats).
 	checkBytes := func(rel string, v any, indent bool) {
 		t.Helper()
 		committed := must(ShowAtHead(ctx, dir, rel))

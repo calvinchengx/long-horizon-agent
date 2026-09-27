@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety/pystr"
 )
 
@@ -364,6 +365,16 @@ func RedactValue(value any) any {
 		return v
 	case map[string]any:
 		return RedactMapping(v)
+	case *contracts.OrderedMap: // keeps its key order
+		if v == nil {
+			return v
+		}
+		out := contracts.NewOrderedMap()
+		v.Range(func(k string, item any) bool {
+			out.Set(k, redactEntry(k, item))
+			return true
+		})
+		return out
 	case []any:
 		out := make([]any, len(v))
 		for i, item := range v {

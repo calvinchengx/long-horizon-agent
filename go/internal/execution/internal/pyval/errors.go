@@ -1,15 +1,14 @@
 package pyval
 
 import (
-	"context"
 	"errors"
 	"io/fs"
 	"os"
-	"os/exec"
 	"strings"
 	"syscall"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Error is an error carrying a Python exception type name; Error() is str(exc).
@@ -28,27 +27,10 @@ func NewError(typ, msg string) error { return &Error{Type: typ, Msg: msg} }
 
 type pyTyped interface{ PyTypeName() string }
 
-// ExcTypeName is type(exc).__name__ for err: the PyTypeName() of the first error in the chain that
-// has one, the Python OSError subclass for an errno, else "Exception".
-func ExcTypeName(err error) string {
-	var typed pyTyped
-	if errors.As(err, &typed) {
-		return typed.PyTypeName()
-	}
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
-		return errnoType(errno)
-	}
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		return "TimeoutError"
-	case errors.Is(err, context.Canceled):
-		return "CancelledError"
-	case errors.Is(err, exec.ErrNotFound):
-		return "FileNotFoundError"
-	}
-	return "Exception"
-}
+// ExcTypeName is type(exc).__name__ for err (pyfmt.ExcTypeName: the PyTypeName() of the first
+// error in the chain that has one, the Python OSError subclass for an errno, ..., else
+// "RuntimeError").
+func ExcTypeName(err error) string { return pyfmt.ExcTypeName(err) }
 
 var osErrorTypes = map[string]bool{
 	"OSError": true, "FileNotFoundError": true, "PermissionError": true, "FileExistsError": true,

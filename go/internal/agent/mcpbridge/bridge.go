@@ -31,8 +31,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"reflect"
-	"strings"
 	"sync"
 	"time"
 
@@ -326,25 +324,9 @@ func (b *Bridge) runHandler(tool Tool, arguments map[string]any) (text string, i
 	text, isError, err := tool.Handler(ctx, arguments)
 	if err != nil {
 		slog.Warn("bridge_tool_failed", "tool", tool.Name, "error", err.Error())
-		return fmt.Sprintf("tool %s failed: %s: %v", tool.Name, errorTypeName(err), err), true
+		return fmt.Sprintf("tool %s failed: %s: %v", tool.Name, pyfmt.ExcTypeName(err), err), true
 	}
 	return text, isError
-}
-
-// errorTypeName is the error's Go type without package or pointer (python: type(exc).__name__).
-func errorTypeName(err error) string {
-	t := reflect.TypeOf(err)
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	name := t.Name()
-	if name == "" || name == "errorString" || name == "wrapError" {
-		return "Error"
-	}
-	if i := strings.LastIndex(name, "."); i >= 0 {
-		name = name[i+1:]
-	}
-	return name
 }
 
 func rpcOK(id json.RawMessage, result map[string]any) map[string]any {

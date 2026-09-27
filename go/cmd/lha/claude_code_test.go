@@ -37,9 +37,6 @@ var (
 	bearerRE = regexp.MustCompile(`Bearer [A-Za-z0-9_-]+`)
 	portRE   = regexp.MustCompile(`127\.0\.0\.1:\d+`)
 	hexRE    = regexp.MustCompile(`\b[0-9a-f]{7,40}\b`)
-	// Known gap (not the claude_code port's): the Go execution tools' JSON-Schema properties are
-	// plain maps, so the prompt lists their keys sorted where Python keeps declaration order.
-	toolArgsRE = regexp.MustCompile(`\(args: \{[^\n]*\}\)`)
 )
 
 // normalizeCall masks what legitimately differs between two runs: the bridge's token and port,
@@ -53,7 +50,6 @@ func normalizeCall(c claudecodetest.Call, dir string) claudecodetest.Call {
 		s = bearerRE.ReplaceAllString(s, "Bearer <TOKEN>")
 		s = portRE.ReplaceAllString(s, "127.0.0.1:<PORT>")
 		s = missionIDRE.ReplaceAllString(s, "mission_<ID>")
-		s = toolArgsRE.ReplaceAllString(s, "(args: <SCHEMA>)")
 		return hexRE.ReplaceAllString(s, "<SHA>")
 	}
 	out := claudecodetest.Call{Stdin: norm(c.Stdin), Cwd: norm(c.Cwd)}

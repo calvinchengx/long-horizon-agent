@@ -14,6 +14,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Postgres backend of Store (python: lha.persistence.postgres; needs `lha db migrate`).
@@ -125,6 +126,55 @@ func isConnectError(err error) bool {
 	var netErr net.Error
 	var connErr *pgconn.ConnectError
 	return errors.As(err, &connErr) || errors.As(err, &netErr) || (errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "08"))
+}
+
+// psycopgSQLStateNames are the psycopg.errors classes of the SQLSTATEs a store operation meets.
+var psycopgSQLStateNames = map[string]string{
+	"23505": "UniqueViolation",
+	"23503": "ForeignKeyViolation",
+	"23502": "NotNullViolation",
+	"42P01": "UndefinedTable",
+	"42703": "UndefinedColumn",
+	"42883": "UndefinedFunction",
+	"42501": "InsufficientPrivilege",
+	"3D000": "InvalidCatalogName",
+	"28P01": "InvalidPassword",
+	"28000": "InvalidAuthorizationSpecification",
+	"40001": "SerializationFailure",
+	"40P01": "DeadlockDetected",
+	"57014": "QueryCanceled",
+}
+
+// Postgres errors are named after psycopg's classes wherever an error message embeds a type name
+// (memory_error, cost_hook_failed, ...), not only in the store's own messages.
+func init() { pyfmt.RegisterExcNamer(psycopgErrorName) }
+
+// psycopgErrorName is the psycopg exception class of a Postgres error ("" when err is not one):
+// OperationalError for a failed connection, the SQLSTATE's class when listed, else the SQLSTATE
+// class family's base.
+func psycopgErrorName(err error) string {
+	var connErr *pgconn.ConnectError
+	if errors.As(err, &connErr) {
+		return "OperationalError"
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return ""
+	}
+	if name, ok := psycopgSQLStateNames[pgErr.Code]; ok {
+		return name
+	}
+	switch {
+	case strings.HasPrefix(pgErr.Code, "23"):
+		return "IntegrityError"
+	case strings.HasPrefix(pgErr.Code, "42"):
+		return "ProgrammingError"
+	case strings.HasPrefix(pgErr.Code, "22"):
+		return "DataError"
+	case strings.HasPrefix(pgErr.Code, "08"), strings.HasPrefix(pgErr.Code, "57"), strings.HasPrefix(pgErr.Code, "53"):
+		return "OperationalError"
+	}
+	return "DatabaseError"
 }
 
 // Backend is "postgres".

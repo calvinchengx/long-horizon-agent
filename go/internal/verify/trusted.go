@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
@@ -380,7 +381,7 @@ func (v *TrustedAwareVerifier) runTrusted(ctx context.Context, checks []contract
 	commit, err := CandidateCommit(ctx, v.HostWorkdir, "")
 	out := []contracts.CheckResult{}
 	if err != nil {
-		msg := fmt.Sprintf("[trusted] could not create the candidate commit: %s: %s", errorTypeName(err), err)
+		msg := fmt.Sprintf("[trusted] could not create the candidate commit: %s: %s", pyfmt.ExcTypeName(err), err)
 		for _, c := range checks {
 			out = append(out, failedCheck(c, msg, started, false))
 		}
@@ -389,7 +390,7 @@ func (v *TrustedAwareVerifier) runTrusted(ctx context.Context, checks []contract
 	for _, c := range checks {
 		r, err := v.Runner.Run(ctx, c, v.HostWorkdir, commit)
 		if err != nil { // a runner failure is a failed check, never a pass
-			r = failedCheck(c, fmt.Sprintf("[trusted] runner failed: %s: %s", errorTypeName(err), err), time.Now(), false)
+			r = failedCheck(c, fmt.Sprintf("[trusted] runner failed: %s: %s", pyfmt.ExcTypeName(err), err), time.Now(), false)
 		}
 		out = append(out, r)
 	}

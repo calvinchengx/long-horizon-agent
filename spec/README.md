@@ -16,6 +16,7 @@ the matching package is ported; it runs every file below.
 | `obs/redact.json` | secret redaction in free text and secret-looking keys |
 | `contracts/check_names.json` | verification check names derived from argv, and de-duplication |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, status transitions |
+| `state/wire_bytes.json` | raw bytes of event lines, a checkpoint's `events.ndjson`, lease / egress events, `ownership.json`, gate events and webhook bodies (compared as bytes) |
 | `coordination/decision_chain.json` | the canonical JSON bytes and SHA-256 chain of the decision log |
 | `coordination/shared_paths.json` | files only the lead engineer may write |
 | `verify/harness_files.json` | test/harness files the agent may not weaken |

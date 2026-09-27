@@ -717,8 +717,8 @@ func TestResumeRestoresReflectionsForOpenItems(t *testing.T) {
 	if _, err := anchor.Initialize(ctx, "T", "D", checklist); err != nil {
 		t.Fatal(err)
 	}
-	_ = anchor.AppendEvent(ctx, contracts.EventRecord{Kind: "reflection", CycleID: "c7", Payload: map[string]any{"item": "01", "text": "REFLECT-01"}})
-	_ = anchor.AppendEvent(ctx, contracts.EventRecord{Kind: "reflection", Payload: map[string]any{"item": "zz", "text": "no"}})
+	_ = anchor.AppendEvent(ctx, contracts.EventRecord{Kind: "reflection", CycleID: "c7", Payload: contracts.Payload("item", "01", "text", "REFLECT-01")})
+	_ = anchor.AppendEvent(ctx, contracts.EventRecord{Kind: "reflection", Payload: contracts.Payload("item", "zz", "text", "no")})
 	if _, err := anchor.CommitCheckpoint(ctx, contracts.Checkpoint{CycleID: "c7", Checklist: checklist}); err != nil {
 		t.Fatal(err)
 	}
