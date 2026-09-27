@@ -209,23 +209,23 @@ func TestParallelWaveWithResearchAndReviewCompletes(t *testing.T) {
 		t.Fatalf("%d merge checkpoints", n) // each integration commit is a checkpoint
 	}
 	tickets := eventsOf(t, work, "ticket")
-	if len(tickets) != 2 || tickets[0].Payload["status"] != "done" || tickets[1].Payload["status"] != "done" {
+	if len(tickets) != 2 || tickets[0].Payload.Plain()["status"] != "done" || tickets[1].Payload.Plain()["status"] != "done" {
 		t.Fatalf("tickets %v", tickets)
 	}
 	var history []string
-	for _, h := range tickets[0].Payload["history"].([]any) {
+	for _, h := range tickets[0].Payload.Plain()["history"].([]any) {
 		history = append(history, h.(map[string]any)["status"].(string))
 	}
 	if strings.Join(history, ",") != "created,in_progress,awaiting_verify,awaiting_merge,done" {
 		t.Fatalf("ticket history %v", history)
 	}
 	reviews := eventsOf(t, work, "review")
-	if len(reviews) != 2 || reviews[0].Payload["verdict"] != "approve" || reviews[1].Payload["verdict"] != "approve" {
+	if len(reviews) != 2 || reviews[0].Payload.Plain()["verdict"] != "approve" || reviews[1].Payload.Plain()["verdict"] != "approve" {
 		t.Fatalf("reviews %v", reviews)
 	}
 	var researched []string
 	for _, r := range eventsOf(t, work, "research") {
-		researched = append(researched, r.Payload["item"].(string))
+		researched = append(researched, r.Payload.Plain()["item"].(string))
 	}
 	sort.Strings(researched)
 	if strings.Join(researched, ",") != "01,02" {
@@ -299,10 +299,10 @@ func TestSerialRoundResearchFailuresSurfaceAndReviewReopens(t *testing.T) {
 		t.Fatalf("gate log %v", log)
 	}
 	research := eventsOf(t, inp.Workdir, "research")
-	if len(research) != 2 || research[0].Payload["failed"] != 1.0 || research[1].Payload["failed"] != 1.0 {
+	if len(research) != 2 || research[0].Payload.Plain()["failed"] != 1.0 || research[1].Payload.Plain()["failed"] != 1.0 {
 		t.Fatalf("research events %v", research)
 	}
-	if f := research[0].Payload["failures"].([]any)[0].(string); !strings.Contains(f, "search backend down") ||
+	if f := research[0].Payload.Plain()["failures"].([]any)[0].(string); !strings.Contains(f, "search backend down") ||
 		!strings.HasPrefix(f, "researcher: ApplicationError: ") {
 		t.Fatalf("failure %q", f)
 	}
@@ -310,7 +310,7 @@ func TestSerialRoundResearchFailuresSurfaceAndReviewReopens(t *testing.T) {
 		t.Fatal("the briefs never reached the Lead's prompt")
 	}
 	reviews := eventsOf(t, inp.Workdir, "review")
-	if len(reviews) != 2 || reviews[0].Payload["reopened"] != true || reviews[1].Payload["reopened"] != false {
+	if len(reviews) != 2 || reviews[0].Payload.Plain()["reopened"] != true || reviews[1].Payload.Plain()["reopened"] != false {
 		t.Fatalf("reviews %v", reviews)
 	}
 	cl, _ := state.NewGitMissionAnchor(inp.Workdir).ReadChecklist(context.Background())
@@ -369,7 +369,7 @@ func (erroringModel) EstimateCostUSD(contracts.Usage) (float64, error) { return 
 func cycleItems(t *testing.T, workdir string) string {
 	var ids []string
 	for _, c := range eventsOf(t, workdir, "cycle") {
-		ids = append(ids, fmt.Sprint(c.Payload["item_id"]))
+		ids = append(ids, fmt.Sprint(c.Payload.Plain()["item_id"]))
 	}
 	return strings.Join(ids, ",")
 }
@@ -383,7 +383,7 @@ func TestAFailedImplementerIsAFailedAttemptAndTheItemGoesSerial(t *testing.T) {
 		t.Fatalf("result %+v err %v", res, err)
 	}
 	tickets := eventsOf(t, inp.Workdir, "ticket")
-	if len(tickets) != 2 || tickets[0].Payload["status"] != "done" || tickets[1].Payload["status"] != "failed" {
+	if len(tickets) != 2 || tickets[0].Payload.Plain()["status"] != "done" || tickets[1].Payload.Plain()["status"] != "failed" {
 		t.Fatalf("tickets %v", tickets)
 	}
 	if got := cycleItems(t, inp.Workdir); got != "01,02,02" {
@@ -482,12 +482,12 @@ func TestALeaseInsideADurableWaveIsGrantedAndMerged(t *testing.T) {
 		t.Fatalf("the leased file was not merged: %q", data)
 	}
 	leases := eventsOf(t, inp.Workdir, "lease")
-	if len(leases) != 1 || leases[0].Payload["granted"] != true || leases[0].Payload["writer"] != "implementer-01" {
+	if len(leases) != 1 || leases[0].Payload.Plain()["granted"] != true || leases[0].Payload.Plain()["writer"] != "implementer-01" {
 		t.Fatalf("leases %v", leases)
 	}
 	ticket := eventsOf(t, inp.Workdir, "ticket")[0]
-	if l := ticket.Payload["leases"].([]any); len(l) != 1 || l[0].(map[string]any)["granted"] != true {
-		t.Fatalf("ticket leases %v", ticket.Payload["leases"])
+	if l := ticket.Payload.Plain()["leases"].([]any); len(l) != 1 || l[0].(map[string]any)["granted"] != true {
+		t.Fatalf("ticket leases %v", ticket.Payload.Plain()["leases"])
 	}
 }
 
@@ -542,7 +542,7 @@ func TestImplementerAndIntegrationAreRetrySafeAndHonourLeases(t *testing.T) {
 			t.Fatalf("lease commit has %s", n)
 		}
 	}
-	if leases := eventsOf(t, work, "lease"); leases[0].Payload["path"] != "lib/helper.txt" {
+	if leases := eventsOf(t, work, "lease"); leases[0].Payload.Plain()["path"] != "lib/helper.txt" {
 		t.Fatalf("lease events %v", leases)
 	}
 	// A retried attempt (e.g. after a crash before reporting) returns the committed branch.
@@ -600,7 +600,7 @@ func TestALeaseOwnedByAnOpenItemIsRefused(t *testing.T) {
 	if contains(strings.Fields(changed), "work/02.txt") {
 		t.Fatalf("the branch changed work/02.txt: %s", changed)
 	}
-	if refused := eventsOf(t, inp.Workdir, "lease")[0]; refused.Payload["granted"] != false {
+	if refused := eventsOf(t, inp.Workdir, "lease")[0]; refused.Payload.Plain()["granted"] != false {
 		t.Fatalf("lease event %v", refused)
 	}
 }
@@ -620,7 +620,7 @@ func TestFailedImplementerIsRecordedAsAFailedAttempt(t *testing.T) {
 	if item := cl.Items[0]; item.Status != contracts.StatusInProgress || !strings.Contains(item.LastFailure, "cannot open the sandbox") {
 		t.Fatalf("item %+v", item)
 	}
-	if tickets := eventsOf(t, inp.Workdir, "ticket"); len(tickets) != 1 || tickets[0].Payload["status"] != "failed" {
+	if tickets := eventsOf(t, inp.Workdir, "ticket"); len(tickets) != 1 || tickets[0].Payload.Plain()["status"] != "failed" {
 		t.Fatalf("tickets %v", tickets)
 	}
 }
@@ -662,7 +662,7 @@ func TestReviewIsExactlyOnceAndRepeatedBlocksBlockTheItem(t *testing.T) {
 	}
 	var blocked []any
 	for _, r := range eventsOf(t, work, "review") {
-		blocked = append(blocked, r.Payload["blocked"])
+		blocked = append(blocked, r.Payload.Plain()["blocked"])
 	}
 	if !reflect.DeepEqual(blocked, []any{false, false, true}) {
 		t.Fatalf("blocked %v", blocked)
@@ -827,7 +827,7 @@ func TestOrgSpendIsJournaledAndLedgeredForEveryRole(t *testing.T) {
 		}
 	}
 	research := eventsOf(t, inp.Workdir, "research")
-	if len(research) != 2 || research[0].Payload["n"] != 1.0 {
+	if len(research) != 2 || research[0].Payload.Plain()["n"] != 1.0 {
 		t.Fatalf("research %v", research)
 	}
 }

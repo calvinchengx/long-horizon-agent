@@ -555,7 +555,7 @@ func runFromOutput(inp IntegrateInput, item contracts.ChecklistItem, fallback *o
 	if len(out.TicketHistory) > 0 {
 		run.Tickets = nil
 		for _, h := range out.TicketHistory {
-			run.Tickets = append(run.Tickets, org.TicketHistoryEntry{Status: h["status"], Note: h["note"]})
+			run.Tickets = append(run.Tickets, org.TicketHistoryEntry{Status: h["status"], Note: h["note"], KeysSorted: true})
 		}
 	}
 	for _, text := range out.Leases {
@@ -690,9 +690,9 @@ func (a *Activities) integrateBranch(ctx context.Context, inp IntegrateInput) (C
 		for i, f := range inp.ResearchFailures {
 			failures[i] = headRunes(f, 500)
 		}
-		events = append(events, contracts.EventRecord{Kind: "research", CycleID: inp.CycleID, Payload: map[string]any{
-			"item": inp.ItemID, "n": inp.ResearchBriefs, "failed": len(inp.ResearchFailures), "failures": failures,
-		}})
+		events = append(events, contracts.EventRecord{Kind: "research", CycleID: inp.CycleID, Payload: contracts.Payload(
+			"item", inp.ItemID, "n", inp.ResearchBriefs, "failed", len(inp.ResearchFailures), "failures", failures,
+		)})
 	}
 	trusted, err := settings.TrustedCheckCommands()
 	if err != nil {
@@ -758,8 +758,8 @@ func (a *Activities) leadModel(settings *config.Settings, snapshot contracts.Sit
 func blockingStreak(events []contracts.EventRecord, itemID string) int {
 	streak := 0
 	for _, e := range events {
-		if e.Kind == ReviewEvent && e.Payload["item_id"] == itemID {
-			if blocking, _ := e.Payload["blocking"].(bool); blocking {
+		if e.Kind == ReviewEvent && e.Payload.Value("item_id") == itemID {
+			if blocking, _ := e.Payload.Value("blocking").(bool); blocking {
 				streak++
 			} else {
 				streak = 0
@@ -903,11 +903,11 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		CycleID:         reviewID,
 		ProgressSummary: fmt.Sprintf("- %s review of [%s]: %s", reviewID, inp.ItemID, outcome),
 		Checklist:       checklist,
-		Events: []contracts.EventRecord{{Kind: ReviewEvent, CycleID: reviewID, Payload: map[string]any{
-			"item_id": inp.ItemID, "verdict": review.Verdict, "blocking": review.Blocking,
-			"blocking_issues": capList(review.BlockingIssues, 20), "advisory": capList(review.Advisory, 20),
-			"reopened": review.Blocking && !blocked, "blocked": blocked, "base": base, "head": inp.HeadSHA,
-		}}},
+		Events: []contracts.EventRecord{{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
+			"item_id", inp.ItemID, "verdict", review.Verdict, "blocking", review.Blocking,
+			"blocking_issues", capList(review.BlockingIssues, 20), "advisory", capList(review.Advisory, 20),
+			"reopened", review.Blocking && !blocked, "blocked", blocked, "base", base, "head", inp.HeadSHA,
+		)}},
 		CommitMessage: fmt.Sprintf("lha: review %s %s", outcome, inp.ItemID),
 	}); err != nil {
 		return CycleResult{}, err

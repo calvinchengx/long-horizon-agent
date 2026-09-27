@@ -81,6 +81,9 @@ func DiffSince(ctx context.Context, workdir, base, head string) string {
 type TicketHistoryEntry struct {
 	Status string
 	Note   string
+	// KeysSorted marks an entry that crossed an activity boundary: Python's Temporal JSON
+	// converter writes dicts with sorted keys, so the ticket event lists it as {"note", "status"}.
+	KeysSorted bool
 }
 
 // ImplementerRun is one implementer's attempt at one item, before integration.
@@ -445,15 +448,19 @@ func IntegrateRun(ctx context.Context, run *ImplementerRun, o IntegrateOptions) 
 	checks := []any{}
 	if shown != nil {
 		for _, r := range shown.Results {
-			checks = append(checks, map[string]any{
-				"name": r.Name, "passed": r.Passed, "gating": r.Gating, "exit_code": r.ExitCode,
-				"duration_s": roundDuration(r.DurationS),
-			})
+			checks = append(checks, contracts.NewOrderedMap(
+				"name", r.Name, "passed", r.Passed, "gating", r.Gating, "exit_code", r.ExitCode,
+				"duration_s", roundDuration(r.DurationS),
+			))
 		}
 	}
 	history := make([]any, len(run.Tickets))
 	for i, h := range run.Tickets {
-		history[i] = map[string]any{"status": h.Status, "note": h.Note}
+		if h.KeysSorted {
+			history[i] = contracts.NewOrderedMap("note", h.Note, "status", h.Status)
+		} else {
+			history[i] = contracts.NewOrderedMap("status", h.Status, "note", h.Note)
+		}
 	}
 	violations := make([]any, len(run.Violations))
 	for i, v := range run.Violations {
@@ -461,23 +468,23 @@ func IntegrateRun(ctx context.Context, run *ImplementerRun, o IntegrateOptions) 
 	}
 	leases := []any{}
 	for _, d := range run.Leases.Decisions() {
-		leases = append(leases, map[string]any{"path": d.Path, "granted": d.Granted, "why": d.Why})
+		leases = append(leases, contracts.NewOrderedMap("path", d.Path, "granted", d.Granted, "why", d.Why))
 	}
 	writeSet := make([]any, len(run.Ticket.Contract.WriteSet))
 	for i, p := range run.Ticket.Contract.WriteSet {
 		writeSet[i] = p
 	}
 	events := append(append([]contracts.EventRecord{}, o.Events...),
-		contracts.EventRecord{Kind: "cycle", CycleID: run.CycleID, Payload: map[string]any{
-			"item_id": item.ID, "verified": merged, "verdict": verdict, "status": status,
-			"tool_calls": run.ToolCalls, "writer": run.Writer, "branch": run.Branch,
-			"split_into": splitInto, "checks": checks,
-		}},
-		contracts.EventRecord{Kind: "ticket", CycleID: run.CycleID, Payload: map[string]any{
-			"ticket_id": run.Ticket.ID, "item_id": item.ID, "role": run.Ticket.Contract.Role,
-			"write_set": writeSet, "branch": run.Branch, "status": string(run.Ticket.Status),
-			"history": history, "ownership_violations": violations, "leases": leases,
-		}},
+		contracts.EventRecord{Kind: "cycle", CycleID: run.CycleID, Payload: contracts.Payload(
+			"item_id", item.ID, "verified", merged, "verdict", verdict, "status", status,
+			"tool_calls", run.ToolCalls, "writer", run.Writer, "branch", run.Branch,
+			"split_into", splitInto, "checks", checks,
+		)},
+		contracts.EventRecord{Kind: "ticket", CycleID: run.CycleID, Payload: contracts.Payload(
+			"ticket_id", run.Ticket.ID, "item_id", item.ID, "role", run.Ticket.Contract.Role,
+			"write_set", writeSet, "branch", run.Branch, "status", string(run.Ticket.Status),
+			"history", history, "ownership_violations", violations, "leases", leases,
+		)},
 	)
 	branchShown := run.Branch
 	if branchShown == "" {

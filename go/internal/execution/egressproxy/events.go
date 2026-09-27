@@ -23,9 +23,6 @@ import (
 // EgressEventKind is the kind of the events ParseProxyLog returns.
 const EgressEventKind = "sandbox_egress"
 
-// EgressEventFields is the payload key order of a sandbox_egress event (python dict order).
-var EgressEventFields = []string{"decision", "method", "host", "port", "detail", "count"}
-
 var proxyLineRE = regexp.MustCompile(
 	` (?:INFO|WARNING) (allow|deny|fail) ([A-Z]+) (\S+)(?: -> (\S+)|: (.*))$`)
 
@@ -83,10 +80,10 @@ func ParseProxyLog(lines []string) []contracts.EventRecord {
 	}
 	events := make([]contracts.EventRecord, 0, len(order))
 	for _, k := range order {
-		events = append(events, contracts.EventRecord{Kind: EgressEventKind, Payload: map[string]any{
-			"decision": k.decision, "method": k.method, "host": k.host, "port": k.port,
-			"detail": details[k], "count": counts[k],
-		}})
+		events = append(events, contracts.EventRecord{Kind: EgressEventKind, Payload: contracts.Payload(
+			"decision", k.decision, "method", k.method, "host", k.host, "port", k.port,
+			"detail", details[k], "count", counts[k],
+		)})
 	}
 	return events
 }

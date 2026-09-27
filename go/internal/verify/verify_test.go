@@ -125,7 +125,7 @@ func TestVerifierSandboxErrorIsAFailure(t *testing.T) {
 	}
 	r := result.Results[0]
 	if result.AllGreen || r.ExitCode != -1 || r.Passed ||
-		r.OutputTail != "[verifier] could not execute check: errorString: container gone" {
+		r.OutputTail != "[verifier] could not execute check: RuntimeError: container gone" {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -189,7 +189,7 @@ func TestVerifierRunsRealCommands(t *testing.T) {
 		t.Fatalf("%+v", fail)
 	}
 	missing := result.Results[2]
-	if missing.ExitCode != -1 || !strings.HasPrefix(missing.OutputTail, "[verifier] could not execute check: Error: ") {
+	if missing.ExitCode != -1 || !strings.HasPrefix(missing.OutputTail, "[verifier] could not execute check: FileNotFoundError: ") {
 		t.Fatalf("%+v", missing)
 	}
 	timed, err := (&DeterministicVerifier{DefaultTimeoutS: 1, OutputTail: 10}).Verify(context.Background(), session,

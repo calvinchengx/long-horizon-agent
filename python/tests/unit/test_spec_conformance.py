@@ -496,3 +496,57 @@ def test_memory_recall() -> None:
         assert _terms(case["text"]) == case["terms"], case
     for case in spec["cases"]:
         assert asyncio.run(run_case(case)) == case["blocks"], case["name"]
+
+
+def test_wire_bytes(tmp_path: Path) -> None:
+    """Raw bytes (never parsed JSON) of events, events.ndjson, ownership.json and gate bodies."""
+    import httpx._content
+
+    from lha.contracts.state import Checkpoint, EventRecord
+    from lha.coordination.leases import LeaseDecision, lease_event
+    from lha.durable.activities import gate_notice_payload
+    from lha.durable.types import GateNotice, PendingApproval
+    from lha.execution.egress_events import parse_proxy_log
+    from lha.state.mission_anchor import GitMissionAnchor
+
+    spec = _load("state/wire_bytes.json")
+    events = [EventRecord.model_validate_json(line) for line in spec["events"]]
+    assert [e.model_dump_json() for e in events] == spec["events"]
+
+    async def write_anchor() -> str:
+        anchor = GitMissionAnchor(str(tmp_path))
+        items = Checklist(items=[ChecklistItem(id="01", description="one")])
+        await anchor.initialize(title="Wire", description="bytes", items=items)
+        await anchor.commit_checkpoint(
+            Checkpoint(cycle_id="c1", progress_summary="- c1", checklist=items, events=events)
+        )
+        return (tmp_path / ".lha" / "events.ndjson").read_text(encoding="utf-8")
+
+    assert asyncio.run(write_anchor()) == spec["anchor_events_file"]
+    for case in spec["lease_events"]:
+        line = lease_event(LeaseDecision(**case["decision"]), "c9").model_dump_json()
+        assert line == case["line"]
+    lines = _load("execution/sandbox_egress.json")["proxy_log"]["lines"]
+    assert [e.model_dump_json() for e in parse_proxy_log(lines)] == spec["egress_events"]
+    for case in spec["ownership"]:
+        items = [ChecklistItem(id=i, description=f"item {i}") for i in case["items"]]
+        ownership = assign_ownership(items, case["files"])
+        for writer in case["release"]:
+            ownership.release(writer)
+        for path, writer in case["reassign"]:
+            ownership.reassign(path, writer)
+        assert ownership.model_dump_json(indent=2) == case["json"]
+        back = FileOwnershipMap.model_validate_json(case["json"])
+        assert back.model_dump_json(indent=2) == case["json"]
+    for case in spec["gates"]:
+        fields = dict(case["notice"])
+        if fields.get("request") is not None:
+            fields["request"] = PendingApproval(**fields["request"])
+        notice = GateNotice(**fields)
+        payload = gate_notice_payload(notice)
+        _, stream = httpx._content.encode_json(payload)
+        assert b"".join(stream).decode("utf-8") == case["body"]
+        event = EventRecord(
+            kind=f"gate_{notice.event}", cycle_id=f"gate:{notice.gate_id}", payload=payload
+        )
+        assert event.model_dump_json() == case["event"]

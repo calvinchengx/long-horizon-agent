@@ -40,7 +40,6 @@ package tracing
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -153,14 +152,14 @@ func Configure(s *config.Settings, o Options) []string {
 			attribute.String("lha.component", component),
 		))
 	if err != nil && res == nil {
-		logger().Warn("tracing_not_configured", "reason", obs.RedactText(err.Error()))
+		logger().Warn("tracing_not_configured", "reason", obs.RedactText(pyfmt.ExcText(err)))
 		return nil
 	}
 	opts := []sdktrace.TracerProviderOption{sdktrace.WithResource(res)}
 	for _, target := range targets {
 		exporter, err := factory(target, timeout)
 		if err != nil {
-			logger().Warn("tracing_not_configured", "reason", obs.RedactText(err.Error()))
+			logger().Warn("tracing_not_configured", "reason", obs.RedactText(pyfmt.ExcText(err)))
 			return nil
 		}
 		opts = append(opts, sdktrace.WithBatcher(exporter, sdktrace.WithExportTimeout(timeout)))
@@ -198,7 +197,7 @@ func Shutdown(ctx context.Context) {
 		return
 	}
 	if err := p.Shutdown(ctx); err != nil {
-		logger().Warn("tracing_shutdown_failed", "error", obs.RedactText(err.Error()))
+		logger().Warn("tracing_shutdown_failed", "error", obs.RedactText(pyfmt.ExcText(err)))
 	}
 }
 
@@ -270,21 +269,14 @@ func (s *Span) End(err error) {
 		return
 	}
 	if err != nil && s.span.IsRecording() {
-		text := obs.RedactText(pyTypeName(err) + ": " + err.Error())
+		text := obs.RedactText(pyfmt.ExcTypeName(err) + ": " + err.Error())
 		s.span.AddEvent("exception", trace.WithAttributes(
-			attribute.String("exception.type", pyTypeName(err)),
+			attribute.String("exception.type", pyfmt.ExcTypeName(err)),
 			attribute.String("exception.message", obs.RedactText(err.Error())),
 		))
 		s.span.SetStatus(codes.Error, text)
 	}
 	s.span.End()
-}
-
-func pyTypeName(err error) string {
-	if n, ok := err.(interface{ PyTypeName() string }); ok {
-		return n.PyTypeName()
-	}
-	return fmt.Sprintf("%T", err)
 }
 
 func head(s string, n int) string {

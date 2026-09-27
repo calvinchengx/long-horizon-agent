@@ -62,8 +62,8 @@ func TestFlakyRetry(t *testing.T) {
 		OutputTail string `json:"output_tail"`
 	}
 	type event struct {
-		Kind    string         `json:"kind"`
-		Payload map[string]any `json:"payload"`
+		Kind    string                `json:"kind"`
+		Payload *contracts.OrderedMap `json:"payload"`
 	}
 	type call struct {
 		Verdict string   `json:"verdict"`

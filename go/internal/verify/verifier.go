@@ -5,12 +5,12 @@ package verify
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // OutputTailChars is the tail of each check's output kept on the CheckResult (what the agent
@@ -109,7 +109,7 @@ func (v *DeterministicVerifier) runOne(ctx context.Context, session contracts.Sa
 			Gating:    check.Gating,
 			DurationS: time.Since(started).Seconds(),
 			OutputTail: fmt.Sprintf("[verifier] could not execute check: %s: %s",
-				errorTypeName(err), err.Error()),
+				pyfmt.ExcTypeName(err), err.Error()),
 		}, nil
 	}
 	return contracts.CheckResult{
@@ -121,19 +121,6 @@ func (v *DeterministicVerifier) runOne(ctx context.Context, session contracts.Sa
 		TimedOut:   outcome.TimedOut,
 		OutputTail: ClipOutputTail(outcome.Stdout, outcome.Stderr, v.OutputTail),
 	}, nil
-}
-
-// errorTypeName is the Go analogue of Python's type(exc).__name__: the error's concrete type
-// name without package or pointer ("PathError", "ExitError"; "error" when unnamed).
-func errorTypeName(err error) string {
-	t := reflect.TypeOf(err)
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t.Name() == "" {
-		return "error"
-	}
-	return t.Name()
 }
 
 // DefaultPythonCheckCommands is the standard deterministic gate for a uv-managed Python repo.

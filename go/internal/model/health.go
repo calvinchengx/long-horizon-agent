@@ -15,6 +15,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Cheap, real model-provider health probes, for a parked durable mission
@@ -63,6 +64,10 @@ func HTTPFailure(err error) ModelHealth {
 func errorTypeName(err error) string {
 	if n, ok := err.(interface{ PyTypeName() string }); ok {
 		return n.PyTypeName()
+	}
+	var uerr *url.Error
+	if errors.As(err, &uerr) && !errors.Is(err, errClientClosed) { // httpx's transport errors
+		return pyfmt.HTTPErrorTypeName(err)
 	}
 	var unknown *contracts.UnknownPriceError
 	var opErr *net.OpError

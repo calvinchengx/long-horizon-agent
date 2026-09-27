@@ -402,7 +402,7 @@ func (a *GitMissionAnchor) ReadEvents(ctx context.Context) ([]contracts.EventRec
 			continue
 		}
 		if event.Payload == nil {
-			event.Payload = map[string]any{}
+			event.Payload = contracts.Payload()
 		}
 		out = append(out, event)
 	}

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
@@ -18,6 +17,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence/services"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -302,11 +302,7 @@ type GateStoreBinder interface {
 }
 
 // errorStop is python's f"error: {type(exc).__name__}" stop reason for a run that raised.
-func errorStop(err error) string {
-	name := fmt.Sprintf("%T", err)
-	name = strings.TrimLeft(name[strings.LastIndex(name, ".")+1:], "*")
-	return "error: " + name
-}
+func errorStop(err error) string { return "error: " + pyfmt.ExcTypeName(err) }
 
 func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, meter *governor.CostMeter, detector *governor.LoopDetector, checks []contracts.Check, anchor *state.GitMissionAnchor, toolbox Toolbox, recorder *obs.TraceRecorder, missionID string) (_ MissionSummary, runErr error) {
 	lead := o.Model
