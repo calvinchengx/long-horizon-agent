@@ -102,6 +102,22 @@ type promptSpec struct {
 			Output   string `json:"output"`
 			Rendered string `json:"rendered"`
 		} `json:"render"`
+		Query []struct {
+			Item  contracts.ChecklistItem `json:"item"`
+			Query string                  `json:"query"`
+		} `json:"query"`
+		TraceChars  int      `json:"trace_chars"`
+		TraceScript string   `json:"trace_script"`
+		TraceArgv   []string `json:"trace_argv"`
+		TraceEnv    []struct {
+			Item   contracts.ChecklistItem `json:"item"`
+			Budget int                     `json:"budget"`
+			Env    map[string]string       `json:"env"`
+		} `json:"trace_env"`
+		FoundCode []struct {
+			Output string `json:"output"`
+			Found  bool   `json:"found"`
+		} `json:"found_code"`
 	} `json:"code_map"`
 	LeadTools struct {
 		Specs    []json.RawMessage `json:"specs"`
@@ -312,6 +328,28 @@ func TestAgentCodeMap(t *testing.T) {
 	for i, c := range s.CodeMap.Render {
 		if got := agent.RenderCodeMap(c.Output); got != c.Rendered {
 			t.Errorf("render %d differs (%d vs %d runes)", i, len([]rune(got)), len([]rune(c.Rendered)))
+		}
+	}
+	if s.CodeMap.TraceChars != agent.TraceChars || s.CodeMap.TraceScript != agent.TraceScript ||
+		!reflect.DeepEqual(s.CodeMap.TraceArgv, agent.TraceArgv()) {
+		t.Fatalf("trace constants differ from python")
+	}
+	if len(s.CodeMap.Query) == 0 || len(s.CodeMap.TraceEnv) == 0 || len(s.CodeMap.FoundCode) == 0 {
+		t.Fatal("no query/trace/found cases")
+	}
+	for _, c := range s.CodeMap.Query {
+		if got := agent.CodeMapQuery(c.Item); got != c.Query {
+			t.Errorf("CodeMapQuery(%s) = %q, want %q", c.Item.ID, got, c.Query)
+		}
+	}
+	for _, c := range s.CodeMap.TraceEnv {
+		if got := agent.TraceEnv(c.Item, c.Budget); !reflect.DeepEqual(got, c.Env) {
+			t.Errorf("TraceEnv(%s) differs", c.Item.ID)
+		}
+	}
+	for _, c := range s.CodeMap.FoundCode {
+		if got := agent.FoundCode(c.Output); got != c.Found {
+			t.Errorf("FoundCode(%q) = %v", c.Output, got)
 		}
 	}
 }

@@ -200,6 +200,17 @@ tests it finds into the lead's first message. ripwire is offline, deterministic 
 into the workspace; the reference image in [`sandbox/`](../sandbox/) includes it. Without it, or
 if it fails, the cycle runs without a map.
 
+Two things make the map find the right code more often:
+
+- **The query includes the item's witnesses.** Test names often use the code's own words when the
+  description does not. For a task described as "mask GitLab tokens", the description alone missed
+  `redact.py`; with its witness `test_ab_redact.py` added, the map found it.
+- **A retry maps from the failure.** When the item has a failure report, the map comes from
+  `ripwire . --from-trace=-` on its last 4,000 characters instead. On four real LHA failure
+  reports for that task, it ranked `redact.py` first every time. If the trace finds no code, the
+  task query is used. The report reaches ripwire through an environment variable and stdin, never
+  the command line or a file in the workspace.
+
 **Measured so far: it has not paid off.** On 27–28 September 2026 we ran two missions with and two
 without the map, with `gemma4` as the lead, on three small changes in LHA's own Python package.
 The map pointed at the right file first for two of the three changes and missed the third, whose
@@ -207,7 +218,8 @@ description never used the file's own words. The runs with the map used about 30
 per cycle (44.5k against 34.2k) and cost about 14% more, because the map stays in the conversation
 and is re-sent with every model turn; they made about 18% fewer navigation calls. Neither arm
 finished any of the three changes within nine cycles. This says nothing yet about a stronger lead
-model, and the same runs exposed the split-ordering starvation fixed above. Leave it off unless you
+model, and the same runs exposed the split-ordering starvation fixed above. The witness-aware query
+and the trace-first retries came after these runs and are not measured yet. Leave it off unless you
 measure a gain on your own missions.
 
 ## What this does not solve

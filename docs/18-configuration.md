@@ -132,7 +132,7 @@ See [12-memory.md](12-memory.md).
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_CODE_MAP` | `off` \| `ripwire` | `off` | `ripwire` runs `ripwire . --pack-task=<item> --token-budget=N` in the sandbox at the start of each cycle and puts the task bundle in the lead's first message, after the memory block. Needs ripwire in the sandbox image (the reference image has it); a missing ripwire, a failure or a timeout means no map for that cycle |
+| `LHA_CODE_MAP` | `off` \| `ripwire` | `off` | `ripwire` runs ripwire in the sandbox at the start of each cycle and puts its answer in the lead's first message, after the memory block: `--pack-task` on the item's description and witnesses, or, on a retry, `--from-trace` on the last failure report (falling back to the task query if the trace finds no code). Needs ripwire in the sandbox image (the reference image has it); a missing ripwire, a failure or a timeout means no map for that cycle |
 | `LHA_CODE_MAP_TOKEN_BUDGET` | int (>= 200) | `2000` | ripwire's `--token-budget` for the bundle |
 | `LHA_CODE_MAP_TIMEOUT_S` | float (> 0) | `60.0` | the ripwire command's timeout |
 

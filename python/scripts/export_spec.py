@@ -825,11 +825,25 @@ def _prompt_cases() -> list[dict[str, Any]]:
 
 def _code_map_cases() -> dict[str, Any]:
     """The ripwire command for an item and how its output becomes the prompt section."""
-    from lha.agent.code_map import code_map_argv
+    from lha.agent.code_map import (
+        TRACE_CHARS,
+        TRACE_SCRIPT,
+        code_map_argv,
+        code_map_query,
+        found_code,
+        trace_argv,
+        trace_env,
+    )
 
     items = [
         ChecklistItem(id="01", description="add farewell()"),
         ChecklistItem(id="02", description='quote " & -dash; $(rm -rf /) `x` déjà 🐟'),
+        ChecklistItem(
+            id="03",
+            description="mask gitlab tokens",
+            witnesses=["pytest:tests/test_redact.py::test_gitlab", "cmd:make check"],
+            last_failure="déjà 🐟 " * 900 + "\ntests/test_redact.py:6: AssertionError",
+        ),
     ]
     outputs = ["", "   \n\t ", " <ctx/> ", "<ctx>" + "déjà " * 5000 + "</ctx>"]
     return {
@@ -841,6 +855,18 @@ def _code_map_cases() -> dict[str, Any]:
             for b in (200, 2000)
         ],
         "render": [{"output": o, "rendered": render_code_map(o)} for o in outputs],
+        "query": [{"item": i.model_dump(mode="json"), "query": code_map_query(i)} for i in items],
+        "trace_chars": TRACE_CHARS,
+        "trace_script": TRACE_SCRIPT,
+        "trace_argv": trace_argv(),
+        "trace_env": [
+            {"item": i.model_dump(mode="json"), "budget": 1200, "env": trace_env(i, 1200)}
+            for i in items
+        ],
+        "found_code": [
+            {"output": o, "found": found_code(o)}
+            for o in ["", "<ctx/>", '<ctx><d p="src/a.py:1"/></ctx>', '<ctx p="x"/>', 'p="nospace"']
+        ],
     }
 
 

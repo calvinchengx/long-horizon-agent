@@ -276,6 +276,24 @@ def test_agent_prompts() -> None:
         assert code_map_argv(item, case["budget"]) == case["argv"]
     for case in code_map["render"]:
         assert render_code_map(case["output"]) == case["rendered"]
+    from lha.agent.code_map import (
+        TRACE_CHARS,
+        TRACE_SCRIPT,
+        code_map_query,
+        found_code,
+        trace_argv,
+        trace_env,
+    )
+
+    assert (code_map["trace_chars"], code_map["trace_script"]) == (TRACE_CHARS, TRACE_SCRIPT)
+    assert code_map["trace_argv"] == trace_argv()
+    for case in code_map["query"]:
+        assert code_map_query(ChecklistItem.model_validate(case["item"])) == case["query"]
+    for case in code_map["trace_env"]:
+        item = ChecklistItem.model_validate(case["item"])
+        assert trace_env(item, case["budget"]) == case["env"]
+    for case in code_map["found_code"]:
+        assert found_code(case["output"]) == case["found"]
 
 
 def test_agent_reply_protocol_and_planning() -> None:

@@ -9,7 +9,13 @@ from pathlib import Path
 import pytest
 
 from lha.agent.assembly import build_lead_loop
-from lha.agent.code_map import RipwireCodeMap, code_map_argv
+from lha.agent.code_map import (
+    TRACE_CHARS,
+    RipwireCodeMap,
+    code_map_argv,
+    code_map_query,
+    trace_argv,
+)
 from lha.agent.loop import AgentLoop
 from lha.agent.prompt import CODE_MAP_HARD_CAP, CODE_MAP_HEADER, render_code_map
 from lha.config import Settings
@@ -148,3 +154,85 @@ async def test_real_ripwire_maps_a_repo_and_writes_nothing(tmp_path: Path) -> No
         ["git", "status", "--porcelain", "--ignored"], cwd=tmp_path, capture_output=True, text=True
     )
     assert status.stdout == ""  # no cache or notes files left in the workspace
+
+
+# --- witness-aware queries and trace-first retries -----------------------------------------
+
+FAILING = ChecklistItem(
+    id="02",
+    description="mask gitlab tokens",
+    witnesses=["pytest:tests/test_redact.py::test_gitlab"],
+    last_failure="x" * 5000 + "\ntests/test_redact.py:6: AssertionError",
+)
+
+
+def test_the_query_carries_the_acceptance_checks() -> None:
+    assert code_map_query(ITEM) == ITEM.description  # no witnesses: the description alone
+    assert code_map_query(FAILING) == (
+        "mask gitlab tokens\nAcceptance checks: pytest:tests/test_redact.py::test_gitlab"
+    )
+
+
+class _Scripted:
+    """A session answering the trace script and the task command differently."""
+
+    def __init__(self, trace: ExecResult, task: ExecResult) -> None:
+        self.trace, self.task = trace, task
+        self.calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    async def exec(self, argv, *, timeout_s=600, env=None, **_):  # type: ignore[no-untyped-def]
+        self.calls.append((argv, env))
+        return self.trace if argv[0] == "sh" else self.task
+
+
+async def test_a_retry_maps_from_the_failure_report() -> None:
+    session = _Scripted(
+        trace=ExecResult(exit_code=0, stdout='<ctx><d p="src/redact.py:3"/></ctx>'),
+        task=ExecResult(exit_code=0, stdout="<ctx/>"),
+    )
+    text, info = await RipwireCodeMap(token_budget=900).render(session, FAILING)  # type: ignore[arg-type]
+    assert 'p="src/redact.py:3"' in text and info["mode"] == "trace"
+    ((argv, env),) = session.calls  # the task query was not needed
+    assert argv == trace_argv() and env is not None
+    assert (
+        env["LHA_TRACE"] == FAILING.last_failure[-TRACE_CHARS:] and env["LHA_TRACE_BUDGET"] == "900"
+    )
+    assert FAILING.last_failure[-TRACE_CHARS:] not in " ".join(argv)  # the report is data, not argv
+
+
+async def test_a_trace_that_finds_nothing_falls_back_to_the_task_query() -> None:
+    session = _Scripted(
+        trace=ExecResult(exit_code=0, stdout="<ctx/>"),
+        task=ExecResult(exit_code=0, stdout='<ctx><d p="src/a.py:1"/></ctx>'),
+    )
+    text, info = await RipwireCodeMap().render(session, FAILING)  # type: ignore[arg-type]
+    assert [c[0][0] for c in session.calls] == ["sh", "ripwire"]
+    assert info["mode"] == "task" and info["fell_back"] is True and 'p="src/a.py:1"' in text
+
+
+@pytest.mark.skipif(shutil.which("ripwire") is None, reason="needs ripwire on PATH")
+async def test_real_ripwire_finds_the_code_from_a_pytest_failure(tmp_path: Path) -> None:
+    import subprocess
+
+    (tmp_path / "redact.py").write_text("def redact_text(text):\n    return text\n")
+    (tmp_path / "other.py").write_text("def unrelated():\n    return 1\n")
+    (tmp_path / "test_redact.py").write_text(
+        "from redact import redact_text\n\n\ndef test_gitlab():\n"
+        '    assert "glpat-" not in redact_text("glpat-abc")\n'
+    )
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"],
+        cwd=tmp_path,
+        check=True,
+    )
+    report = (
+        "_____ test_gitlab _____\n\n    def test_gitlab():\n"
+        '>       assert "glpat-" not in redact_text("glpat-abc")\n'
+        "E       AssertionError\n\ntest_redact.py:5: AssertionError\n"
+    )
+    item = ChecklistItem(id="01", description="mask tokens", last_failure=report)
+    session = await LocalSandbox().open(workdir=str(tmp_path))
+    text, info = await RipwireCodeMap(token_budget=800).render(session, item)
+    assert info["mode"] == "trace" and "redact" in text
