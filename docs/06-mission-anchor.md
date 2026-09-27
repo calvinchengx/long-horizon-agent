@@ -259,8 +259,9 @@ context from the previous cycle. A restart after a crash is therefore handled th
 any other cycle start.
 
 On Temporal, each cycle attempt additionally resets the checkout to `HEAD` before starting
-(`git reset --hard` and `git clean -ffdx`, keeping `.venv`, `venv`, `node_modules`, `.env*` and
-`.lha/objects`), so partial edits from a crashed attempt are never committed. See
+(`git reset --hard` and `git clean -ffdx`, keeping `.venv`, `venv`, `node_modules`, `.env*`,
+`.lha/objects` and the paths in `LHA_RESET_KEEP`), so partial edits from a crashed attempt are
+never committed. See
 [durable execution](08-durable-execution.md).
 
 ## Importing a checklist

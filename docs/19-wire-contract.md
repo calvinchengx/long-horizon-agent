@@ -522,6 +522,15 @@ JSON files exported from the Python implementation by
 | `memory/retrieval.json` | BM25 ranking and scores, Reciprocal Rank Fusion order and scores | yes | yes |
 | `memory/recall.json` | episodic lines, search terms, and the memory blocks `MissionMemory` recalls for a fixture (hybrid on SQLite, lexical with `git grep`, a tight budget) | yes | yes |
 | `memory/voyage.json` | the Voyage embedder's batching, the request bodies sent on the wire (documents and queries), response parsing and its errors, and the probe's HTTP-status messages | yes | yes |
+| `model/fallback_models.json` | `LHA_FALLBACK_MODELS` entries parsed into backend, model and price | yes | yes |
+| `execution/paths.json` | workspace-relative path normalization, protected paths, containment | yes | yes |
+| `execution/arguments.json` | tool-argument validation against each tool's JSON schema, missing required arguments | yes | yes |
+| `execution/sandbox_egress.json` | package-fetch and write hosts, the sandbox egress allow-list, the Rule of Two check, proxy log lines to events | yes | yes |
+| `state/vendor_paths.json` | where `lha vendor` stores each URL | yes | yes |
+| `verify/flaky_retry.json` | flaky-check re-runs, verdicts and quarantine | yes | yes |
+| `agent/prompts.json` | the lead's messages, tool rendering, memory block, reply and plan parsing, planner and replanner messages | yes | yes |
+| `agent/org.json` | role tool policies, sub-agent and reviewer messages, review parsing, reflection, implementer objectives, the ownership guard, lease decisions, ticket transitions | yes | yes |
+| `systemone/wire.json` | System One request bodies (key and option order), answer parsing, confidence, the stall-triage question, state and actions, reranking, endpoint prices ([25-system-one.md](25-system-one.md)) | yes | yes |
 
 Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit/test_spec_conformance.py),
 Go in `go/internal/spec/conformance_*_test.go` (`shared_paths.json` in

@@ -177,6 +177,7 @@ Durable sub-agent activities (`run_subagent`) build their own governor from
 | `LHA_TRUSTED_CHECKS` | JSON object | `""` | operator-defined checks run outside the sandbox, as `{"name": ["argv", ...]}`; items reference them as `trusted:<name>` witnesses. Malformed JSON or a non-list entry is a configuration error when a run starts |
 | `LHA_TRUSTED_CHECK_ENV` | comma-separated variable names | `""` | host environment variables passed through to trusted checks, for example `GOFLAGS,GOPROXY,GOMODCACHE`. A trusted check otherwise gets only `PATH`, the locale, a fresh empty `HOME`/`TMPDIR` and `LHA_CHECK_*`, never the operator's credentials. `LHA_*` names are refused (configuration error); a listed name is visible to agent-written code. See [07-verification.md](07-verification.md#threat-model) |
 | `LHA_HARNESS_PATHS` | comma-separated globs | `""` | workspace-relative paths the agent may not modify, on top of the test files always protected, for example `Makefile,e2e/**,.github/**` |
+| `LHA_RESET_KEEP` | comma-separated gitignore patterns | `""` | extra ignored paths that survive the clean at the start of every durable cycle attempt (on top of `.venv`, `venv`, `node_modules`, `.env*`, `.lha/objects`), for example build caches (`target`) or a local git remote. List only ignored paths: a kept untracked file that is not ignored would be committed by the next checkpoint. `.`, `*`, `**`, `..`, absolute paths and anything under `.git` or `.lha` are refused (`lha worker` exits 2; a cycle fails with a configuration error) |
 | `LHA_FLAKY_RETRIES` | int (0 to 5) | `1` | re-runs of a failing, not timed-out gating check on the same work tree; a check that then passes is quarantined (non-gating for the rest of the mission, with a committed `check_quarantined` event). `0` turns re-runs and quarantine off. See [07-verification.md](07-verification.md#flaky-check-quarantine) |
 
 `LHA_SANDBOX_IMAGE` and the three `LHA_SANDBOX_EGRESS*` settings apply to `docker` only. Any
@@ -286,9 +287,9 @@ See
 
 ## Secrets
 
-Eight settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`,
+Nine settings are `SecretStr`: `LHA_OPENAI_API_KEY`, `LHA_ANTHROPIC_API_KEY`,
 `LHA_POSTGRES_DSN`, `LHA_LANGFUSE_SECRET_KEY`, `LHA_VOYAGE_API_KEY`, `LHA_WEB_CREDENTIALS`,
-`LHA_WEB_SEARCH_API_KEY` and
+`LHA_WEB_SEARCH_API_KEY`, `LHA_SYSTEM_ONE_API_KEY` and
 `LHA_GATE_WEBHOOK_URL` (chat webhook URLs embed their credential). Their `repr` never shows the
 value; code unwraps them with
 `get_secret_value()` only where the value is sent. `Settings.redacted()` masks every field whose
@@ -317,7 +318,7 @@ keys do not reach agent-run commands. Keep `.env` out of version control (`.giti
 | `LHA_IT_POSTGRES_DSN` | `tests/integration/conftest.py` | admin DSN for a Postgres with `vector` available; each test creates and drops its own database. Unset: Postgres tests are skipped |
 | `LHA_IT_DOCKER` | `tests/integration/conftest.py` | `1` runs the Docker sandbox tests against the local daemon (they pull `python:3.12-slim`, `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` and `python:3.12-alpine`, and the egress tests need internet access). Otherwise skipped |
 | `LHA_IT_SANDBOX_IMAGE` | `tests/integration/test_large_mission_e2e.py` | the polyglot sandbox image built from `sandbox/Dockerfile` (default `lha-sandbox:dev`) |
-| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json`, `mission_approval_ladder.json`, `mission_row_gate_retry.json` and `mission_cancel_mid_cycle.json` in `tests/durability/histories/`; select one with `-k` so the others keep replaying |
+| `LHA_RECORD_HISTORY` | `tests/durability/test_replay.py` | `1` rewrites the committed replay histories `mission_three_items.json`, `mission_approval_ladder.json`, `mission_row_gate_retry.json`, `mission_cancel_mid_cycle.json` and `mission_org_wave_review.json` in `tests/durability/histories/` (the two `*_legacy.json` histories are never rewritten); select one with `-k` so the others keep replaying |
 | `LHA_APPDB_PASSWORD` | `docker-compose.yml` | `appdb` password (default `lha`) |
 | `LANGFUSE_NEXTAUTH_SECRET`, `LANGFUSE_SALT` | `docker-compose.yml` | required by the Langfuse service; compose refuses to start without them |
 

@@ -105,8 +105,8 @@ a blocked item are.
   implements everything except the E2B sandbox and the `sentence_transformers` / `cross_encoder`
   extras, and a Go and a Python worker cannot serve the same
   mission (each refuses a task queue the other polls).
-- **Real-service paths without CI coverage.** The E2B sandbox is excluded from coverage and never
-  run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama and Voyage embedders are tested
+- **Real-service paths without CI coverage.** The E2B sandbox is tested only against a fake SDK;
+  the real E2B service is never run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama and Voyage embedders are tested
   against mocked HTTP, not live endpoints, so no test shows how much a real embedding model
   improves recall. Trace export is tested with an in-memory exporter and against a closed port,
   never against a live collector or Langfuse server.

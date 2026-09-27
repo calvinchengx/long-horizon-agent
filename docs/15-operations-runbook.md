@@ -24,8 +24,8 @@ by default, Postgres with `LHA_POSTGRES_DSN`; `lha config` prints where) is writ
 `mission-start`, the cycle activities (`RUNNING`, also when the checklist is deadlocked,
 `WAITING_ON_HUMAN` for a queued approval, `DONE`, `ABORTED` on budget) and the workflow
 (`SLEEPING`, `DEGRADED_PARK`, `WAITING_ON_HUMAN` when a gate opens, and the final status of every
-ending, including `IMPOSSIBLE` for a deadlock, a gate decision, `max_cycles` and
-`mission-abort`). The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` back to a
+ending: `DONE`; `IMPOSSIBLE` for a deadlock or an "impossible" decision; `ABORTED` for an abort
+at a gate, `max_cycles`, the budget, a non-retryable failure or `mission-abort`). The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` back to a
 non-terminal status, so a cycle still finishing after an abort cannot overwrite `ABORTED`. The
 workflow's writes are best effort; `lha mission-status` is the live source.
 
@@ -81,7 +81,8 @@ values (an empty `check_commands`, `cycles_before_can < 1`, `max_cycles < 0`) fa
 before the first cycle.
 
 An item becomes `blocked` after 3 consecutive failed verifications (the `AgentLoop` default; not
-configurable through settings). The replanner then tries to split it into smaller items
+configurable through settings), or after `LHA_SYSTEM_ONE_TRIAGE_MIN_FAILURES` (default 2) when
+[System One triage](25-system-one.md) is on and confidently finds an environment problem. The replanner then tries to split it into smaller items
 (at most `LHA_MAX_REPLANS` splits per mission, nested at most `LHA_MAX_SPLIT_DEPTH` levels).
 Blocked items are skipped so independent items continue; when only blocked items remain the
 mission is deadlocked and the deadlock gate opens.
@@ -246,9 +247,8 @@ a new worker picks it up. The guard:
   replays every `*.json` history in a directory against the current `MissionWorkflow` and
   `SubAgentWorkflow`, using the same ClaimCheck data converter as the worker.
 - [`tests/durability/test_replay.py`](../python/tests/durability/test_replay.py) replays the
-  committed histories in `tests/durability/histories/` (a three-item mission, a deadlock gate and
-  an approval gate recorded with the pre-ladder code, and an approval on the escalation ladder),
-  and checks that a tampered history fails. CI runs it on every push and pull request.
+  committed histories in `tests/durability/histories/` (all seven are listed in
+  [20-testing.md](20-testing.md#the-replay-test)), and checks that a tampered history fails. CI runs it on every push and pull request.
 - New workflow behaviour is guarded by `workflow.patched(...)` (see
   [08-durable-execution.md](08-durable-execution.md#replay-safety-net)), so a mission started by
   an older worker keeps its old command sequence after a deploy.
@@ -297,6 +297,5 @@ process that runs cycles, and `ollama pull` the model there. If the server is do
 is missing, memory runs lexical-only and logs `memory_degraded` with the reason; the mission is
 not affected. See [12-memory.md](12-memory.md#embedders).
 
-**Orphaned sub-agent branches.** Nothing reconciles branches left behind by an interrupted
-`lha orchestrate` run; `orchestrate` prunes stale worktrees when it starts. **Planned** together
-with resuming `orchestrate`.
+**Orphaned sub-agent branches.** `lha orchestrate` (at start and when it ends) and the durable
+`plan_round` remove an interrupted wave's worktrees and its `lha/implementer-*` branches.

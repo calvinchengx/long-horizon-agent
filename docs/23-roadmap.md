@@ -69,7 +69,7 @@ path (local, durable and `orchestrate`) through [`agent/assembly.py`](../python/
   local (`--approve-interactive`, a terminal prompt that rejects after
   `LHA_CONSOLE_APPROVAL_TIMEOUT_S`, default 3600 s).
 
-Not done: `--checklist` on `orchestrate`; a Planner that writes witnesses; measurements of split
+Not done: a Planner that writes witnesses; measurements of split
 quality with real models.
 
 ### Phase 2: independent reviewer and decision log (done)

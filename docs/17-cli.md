@@ -6,14 +6,13 @@ The `lha` command is defined in [`python/src/lha/cli/main.py`](../python/src/lha
 [18-configuration.md](18-configuration.md), and before it runs installs the OTLP trace exporter
 when one is configured ([16-observability.md](16-observability.md)).
 
-The Go implementation mirrors this surface (same command names, options and settings) as it is
-ported. `go/cmd/lha` implements every command: `version`, `config`, `run-local`, `mission`,
-`orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate` (Go needs no
-extra for `db migrate`: the Postgres driver is built in), `worker`, `mission-start`,
-`mission-status`, `mission-approve`, `mission-snooze` and `mission-abort`, and installs the trace
-exporter at start like Python. `mission-start`'s organization options (`--research`, `--review`
-and `--max-parallel` 2 or more) print that they are not yet available in Go and exit 2; see
-[04-choosing-an-implementation.md](04-choosing-an-implementation.md).
+The Go implementation mirrors this surface: the same command names, options, settings, output
+and exit codes. `go/cmd/lha` implements every command: `version`, `config`, `run-local`,
+`mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate` (Go
+needs no extra for `db migrate`: the Postgres driver is built in), `worker`, `mission-start`
+(including the organization options `--research`, `--review` and `--max-parallel`),
+`mission-status`, `mission-approve`, `mission-snooze` and `mission-abort`. It installs the trace
+exporter at start like Python; see [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
 
@@ -105,7 +104,8 @@ Prints `lha <version>` (currently `lha 0.1.0`). No options.
 
 Prints every setting as `name = value`, one per line, in declaration order. `SecretStr` settings
 (`openai_api_key`, `anthropic_api_key`, `postgres_dsn`, `langfuse_secret_key`,
-`web_credentials`, `web_search_api_key`, `gate_webhook_url`) print `***` when set and `None` when
+`voyage_api_key`, `web_credentials`, `web_search_api_key`, `system_one_api_key`,
+`gate_webhook_url`) print `***` when set and `None` when
 unset. The last line, `mission store = ...`, is where `lha missions` and `lha costs` read:
 `sqlite <absolute path>` (the resolved `LHA_SQLITE_PATH` or the per-user default), or
 `postgres (LHA_POSTGRES_DSN)` with its SQLite fallback. No options.

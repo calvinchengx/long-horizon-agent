@@ -17,7 +17,8 @@ Code: [`python/src/lha/safety/`](../python/src/lha/safety/),
 [`python/src/lha/hitl/`](../python/src/lha/hitl/). The Go port has equivalents of the classifier
 and egress checks in `go/internal/safety/`, which run the same `spec/` cases, the local and Docker
 sandboxes, egress proxy, dispatcher and tools in `go/internal/execution/`, and the console
-approval gate in `go/internal/hitl/`; it has no E2B sandbox and no durable (Temporal) gates.
+approval gate in `go/internal/hitl/`, and its durable (Temporal) gates in `go/internal/durable/`;
+it has no E2B sandbox.
 
 ## 1. Sandboxes
 
@@ -27,7 +28,7 @@ the single entry point. `LHA_SANDBOX` selects the kind. The default is `docker`.
 | Kind | Isolation | Notes |
 |---|---|---|
 | `docker` | container | Needs the `sandbox` extra (`docker>=7.1`). Image `LHA_SANDBOX_IMAGE`, default `ghcr.io/astral-sh/uv:python3.12-bookworm-slim`; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds a Go + uv + Node/pnpm image |
-| `e2b` | Firecracker microVM (E2B service) | Imports `e2b_code_interpreter`, which no extra provides. The workspace is synced both ways (below); tested against a fake SDK only, not against the E2B service in CI. Python only |
+| `e2b` | Firecracker microVM (E2B service) | Needs the `e2b` extra (`e2b-code-interpreter`). The workspace is synced both ways (below); tested against a fake SDK only, not against the E2B service in CI. Python only |
 | `local` | none | Refused with `UnsafeSandboxError` unless `LHA_ALLOW_UNSAFE_LOCAL=true` or `--unsafe-local` |
 
 Docker hardening, from `DockerSandbox.run_kwargs()` in

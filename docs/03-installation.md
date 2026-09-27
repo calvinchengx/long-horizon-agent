@@ -19,7 +19,8 @@ uv run lha --help
 ```
 
 `uv sync` installs the core dependencies (pydantic, pydantic-settings, typer, structlog, orjson,
-tenacity, httpx, temporalio) and the dev group (ruff, pytest, pytest-asyncio, ty, pytest-cov).
+tenacity, httpx, httpcore, temporalio) and the dev group (ruff, pytest, pytest-asyncio, ty,
+pytest-cov, and the OpenTelemetry SDK and OTLP exporter the tracing tests use).
 The project requires Python `>=3.12`. The `lha` console script is `lha.cli.main:main` (the Typer app is `lha.cli.main:app`).
 
 ### Optional extras
@@ -64,10 +65,9 @@ cd go
 go test ./...
 ```
 
-The Go implementation is being ported in phases. `go build -o lha ./cmd/lha` (from `go/`) builds
-a CLI that runs single-agent missions locally (`lha run-local`, `lha mission`) in the local or
-Docker sandbox; there is no Go Temporal worker yet. See
-[choosing an implementation](04-choosing-an-implementation.md) for what exists.
+`go build -o lha ./cmd/lha` (from `go/`) builds the Go CLI. It implements every command of the
+Python CLI, including the Temporal worker (`lha worker`) and the durable `mission-*` commands. The
+E2B sandbox is Python-only. See [choosing an implementation](04-choosing-an-implementation.md).
 
 ## Docker image (Python worker)
 

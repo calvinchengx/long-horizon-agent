@@ -2,6 +2,7 @@
 title: LHA — Long-Horizon Agent
 description: A durable agent organization that makes verified progress on software missions spanning days to weeks.
 template: splash
+editUrl: https://github.com/calvinchengx/long-horizon-agent/edit/main/website/src/landing/index.mdx
 hero:
   tagline: A durable agent organization that makes verified progress on software missions spanning days to weeks, surviving crashes, reboots and context-window limits.
   actions:
@@ -32,12 +33,12 @@ as an engineering problem, not a model capability.
     resumes from the last completed cycle, and waiting on an outage is a durable timer.
   </Card>
   <Card title="Deterministic verification" icon="approve-check">
-    An item is done only when real tests, lint and type checks pass in the sandbox, never on the
-    model's say-so.
+    An item is done only when its checks and its own witnesses (real tests, by default with lint
+    and type checks) pass in the sandbox, never on the model's say-so.
   </Card>
   <Card title="Guardrails" icon="warning">
-    Sandboxed execution, irreversible commands refused outright, default-deny
-    egress and a budget governor that stops spend before it happens.
+    Sandboxed execution, irreversible commands (pushes, deploys, uploads) held for a human's
+    approval, default-deny egress and a budget governor that stops spend before it happens.
   </Card>
 </CardGrid>
 

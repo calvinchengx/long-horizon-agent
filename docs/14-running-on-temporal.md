@@ -280,7 +280,8 @@ outcome, and Continue-As-New every 200 cycles or when Temporal suggests it.
 | non-retryable error types | `BudgetExceeded`, `MissionConfigError` |
 
 Each attempt takes an exclusive `flock` on `<workdir>/.git/lha-cycle.lock` (waiting up to 300 s),
-resets the checkout to `HEAD` (`reset --hard`, `clean -ffdx`), and checks whether `HEAD` already
+resets the checkout to `HEAD` (`reset --hard`, `clean -ffdx`, keeping the paths listed in
+[durable execution](08-durable-execution.md) and `LHA_RESET_KEEP`), and checks whether `HEAD` already
 has a `cycle` event for this cycle id. If it does, the attempt returns that result instead of
 working another item.
 

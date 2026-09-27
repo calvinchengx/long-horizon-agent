@@ -59,7 +59,9 @@ again. Each attempt is made safe to repeat:
   zombie attempt after a heartbeat timeout, and its retry) waits up to 300 s, heartbeating while it
   waits, then fails with the retryable `WorkdirBusyError`.
 - **Clean start.** Each attempt runs `git reset --hard` and `git clean -ffdx` to HEAD first, so
-  partial edits from a crashed attempt are discarded, not committed.
+  partial edits from a crashed attempt are discarded, not committed. Ignored files go too, except
+  `.venv`, `venv`, `node_modules`, `.env*`, `.lha/objects` and the paths in `LHA_RESET_KEEP`
+  (for example a build cache or a local git remote).
 - **Exactly-once commit per cycle id.** Cycle ids are `c<n>`, derived from `cycles_done`. If one of
   the last 256 events in `HEAD:.lha/events.ndjson` is a `cycle` event with this id, the previous
   attempt committed and then crashed before reporting. The attempt returns that result instead of

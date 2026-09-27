@@ -89,9 +89,14 @@ determinism:
   approved at a gate on the escalation ladder, and replays it.
 - `test_fresh_mission_row_history_replays` records a mission that deadlocks, is retried at the
   deadlock gate and completes, with the workflow's mission-row writes, and replays it.
+- `test_fresh_cancel_mid_cycle_history_replays` records a mission aborted while its first cycle
+  runs, and replays it.
+- `test_fresh_org_history_replays` records a three-item mission with the organization on (a
+  parallel wave, a serial round, one researcher per item, every verified item reviewed), and
+  replays it.
 - `test_recorded_histories_still_replay` replays every history in
   `tests/durability/histories/` against the current `MissionWorkflow`, and requires at least
-  these six:
+  these seven:
   - `mission_three_items.json`: a plain three-item mission;
   - `mission_deadlock_gate_legacy.json` and `mission_approval_gate_legacy.json`: a deadlock
     gate answered `retry` and an approval gate answered `approve`, recorded with the workflow
@@ -102,7 +107,9 @@ determinism:
     answered `retry`, then done;
   - `mission_cancel_mid_cycle.json`: a mission aborted while its first cycle runs, on the
     `lha-cycle-wait-cancel-v1` path (the workflow waits for the cycle's cancellation before it
-    writes `ABORTED`).
+    writes `ABORTED`);
+  - `mission_org_wave_review.json`: the organization's rounds (`plan_round`, `run_implementer`,
+    `integrate_branch`, `review_cycle`) with researcher child workflows.
 
   If a code change makes an in-flight mission non-deterministic, this fails.
 - `test_committed_histories_cover_what_they_claim` checks that the legacy histories carry no
@@ -169,7 +176,6 @@ Coverage uses `pytest-cov` (a dev dependency). Settings are in
 [`python/pyproject.toml`](../python/pyproject.toml):
 
 - `source = ["src/lha"]`, branch coverage on.
-- Omitted: `execution/sandbox_e2b.py` (needs an E2B account).
 - `fail_under = 90` with `precision = 2`, so 89.95% fails.
 
 Coverage flags are not in pytest `addopts`; pass them explicitly:
@@ -241,8 +247,8 @@ go test ./...
 go test -short ./...   # skips the slow cross-implementation anchor tests
 ```
 
-Packages with tests: `config`, `contracts`, `governor`, `model`, `obs`, `safety` (and
-`safety/pystr`), `spec`, `state`, `verify`. `internal/state/decision_chain_test.go` covers the
+Every package under `internal/` and `cmd/lha` has tests, apart from the test helpers
+(`agent/agenttest`, `model/claudecodetest`, `persistence/pgtest`) and `persistence/services`. `internal/state/decision_chain_test.go` covers the
 Go decision chain. `internal/state/crossimpl_test.go` writes a mission anchor with Go and reads
 it with the Python implementation (via `uv run --project ../python`), and the reverse, including
 byte-identical `decisions.ndjson` links and each side verifying the other's chain; it skips

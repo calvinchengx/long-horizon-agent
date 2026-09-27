@@ -147,10 +147,10 @@ The Go implementation ([`go/internal/obs/tracing/`](../go/internal/obs/tracing/)
 same way, with no extra to install: the same settings and destinations, the resource attributes
 above, one batch exporter per destination, and the same span names and attributes for
 `lha.mission`, `lha.cycle`, `chat <model>` and `execute_tool <name>` on `run-local` and
-`mission`. Go also redacts the recorded error text of a failed span. Its helpers
-`StartActivityCycle`, `StartModelCall` (`chat` / `invoke_agent`), `TracedDispatch` and
-`AgentSpan` give the durable activity, `claude -p` sessions and the organization the same span
-schema as Python.
+`mission`. Go also redacts the recorded error text of a failed span. Not emitted by Go yet: the
+durable activity's `lha.activity.run_agent_cycle` span, the `lha.mission` span of `orchestrate`,
+and the organization's agent spans (the helpers `StartActivityCycle` and `AgentSpan` exist but
+nothing calls them).
 
 Tracing never blocks or stops the agent. Spans are handed to a `BatchSpanProcessor` (a bounded
 background queue that drops spans when full), an export gives up after

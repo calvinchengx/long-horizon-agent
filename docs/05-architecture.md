@@ -10,75 +10,48 @@ the same package layout (see [choosing an implementation](04-choosing-an-impleme
 
 ## System context
 
-How the pieces are deployed and what talks to what. Solid lines are called on a run path today
-(a CLI command, the local runners or a Temporal activity). The dashed box and line are planned:
-a Go Temporal worker (see [choosing an implementation](04-choosing-an-implementation.md)).
+How the pieces are deployed and what talks to what. A mission runs either in the CLI process (a
+local run) or on a Temporal worker (a durable run); both run the same cycle against the same
+services. Either implementation can be the CLI or the worker, but a task queue is served by one
+implementation at a time (see [choosing an implementation](04-choosing-an-implementation.md)).
 
 ```mermaid
 flowchart TB
-    OP(["Operator"]) --> CLI["lha CLI"]
-
-    subgraph local["Local runs, no Temporal<br/>lha mission / run-local / orchestrate"]
-        RUN["Planner + AgentLoop + Replanner<br/>(orchestrate adds researchers, reviewer,<br/>parallel implementers + BranchIntegrator)"]
-    end
-
-    subgraph temporal["Durable runs"]
-        TS["Temporal server<br/>+ its Postgres"]
-        PYW["Python worker<br/>lha worker"]
-        GOW["Go worker<br/>(planned)"]
-        MW["MissionWorkflow<br/>run_agent_cycle, check_mission_health,<br/>notify_gate, declare_impossible,<br/>unblock_items, read_mission_snapshot,<br/>record_mission_status; opt-in organization:<br/>plan_round, run_implementer,<br/>integrate_branch, review_cycle"]
-        SUB["SubAgentWorkflow<br/>(researchers, with --research)"]
-    end
-
-    subgraph ext["Outside the process"]
-        MODELS["Model providers<br/>Ollama / OpenAI-compatible / Claude /<br/>Claude Code (claude -p) / stub<br/>primary, then LHA_FALLBACK_MODELS"]
-        SB["Sandbox<br/>Docker daemon / E2B / local"]
-        PROXY["Egress proxy container<br/>(when LHA_SANDBOX_EGRESS* lists hosts)"]
-        TR["Trusted runner<br/>host subprocess, trusted: checks"]
-        WS[("Workspace git repo<br/>+ .lha/ anchor")]
-        STORE[("Mission store<br/>SQLite (default) or<br/>Postgres + pgvector")]
-        OBJ[("Object store<br/>large payloads")]
-        HOOK["Gate webhook<br/>(LHA_GATE_WEBHOOK_URL)"]
-        LF["Langfuse / OTel collector<br/>(OTLP/HTTP)"]
-        NET["Internet"]
-    end
-
-    CLI --> RUN
-    CLI -- "mission-start, mission-status, mission-approve,<br/>mission-snooze, mission-abort" --> TS
-    CLI -- "missions, costs;<br/>db migrate (Postgres)" --> STORE
-    CLI -- "decisions --verify" --> WS
-    CLI -- "vendor (reference pages)" --> NET
-    TS <-- "task queue lha-mission" --> PYW
-    TS -.-> GOW
-    PYW --> MW
-    MW -- "with --research N" --> SUB
-    RUN --> MODELS
-    MW -- "cycles; health probe while parked" --> MODELS
-    RUN --> SB
-    MW --> SB
-    SB --> WS
-    RUN -- "read at start,<br/>checkpoint commit" --> WS
-    MW -- "read at start,<br/>checkpoint commit" --> WS
-    RUN --> TR
-    MW --> TR
-    TR -- "worktree of the candidate commit" --> WS
-    RUN -- "mission row, cost ledger, memory" --> STORE
-    MW -- "mission row, cost ledger, memory" --> STORE
-    RUN -- "approval prompt<br/>(--approve-interactive)" --> OP
-    MW -- "WAITING_ON_HUMAN<br/>approve / reject, retry / abort / impossible" --> OP
-    RUN -- "gate events" --> HOOK
-    MW -- "gate events (notify_gate)" --> HOOK
-    PYW -- "ClaimCheck codec" --> OBJ
-    RUN -- "OTLP spans (when configured)" --> LF
-    PYW -- "OTLP spans (when configured)" --> LF
-    SB -- "allow-listed hosts only" --> PROXY
-    PROXY --> NET
-    RUN -- "fetch_url, web_search<br/>(when LHA_WEB_ALLOW_HOSTS is set)" --> NET
-    MW -- "fetch_url, web_search<br/>(when LHA_WEB_ALLOW_HOSTS is set)" --> NET
-
-    classDef planned stroke-dasharray: 5 5
-    class GOW planned
+    OP(["Operator"]) --> CLI["lha CLI<br/>Python or Go"]
+    CLI -- "run-local, mission,<br/>orchestrate" --> LOCAL["Local run<br/>in the CLI process"]
+    CLI -- "mission-start, -status,<br/>-approve, -snooze, -abort" --> TS["Temporal server"]
+    TS <-- "task queue" --> W["lha worker<br/>Python or Go<br/>MissionWorkflow"]
+    LOCAL --> CYCLE["One cycle<br/>gather, act,<br/>verify, checkpoint"]
+    W -- "activities" --> CYCLE
+    CYCLE --> MODELS["Model providers"]
+    CYCLE --> SB["Sandbox<br/>Docker, E2B or local"]
+    SB -. "allow-listed<br/>hosts only" .-> PROXY["Egress proxy"]
+    CYCLE --> TR["Trusted runner<br/>trusted: checks"]
+    CYCLE --> WS[("Workspace git repo<br/>+ .lha/ anchor")]
+    CYCLE --> STORE[("Mission store<br/>SQLite or Postgres")]
+    CYCLE -. "gates" .-> OP
 ```
+
+The other connections, each used only when it is configured:
+
+| From | To | When |
+|---|---|---|
+| a cycle | the internet, through `fetch_url` and `web_search` | `LHA_WEB_ALLOW_HOSTS` is set |
+| the sandbox | the internet, through the egress proxy | `LHA_SANDBOX_EGRESS*` lists hosts |
+| a cycle | a System One model (Jev or Kev) | `LHA_SYSTEM_ONE_BACKEND` is set ([25-system-one.md](25-system-one.md)) |
+| a durable mission's gates | a webhook | `LHA_GATE_WEBHOOK_URL` is set |
+| the worker | the object store (payloads over 32 KiB) | always, for large payloads ([ClaimCheck](08-durable-execution.md#claimcheck-payload-codec)) |
+| the CLI and the worker | an OTLP collector or Langfuse | an OTLP endpoint or the Langfuse keys are set |
+| `lha vendor` | the named pages on the internet | when run |
+| `lha db migrate`, `missions`, `costs`, `gates` | the mission store | when run |
+| `lha decisions --verify` | the workspace's decision log | when run |
+
+A model provider is Ollama, an OpenAI-compatible endpoint, Claude, Claude Code (`claude -p`) or
+the stub, then each entry of `LHA_FALLBACK_MODELS` in turn. The worker's activities are
+`run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`,
+`read_mission_snapshot` and `record_mission_status`, plus `plan_round`, `run_implementer`,
+`integrate_branch` and `review_cycle` for the opt-in organization; `--research N` adds
+`SubAgentWorkflow` children ([durable execution](08-durable-execution.md)).
 
 The Temporal server is the only component that must be running for durable missions; a local
 run needs nothing but git, a sandbox and a model. The mission store defaults to a SQLite file
@@ -180,8 +153,8 @@ The workflow itself never touches a database. The cycle activity writes the miss
 `WAITING_ON_HUMAN` (the cycle queued an approval) and `ABORTED` (budget). The workflow writes the
 statuses only it decides through the best-effort `record_mission_status` activity:
 `DEGRADED_PARK`, `SLEEPING`, an open gate's `WAITING_ON_HUMAN`, and the final status of every
-ending (`IMPOSSIBLE` for a deadlock, a deadlock-gate decision, `max_cycles`, a failure, a
-cancellation). The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` back to a
+ending (`DONE`; `IMPOSSIBLE` for a deadlock or an "impossible" decision; `ABORTED` for an abort
+at a gate, `max_cycles`, the budget, a non-retryable failure or a cancellation). The store never moves a row from `DONE`, `IMPOSSIBLE` or `ABORTED` back to a
 non-terminal status, and a cancelled cycle is waited for before `ABORTED` is written, so an abort
 during a cycle ends as `ABORTED`. `lha mission-status` reads the live status from the workflow.
 Every gate event (opened, reminder, resolved, defaulted) is written to the `hitl_gates` table by
@@ -349,7 +322,7 @@ flowchart TD
     E -- "turns exhausted" --> G["Verify (if workspace changed)<br/>+ harness integrity check"]
     G --> H{"passed?"}
     H -- yes --> I["record_success: done, verified_by"]
-    H -- no --> J["record_failure: in_progress,<br/>blocked after 3 in a row"]
+    H -- no --> J["record_failure: in_progress,<br/>blocked after 3 in a row<br/>(or earlier by System One triage)"]
     J -- "newly blocked" --> S["Replanner may split it<br/>into id.1 .. id.n"]
     I --> K["Checkpoint commit: code + .lha/"]
     J --> K

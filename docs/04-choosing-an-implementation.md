@@ -108,8 +108,9 @@ What the Go CLI can do today:
 - `lha vendor` snapshots reference pages with the same egress rules, DNS pinning (each hop is
   resolved once and only a vetted address is dialled), output, exit codes and `MANIFEST.json`.
 - `LHA_FALLBACK_MODELS` builds a failover chain, and OTLP trace export
-  (`LHA_OTEL_EXPORTER_OTLP_ENDPOINT` or Langfuse) emits the same spans as Python
-  ([observability](16-observability.md)).
+  (`LHA_OTEL_EXPORTER_OTLP_ENDPOINT` or Langfuse) emits the same mission, cycle, model-call and
+  tool-call spans as Python on `run-local` and `mission`; the durable activity, `orchestrate` and
+  organization spans are not emitted yet ([observability](16-observability.md)).
 - `lha orchestrate` plans (or takes `--checklist`) and runs the organization: research fan-out,
   the Lead, reflection, the Reviewer, parallel implementer waves with leases and the integrator.
   A mission started by either implementation can be continued by the other with `--resume`.

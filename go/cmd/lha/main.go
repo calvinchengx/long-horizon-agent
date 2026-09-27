@@ -43,7 +43,7 @@ const Version = "0.1.0"
 const appHelp = "LHA — a durable, self-improving agent organization for long-horizon software missions."
 
 // notPorted are the Python commands the Go CLI does not implement yet.
-// Every Python command is implemented; mission-start refuses its organization options itself.
+// Every Python command is implemented; mission-start implements its organization options.
 var notPorted = []string{}
 
 var commandHelp = []struct{ name, help string }{
