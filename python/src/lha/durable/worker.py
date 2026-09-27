@@ -9,11 +9,17 @@ so a history recorded by one implementation's worker does not replay on the othe
 therefore mark their identity (``lha-py:<pid>@<host>`` here, ``lha-go:...`` in Go) and, before
 polling, refuse to start when the task queue is already polled by the other implementation
 (``check_task_queue_pollers``). Temporal lists a poller for a few minutes after it stopped.
+
+Two workers of different implementations started at the same moment can both pass that startup
+check. So a running worker re-checks the pollers every ``LHA_WORKER_GUARD_INTERVAL_S`` seconds
+(``guard_task_queue``) and, when a poller of the other implementation appears, shuts down
+gracefully and exits non-zero with the same message (fail closed: in such a race both stop).
 """
 
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import socket
 
@@ -21,6 +27,7 @@ from temporalio.api.enums.v1 import TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
+from temporalio.service import RPCError
 from temporalio.worker import Worker
 
 from lha.config import Settings, get_settings
@@ -44,6 +51,8 @@ from lha.durable.org_activities import (
 from lha.durable.subagent_workflow import SubAgentWorkflow
 from lha.durable.types import MissionInput, MissionResult
 from lha.durable.workflows import MissionWorkflow
+
+_log = logging.getLogger(__name__)
 
 
 async def connect_client(settings: Settings | None = None) -> Client:
@@ -98,6 +107,27 @@ async def check_task_queue_pollers(client: Client, task_queue: str) -> None:
                 )
 
 
+async def guard_task_queue(client: Client, task_queue: str, interval_s: float) -> None:
+    """Re-check the pollers of ``task_queue`` every ``interval_s`` seconds, forever; raise
+    ``MixedWorkersError`` once a Go lha worker polls it too. A failed check (the server briefly
+    unreachable) is logged and retried at the next interval: the worker already passed the
+    fail-closed startup check."""
+    while True:
+        await asyncio.sleep(interval_s)
+        try:
+            await check_task_queue_pollers(client, task_queue)
+        except RPCError as exc:
+            _log.warning("cannot re-check who polls task queue %r: %s", task_queue, exc)
+
+
+async def serve_guarded(worker: Worker, client: Client, task_queue: str, interval_s: float) -> None:
+    """Run ``worker`` until cancelled, or until the guard sees a Go poller on its task queue:
+    then the worker stops polling and shuts down (``Worker.shutdown``) and ``MixedWorkersError``
+    propagates."""
+    async with worker:
+        await guard_task_queue(client, task_queue, interval_s)
+
+
 def build_worker(client: Client, task_queue: str) -> Worker:
     """Construct a Worker that hosts the mission + sub-agent workflows and their activities."""
     return Worker(
@@ -143,8 +173,7 @@ async def run_worker() -> None:
     client = await connect_client(settings)
     await check_task_queue_pollers(client, settings.task_queue)
     worker = build_worker(client, settings.task_queue)
-    async with worker:
-        await asyncio.Event().wait()
+    await serve_guarded(worker, client, settings.task_queue, settings.worker_guard_interval_s)
 
 
 if __name__ == "__main__":

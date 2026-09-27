@@ -53,7 +53,8 @@ func temporalAddress(t *testing.T) string {
 	var cmd *exec.Cmd
 	if bin, err := exec.LookPath("temporal"); err == nil {
 		cmd = exec.Command(bin, "server", "start-dev", "--headless", "--ip", "127.0.0.1", "--port", strconv.Itoa(port),
-			"--http-port", strconv.Itoa(freePort(t)), "--metrics-port", strconv.Itoa(freePort(t)), "--log-level", "error")
+			"--ui-port", strconv.Itoa(freePort(t)), "--http-port", strconv.Itoa(freePort(t)), "--metrics-port", strconv.Itoa(freePort(t)),
+			"--db-filename", filepath.Join(t.TempDir(), "temporal.db"), "--log-level", "error")
 	} else if bin := cachedTestServer(); bin != "" {
 		cmd = exec.Command(bin, strconv.Itoa(port)) // the Python SDK's test server (normal time)
 	} else {
@@ -437,14 +438,8 @@ func unimplemented(err error) bool {
 // Each implementation's worker refuses a task queue the other implementation polls.
 func TestWorkersRefuseMixedTaskQueues(t *testing.T) {
 	addr := temporalAddress(t)
+	needsDescribeTaskQueue(t, addr)
 	dir := t.TempDir()
-	if probe, err := client.Dial(client.Options{HostPort: addr, Logger: durable.Logger(io.Discard, slog.LevelError)}); err == nil {
-		_, err := probe.DescribeTaskQueue(context.Background(), "lha-probe", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
-		probe.Close()
-		if unimplemented(err) {
-			t.Skip("this Temporal server does not implement DescribeTaskQueue (a test server)")
-		}
-	}
 
 	goQueue := "lha-it-guard-go-" + strconv.FormatInt(time.Now().UnixNano(), 36)
 	goEnv := durableEnv(t, addr, dir, goQueue)
@@ -477,5 +472,132 @@ func TestWorkersRefuseMixedTaskQueues(t *testing.T) {
 	if r.code != 2 || !strings.Contains(r.stderr, "is already polled by a Python lha worker") ||
 		!strings.Contains(r.stderr, "LHA_TASK_QUEUE="+pyQueue+"-go") {
 		t.Fatalf("go worker on a Python queue: %+v", r)
+	}
+}
+
+// needsDescribeTaskQueue skips on a server without DescribeTaskQueue (the Python SDK's test server).
+func needsDescribeTaskQueue(t *testing.T, addr string) {
+	t.Helper()
+	if probe, err := client.Dial(client.Options{HostPort: addr, Logger: durable.Logger(io.Discard, slog.LevelError)}); err == nil {
+		_, err := probe.DescribeTaskQueue(context.Background(), "lha-probe", enumspb.TASK_QUEUE_TYPE_WORKFLOW)
+		probe.Close()
+		if unimplemented(err) {
+			t.Skip("this Temporal server does not implement DescribeTaskQueue (a test server)")
+		}
+	}
+}
+
+// startPythonLHAWorker starts `lha worker` (the Python CLI) in its own process group (uv starts
+// python as a child; both go when ctx ends); done is closed when it exited.
+func startPythonLHAWorker(t *testing.T, ctx context.Context, dir string, env []string) (py *exec.Cmd, stderr *strings.Builder, done chan struct{}) {
+	t.Helper()
+	py = exec.CommandContext(ctx, "uv", "run", "--quiet", "--project", filepath.Join(repoRoot, "python"), "lha", "worker")
+	py.Dir, py.Env = dir, pythonEnv(dir, processEnv(env...))
+	py.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	py.Cancel = func() error { return syscall.Kill(-py.Process.Pid, syscall.SIGKILL) }
+	py.WaitDelay = 5 * time.Second
+	stderr = &strings.Builder{}
+	py.Stdout, py.Stderr = io.Discard, stderr
+	if err := py.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done = make(chan struct{})
+	go func() { _ = py.Wait(); close(done) }()
+	t.Cleanup(func() { _ = syscall.Kill(-py.Process.Pid, syscall.SIGKILL); <-done })
+	return py, stderr, done
+}
+
+// A Go and a Python worker started on the same queue at the same moment: whichever way the race
+// goes (a startup refusal, or both past their startup checks and then a re-check), at most one
+// keeps running, and every one that stopped exits 2 with the guard's message.
+func TestWorkersStartedTogetherLeaveAtMostOneRunning(t *testing.T) {
+	addr := temporalAddress(t)
+	needsDescribeTaskQueue(t, addr)
+	dir := t.TempDir()
+	queue := "lha-it-race-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	env := append(durableEnv(t, addr, dir, queue), "LHA_WORKER_GUARD_INTERVAL_S=0.5")
+	cleanEnv(t, env...)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type exited struct {
+		who string
+		r   result
+	}
+	done := make(chan exited, 2)
+	py, pyErr, pyDone := startPythonLHAWorker(t, ctx, dir, env)
+	go func() {
+		<-pyDone
+		done <- exited{"python", result{"", pyErr.String(), py.ProcessState.ExitCode()}}
+	}()
+	var goOut, goErr strings.Builder
+	goDone := make(chan struct{})
+	go func() {
+		defer close(goDone)
+		code := (&cli{stdout: &goOut, stderr: &goErr, ctx: ctx}).run([]string{"worker"})
+		done <- exited{"go", result{goOut.String(), goErr.String(), code}}
+	}()
+	defer func() { cancel(); <-goDone }()
+
+	check := func(e exited) {
+		t.Helper()
+		t.Logf("the %s worker stopped", e.who)
+		other := map[string]string{"go": "Python", "python": "Go"}[e.who]
+		if e.r.code != 2 || !strings.Contains(e.r.stderr, "is already polled by a "+other+" lha worker") {
+			t.Fatalf("%s worker: %+v", e.who, e.r)
+		}
+	}
+	select {
+	case first := <-done:
+		check(first)
+	case <-time.After(90 * time.Second):
+		t.Fatal("both workers still poll the same task queue")
+	}
+	// The survivor, if any, keeps running for several guard intervals.
+	select {
+	case second := <-done:
+		check(second) // both stopped: fail closed
+	case <-time.After(5 * time.Second):
+	}
+}
+
+// A Go worker that raced past its startup check (it skips it here) onto a queue a Python worker
+// already serves: the Python worker's re-check stops it (exit 2), and the Go worker's re-check
+// stops the Go worker (the stopped Python poller is still listed): neither keeps serving.
+func TestTheGuardRecheckStopsWorkersThatRacedPastTheStartupCheck(t *testing.T) {
+	addr := temporalAddress(t)
+	needsDescribeTaskQueue(t, addr)
+	dir := t.TempDir()
+	queue := "lha-it-recheck-" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	env := append(durableEnv(t, addr, dir, queue), "LHA_WORKER_GUARD_INTERVAL_S=0.5")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	py, pyErr, pyDone := startPythonLHAWorker(t, ctx, dir, env)
+	settings, err := config.LoadFrom(env, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cl, err := durable.Dial(context.Background(), settings, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	waitPoller(t, cl, queue, durable.PythonIdentityMarker)
+
+	w := durable.NewWorker(cl, queue, &durable.Activities{Settings: settings, ModelFactory: gatedFactory(filepath.Join(dir, "m")), OpenToolbox: openToolbox})
+	goErr := durable.RunGuarded(ctx, w, cl, queue, 500*time.Millisecond, nil)
+	var mixed *durable.MixedWorkersError
+	if !errors.As(goErr, &mixed) || !strings.Contains(mixed.Identity, durable.PythonIdentityMarker) {
+		t.Fatalf("go worker: %v", goErr)
+	}
+	select {
+	case <-pyDone:
+	case <-ctx.Done():
+		t.Fatal("the python worker kept polling")
+	}
+	if code := py.ProcessState.ExitCode(); code != 2 || !strings.Contains(pyErr.String(), "is already polled by a Go lha worker") ||
+		!strings.Contains(pyErr.String(), "LHA_TASK_QUEUE="+queue+"-py") {
+		t.Fatalf("python worker (%d): %s", code, pyErr.String())
 	}
 }

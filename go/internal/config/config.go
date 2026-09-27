@@ -73,6 +73,8 @@ type Settings struct {
 	TemporalAddress   string `env:"temporal_address" default:"localhost:7233"`
 	TemporalNamespace string `env:"temporal_namespace" default:"default"`
 	TaskQueue         string `env:"task_queue" default:"lha-mission"`
+	// How often a running worker re-checks who polls its task queue (durable.GuardTaskQueue).
+	WorkerGuardIntervalS float64 `env:"worker_guard_interval_s" default:"30.0" gt:"0"`
 
 	// --- Persistence
 	PostgresDSN     *Secret `env:"postgres_dsn"`

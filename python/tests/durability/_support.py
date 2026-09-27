@@ -8,9 +8,15 @@ cycle's work exists. Nothing is marked done without it.
 
 from __future__ import annotations
 
+import os
+import shutil
+import socket
+import subprocess
 import sys
+import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from lha.config import Settings
@@ -103,3 +109,52 @@ def commits_with(workdir: Path, marker: str) -> int:
 def all_committed_paths(workdir: Path) -> set[str]:
     out = git_ops.run_git(workdir, "log", "--all", "--name-only", "--pretty=format:")
     return {line.strip() for line in out.splitlines() if line.strip()}
+
+
+def _free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return int(s.getsockname()[1])
+
+
+@contextmanager
+def real_temporal_server(tmp: Path) -> Iterator[str | None]:
+    """The address of a real Temporal server, or None: ``LHA_IT_TEMPORAL_ADDRESS`` (an existing
+    server), else a ``temporal server start-dev`` started here (and stopped on exit) when the
+    Temporal CLI is on PATH. The time-skipping test server lacks some APIs (DescribeTaskQueue)."""
+    if addr := os.environ.get("LHA_IT_TEMPORAL_ADDRESS"):
+        yield addr
+        return
+    temporal = shutil.which("temporal")
+    if temporal is None:
+        yield None
+        return
+    port = _free_port()
+    proc = subprocess.Popen(
+        [
+            temporal, "server", "start-dev", "--headless", "--ip", "127.0.0.1",
+            "--port", str(port), "--ui-port", str(_free_port()),
+            "--http-port", str(_free_port()), "--metrics-port", str(_free_port()),
+            "--db-filename", str(tmp / "temporal.db"), "--log-level", "error",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )  # fmt: skip
+    try:
+        deadline = time.monotonic() + 60
+        while True:
+            try:
+                socket.create_connection(("127.0.0.1", port), timeout=1).close()
+                break
+            except OSError:
+                if proc.poll() is not None or time.monotonic() > deadline:
+                    raise RuntimeError("temporal server start-dev did not start") from None
+                time.sleep(0.2)
+        yield f"127.0.0.1:{port}"
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
