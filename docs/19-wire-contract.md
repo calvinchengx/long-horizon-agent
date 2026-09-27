@@ -471,6 +471,7 @@ JSON files exported from the Python implementation by
 | `memory/hash_embedder.json` | the hash embedder's vectors and cosine similarity, exactly (CPython's compensated `sum`) | yes | yes |
 | `memory/retrieval.json` | BM25 ranking and scores, Reciprocal Rank Fusion order and scores | yes | yes |
 | `memory/recall.json` | episodic lines, search terms, and the memory blocks `MissionMemory` recalls for a fixture (hybrid on SQLite, lexical with `git grep`, a tight budget) | yes | yes |
+| `memory/voyage.json` | the Voyage embedder's batching, the request bodies sent on the wire (documents and queries), response parsing and its errors, and the probe's HTTP-status messages | yes | yes |
 
 Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit/test_spec_conformance.py),
 Go in `go/internal/spec/conformance_*_test.go`. `shared_paths.json` waits for a Go port of the

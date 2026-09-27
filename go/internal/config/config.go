@@ -133,13 +133,16 @@ type Settings struct {
 	MemoryEpisodicK          int    `env:"memory_episodic_k" default:"4"`
 	MemorySemanticK          int    `env:"memory_semantic_k" default:"4"`
 	MemorySkillsK            int    `env:"memory_skills_k" default:"2"`
-	MemoryEmbedder           string `env:"memory_embedder" default:"hash" choices:"hash,sentence_transformers,ollama,none"`
+	MemoryEmbedder           string `env:"memory_embedder" default:"hash" choices:"hash,sentence_transformers,ollama,voyage,none"`
 	MemoryEmbeddingModel     string `env:"memory_embedding_model" default:""`
-	MemoryRerank             string `env:"memory_rerank" default:"none" choices:"none,cross_encoder"`
-	MemoryConsolidateEvery   int    `env:"memory_consolidate_every" default:"5"`
-	MemoryConsolidation      string `env:"memory_consolidation" default:"extractive" choices:"extractive,model"`
-	MemoryIndexRepoFiles     bool   `env:"memory_index_repo_files" default:"true"`
-	MemoryMaxRepoFiles       int    `env:"memory_max_repo_files" default:"400"`
+	// Voyage AI embedder (memory_embedder=voyage): the API key and an optional endpoint.
+	VoyageAPIKey           *Secret `env:"voyage_api_key"`
+	VoyageEndpoint         *string `env:"voyage_endpoint"`
+	MemoryRerank           string  `env:"memory_rerank" default:"none" choices:"none,cross_encoder"`
+	MemoryConsolidateEvery int     `env:"memory_consolidate_every" default:"5"`
+	MemoryConsolidation    string  `env:"memory_consolidation" default:"extractive" choices:"extractive,model"`
+	MemoryIndexRepoFiles   bool    `env:"memory_index_repo_files" default:"true"`
+	MemoryMaxRepoFiles     int     `env:"memory_max_repo_files" default:"400"`
 
 	// --- Web tools
 	WebAllowPorts       string  `env:"web_allow_ports" default:""`
@@ -452,6 +455,8 @@ func (s *Settings) Clone() *Settings {
 	c.OTelExporterOTLPEndpoint = cloneStr(s.OTelExporterOTLPEndpoint)
 	c.LangfusePublicKey = cloneStr(s.LangfusePublicKey)
 	c.LangfuseSecretKey = cloneSecret(s.LangfuseSecretKey)
+	c.VoyageAPIKey = cloneSecret(s.VoyageAPIKey)
+	c.VoyageEndpoint = cloneStr(s.VoyageEndpoint)
 	c.WebCredentials = cloneSecret(s.WebCredentials)
 	c.WebSearchProvider = cloneStr(s.WebSearchProvider)
 	c.WebSearchAPIKey = cloneSecret(s.WebSearchAPIKey)

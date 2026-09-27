@@ -130,7 +130,7 @@ func (x *InMemorySemanticIndex) Query(ctx context.Context, text string, k int) (
 	if len(x.order) == 0 {
 		return []contracts.RetrievalHit{}, nil
 	}
-	qv, err := x.embedder.Embed(ctx, []string{text})
+	qv, err := EmbedQueries(ctx, x.embedder, []string{text})
 	if err != nil {
 		return nil, err
 	}

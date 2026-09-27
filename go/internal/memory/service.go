@@ -26,6 +26,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
 )
 
 // Tiered memory wired into the agent loop (python: lha.memory.service.MissionMemory).
@@ -194,7 +195,7 @@ func (x *SQLiteSemanticIndex) Query(ctx context.Context, text string, k int) ([]
 	if err != nil || len(rows) == 0 {
 		return []contracts.RetrievalHit{}, err
 	}
-	qv, err := x.embedder.Embed(ctx, []string{text})
+	qv, err := EmbedQueries(ctx, x.embedder, []string{text})
 	if err != nil {
 		return nil, err
 	}
@@ -578,14 +579,20 @@ func (m *MissionMemory) denseIndex(missionID string) (contracts.SemanticIndex, e
 	return index, nil
 }
 
-func (m *MissionMemory) embed(ctx context.Context, texts []string) ([][]float64, error) {
+// embed is the cached vectors of texts: as search text (query) or as documents (an embedder such
+// as Voyage embeds the two differently, so they are cached apart).
+func (m *MissionMemory) embed(ctx context.Context, texts []string, query bool) ([][]float64, error) {
+	prefix := ""
+	if query {
+		prefix = "q:"
+	}
 	m.mu.Lock()
 	embedder := m.embedder
 	keys := make([]string, len(texts))
 	missing := []int{}
 	for i, t := range texts {
 		sum := sha1.Sum([]byte(t))
-		keys[i] = hex.EncodeToString(sum[:])
+		keys[i] = prefix + hex.EncodeToString(sum[:])
 		if _, ok := m.vectors[keys[i]]; !ok {
 			missing = append(missing, i)
 		}
@@ -599,7 +606,13 @@ func (m *MissionMemory) embed(ctx context.Context, texts []string) ([][]float64,
 		for j, i := range missing {
 			batch[j] = texts[i]
 		}
-		vectors, err := embedder.Embed(ctx, batch)
+		var vectors [][]float64
+		var err error
+		if query {
+			vectors, err = EmbedQueries(ctx, embedder, batch)
+		} else {
+			vectors, err = embedder.Embed(ctx, batch)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -625,17 +638,21 @@ func (m *MissionMemory) denseRank(ctx context.Context, query string, records []c
 	if m.Embedder() == nil || len(records) == 0 {
 		return []string{}, nil
 	}
-	texts := []string{query}
+	queryVec, err := m.embed(ctx, []string{query}, true)
+	if err != nil {
+		return nil, err
+	}
+	texts := []string{}
 	for _, r := range records {
 		texts = append(texts, r.Text)
 	}
-	vectors, err := m.embed(ctx, texts)
+	vectors, err := m.embed(ctx, texts, false)
 	if err != nil {
 		return nil, err
 	}
 	scored := make([]Scored, len(records))
 	for i, r := range records {
-		s, err := Cosine(vectors[0], vectors[i+1])
+		s, err := Cosine(queryVec[0], vectors[i])
 		if err != nil {
 			return nil, err
 		}
@@ -1227,7 +1244,8 @@ func (m *MissionMemory) Close() error {
 // --- construction ----------------------------------------------------------------------------------
 
 // DefaultEmbeddingModels is LHA_MEMORY_EMBEDDING_MODEL when empty, per embedder.
-var DefaultEmbeddingModels = map[string]string{"ollama": "nomic-embed-text", "sentence_transformers": "BAAI/bge-m3"}
+var DefaultEmbeddingModels = map[string]string{"ollama": "nomic-embed-text", "voyage": VoyageDefaultModel,
+	"sentence_transformers": "BAAI/bge-m3"}
 
 // EmbeddingModel is the configured embedding model, or the embedder's default.
 func EmbeddingModel(s *config.Settings) string {
@@ -1244,6 +1262,20 @@ func buildEmbedder(ctx context.Context, s *config.Settings, backend string, tran
 	case "ollama":
 		emb, err := ConnectOllama(ctx, OllamaOptions{Model: EmbeddingModel(s), BaseURL: s.OllamaBaseURL,
 			Timeout: OllamaTimeout, Transport: transport.EmbedderTransport})
+		if err != nil {
+			return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthDown, Detail: err.Error()}
+		}
+		return emb, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthOK}
+	case "voyage":
+		key, endpoint := "", ""
+		if s.VoyageAPIKey != nil {
+			key = s.VoyageAPIKey.Value()
+		}
+		if s.VoyageEndpoint != nil {
+			endpoint = *s.VoyageEndpoint
+		}
+		emb, err := ConnectVoyage(ctx, VoyageOptions{APIKey: key, Model: EmbeddingModel(s), Endpoint: endpoint,
+			Timeout: VoyageTimeout, Resolver: transport.EmbedderResolver, Transport: transport.EmbedderTransport})
 		if err != nil {
 			return nil, ops.DependencyStatus{Name: "embeddings", Health: ops.HealthDown, Detail: err.Error()}
 		}
@@ -1274,8 +1306,10 @@ func buildEmbedder(ctx context.Context, s *config.Settings, backend string, tran
 type OpenOptions struct {
 	Model    contracts.ModelProvider // the metered librarian model ("model" consolidation)
 	Recorder *obs.TraceRecorder
-	// EmbedderTransport is a test seam for the Ollama embedder's HTTP client.
+	// EmbedderTransport is a test seam for the Ollama / Voyage embedder's HTTP client.
 	EmbedderTransport http.RoundTripper
+	// EmbedderResolver is a test seam for the Voyage endpoint's DNS resolution (egress check).
+	EmbedderResolver safety.Resolver
 	// SentenceTransformer is a test seam standing in for the (Python-only) sentence_transformers
 	// embedder.
 	SentenceTransformer func(model string) (contracts.Embedder, error)
@@ -1294,7 +1328,8 @@ func OpenMissionMemory(ctx context.Context, s *config.Settings, store persistenc
 	statuses = append(statuses, status)
 	if store.Backend() == persistence.BackendPostgres && embedder != nil {
 		if embedder.Dim() < PGEmbeddingDim {
-			// e.g. nomic-embed-text (768): zero-padding keeps cosine similarity unchanged.
+			// e.g. nomic-embed-text (768), or a 512-wide Voyage model: zero-padding keeps cosine
+			// similarity unchanged. Wider (a 2048-wide Voyage output) runs lexical-only.
 			embedder, _ = NewPaddedEmbedder(embedder, PGEmbeddingDim)
 		}
 		if embedder.Dim() != PGEmbeddingDim {

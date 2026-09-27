@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 
 from lha.contracts.memory import Embedder, MemoryRecord, RetrievalHit, SemanticIndex
+from lha.memory.embeddings import embed_queries
 
 
 def cosine(a: list[float], b: list[float]) -> float:
@@ -84,7 +85,7 @@ class InMemorySemanticIndex(SemanticIndex):
     async def query(self, text: str, *, k: int = 5) -> list[RetrievalHit]:
         if not self._entries:
             return []
-        query_vec = (await self._embedder.embed([text]))[0]
+        query_vec = (await embed_queries(self._embedder, [text]))[0]
         scored = [
             RetrievalHit(record=record, score=cosine(query_vec, vector))
             for record, vector in self._entries.values()

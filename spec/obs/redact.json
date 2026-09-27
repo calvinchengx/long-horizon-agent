@@ -63,6 +63,14 @@
   {
    "text": "x_sk-abcdefghijklmnopqrst",
    "redacted": "x_***"
+  },
+  {
+   "text": "voyage key pa-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-xy done",
+   "redacted": "voyage key *** done"
+  },
+  {
+   "text": "short pa-abcdefghijklmnopqrstuvwxyz01234 and spa-abcdefghijklmnopqrstuvwxyz0123456789",
+   "redacted": "short pa-abcdefghijklmnopqrstuvwxyz01234 and spa-abcdefghijklmnopqrstuvwxyz0123456789"
   }
  ],
  "is_secret_key": [

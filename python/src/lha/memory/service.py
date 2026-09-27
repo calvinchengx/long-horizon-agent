@@ -44,11 +44,16 @@ from lha.contracts.model import ModelProvider
 from lha.contracts.state import ChecklistItem, SituationSnapshot
 from lha.memory.consolidation import consolidate
 from lha.memory.embeddings import (
+    VOYAGE_DEFAULT_MODEL,
+    VOYAGE_TIMEOUT_S,
     HashEmbedder,
     OllamaEmbedder,
     OllamaUnavailableError,
     PaddedEmbedder,
     SentenceTransformerEmbedder,
+    VoyageEmbedder,
+    VoyageUnavailableError,
+    embed_queries,
 )
 from lha.memory.hybrid import BM25Index, reciprocal_rank_fusion
 from lha.memory.rerank import CrossEncoderReranker, NoopReranker
@@ -57,6 +62,7 @@ from lha.memory.skills import Skill
 from lha.obs.events import TraceRecorder, get_logger
 from lha.ops.degradation import DependencyStatus, Health, MemoryMode, decide_memory_mode
 from lha.persistence.store import BACKEND_POSTGRES, MissionStore
+from lha.safety.egress import Resolver
 from lha.state import git_ops
 
 EPISODE_KIND = "cycle_outcome"
@@ -186,7 +192,7 @@ class SqliteSemanticIndex(SemanticIndex):
         )
         if not rows:
             return []
-        query_vec = (await self._embedder.embed([text]))[0]
+        query_vec = (await embed_queries(self._embedder, [text]))[0]
         hits = [RetrievalHit(record=r, score=cosine(query_vec, v)) for r, v in rows]
         hits.sort(key=lambda hit: hit.score, reverse=True)
         return [hit for hit in hits if hit.score > 0][:k]
@@ -385,12 +391,19 @@ class MissionMemory:
             self._dense[mission_id] = index
         return index
 
-    async def _embed(self, texts: list[str]) -> list[list[float]]:
+    async def _embed(self, texts: list[str], *, query: bool = False) -> list[list[float]]:
+        """Cached vectors of ``texts``: as search text (``query``) or as documents (an embedder
+        such as Voyage embeds the two differently, so they are cached apart)."""
         assert self.embedder is not None
-        keys = [hashlib.sha1(t.encode("utf-8")).hexdigest() for t in texts]
+        prefix = "q:" if query else ""
+        keys = [prefix + hashlib.sha1(t.encode("utf-8")).hexdigest() for t in texts]
         missing = [i for i, key in enumerate(keys) if key not in self._vectors]
         if missing:
-            vectors = await self.embedder.embed([texts[i] for i in missing])
+            batch = [texts[i] for i in missing]
+            if query:
+                vectors = await embed_queries(self.embedder, batch)
+            else:
+                vectors = await self.embedder.embed(batch)
             for i, vector in zip(missing, vectors, strict=True):
                 self._vectors[keys[i]] = vector
         return [self._vectors[key] for key in keys]
@@ -398,8 +411,9 @@ class MissionMemory:
     async def _dense_rank(self, query: str, records: list[MemoryRecord]) -> list[str]:
         if self.embedder is None or not records:
             return []
-        vectors = await self._embed([query, *[r.text for r in records]])
-        scored = [(r.id, cosine(vectors[0], v)) for r, v in zip(records, vectors[1:], strict=True)]
+        (query_vec,) = await self._embed([query], query=True)
+        vectors = await self._embed([r.text for r in records])
+        scored = [(r.id, cosine(query_vec, v)) for r, v in zip(records, vectors, strict=True)]
         scored.sort(key=lambda pair: pair[1], reverse=True)
         return [doc_id for doc_id, score in scored if score > 0]
 
@@ -755,7 +769,11 @@ def _extractive_facts(episodes: list[Any]) -> list[tuple[str, str]]:
 
 # --- construction -------------------------------------------------------------------------------
 #: ``LHA_MEMORY_EMBEDDING_MODEL`` when it is empty, per embedder.
-DEFAULT_EMBEDDING_MODELS = {"ollama": "nomic-embed-text", "sentence_transformers": "BAAI/bge-m3"}
+DEFAULT_EMBEDDING_MODELS = {
+    "ollama": "nomic-embed-text",
+    "voyage": VOYAGE_DEFAULT_MODEL,
+    "sentence_transformers": "BAAI/bge-m3",
+}
 
 
 def embedding_model(settings: Settings) -> str:
@@ -765,7 +783,11 @@ def embedding_model(settings: Settings) -> str:
 
 
 async def _build_embedder(
-    settings: Settings, backend: str, *, transport: httpx.AsyncBaseTransport | None = None
+    settings: Settings,
+    backend: str,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+    resolver: Resolver | None = None,
 ) -> tuple[Embedder | None, DependencyStatus]:
     choice = settings.memory_embedder
     if choice == "none":
@@ -783,6 +805,20 @@ async def _build_embedder(
         except OllamaUnavailableError as exc:
             return None, DependencyStatus("embeddings", Health.DOWN, str(exc))
         return ollama, DependencyStatus("embeddings", Health.OK)  # closed by MissionMemory.close
+    if choice == "voyage":
+        key = settings.voyage_api_key.get_secret_value() if settings.voyage_api_key else ""
+        try:
+            voyage = await VoyageEmbedder.connect(
+                api_key=key,
+                model=embedding_model(settings),
+                endpoint=settings.voyage_endpoint or None,
+                timeout_s=VOYAGE_TIMEOUT_S,
+                resolver=resolver,
+                transport=transport,
+            )
+        except VoyageUnavailableError as exc:
+            return None, DependencyStatus("embeddings", Health.DOWN, str(exc))
+        return voyage, DependencyStatus("embeddings", Health.OK)  # closed by MissionMemory.close
     if choice == "sentence_transformers":
         try:
             embedder: Embedder = SentenceTransformerEmbedder(embedding_model(settings))
@@ -807,10 +843,12 @@ async def open_mission_memory(
     model: ModelProvider | None = None,
     recorder: TraceRecorder | None = None,
     embedder_transport: httpx.AsyncBaseTransport | None = None,
+    embedder_resolver: Resolver | None = None,
 ) -> MissionMemory | None:
     """The run's memory plane per settings (``None`` when ``memory_enabled`` is false).
 
-    ``embedder_transport`` is a test seam for the Ollama embedder's HTTP client.
+    ``embedder_transport`` is a test seam for the Ollama / Voyage embedder's HTTP client, and
+    ``embedder_resolver`` for the Voyage endpoint's DNS resolution (egress check).
     """
     if not settings.memory_enabled:
         return None
@@ -818,12 +856,13 @@ async def open_mission_memory(
     if store.degraded_reason:
         statuses.append(DependencyStatus("postgres", Health.DOWN, store.degraded_reason))
     embedder, embed_status = await _build_embedder(
-        settings, store.backend, transport=embedder_transport
+        settings, store.backend, transport=embedder_transport, resolver=embedder_resolver
     )
     statuses.append(embed_status)
     if store.backend == BACKEND_POSTGRES and embedder is not None:
         if embedder.dim < PG_EMBEDDING_DIM:
-            # e.g. nomic-embed-text (768): zero-padding keeps cosine similarity unchanged.
+            # e.g. nomic-embed-text (768), or a 512-wide Voyage model: zero-padding keeps cosine
+            # similarity unchanged. Wider (a 2048-wide Voyage output) runs lexical-only.
             embedder = PaddedEmbedder(embedder, PG_EMBEDDING_DIM)
         if embedder.dim != PG_EMBEDDING_DIM:
             statuses.append(

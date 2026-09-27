@@ -82,7 +82,7 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
 The E2B sandbox (E2B has no Go SDK; see
 [choosing an implementation](../docs/04-choosing-an-implementation.md#e2b-is-not-supported-in-go));
 the `sentence_transformers` embedder and `cross_encoder` reranker (Python extras: Go degrades as
-Python does without them) and the library-only `VoyageEmbedder`.
+Python does without them). The Voyage embedder (`LHA_MEMORY_EMBEDDER=voyage`) is in Go too.
 
 The Docker sandbox's egress proxy container runs the stdlib-only Python proxy source on
 `python:3.12-alpine` by default, exactly like Python. `internal/execution/egressproxy` is the same

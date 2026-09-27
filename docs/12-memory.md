@@ -120,6 +120,7 @@ channel:
 |---|---|---|---|
 | `hash` (default) | `HashEmbedder`, `hash` / `1` | 256 on SQLite, 1024 on Postgres | Hashed bag of tokens, normalized. Lexical, not semantic, but needs no extra, network or key |
 | `ollama` | `OllamaEmbedder`, `ollama:<model>` / `<model>@<digest>` | the model's (measured) | A real semantic embedder served by a local [Ollama](https://ollama.com) at `LHA_OLLAMA_BASE_URL` (`POST /api/embed`): $0, no Python extra. `LHA_MEMORY_EMBEDDING_MODEL`, default `nomic-embed-text` (768 wide); pull it first (`ollama pull nomic-embed-text`). Unreachable or not pulled: lexical-only |
+| `voyage` | `VoyageEmbedder`, `voyage:<model>` / `<model>` | the model's (measured; 1024 for the default) | The paid [Voyage AI](https://docs.voyageai.com/reference/embeddings-api) API (`POST /v1/embeddings`) with `LHA_VOYAGE_API_KEY`; `LHA_MEMORY_EMBEDDING_MODEL`, default `voyage-4` (1024 wide). No key, a refused key or an unreachable API: lexical-only |
 | `sentence_transformers` | `SentenceTransformerEmbedder`, `st:<model>` / `<model>` | the model's | A real local semantic embedder in the worker process (`LHA_MEMORY_EMBEDDING_MODEL`, default `BAAI/bge-m3`). Needs the `embeddings` extra; without it, retrieval falls back to lexical-only |
 | `none` | none | — | Lexical-only (BM25 + `git grep`) by choice |
 
@@ -134,14 +135,48 @@ and embeds a probe text to learn `dim`. Each call embeds up to 64 texts. The rep
 are embedded again each time the plane opens (vectors are cached only for the run), so on a
 large checkout expect each durable cycle to spend time embedding with a local model.
 
-`VoyageEmbedder` (`voyage:<model>`, 1024, calls the Voyage API with httpx) exists but no setting
-selects it.
+### Voyage
+
+`LHA_MEMORY_EMBEDDER=voyage` sends memory text (progress notes, facts, decisions, repository
+chunks, skill descriptions) to Voyage AI, a paid third-party API. Both implementations behave the
+same ([embeddings.py](../python/src/lha/memory/embeddings.py),
+[voyage.go](../go/internal/memory/voyage.go); the request bodies, batching, response handling and
+probe errors are shared spec cases in `spec/memory/voyage.json`):
+
+- **Settings.** `LHA_VOYAGE_API_KEY` (a secret: masked in `lha config`, never logged, and
+  `pa-...` keys are redacted from trace text); `LHA_VOYAGE_ENDPOINT`, default
+  `https://api.voyageai.com/v1/embeddings`; `LHA_MEMORY_EMBEDDING_MODEL`, default `voyage-4`.
+- **Probe.** When the memory plane opens, the embedder embeds a probe text and takes `dim` from
+  the answer. A missing key, HTTP 401/403 ("rejected the API key"), any other error status after
+  retries, a malformed answer, an unreachable API or a refused endpoint makes the plane
+  lexical-only with a `memory_degraded` reason; the key never appears in it.
+- **Requests.** `{"input": [...], "model": ..., "input_type": ...}`: `document` for everything
+  stored or ranked, `query` for the search text (the checklist item). Up to 128 texts and
+  100,000 characters per request (under the API's 1,000-text and per-model token caps; a longer
+  single text travels alone and the API truncates it). The answer's `data[].index` puts vectors
+  back in input order; a short, repeated or non-numeric answer is an error.
+- **Retries and timeouts.** 30 s per request. HTTP 408/409/429/5xx, timeouts and connection
+  errors are retried three times with exponential backoff (1 s base, 30 s cap, a `Retry-After`
+  honoured); 400/401/403 are not retried. A failure after the probe drops the dense channel for
+  the rest of the run, like any embedder failure.
+- **Egress.** The endpoint must be `https` and is the only host the embedder may reach (a
+  one-host egress policy, as for `web_search`). Every request resolves the host, refuses it
+  unless every address is public, and connects only to those vetted addresses (no DNS
+  rebinding, proxy environment variables ignored); TLS and the `Host` header keep the hostname.
+  The key is bound to the endpoint host by a credential broker. An endpoint on a private
+  address (an internal gateway) is refused: lexical-only.
+- **Version.** The version is the model name: Voyage publishes no weight digest. Changing
+  `LHA_MEMORY_EMBEDDING_MODEL` is an embedder change (see below).
+- **Width.** `voyage-4`, `voyage-4-large`, `voyage-4-lite`, `voyage-3.5` and `voyage-3.5-lite`
+  default to 1024 dimensions, exactly the pgvector column; a narrower model is zero-padded on
+  Postgres. Nothing requests `output_dimension`, so no model is wider than its default; a model
+  wider than 1024 runs lexical-only on Postgres (never truncated).
 
 On Postgres, an embedder narrower than the `vector(1024)` column (for example
 `nomic-embed-text`, 768) is wrapped in `PaddedEmbedder`, which appends zeros up to 1024. Zeros
 change neither dot products nor norms, so cosine similarity is unchanged, and the HNSW index
 works as for a 1024-wide model. An embedder wider than 1024 cannot be stored: retrieval is
-lexical-only.
+lexical-only (vectors are never truncated).
 
 ## Version gating
 
@@ -195,10 +230,11 @@ all of the dense-channel dependencies are OK; otherwise lexical-only retrieval: 
 |---|---|---|
 | `LHA_POSTGRES_DSN` set but Postgres unreachable, unmigrated or `psycopg` missing | the store falls back to SQLite (`degraded_reason`) | lexical-only |
 | `LHA_MEMORY_EMBEDDER=ollama` and Ollama unreachable at `LHA_OLLAMA_BASE_URL`, the model not pulled, or the probe embedding fails | at open | lexical-only |
+| `LHA_MEMORY_EMBEDDER=voyage` without `LHA_VOYAGE_API_KEY`, the key refused (401/403), the API unreachable or failing after retries, or the endpoint refused by egress (not https, or not a public address) | at open | lexical-only |
 | `LHA_MEMORY_EMBEDDER=sentence_transformers` without the `embeddings` extra | at open | lexical-only |
 | `LHA_MEMORY_EMBEDDER=none` | at open | lexical-only |
 | Postgres store but `pgvector` not importable, or embedder `dim` is wider than 1024 | at open | lexical-only |
-| the embedder (for example Ollama stops answering) or the vector index raises later in the run | at the failing call | lexical-only for the rest of the run |
+| the embedder (for example Ollama stops answering, or Voyage still fails after its retries) or the vector index raises later in the run | at the failing call | lexical-only for the rest of the run |
 
 Each case logs a structlog warning with the reason (and, on the local run paths, which have a
 `TraceRecorder`, a `memory_degraded` trace event), and the mission continues. Any other memory error is recorded as `memory_error` and the cycle
@@ -224,7 +260,7 @@ for the store itself):
 | Memory on Postgres with pgvector | `postgres` extra (`psycopg[binary,pool]`, `pgvector`), a Postgres with the `vector` extension, `lha db migrate` |
 | `OllamaEmbedder` | core install (httpx) + a running Ollama with the embedding model pulled |
 | `SentenceTransformerEmbedder`, `CrossEncoderReranker` | `embeddings` extra (`sentence-transformers`) |
-| `VoyageEmbedder` | core install (httpx) + Voyage API key, passed in code |
-| Go: everything above except `SentenceTransformerEmbedder`, `CrossEncoderReranker` and `VoyageEmbedder` | the `lha` binary (and `git`); Postgres needs no client extra |
+| `VoyageEmbedder` | core install (httpx) + `LHA_VOYAGE_API_KEY` and HTTPS egress to the Voyage API (paid) |
+| Go: everything above except `SentenceTransformerEmbedder` and `CrossEncoderReranker` | the `lha` binary (and `git`); Postgres needs no client extra |
 
 Related: [Configuration](18-configuration.md), [Operations runbook](15-operations-runbook.md).

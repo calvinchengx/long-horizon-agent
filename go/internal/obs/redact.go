@@ -243,6 +243,8 @@ var secretValuePatterns = []matcher{
 	tokenPrefix("xox", "abposr", "-", classAlnumDash, 10),
 	awsKey,
 	tokenPrefix("AIza", "", "", classAlnumUnderscoreDash, 30),
+	// Voyage AI API keys (pa-...).
+	tokenPrefix("pa-", "", "", classAlnumUnderscoreDash, 32),
 	// "Authorization: <scheme> <credentials>" (Basic/Bearer/Digest/Token, or a bare value).
 	authorizationHeader,
 	// "Bearer <token>" elsewhere in headers or messages.

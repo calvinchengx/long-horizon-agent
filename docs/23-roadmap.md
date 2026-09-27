@@ -144,8 +144,8 @@ These limitations are in the current code:
 
 The Go implementation ([`go/`](../go/)) was built in three phases so that each landed usable and
 wire-compatible with Python ([19-wire-contract.md](19-wire-contract.md)). All three have landed:
-Go implements everything except the E2B sandbox, the `sentence_transformers` / `cross_encoder`
-extras and the library-only `VoyageEmbedder`
+Go implements everything except the E2B sandbox and the `sentence_transformers` / `cross_encoder`
+extras
 ([04-choosing-an-implementation.md](04-choosing-an-implementation.md)).
 
 ### Go phase 1: the spine (done)
@@ -192,5 +192,4 @@ file ownership enforcement, tickets, the blackboard, parallel implementers and t
 (`internal/coordination`); tiered memory (`internal/memory`); the mission store (SQLite and
 Postgres, `internal/persistence`) with `missions`, `costs`, `gates` and `db migrate`; OTLP trace
 export (`internal/obs/tracing`); and every `spec/` file; the durable organization rounds on the
-phase 2 worker. Not planned: E2B, the `sentence_transformers` / `cross_encoder` extras and
-`VoyageEmbedder`.
+phase 2 worker. Not planned: E2B and the `sentence_transformers` / `cross_encoder` extras.

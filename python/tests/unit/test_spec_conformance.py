@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from lha.agent.loop import parse_action
@@ -30,7 +31,16 @@ from lha.coordination.ownership import FileOwnershipMap, LeaseRequest, is_shared
 from lha.coordination.ticket import TaskContract, Ticket, TicketStatus
 from lha.execution.dispatcher import _missing_required, validate_arguments
 from lha.execution.paths import PathEscapeError, contained_posix, is_protected, normalize_relpath
-from lha.memory.embeddings import HashEmbedder
+from lha.memory.embeddings import (
+    VOYAGE_BATCH_CHARS,
+    VOYAGE_BATCH_TEXTS,
+    VOYAGE_DEFAULT_MODEL,
+    HashEmbedder,
+    VoyageEmbedder,
+    parse_voyage_response,
+    voyage_batches,
+    voyage_status_message,
+)
 from lha.memory.hybrid import BM25Index, reciprocal_rank_fusion
 from lha.memory.semantic_memory import cosine
 from lha.memory.service import _render_episode, _terms
@@ -470,6 +480,56 @@ def test_memory_embedder_and_cosine() -> None:
         assert vector == case["vector"], case["text"]  # byte-identical, not approximately equal
     for case in spec["cosine"]:
         assert cosine(case["a"], case["b"]) == case["cosine"], case
+
+
+def test_memory_voyage() -> None:
+    spec = _load("memory/voyage.json")
+    constants = (spec["default_model"], spec["batch_texts"], spec["batch_chars"])
+    assert constants == (VOYAGE_DEFAULT_MODEL, VOYAGE_BATCH_TEXTS, VOYAGE_BATCH_CHARS)
+    for case in spec["batches"]:
+        got = voyage_batches(
+            case["texts"], max_texts=case["max_texts"], max_chars=case["max_chars"]
+        )
+        assert got == case["batches"], case
+    for case in spec["requests"]:
+        # What actually goes on the wire (a mocked API: no network).
+        sent: list[Any] = []
+
+        def api(request: httpx.Request, sent: list[Any] = sent) -> httpx.Response:
+            body = json.loads(request.content)
+            sent.append(body)
+            data = [{"index": i, "embedding": [1.0, 0.0]} for i in range(len(body["input"]))]
+            return httpx.Response(200, json={"data": data})
+
+        async def run(case: dict[str, Any] = case) -> None:
+            embedder = VoyageEmbedder(
+                api_key="pa-test",
+                model=case["model"],
+                dim=2,
+                resolver=_public_resolver,
+                transport=httpx.MockTransport(api),
+            )
+            if case["input_type"] == "query":
+                await embedder.embed_query(case["texts"])
+            else:
+                await embedder.embed(case["texts"])
+            await embedder.aclose()
+
+        asyncio.run(run())
+        assert sent == case["bodies"], case["model"]
+    for case in spec["responses"]:
+        if "error" in case:
+            with pytest.raises(ValueError) as caught:
+                parse_voyage_response(case["response"], case["count"])
+            assert str(caught.value) == case["error"], case
+        else:
+            assert parse_voyage_response(case["response"], case["count"]) == case["vectors"]
+    for case in spec["statuses"]:
+        assert voyage_status_message(case["model"], case["status"]) == case["message"]
+
+
+async def _public_resolver(host: str, port: int) -> list[str]:
+    return ["93.184.216.34"]
 
 
 def test_memory_retrieval() -> None:
