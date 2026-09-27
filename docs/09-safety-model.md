@@ -115,7 +115,9 @@ The default toolset (`default_local_tools()`) is `read_file`, `write_file` (muta
 `list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). Every run path
 builds its dispatcher with `build_run_dispatcher()`
 ([toolset.py](../python/src/lha/execution/tools/toolset.py)); the lead's goes through
-`lead_dispatcher()` in [agent/assembly.py](../python/src/lha/agent/assembly.py). When
+`lead_dispatcher()` in [agent/assembly.py](../python/src/lha/agent/assembly.py). With
+`LHA_CODE_QUERY=true` every role also gets `code_query`: read-only, no egress, running ripwire in
+the sandbox with the question's target as one argument. When
 `LHA_WEB_ALLOW_HOSTS` is set it adds `fetch_url` (and `web_search`, when configured) and allows
 egress for them (section 4). `SubAgent` applies its role's mutating and
 egress policy a second time, hiding and refusing tools the role may not use, even when the

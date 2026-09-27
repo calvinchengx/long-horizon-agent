@@ -222,6 +222,27 @@ model, and the same runs exposed the split-ordering starvation fixed above. The 
 and the trace-first retries came after these runs and are not measured yet. Leave it off unless you
 measure a gain on your own missions.
 
+## Optional: ask the code instead of reading it
+
+`LHA_CODE_QUERY=true` gives every role (the lead, researchers, the reviewer and implementers) a
+read-only `code_query` tool backed by the same ripwire. Unlike the code map, the model pays for an
+answer only when it asks, and each answer is small:
+
+| `kind` | `target` | Answers |
+|---|---|---|
+| `find` | a task in words | the code most relevant to it, ranked |
+| `definition` | a symbol | its full body |
+| `callers` | a symbol | what calls it |
+| `uses` | a symbol | where it is used |
+| `impact` | a symbol | what reaches it: the blast radius of changing it |
+
+On LHA's own code, `callers`, `uses`, `impact` and `definition` answers for `redact_text` were 1–4 KB
+each. ripwire's own measurements put the `grep`-and-read equivalent at several times that; LHA has
+not measured it. An
+unknown symbol comes back as a short tool error (`symbol not found`), and a sandbox without
+ripwire as a clear one. Whether models use it well, and whether it lowers a mission's cost, is not
+measured yet.
+
 ## What this does not solve
 
 - **Model quality.** The harness refuses unverified work; it cannot make a weak model strong. In

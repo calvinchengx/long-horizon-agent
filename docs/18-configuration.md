@@ -134,7 +134,9 @@ See [12-memory.md](12-memory.md).
 |---|---|---|---|
 | `LHA_CODE_MAP` | `off` \| `ripwire` | `off` | `ripwire` runs ripwire in the sandbox at the start of each cycle and puts its answer in the lead's first message, after the memory block: `--pack-task` on the item's description and witnesses, or, on a retry, `--from-trace` on the last failure report (falling back to the task query if the trace finds no code). Needs ripwire in the sandbox image (the reference image has it); a missing ripwire, a failure or a timeout means no map for that cycle |
 | `LHA_CODE_MAP_TOKEN_BUDGET` | int (>= 200) | `2000` | ripwire's `--token-budget` for the bundle |
-| `LHA_CODE_MAP_TIMEOUT_S` | float (> 0) | `60.0` | the ripwire command's timeout |
+| `LHA_CODE_MAP_TIMEOUT_S` | float (> 0) | `60.0` | the ripwire command's timeout (the code map's and `code_query`'s) |
+| `LHA_CODE_QUERY` | bool | `false` | give every role the read-only `code_query` tool: `find`, `definition`, `callers`, `uses` and `impact` questions answered by ripwire in the sandbox |
+| `LHA_CODE_QUERY_TOKEN_BUDGET` | int (>= 200) | `1500` | ripwire's `--token-budget` for `find` answers |
 
 Measured once so far, with no gain: see [building a large project](24-large-missions.md#optional-a-code-map-each-cycle).
 
