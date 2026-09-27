@@ -59,15 +59,15 @@ func TestLocalMissionQuarantinesAFlakyCheckAndCommitsTheEvent(t *testing.T) {
 			}
 		}
 	}
-	if quarantine == nil || quarantine.CycleID == "" || quarantine.Payload["check"] != "flaky" ||
-		quarantine.Payload["passes"] != 1.0 || quarantine.Payload["fails"] != 1.0 {
+	if quarantine == nil || quarantine.CycleID == "" || quarantine.Payload.Plain()["check"] != "flaky" ||
+		quarantine.Payload.Plain()["passes"] != 1.0 || quarantine.Payload.Plain()["fails"] != 1.0 {
 		t.Fatalf("quarantine event: %+v\n%s", quarantine, raw)
 	}
 	if cycle == nil {
 		t.Fatal(raw)
 	}
 	found := false
-	for _, c := range cycle.Payload["checks"].([]any) {
+	for _, c := range cycle.Payload.Plain()["checks"].([]any) {
 		c := c.(map[string]any)
 		if c["name"] == "flaky" {
 			found = true

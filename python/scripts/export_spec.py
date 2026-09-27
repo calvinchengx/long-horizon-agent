@@ -40,6 +40,7 @@ from lha.contracts.state import (  # noqa: E402
     Checklist,
     ChecklistItem,
     DecisionRecord,
+    EventRecord,
     SituationSnapshot,
 )
 from lha.contracts.tools import ToolSpec  # noqa: E402
@@ -1844,7 +1845,222 @@ def export_voyage() -> None:
     )
 
 
+# --- state/wire_bytes: raw bytes of Go/Python-written JSON -------------------------------------
+
+#: Event payloads whose key order is not sorted, with floats, nesting, escapes and non-ASCII: the
+#: anchor writes each as ``EventRecord.model_dump_json()`` and both implementations must produce
+#: exactly these bytes (compared as bytes, never as parsed JSON).
+_WIRE_EVENTS: list[dict[str, Any]] = [
+    {"kind": "cycle", "cycle_id": "c1", "payload": {}},
+    {"kind": "started", "cycle_id": "", "payload": {}, "payload_ref": "blobs/x"},
+    {
+        "kind": "cycle",
+        "cycle_id": "c2",
+        "payload": {
+            "item_id": "01",
+            "verified": True,
+            "verdict": "passed",
+            "status": "done",
+            "tool_calls": 3,
+            "split_into": [],
+            "rolled_back": False,
+            "checks": [
+                {
+                    "name": "pytest",
+                    "passed": True,
+                    "gating": True,
+                    "exit_code": 0,
+                    "duration_s": 0.0,
+                },
+                {
+                    "name": "ruff",
+                    "passed": False,
+                    "gating": False,
+                    "exit_code": 1,
+                    "duration_s": 1.5,
+                },
+            ],
+        },
+    },
+    {
+        "kind": "ticket",
+        "cycle_id": "c3",
+        "payload": {
+            "ticket_id": "c3-02",
+            "item_id": "02",
+            "history": [{"status": "created", "note": ""}, {"status": "done", "note": "ok <&>"}],
+            "leases": [{"path": "b.py", "granted": True, "why": "free"}],
+            "branch": None,
+        },
+    },
+    {
+        "kind": "note",
+        "cycle_id": "c4",
+        "payload": {
+            "zeta": 1,
+            "alpha": 1.0,
+            "big": 1e16,
+            "small": 1e-05,
+            "tiny": 1.5e-07,
+            "neg": -2.5,
+            "text": 'é ü \u2028 \u2029 \x85 "q" \\ \t\n',
+            "nested": {"z": {"y": [None, True, {"b": 2, "a": 1}]}, "a": []},
+        },
+    },
+]
+
+_WIRE_OWNERSHIP: list[dict[str, Any]] = [
+    {
+        "items": ["02", "01", "03"],
+        "files": {
+            "02": ["src/zeta.py", "src/Alpha.py", "docs/b.md"],
+            "01": ["README.md", "src/mid.py"],
+            "03": ["src/beta.py", "src/alpha.py"],
+        },
+        "release": [],
+        "reassign": [],
+    },
+    {
+        "items": ["01", "02"],
+        "files": {"01": ["z.py", "a.py", "m.py"], "02": ["y.py", "b.py"]},
+        "release": ["implementer-01"],
+        "reassign": [["b.py", "implementer-01"], ["c.py", "lead"]],
+    },
+]
+
+_WIRE_GATES: list[dict[str, Any]] = [
+    {
+        "mission_id": "m1",
+        "workdir": "/w",
+        "gate_id": "g1",
+        "kind": "tool_call",
+        "event": "opened",
+        "question": "Allow `git push` with token=sk-live-abcdefghijklmnop? <&> é",
+        "options": ["approve", "reject"],
+        "default_action": "reject",
+        "deadline": "2026-09-27T10:00:00Z",
+        "request": {
+            "fingerprint": "0c6efe57c6d81fa336b6a6459b37de23",
+            "tool": "run_command",
+            "reason": "git push (outward-facing / rewrites history)",
+            "arguments": "{'argv': ['git', 'push']}",
+        },
+    },
+    {
+        "mission_id": "m1",
+        "workdir": "/w",
+        "gate_id": "g2",
+        "kind": "deadlock",
+        "event": "reminder",
+        "question": "Retry blocked items?",
+        "options": ["retry", "abort"],
+        "default_action": "abort",
+        "step": 2,
+    },
+    {
+        "mission_id": "m1",
+        "workdir": "/w",
+        "gate_id": "g2",
+        "kind": "deadlock",
+        "event": "resolved",
+        "decision": "retry",
+    },
+]
+
+
+def _wire_ownership(case: dict[str, Any]) -> str:
+    items = [ChecklistItem(id=i, description=f"item {i}") for i in case["items"]]
+    ownership = assign_ownership(items, case["files"])
+    for writer in case["release"]:
+        ownership.release(writer)
+    for path, writer in case["reassign"]:
+        ownership.reassign(path, writer)
+    return ownership.model_dump_json(indent=2)
+
+
+def _wire_gate(case: dict[str, Any]) -> dict[str, str]:
+    import httpx._content
+
+    from lha.durable.activities import gate_notice_payload
+    from lha.durable.types import GateNotice, PendingApproval
+
+    fields = dict(case)
+    if fields.get("request") is not None:
+        fields["request"] = PendingApproval(**fields["request"])
+    notice = GateNotice(**fields)
+    payload = gate_notice_payload(notice)
+    _, stream = httpx._content.encode_json(payload)
+    event = EventRecord(
+        kind=f"gate_{notice.event}", cycle_id=f"gate:{notice.gate_id}", payload=payload
+    )
+    return {"body": b"".join(stream).decode("utf-8"), "event": event.model_dump_json()}
+
+
+def _wire_anchor_file(lines: list[str]) -> str:
+    import tempfile
+
+    from lha.contracts.state import Checkpoint
+    from lha.state.mission_anchor import GitMissionAnchor
+
+    async def run(workdir: str) -> str:
+        anchor = GitMissionAnchor(workdir)
+        items = Checklist(items=[ChecklistItem(id="01", description="one")])
+        await anchor.initialize(title="Wire", description="bytes", items=items)
+        await anchor.commit_checkpoint(
+            Checkpoint(
+                cycle_id="c1",
+                progress_summary="- c1",
+                checklist=items,
+                events=[EventRecord.model_validate_json(line) for line in lines],
+            )
+        )
+        return (Path(workdir) / ".lha" / "events.ndjson").read_text(encoding="utf-8")
+
+    with tempfile.TemporaryDirectory() as workdir:
+        return asyncio.run(run(workdir))
+
+
+def export_wire_bytes() -> None:
+    from lha.coordination.leases import LeaseDecision, lease_event
+    from lha.execution.egress_events import parse_proxy_log
+
+    events = [EventRecord.model_validate(e).model_dump_json() for e in _WIRE_EVENTS]
+    leases = [
+        {
+            "writer": "implementer-02",
+            "path": "b.py",
+            "reason": "need it",
+            "granted": True,
+            "previous_owner": None,
+            "why": "unowned",
+        },
+        {
+            "writer": "implementer-01",
+            "path": "a.py",
+            "reason": "x",
+            "granted": False,
+            "previous_owner": "implementer-03",
+            "why": "owned by 'implementer-03'",
+        },
+    ]
+    _write(
+        "state/wire_bytes.json",
+        {
+            "events": events,
+            "anchor_events_file": _wire_anchor_file(events),
+            "lease_events": [
+                {"decision": d, "line": lease_event(LeaseDecision(**d), "c9").model_dump_json()}
+                for d in leases
+            ],
+            "egress_events": [e.model_dump_json() for e in parse_proxy_log(_PROXY_LOG)],
+            "ownership": [{**c, "json": _wire_ownership(c)} for c in _WIRE_OWNERSHIP],
+            "gates": [{"notice": c, **_wire_gate(c)} for c in _WIRE_GATES],
+        },
+    )
+
+
 def main() -> None:
+    export_wire_bytes()
     export_memory()
     export_voyage()
     export_paths()

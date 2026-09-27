@@ -117,7 +117,11 @@ What the Go CLI can do today:
   `.lha/` files and the same exit code; `go/cmd/lha/e2e_test.go`,
   `go/cmd/lha/claude_code_test.go` and `go/cmd/lha/orchestrate_test.go` check this by running
   both side by side, including a mission interrupted in one implementation and resumed in the
-  other (event payload keys are written in a different order; the JSON is otherwise equal).
+  other. The comparison is of raw bytes: event payloads and `ownership.json` keep Python's
+  insertion key order and float formatting, and messages that embed an exception class name
+  (`FileNotFoundError: ...`, `ConnectTimeout`, `implementer failed: RuntimeError: ...`,
+  `postgres unavailable (OperationalError: ...)`) use Python's names
+  ([wire contract](19-wire-contract.md#json-bytes-and-exception-names)).
 - `run-local`, `mission` and `orchestrate` write the mission row (RUNNING, then DONE /
   IMPOSSIBLE / ABORTED) and every metered model call (every org role's, and a `claude_code`
   session's reported cost) to the mission store (the per-user SQLite file, or Postgres with

@@ -3,15 +3,14 @@ package hitl
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Gate notifications (python/src/lha/hitl/notify.py): an optional webhook that receives every
@@ -161,35 +160,13 @@ func PostWebhook(rawURL string, payload Payload, timeout time.Duration, transpor
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "failed: " + transportErrorName(err)
+		return "failed: " + pyfmt.HTTPErrorTypeName(err)
 	}
 	resp.Body.Close()
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return WebhookSent
 	}
 	return "failed: HTTP " + strconv.Itoa(resp.StatusCode)
-}
-
-// transportErrorName names a transport failure like the httpx exception Python would see.
-func transportErrorName(err error) string {
-	var op *net.OpError
-	dial := errors.As(err, &op) && op.Op == "dial"
-	timeout := errors.Is(err, context.DeadlineExceeded)
-	var ne net.Error
-	if errors.As(err, &ne) && ne.Timeout() {
-		timeout = true
-	}
-	switch {
-	case dial && timeout:
-		return "ConnectTimeout"
-	case dial:
-		return "ConnectError"
-	case timeout:
-		return "ReadTimeout"
-	case strings.Contains(err.Error(), "malformed HTTP"):
-		return "RemoteProtocolError"
-	}
-	return "ReadError"
 }
 
 // WebhookNotifier is a Notify posting to rawURL with timeoutS seconds (nil when rawURL is "").

@@ -306,10 +306,7 @@ func CommittedCycleEvent(ctx context.Context, workdir, cycleID, kind string) (ma
 			continue
 		}
 		if ev.Kind == kind && ev.CycleID == cycleID {
-			if ev.Payload == nil {
-				ev.Payload = map[string]any{}
-			}
-			return ev.Payload, true
+			return contracts.PlainJSON(ev.Payload).(map[string]any), true
 		}
 	}
 	return nil, false

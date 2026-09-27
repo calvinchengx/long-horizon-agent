@@ -247,6 +247,42 @@ wave in `orchestrate` or in a durable mission) has a `cycle` event that adds `wr
 of `{path, granted, why}`)). The exactly-once checks look for the `cycle` (or `review`) event
 among the last 256 lines of `events.ndjson` at `HEAD`.
 
+### JSON bytes and exception names
+
+Both implementations write the anchor's JSON byte for byte alike, not just as equal data:
+
+- Object keys are in insertion order (a Python dict's): an event payload's keys in the order the
+  writing code lists them (the payloads above), `ownership.json`'s `owners` in assignment order (a
+  `reassign` of an owned path keeps its position; a released path is removed, a later grant goes
+  last). A payload read back from `events.ndjson` keeps the order it was read in. Go writes these
+  with an order-keeping map (`contracts.OrderedMap`); a plain Go map, which has no order, is
+  written with sorted keys. One inherited quirk: in a durable organization mission the
+  implementer's ticket `history` entries cross an activity boundary, and the Python Temporal SDK's
+  JSON converter sorts dict keys, so those entries read `{"note", "status"}` (entries added after
+  the crossing keep `{"status", "note"}`); the Go worker writes the same.
+- Floats are written as pydantic writes them (`1.0`, `0.5`, `0.000025`, `1.5e-7`, `1e+16`); a
+  gate webhook body, which httpx encodes with `json.dumps`, uses Python's `repr` (`1e-05`).
+- pydantic's escaping: UTF-8, no HTML escapes, U+2028 / U+2029 raw.
+
+`spec/state/wire_bytes.json` pins the raw bytes of representative events (read back and
+re-written), the `events.ndjson` a checkpoint writes, `lease` and `sandbox_egress` events,
+`ownership.json` after assignment, release and reassignment, and the durable gate events and
+webhook bodies; both conformance suites compare them as bytes.
+
+Messages that embed an exception class name (`f"{type(exc).__name__}: {exc}"`: a check that could
+not execute, `memory_error` / `memory_degraded` reasons, `postgres unavailable (...)`, a failed
+implementer, a gate webhook's `failed: <name>`, `cost_hook_failed`, `tracing_not_configured`)
+carry Python's class name in both implementations. Go maps its errors (`pyfmt.ExcTypeName`): an
+error that ports a Python class names it (`PyTypeName()`), HTTP client failures are httpx's
+(`ConnectError`, `ConnectTimeout`, `ReadTimeout`, `RemoteProtocolError`, `UnsupportedProtocol`,
+`ReadError`), Postgres errors psycopg's (`OperationalError`, `UndefinedTable`, ...), an errno the
+`OSError` subclass (`FileNotFoundError`, `PermissionError`, `ConnectionRefusedError`, ...), a
+missing executable `FileNotFoundError`, a deadline `TimeoutError`, a cancellation
+`CancelledError`, invalid JSON `JSONDecodeError`, a bad number `ValueError`; an LHA error type
+keeps its own name, which mirrors the Python class. Anything else (a plain `errors.New` /
+`fmt.Errorf` error) is `RuntimeError`, so an error without a Python counterpart can still name a
+different class than Python would; the message text after the name is the Go error's.
+
 Events of the multi-agent organization:
 
 | `kind` | Written by | Payload |
@@ -464,6 +500,7 @@ JSON files exported from the Python implementation by
 | `obs/redact.json` | secret redaction | yes | yes |
 | `contracts/check_names.json` | check names from argv, de-duplication | yes | yes |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, transitions, `split` (child ids, dependencies and witnesses) | yes | yes |
+| `state/wire_bytes.json` | raw bytes (compared as bytes, not parsed): event lines read back and re-written, the `events.ndjson` a checkpoint writes, `lease` and `sandbox_egress` events, `ownership.json` after assignment / release / reassignment, durable gate events and webhook bodies | yes | yes |
 | `coordination/decision_chain.json` | canonical JSON bytes and SHA-256 chain of the decision log; `log`: an anchor `decisions.ndjson` with a legacy prefix, its running hashes, and verification verdicts for tampered variants | yes | yes |
 | `coordination/shared_paths.json` | files only the lead engineer may write | yes | not yet |
 | `verify/harness_files.json` | test/harness files the agent may not weaken | yes | yes |

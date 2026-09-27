@@ -119,12 +119,16 @@ type LeaseRequest struct {
 }
 
 // FileOwnershipMap maps normalized, case-folded file paths to their single permitted writer. Its
-// JSON form is the pydantic model's: {"owners": {path: writer}}. It is safe for concurrent use
-// (a wave's implementers share one live map: a lease granted to one is seen by every guard); use
-// it by pointer, and read Owners directly only when nothing else holds the map.
+// JSON form is the pydantic model's: {"owners": {path: writer}}, keys in assignment order (a
+// Python dict's insertion order, so .lha/ownership.json is byte-identical). It is safe for
+// concurrent use (a wave's implementers share one live map: a lease granted to one is seen by
+// every guard); use it by pointer, and read Owners directly only when nothing else holds the map.
 type FileOwnershipMap struct {
 	mu     sync.RWMutex
 	Owners map[string]string `json:"owners"`
+	// order is the keys in insertion order; keys set on Owners directly (not through Assign /
+	// Reassign) are written after them, sorted.
+	order []string
 }
 
 // NewFileOwnershipMap returns an empty map.
@@ -144,33 +148,102 @@ func (m *FileOwnershipMap) Snapshot() map[string]string {
 	return out
 }
 
-// MarshalJSON never emits null owners.
-func (m *FileOwnershipMap) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
-		Owners map[string]string `json:"owners"`
-	}{m.Snapshot()})
+// Keys is the owned path keys in insertion order (Python's dict order).
+func (m *FileOwnershipMap) Keys() []string {
+	if m == nil {
+		return []string{}
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.keysLocked()
 }
 
-// UnmarshalJSON accepts a missing owners key (pydantic default).
+func (m *FileOwnershipMap) keysLocked() []string {
+	out := make([]string, 0, len(m.Owners))
+	seen := make(map[string]bool, len(m.Owners))
+	for _, k := range m.order {
+		if _, ok := m.Owners[k]; ok && !seen[k] {
+			out = append(out, k)
+			seen[k] = true
+		}
+	}
+	rest := []string{}
+	for k := range m.Owners {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// setLocked stores key -> writer; a new key goes last (Python: owners[key] = writer).
+func (m *FileOwnershipMap) setLocked(key, writer string) {
+	if m.Owners == nil {
+		m.Owners = map[string]string{}
+	}
+	if _, ok := m.Owners[key]; !ok {
+		m.order = append(m.order, key)
+	}
+	m.Owners[key] = writer
+}
+
+// MarshalJSON never emits null owners, and writes them in insertion order.
+func (m *FileOwnershipMap) MarshalJSON() ([]byte, error) {
+	owners := contracts.NewOrderedMap()
+	if m != nil {
+		m.mu.RLock()
+		for _, k := range m.keysLocked() {
+			owners.Set(k, m.Owners[k])
+		}
+		m.mu.RUnlock()
+	}
+	return json.Marshal(contracts.NewOrderedMap("owners", owners))
+}
+
+// UnmarshalJSON accepts a missing owners key (pydantic default) and keeps the file's key order.
 func (m *FileOwnershipMap) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Owners map[string]string `json:"owners"`
+		Owners *contracts.OrderedMap `json:"owners"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
-	if raw.Owners == nil {
-		raw.Owners = map[string]string{}
+	owners := map[string]string{}
+	order := []string{}
+	var bad error
+	raw.Owners.Range(func(k string, v any) bool {
+		s, ok := v.(string)
+		if !ok {
+			bad = fmt.Errorf("owners[%s]: not a string", contracts.PyRepr(k))
+			return false
+		}
+		owners[k] = s
+		order = append(order, k)
+		return true
+	})
+	if bad != nil {
+		return bad
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.Owners = raw.Owners
+	m.Owners = owners
+	m.order = order
 	return nil
 }
 
 // Clone is a deep copy (python: model_copy(deep=True)).
 func (m *FileOwnershipMap) Clone() *FileOwnershipMap {
-	return &FileOwnershipMap{Owners: m.Snapshot()}
+	out := NewFileOwnershipMap()
+	if m == nil {
+		return out
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, k := range m.keysLocked() {
+		out.setLocked(k, m.Owners[k])
+	}
+	return out
 }
 
 // Equal reports whether two maps have the same owners.
@@ -208,15 +281,12 @@ func (m *FileOwnershipMap) Assign(p, writer string) error {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.Owners == nil {
-		m.Owners = map[string]string{}
-	}
 	if current, ok := m.Owners[key]; ok && current != writer {
 		norm, _ := NormalizePath(p)
 		return &OwnershipConflictError{fmt.Sprintf("%s is already owned by %s; refusing to hand it to %s (use reassign)",
 			contracts.PyRepr(norm), contracts.PyRepr(current), contracts.PyRepr(writer))}
 	}
-	m.Owners[key] = writer
+	m.setLocked(key, writer)
 	return nil
 }
 
@@ -228,11 +298,8 @@ func (m *FileOwnershipMap) Reassign(p, writer string) (string, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.Owners == nil {
-		m.Owners = map[string]string{}
-	}
 	previous := m.Owners[key]
-	m.Owners[key] = writer
+	m.setLocked(key, writer)
 	return previous, nil
 }
 
@@ -332,6 +399,13 @@ func (m *FileOwnershipMap) Release(writer string) []string {
 	for _, key := range released {
 		delete(m.Owners, key)
 	}
+	kept := m.order[:0]
+	for _, key := range m.order {
+		if _, ok := m.Owners[key]; ok {
+			kept = append(kept, key)
+		}
+	}
+	m.order = kept
 	return released
 }
 

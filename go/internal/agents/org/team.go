@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
-	"unicode"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -36,22 +34,8 @@ func isFatal(err error) bool {
 	return errors.As(err, &status) && (status.StatusCode == 401 || status.StatusCode == 403)
 }
 
-// ExcTypeName names an error like Python's type(exc).__name__: a PyTypeName() when the error has
-// one, else its Go type name when that reads like an exception class, else "RuntimeError".
-func ExcTypeName(err error) string {
-	var typed interface{ PyTypeName() string }
-	if errors.As(err, &typed) {
-		return typed.PyTypeName()
-	}
-	t := reflect.TypeOf(err)
-	for t != nil && t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t != nil && t.Name() != "" && unicode.IsUpper([]rune(t.Name())[0]) {
-		return t.Name()
-	}
-	return "RuntimeError"
-}
+// ExcTypeName names an error like Python's type(exc).__name__ (pyfmt.ExcTypeName).
+func ExcTypeName(err error) string { return pyfmt.ExcTypeName(err) }
 
 // ErrorSummary is f"{type(exc).__name__}: {exc}"[:500].
 func ErrorSummary(err error) string {

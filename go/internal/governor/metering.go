@@ -11,6 +11,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Metered model provider: every Complete is budget-checked BEFORE it runs and recorded AFTER.
@@ -117,7 +118,7 @@ func (m *CostMeter) record(ctx context.Context, usage contracts.Usage, usd *floa
 	entry := m.Ledger.Record(m.CycleID(), usage, usd, role)
 	if hook := m.Hook(); hook != nil {
 		if err := hook.RecordCost(ctx, entry); err != nil {
-			slog.Default().With("logger", "lha.governor").Warn("cost_hook_failed", "error", err.Error())
+			slog.Default().With("logger", "lha.governor").Warn("cost_hook_failed", "error", pyfmt.ExcText(err))
 		}
 	}
 }

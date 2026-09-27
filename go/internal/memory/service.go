@@ -512,17 +512,14 @@ func (m *MissionMemory) emit(kind, missionID, cycleID string, data ...obs.Field)
 	log().Info(kind, attrs...)
 }
 
-// errText is python's f"{type(exc).__name__}: {exc}" (Go has no class name: "Error").
+// errText is python's f"{type(exc).__name__}: {exc}" (pyfmt.ExcTypeName; an unsupported feature is
+// NotImplementedError).
 func errText(err error) string {
 	var unsupported interface{ Unsupported() bool }
-	name := "Error"
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		name = "TimeoutError"
-	case errors.As(err, &unsupported):
-		name = "NotImplementedError"
+	if errors.As(err, &unsupported) {
+		return "NotImplementedError: " + err.Error()
 	}
-	return name + ": " + err.Error()
+	return pyfmt.ExcText(err)
 }
 
 func (m *MissionMemory) recordError(where, missionID, cycleID string, err error) {

@@ -517,20 +517,25 @@ func (d DecisionRecord) MarshalJSON() ([]byte, error) {
 	return json.Marshal(a)
 }
 
-// EventRecord is one entry in the append-only episodic event log.
+// EventRecord is one entry in the append-only episodic event log. Payload keeps its keys in
+// insertion order (Python writes the dict in that order), so .lha/events.ndjson is byte-identical
+// to a Python run's; decoding keeps the order it reads (any key order, and null, decode).
 type EventRecord struct {
-	Kind       string         `json:"kind"`
-	CycleID    string         `json:"cycle_id"`
-	Payload    map[string]any `json:"payload"`
-	PayloadRef *string        `json:"payload_ref"`
+	Kind       string      `json:"kind"`
+	CycleID    string      `json:"cycle_id"`
+	Payload    *OrderedMap `json:"payload"`
+	PayloadRef *string     `json:"payload_ref"`
 }
+
+// Payload builds an event payload from alternating key, value arguments, in order.
+func Payload(kv ...any) *OrderedMap { return NewOrderedMap(kv...) }
 
 // MarshalJSON never emits null for payload.
 func (e EventRecord) MarshalJSON() ([]byte, error) {
 	type alias EventRecord
 	a := alias(e)
 	if a.Payload == nil {
-		a.Payload = map[string]any{}
+		a.Payload = &OrderedMap{Values: map[string]any{}}
 	}
 	return json.Marshal(a)
 }

@@ -46,6 +46,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Backend names.
@@ -396,7 +397,9 @@ func OpenStore(ctx context.Context, settings *config.Settings, workdir string) (
 	return store, nil
 }
 
-// errorTypeName is a short Python-like class name for err (the message's "TypeName: message").
+// errorTypeName is the Python class name of err (the message's "TypeName: message"): psycopg's
+// OperationalError for a failed connection, its SQLSTATE class for a server error, else
+// pyfmt.ExcTypeName.
 func errorTypeName(err error) string {
 	var unavailable *StoreUnavailableError
 	if errors.As(err, &unavailable) {
@@ -405,5 +408,8 @@ func errorTypeName(err error) string {
 	if isConnectError(err) {
 		return "OperationalError"
 	}
-	return "Error"
+	if name := psycopgErrorName(err); name != "" {
+		return name
+	}
+	return pyfmt.ExcTypeName(err)
 }

@@ -107,7 +107,7 @@ func TestCheckpointAdvancesAndSurvivesRestart(t *testing.T) {
 		ProgressSummary: "# Progress\n\nDone 01.\n",
 		Checklist:       cl,
 		Decisions:       []contracts.DecisionRecord{{Decision: "use dataclass", Rationale: "simple", CycleID: "c1"}},
-		Events:          []contracts.EventRecord{{Kind: "item_done", CycleID: "c1", Payload: map[string]any{"id": "01"}}},
+		Events:          []contracts.EventRecord{{Kind: "item_done", CycleID: "c1", Payload: contracts.Payload("id", "01")}},
 		CommitMessage:   "lha: checkpoint c1 (done 01)",
 	}))
 	if newSHA == "" || newSHA == base {

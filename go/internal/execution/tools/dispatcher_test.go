@@ -192,7 +192,7 @@ func TestIrreversibleCommandsDeniedWithoutGate(t *testing.T) {
 	if len(events) != 1 || events[0].Kind != "tool_approval" {
 		t.Fatal(events)
 	}
-	p := events[0].Payload
+	p := events[0].Payload.Plain()
 	if p["tool"] != "run_command" || p["arguments"] != "{'argv': ['git', 'push', 'origin']}" ||
 		p["decision"] != "reject" || p["approved"] != false || p["resolved_by"] != "no human gate configured" ||
 		p["defaulted"] != true || p["fingerprint"] != "0c6efe57c6d81fa336b6a6459b37de23" || // python's
@@ -225,7 +225,7 @@ func TestIrreversibleCommandsRouteThroughGate(t *testing.T) {
 		t.Fatal(r)
 	}
 	ev := approved.DrainEvents()
-	if len(ev) != 1 || ev[0].Payload["decision"] != "approve" || ev[0].Payload["approved"] != true || ev[0].Payload["resolved_by"] != "alice" {
+	if len(ev) != 1 || ev[0].Payload.Plain()["decision"] != "approve" || ev[0].Payload.Plain()["approved"] != true || ev[0].Payload.Plain()["resolved_by"] != "alice" {
 		t.Fatal(ev)
 	}
 
@@ -241,7 +241,7 @@ func TestIrreversibleCommandsRouteThroughGate(t *testing.T) {
 	if !strings.HasPrefix(r.ErrorText(), "queued for human approval: "+reason+". It is NOT done.") {
 		t.Fatal(r)
 	}
-	if ev := pending.DrainEvents(); ev[0].Payload["decision"] != "pending" {
+	if ev := pending.DrainEvents(); ev[0].Payload.Plain()["decision"] != "pending" {
 		t.Fatal(ev)
 	}
 	broken := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{AllowMutating: true, Gate: &callbackGate{err: context.DeadlineExceeded}})

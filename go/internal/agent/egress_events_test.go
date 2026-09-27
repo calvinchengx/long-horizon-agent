@@ -23,10 +23,10 @@ type egressSession struct {
 
 func (s *egressSession) DrainEgressEvents(context.Context) []contracts.EventRecord {
 	s.drained++
-	return []contracts.EventRecord{{Kind: "sandbox_egress", Payload: map[string]any{
-		"decision": "allow", "method": "CONNECT", "host": "pypi.org", "port": 443,
-		"detail": "151.101.0.223:443", "count": 3,
-	}}}
+	return []contracts.EventRecord{{Kind: "sandbox_egress", Payload: contracts.Payload(
+		"decision", "allow", "method", "CONNECT", "host", "pypi.org", "port", 443,
+		"detail", "151.101.0.223:443", "count", 3,
+	)}}
 }
 
 type egressToolbox struct {
@@ -63,8 +63,8 @@ func TestTheLoopCommitsTheSessionsEgressEvents(t *testing.T) {
 			egress = &e
 		}
 	}
-	if egress == nil || egress.CycleID == "" || egress.Payload["host"] != "pypi.org" ||
-		egress.Payload["count"] != 3.0 || sess.drained == 0 {
+	if egress == nil || egress.CycleID == "" || egress.Payload.Plain()["host"] != "pypi.org" ||
+		egress.Payload.Plain()["count"] != 3.0 || sess.drained == 0 {
 		t.Fatalf("egress event: %+v\n%s", egress, raw)
 	}
 	if !strings.Contains(s.TraceJSONL, `"kind":"sandbox_egress"`) {
