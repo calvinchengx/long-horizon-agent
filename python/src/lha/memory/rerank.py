@@ -9,8 +9,12 @@ set (the rerank depth is a governor-throttleable knob). ``NoopReranker`` is the 
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 from lha.contracts.memory import RetrievalHit
+
+if TYPE_CHECKING:
+    from sentence_transformers.base.modality_types import PairInput
 
 
 class NoopReranker:
@@ -38,8 +42,8 @@ class CrossEncoderReranker:
     ) -> list[RetrievalHit]:
         if not hits:
             return []
-        pairs = [(query, hit.record.text) for hit in hits]
-        scores = await asyncio.to_thread(self._model.predict, pairs)
+        pairs: list[PairInput] = [(query, hit.record.text) for hit in hits]
+        scores = await asyncio.to_thread(lambda: self._model.predict(pairs))
         rescored = [
             RetrievalHit(record=hit.record, score=float(score))
             for hit, score in zip(hits, scores, strict=True)
