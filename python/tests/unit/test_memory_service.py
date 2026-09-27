@@ -3,6 +3,7 @@ degradation — at the service level and through the real run paths."""
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -597,3 +598,31 @@ async def test_memory_errors_never_fail_a_cycle(tmp_path: Path) -> None:
     block = await memory.recall(mission_id="m1", cycle_id="c2", item=_item(), snapshot=_snapshot())
     assert isinstance(block, str) and memory.errors >= 2
     await store.close()
+
+
+def test_memory_git_is_hardened(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Memory's git is the hardened harness git: an operator GIT_DIR does not redirect it, and a
+    work tree whose config the harness refuses reads as no repository evidence."""
+    ws = _repo(tmp_path / "ws", {"parser.py": "def parse_config(): pass\n"})
+    other = _repo(tmp_path / "other", {"decoy.py": "parse_config = 'decoy'\n"})
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+
+    chunks = memsvc._repo_chunks(ws, 10)
+    assert [c.metadata["path"] for c in chunks] == ["parser.py"]
+    assert [h.metadata["path"] for h in memsvc._git_grep(ws, ["parse_config"])] == ["parser.py"]
+    assert memsvc._git_grep(ws, ["no_such_term_anywhere"]) == []  # exit 1 is an empty result
+    before = git_ops.head_sha(ws)
+    (ws / "new.py").write_text("x = 1\n", encoding="utf-8")
+    after = git_ops.commit_all(ws, "add new.py")
+    assert memsvc._changed_files(ws, before, after) == ["new.py"]
+
+    # A config include from the (agent-writable) work tree: every driver-capable command is
+    # refused, i.e. exit 128.
+    monkeypatch.delenv("GIT_DIR")
+    monkeypatch.delenv("GIT_WORK_TREE")
+    (ws / "agent.cfg").write_text("[user]\n\tname = agent\n", encoding="utf-8")
+    subprocess.run(["git", "config", "include.path", "../agent.cfg"], cwd=ws, check=True)
+    assert memsvc._changed_files(ws, before, after) == []
+    with pytest.raises(RuntimeError, match="refusing to run git"):
+        memsvc._git_grep(ws, ["parse_config"])

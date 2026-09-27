@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -27,6 +26,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
@@ -239,27 +239,18 @@ type gitResult struct {
 	stderr []byte
 }
 
+// runGit is the hardened harness git (state.RunGitBytes); a refusal or timeout reads as exit
+// code 128 (python: memory.service._git).
 func runGit(ctx context.Context, workdir string, args ...string) (gitResult, error) {
-	cctx, cancel := context.WithTimeout(ctx, gitTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", args...)
-	cmd.Dir = workdir
-	var out, errb bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
-	res := gitResult{stdout: out.Bytes(), stderr: errb.Bytes()}
-	var exitErr *exec.ExitError
+	res, err := state.RunGitBytes(ctx, workdir, gitTimeout, args...)
+	var gitErr *state.GitError
 	switch {
-	case err == nil:
-	case errors.As(err, &exitErr):
-		res.code = exitErr.ExitCode()
-	default:
-		return res, err
+	case errors.As(err, &gitErr):
+		return gitResult{code: 128, stderr: []byte(gitErr.Error())}, nil
+	case err != nil:
+		return gitResult{}, err
 	}
-	if cctx.Err() != nil {
-		return res, fmt.Errorf("git %s timed out after %s", args[0], gitTimeout)
-	}
-	return res, nil
+	return gitResult{code: res.ReturnCode, stdout: res.Stdout, stderr: res.Stderr}, nil
 }
 
 func changedFiles(ctx context.Context, workdir, before, after string) ([]string, error) {

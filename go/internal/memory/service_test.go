@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -726,4 +727,55 @@ func TestOllamaVectorsArePaddedForPgvector(t *testing.T) {
 		t.Fatalf("%+v", mem.Mode())
 	}
 	_ = mem.Close()
+}
+
+// Memory's git is the hardened harness git: an operator GIT_DIR does not redirect it to another
+// repository, and a work tree whose config the harness refuses reads as no repository evidence.
+func TestMemoryGitIsHardened(t *testing.T) {
+	ws := repo(t, map[string]string{"parser.py": "def parse_config(): pass\n"})
+	other := repo(t, map[string]string{"decoy.py": "parse_config = 'decoy'\n"})
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+
+	chunks, err := RepoChunks(bg, ws, 10)
+	if err != nil || len(chunks) != 1 || chunks[0].Metadata["path"] != "parser.py" {
+		t.Fatalf("ls-files followed the operator's GIT_DIR: %+v %v", chunks, err)
+	}
+	hits, err := GitGrep(bg, ws, []string{"parse_config"})
+	if err != nil || len(hits) != 1 || hits[0].Metadata["path"] != "parser.py" {
+		t.Fatalf("git grep followed the operator's GIT_DIR: %+v %v", hits, err)
+	}
+	if none, err := GitGrep(bg, ws, []string{"no_such_term_anywhere"}); err != nil || len(none) != 0 {
+		t.Fatalf("git grep exit 1 must be an empty result: %+v %v", none, err)
+	}
+	before, _ := state.HeadSHA(bg, ws)
+	if err := os.WriteFile(filepath.Join(ws, "new.py"), []byte("x = 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	after, err := state.CommitAll(bg, ws, "add new.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if files, err := changedFiles(bg, ws, before, after); err != nil || len(files) != 1 || files[0] != "new.py" {
+		t.Fatalf("diff followed the operator's GIT_DIR: %v %v", files, err)
+	}
+
+	// A config include from the (agent-writable) work tree: every driver-capable command is
+	// refused, i.e. exit 128.
+	os.Unsetenv("GIT_DIR")
+	os.Unsetenv("GIT_WORK_TREE")
+	if err := os.WriteFile(filepath.Join(ws, "agent.cfg"), []byte("[user]\n\tname = agent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "config", "include.path", "../agent.cfg")
+	cmd.Dir = ws
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v %s", err, out)
+	}
+	if files, err := changedFiles(bg, ws, before, after); err != nil || len(files) != 0 {
+		t.Fatalf("a refused diff must read as no changed files: %v %v", files, err)
+	}
+	if _, err := GitGrep(bg, ws, []string{"parse_config"}); err == nil || !strings.Contains(err.Error(), "refusing to run git") {
+		t.Fatalf("a refused git grep must fail with the refusal, got %v", err)
+	}
 }
