@@ -16,6 +16,8 @@ import (
 	"syscall"
 	"time"
 	"unicode"
+
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Retry classification + bounded exponential backoff for model HTTP calls (python: retry.py).
@@ -24,6 +26,9 @@ import (
 // connection/transport errors. Client errors such as 400, 401 and 403 are NOT retried: retrying
 // or failing over cannot fix them and would only hide a misconfiguration. A server-supplied
 // Retry-After is honoured (capped).
+//
+// A transient error that is finally returned carries how many calls were made (AttemptsOf), so a
+// run that stops on it can say "model unavailable: ReadTimeout after 4 attempts".
 
 // Default retry/backoff parameters (python defaults).
 const (
@@ -144,6 +149,61 @@ func IsRetryable(err error) bool {
 	}
 	return false
 }
+
+// ModelUnavailableStop prefixes a local run's StoppedReason when the model stayed unreachable
+// after every retry and fallback (the durable path parks in DEGRADED_PARK instead).
+const ModelUnavailableStop = "model unavailable"
+
+// attemptsError carries how many model calls ended in err (python: the lha_attempts attribute).
+// Its message is err's, and errors.As / errors.Is see through it.
+type attemptsError struct {
+	err      error
+	attempts int
+}
+
+func (e *attemptsError) Error() string { return e.err.Error() }
+func (e *attemptsError) Unwrap() error { return e.err }
+
+// withAttempts records on err that attempts model calls ended in it.
+func withAttempts(err error, attempts int) error {
+	if counted, ok := err.(*attemptsError); ok {
+		err = counted.err // recount, never nest
+	}
+	return &attemptsError{err: err, attempts: attempts}
+}
+
+// AttemptsOf is how many model calls ended in err (1 unless a retry loop or failover counted them).
+func AttemptsOf(err error) int {
+	var counted *attemptsError
+	if errors.As(err, &counted) && counted.attempts > 0 {
+		return counted.attempts
+	}
+	return 1
+}
+
+// UnavailableReason is "model unavailable: <Type> after <n> attempts" for a transient error;
+// ok is false for any other error.
+func UnavailableReason(err error) (reason string, ok bool) {
+	if !IsRetryable(err) {
+		return "", false
+	}
+	n := AttemptsOf(err)
+	plural := "s"
+	if n == 1 {
+		plural = ""
+	}
+	return fmt.Sprintf("%s: %s after %d attempt%s", ModelUnavailableStop, pyfmt.ExcTypeName(err), n, plural), true
+}
+
+// UnavailableError is returned when the model stayed unreachable after its retries and fallbacks
+// before a mission started (the Planner's call). Its message is UnavailableReason's.
+type UnavailableError struct {
+	Reason string
+	Err    error
+}
+
+func (e *UnavailableError) Error() string { return e.Reason }
+func (e *UnavailableError) Unwrap() error { return e.Err }
 
 // RetryAfterSeconds is the server's Retry-After hint (seconds or HTTP-date) carried by an
 // *HTTPStatusError, clamped at 0. ok is false when there is no usable hint.
@@ -266,8 +326,11 @@ func WithRetries[T any](ctx context.Context, p RetryPolicy, call func(context.Co
 		if err == nil {
 			return v, nil
 		}
-		if attempt >= p.MaxRetries || !IsRetryable(err) || ctx.Err() != nil {
+		if !IsRetryable(err) || ctx.Err() != nil {
 			return v, err
+		}
+		if attempt >= p.MaxRetries {
+			return v, withAttempts(err, attempt+1)
 		}
 		if serr := sleep(ctx, BackoffDelay(attempt, err, p.BaseDelaySeconds, p.MaxDelaySeconds)); serr != nil {
 			var zero T

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -117,6 +118,7 @@ func buildBackend(settings *config.Settings, backend, name string, client *http.
 			PriceInPerMTok:  &zero,
 			PriceOutPerMTok: &zero,
 			Client:          client,
+			Timeout:         modelTimeout(settings),
 			MaxRetries:      Int(maxRetries),
 		}))
 
@@ -136,6 +138,7 @@ func buildBackend(settings *config.Settings, backend, name string, client *http.
 			PriceInPerMTok:  in,
 			PriceOutPerMTok: out,
 			Client:          client,
+			Timeout:         modelTimeout(settings),
 			MaxRetries:      Int(maxRetries),
 		}))
 
@@ -178,3 +181,8 @@ func Int(n int) *int { return &n }
 
 // Float returns a pointer to x (for the optional *float64 option fields and prices).
 func Float(x float64) *float64 { return &x }
+
+// modelTimeout is LHA_MODEL_TIMEOUT_S as a duration (an owned OpenAI-compatible client's timeout).
+func modelTimeout(settings *config.Settings) time.Duration {
+	return time.Duration(settings.ModelTimeoutS * float64(time.Second))
+}

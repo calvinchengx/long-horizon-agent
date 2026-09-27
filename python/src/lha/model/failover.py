@@ -22,7 +22,7 @@ from lha.contracts.model import (
     Usage,
 )
 from lha.model.health import ModelHealth, probe_provider
-from lha.model.retry import Sleep, backoff_delay, is_retryable
+from lha.model.retry import Sleep, attempts_of, backoff_delay, is_retryable, set_attempts
 
 
 class FailoverModel(ModelProvider):
@@ -59,6 +59,7 @@ class FailoverModel(ModelProvider):
         max_tokens: int | None = None,
     ) -> TurnResult:
         last_error: Exception | None = None
+        attempts = 0  # model calls made across every provider and round (for the stop reason)
         for round_no in range(self._max_rounds):
             if round_no > 0:
                 await self._sleep(
@@ -73,11 +74,13 @@ class FailoverModel(ModelProvider):
                     if not is_retryable(exc):
                         raise
                     last_error = exc
+                    attempts += attempts_of(exc)
                     continue
                 if not result.usage.provider:
                     result.usage.provider = provider.name
                 return result
         assert last_error is not None  # every provider was attempted at least once
+        set_attempts(last_error, attempts)
         raise last_error
 
     def _provider_for(self, usage: Usage) -> ModelProvider:
