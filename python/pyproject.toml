@@ -27,6 +27,8 @@ embeddings = ["sentence-transformers>=3.0"]
 # OTLP/HTTP trace export (to any OTLP collector, and to Langfuse through its OTLP endpoint).
 observability = ["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp-proto-http>=1.25"]
 sandbox = ["docker>=7.1"]
+# The e2b sandbox (LHA_SANDBOX=e2b): remote Firecracker microVMs; also needs an E2B API key.
+e2b = ["e2b-code-interpreter>=1.0"]
 
 [project.scripts]
 lha = "lha.cli.main:app"

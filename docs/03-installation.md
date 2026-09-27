@@ -33,6 +33,7 @@ Heavy or environment-specific dependencies are extras, declared in
 | `embeddings` | `sentence-transformers` | `LHA_MEMORY_EMBEDDER=sentence_transformers` and `LHA_MEMORY_RERANK=cross_encoder`; without it, memory falls back to lexical-only retrieval. Semantic memory without this extra: `LHA_MEMORY_EMBEDDER=ollama` and a local Ollama with `nomic-embed-text` pulled |
 | `observability` | `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-http` | OTLP trace export to a collector or to Langfuse, configured at process start when an endpoint or the Langfuse keys are set ([16-observability.md](16-observability.md)) |
 | `sandbox` | `docker` | The `docker` sandbox, which is the default |
+| `e2b` | `e2b-code-interpreter` | The `e2b` sandbox (`LHA_SANDBOX=e2b`, Python only); also needs an E2B API key |
 
 ```bash
 uv sync --extra sandbox                    # needed for the default docker sandbox
@@ -40,8 +41,8 @@ uv sync --extra postgres --extra sandbox   # extras combine
 ```
 
 The `claude` model backend needs no extra: it calls the Messages API over HTTP with
-`LHA_ANTHROPIC_API_KEY`. The `e2b` sandbox (Python only) needs the `e2b-code-interpreter`
-package, which is not part of any extra, an E2B account and a VM template with `python3`; it
+`LHA_ANTHROPIC_API_KEY`. The `e2b` sandbox (Python only) needs the `e2b` extra
+(`uv sync --extra e2b`), an E2B account and a VM template with `python3`; it
 syncs the workspace into the microVM and back ([safety model](09-safety-model.md#1-sandboxes)),
 and CI tests it against a fake SDK only, never the E2B service.
 

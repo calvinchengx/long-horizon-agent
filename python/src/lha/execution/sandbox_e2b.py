@@ -31,7 +31,7 @@ snapshots: the durable workflow never stores one, and the host workdir is re-upl
 ``open`` instead (``snapshot`` and ``open(snapshot_id=...)`` raise ``NotImplementedError``).
 
 The VM side needs ``python3`` (3.8+) — the sync helper is a small script uploaded on ``open``.
-Requires the ``e2b-code-interpreter`` package and an E2B API key (the SDK's own configuration).
+Requires the ``e2b`` extra (``e2b-code-interpreter``) and an E2B API key (the SDK's own configuration).
 Unit-tested against a fake SDK that runs the helper locally; not exercised against the E2B service
 in CI.
 """

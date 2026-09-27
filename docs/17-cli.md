@@ -93,7 +93,7 @@ set `LHA_SANDBOX_IMAGE` to an image that has them.
 
 Choosing `local` without `--unsafe-local` (or `LHA_ALLOW_UNSAFE_LOCAL=true`) fails before any
 model call or workspace write. `e2b` (Python only; the Go `lha` refuses it) requires the
-`e2b-code-interpreter` package, an E2B account and a template with `python3`, and copies the
+`e2b` extra (`uv sync --extra e2b`), an E2B account and a template with `python3`, and copies the
 workspace into the microVM and back around every command; `docker` requires the `sandbox` extra
 and a Docker daemon.
 
