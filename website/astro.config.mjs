@@ -60,6 +60,7 @@ export default defineConfig({
             { slug: '15-operations-runbook' },
             { slug: '16-observability' },
             { slug: '24-large-missions' },
+            { slug: '25-system-one' },
           ],
         },
         {

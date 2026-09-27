@@ -112,6 +112,8 @@ quality with real models.
 | Saga compensation, orphan-branch reconciliation, Magentic-One task/progress ledgers | removed: LHA itself pushes nothing, opens no PRs and deploys nothing (irreversible actions go to a human gate), an interrupted wave's worktrees and branches are discarded by `lha orchestrate --resume` and by the durable `plan_round`, and the checklist, tickets and loop detector already cover the ledgers |
 | Claude Agent SDK lead (`claude_sdk_lead.py`) | removed: superseded by the `claude_code` lead engine and model backend ([13-models.md](13-models.md)) |
 | Auditor, Librarian, Tester and model-backed Integrator runners | removed: harness integrity and the verifier are the deterministic auditor, memory consolidation is the librarian, and `BranchIntegrator` integrates |
+| System One decision models (Jev / Kev): stall triage, memory reranking | done: every run path, Python and Go, off by default ([25-system-one.md](25-system-one.md)) |
+| System One: pre-review diff screen, untrusted-content screen, model-tier routing, command second opinion; exporting approvals, verdicts and reviews as calibration and fine-tuning labels | planned ([25-system-one.md](25-system-one.md#not-built-yet)) |
 | Worker Build IDs / versioned deploys | planned |
 | Re-embedding after an embedding-model change | planned |
 

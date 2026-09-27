@@ -42,6 +42,10 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
   gates (SQLite by default, Postgres optionally; `lha missions`, `lha costs`, `lha gates`),
   recalls tiered memory into the
   prompt, and appends design decisions to a hash-chained log (`lha decisions --verify`).
+- **Fast judgments, never verdicts.** Optionally, a System One decision model (TypeSafe's Jev or
+  a self-hosted Kev) triages items that keep failing and reranks recalled memory. It can only
+  stop work on an item sooner, never allow an action or mark work done
+  ([System One](docs/25-system-one.md)).
 
 ## Two implementations
 

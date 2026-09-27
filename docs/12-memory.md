@@ -101,7 +101,10 @@ Rankings are fused with reciprocal rank fusion (`reciprocal_rank_fusion`, score 
 
 The fused list is then reranked (`NoopReranker` keeps fusion order; `LHA_MEMORY_RERANK=cross_encoder`
 uses `CrossEncoderReranker`, which needs the `embeddings` extra and falls back to `NoopReranker`
-with a warning if it cannot be built).
+with a warning if it cannot be built; `LHA_MEMORY_RERANK=system_one` uses `SystemOneReranker`,
+which asks the configured System One model one yes/no relevance question per passage in a single
+request, drops passages below `LHA_SYSTEM_ONE_RERANK_MIN`, and keeps fusion order if the call
+fails; see [25-system-one.md](25-system-one.md)).
 
 `HybridRetriever` in [hybrid.py](../python/src/lha/memory/hybrid.py) is not used by the service,
 which combines `BM25Index` and `reciprocal_rank_fusion` itself because its dense side is split

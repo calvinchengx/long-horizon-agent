@@ -119,13 +119,31 @@ mission was aborted cannot turn `ABORTED` back into `RUNNING`.
 | `LHA_MEMORY_EMBEDDING_MODEL` | string | unset | the embedding model; unset: `nomic-embed-text` for `ollama`, `voyage-4` (1024 wide) for `voyage`, `BAAI/bge-m3` for `sentence_transformers`. On Postgres a model narrower than 1024 is zero-padded to the `vector(1024)` column; a wider one runs lexical-only |
 | `LHA_VOYAGE_API_KEY` | secret | unset | the Voyage AI API key for `LHA_MEMORY_EMBEDDER=voyage`; unset: lexical-only. Sent only to the endpoint host |
 | `LHA_VOYAGE_ENDPOINT` | string | unset | the Voyage embeddings endpoint; unset: `https://api.voyageai.com/v1/embeddings`. Must be `https` and resolve to public addresses only, otherwise lexical-only ([Memory](12-memory.md#voyage)) |
-| `LHA_MEMORY_RERANK` | `none` \| `cross_encoder` | `none` | second-stage rerank; `cross_encoder` needs the `embeddings` extra |
+| `LHA_MEMORY_RERANK` | `none` \| `cross_encoder` \| `system_one` | `none` | second-stage rerank; `cross_encoder` needs the `embeddings` extra; `system_one` asks the System One model below whether each passage helps (fusion order without `LHA_SYSTEM_ONE_BACKEND`) |
 | `LHA_MEMORY_CONSOLIDATE_EVERY` | int | `5` | consolidate episodes into facts every N recorded cycles; `0` disables |
 | `LHA_MEMORY_CONSOLIDATION` | `extractive` \| `model` | `extractive` | `extractive` is deterministic and free; `model` asks the metered lead model |
 | `LHA_MEMORY_INDEX_REPO_FILES` | bool | `true` | index the checkout's tracked text files for retrieval |
 | `LHA_MEMORY_MAX_REPO_FILES` | int | `400` | cap on indexed files |
 
 See [12-memory.md](12-memory.md).
+
+### System One decision models
+
+| Variable | Type | Default | Meaning |
+|---|---|---|---|
+| `LHA_SYSTEM_ONE_BACKEND` | `off` \| `systemone` \| `stub` | `off` | a model that answers typed questions with calibrated probabilities (TypeSafe's Jev, or a self-hosted Kev); `stub` answers uniformly (tests) |
+| `LHA_SYSTEM_ONE_ENDPOINT` | string | `https://api.typesafe.ai/v1/systemone` | `POST /v1/systemone` URL; `https` unless loopback |
+| `LHA_SYSTEM_ONE_API_KEY` | secret | unset | required for a remote endpoint; sent only to its host |
+| `LHA_SYSTEM_ONE_MODEL` | string | `jev-1.13.0` | a pinned version (thresholds are tuned per version) |
+| `LHA_SYSTEM_ONE_TIMEOUT_S` | float (> 0) | `5.0` | per request; one retry on 429/5xx |
+| `LHA_SYSTEM_ONE_PRICE_IN_PER_MTOK` | float (>= 0) | unset | unset: $0.042 for TypeSafe's host, $0 on loopback; any other endpoint must set it (or `LHA_ALLOW_UNPRICED_MODELS`) |
+| `LHA_SYSTEM_ONE_PRIVATE_DATA_OK` | bool | `false` | with `LHA_PRIVATE_DATA=true`, a remote endpoint is refused unless this is set |
+| `LHA_SYSTEM_ONE_TRIAGE` | bool | `true` | stall triage when a backend is configured |
+| `LHA_SYSTEM_ONE_TRIAGE_THRESHOLD` | float (0-1) | `0.9` | confidence a triage answer needs before it splits or blocks an item |
+| `LHA_SYSTEM_ONE_TRIAGE_MIN_FAILURES` | int (>= 1) | `2` | failures in a row before triage is asked |
+| `LHA_SYSTEM_ONE_RERANK_MIN` | float (0-1) | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages below this relevance |
+
+See [25-system-one.md](25-system-one.md).
 
 ### Governor
 
@@ -259,7 +277,8 @@ Temporal and durable-gate settings (`LHA_TEMPORAL_*`, `LHA_TASK_QUEUE`,
 extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
 `LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
 extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` or `voyage` are the Go choices for real
-embeddings).
+embeddings, and `LHA_MEMORY_RERANK=system_one` for reranking). Go also reads the
+`LHA_SYSTEM_ONE_*` settings.
 The one Python-only feature a setting selects is the E2B sandbox: `LHA_SANDBOX=e2b` is refused.
 (The durable organization is chosen by `mission-start` options, not settings; Go runs it too.)
 See

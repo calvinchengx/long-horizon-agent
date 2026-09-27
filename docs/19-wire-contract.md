@@ -324,7 +324,11 @@ or `pending` when a durable cycle queued it for the workflow), `approved`, `reso
 a `check_quarantined` event, and a quarantined check that failed every attempt a
 `quarantined_check_failed` event, each with `check`, `revision` (the work tree's git tree id),
 `passes` and `fails`. The set of quarantined checks is the `check` of every committed
-`check_quarantined` event.
+`check_quarantined` event. When stall triage asks a System One model about a failed item, the
+cycle also gets a `system_one` event: `use` (`"stall_triage"`), `item_id`, `model` (the versioned
+id that answered, `""` on failure), `answer`, `confidence`, `probabilities` (option -> probability,
+in the question's option order), `threshold`, `action` (`continue` \| `split` \| `block`) and
+`error` (`""` unless the call failed); see [25-system-one.md](25-system-one.md#the-record).
 
 Commit messages: `lha: initialize mission anchor`,
 `lha: complete|attempt|block|split <id> (<description>)` (orchestrate appends
