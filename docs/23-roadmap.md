@@ -114,6 +114,7 @@ quality with real models.
 | Auditor, Librarian, Tester and model-backed Integrator runners | removed: harness integrity and the verifier are the deterministic auditor, memory consolidation is the librarian, and `BranchIntegrator` integrates |
 | System One decision models (Jev / Kev): stall triage, memory reranking | done: every run path, Python and Go, off by default ([25-system-one.md](25-system-one.md)) |
 | System One: pre-review diff screen, untrusted-content screen, model-tier routing, command second opinion; exporting approvals, verdicts and reviews as calibration and fine-tuning labels | planned ([25-system-one.md](25-system-one.md#not-built-yet)) |
+| Cycle-start code map (`LHA_CODE_MAP=ripwire`) | done: every run path, Python and Go, off by default; one measurement showed no gain ([24](24-large-missions.md#optional-a-code-map-each-cycle)) |
 | Worker Build IDs / versioned deploys | planned |
 | Re-embedding after an embedding-model change | planned |
 

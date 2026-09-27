@@ -128,6 +128,16 @@ mission was aborted cannot turn `ABORTED` back into `RUNNING`.
 
 See [12-memory.md](12-memory.md).
 
+### Code map
+
+| Variable | Type | Default | Meaning |
+|---|---|---|---|
+| `LHA_CODE_MAP` | `off` \| `ripwire` | `off` | `ripwire` runs `ripwire . --pack-task=<item> --token-budget=N` in the sandbox at the start of each cycle and puts the task bundle in the lead's first message, after the memory block. Needs ripwire in the sandbox image (the reference image has it); a missing ripwire, a failure or a timeout means no map for that cycle |
+| `LHA_CODE_MAP_TOKEN_BUDGET` | int (>= 200) | `2000` | ripwire's `--token-budget` for the bundle |
+| `LHA_CODE_MAP_TIMEOUT_S` | float (> 0) | `60.0` | the ripwire command's timeout |
+
+Measured once so far, with no gain: see [building a large project](24-large-missions.md#optional-a-code-map-each-cycle).
+
 ### System One decision models
 
 | Variable | Type | Default | Meaning |

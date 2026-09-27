@@ -19,6 +19,7 @@ webhook and the mission store have their own tests.
 | Knowledge of an API the model has not memorized | Vendored references | `lha vendor`, `--reference` |
 | Coarse items that turn out too big | Replanning | `LHA_MAX_REPLANS`, `LHA_MAX_SPLIT_DEPTH` |
 | Stalled items noticed before the failure limit (optional) | System One triage | `LHA_SYSTEM_ONE_BACKEND` |
+| A map of the code before the first turn (optional) | ripwire code map | `LHA_CODE_MAP=ripwire` |
 | Pushes and releases stay a human decision | Durable approvals | `lha mission-approve` |
 | Someone notices when a gate is waiting | Escalation ladder and webhook | `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL` |
 | Spend and status you can query after the fact | Mission store | `lha missions`, `lha costs` |
@@ -176,7 +177,8 @@ lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decis
 - **Replanning.** When an item fails verification three times in a row, the model splits it into
   2–6 smaller children (`03.1`, `03.2`, ...). The parent's witnesses move to the last child, so
   splitting can make work tractable but never makes it pass more easily. At most `LHA_MAX_REPLANS`
-  splits per mission (default 20), nested at most `LHA_MAX_SPLIT_DEPTH` levels (default 2).
+  splits per mission (default 20), nested at most `LHA_MAX_SPLIT_DEPTH` levels (default 2). The
+  children queue behind the items already waiting, so one hard item cannot starve the others.
 - **Triage (optional).** With a System One model configured (`LHA_SYSTEM_ONE_BACKEND`; a
   self-hosted Kev keeps the mission's text on your machine), an item that fails twice is triaged.
   If the model is confident it is too big, it is split then; if the environment is at fault (a
@@ -187,6 +189,26 @@ lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decis
   `retry` (unblock and continue), `abort`, or `impossible` (a final checkpoint records the mission
   as impossible). Unanswered, it applies `--deadlock-default` (`LHA_DEADLOCK_GATE_DEFAULT`,
   default `abort`).
+
+## Optional: a code map each cycle
+
+A cycle starts from a mostly fresh context, and the lead spends turns finding its way around the
+code. With `LHA_CODE_MAP=ripwire`, the harness runs [ripwire](https://github.com/redhat-et/ripwire)
+in the sandbox at the start of each cycle (`ripwire . --pack-task="<the item>"`, about 1k tokens
+at the default `LHA_CODE_MAP_TOKEN_BUDGET=2000`) and puts the ranked definitions, callers and
+tests it finds into the lead's first message. ripwire is offline, deterministic and writes nothing
+into the workspace; the reference image in [`sandbox/`](../sandbox/) includes it. Without it, or
+if it fails, the cycle runs without a map.
+
+**Measured so far: it has not paid off.** On 27–28 September 2026 we ran two missions with and two
+without the map, with `gemma4` as the lead, on three small changes in LHA's own Python package.
+The map pointed at the right file first for two of the three changes and missed the third, whose
+description never used the file's own words. The runs with the map used about 30% more input tokens
+per cycle (44.5k against 34.2k) and cost about 14% more, because the map stays in the conversation
+and is re-sent with every model turn; they made about 18% fewer navigation calls. Neither arm
+finished any of the three changes within nine cycles. This says nothing yet about a stronger lead
+model, and the same runs exposed the split-ordering starvation fixed above. Leave it off unless you
+measure a gain on your own missions.
 
 ## What this does not solve
 
