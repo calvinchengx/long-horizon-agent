@@ -433,6 +433,9 @@ class DockerSandbox(Sandbox):
             networking = {"network_mode": "bridge" if self._network else "none"}
         return {
             "command": ["sleep", "infinity"],
+            # A reaping PID 1: commands run via ``docker exec``, so orphans (a timed-out command's
+            # killed grandchildren) are re-parented to PID 1, and ``sleep`` never reaps them.
+            "init": True,
             "detach": True,
             "tty": False,
             "working_dir": _WORKDIR,

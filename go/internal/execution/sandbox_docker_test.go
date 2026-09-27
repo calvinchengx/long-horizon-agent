@@ -141,6 +141,9 @@ func TestDockerContainerIsHardened(t *testing.T) {
 	if !slices.Equal(args[len(args)-3:], []string{DockerDefaultImage, "sleep", "infinity"}) {
 		t.Fatal(args)
 	}
+	if !slices.Contains(args, "--init") { // orphaned processes are reaped, not left as zombies
+		t.Error("the sandbox container runs without --init")
+	}
 	checks := map[string][]string{
 		"--network":      {"none"},
 		"--cap-drop":     {"ALL"},
