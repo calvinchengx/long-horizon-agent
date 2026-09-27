@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     temporal_address: str = "localhost:7233"
     temporal_namespace: str = "default"
     task_queue: str = "lha-mission"
+    # How often a running worker re-checks who polls its task queue (the cross-language guard,
+    # lha.durable.worker): a worker of the other implementation that appears stops this one.
+    worker_guard_interval_s: float = Field(default=30.0, gt=0)
 
     # --- Persistence -----------------------------------------------------------------
     # If unset, local SQLite + filesystem stores are used (zero-infra default).

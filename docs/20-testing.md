@@ -13,7 +13,7 @@ All Python tests live in [`python/tests/`](../python/tests/) and run with `pytes
 |---|---|---|
 | `tests/unit/` | every module in isolation: safety classifier and egress, sandboxes (with fakes), the egress proxy (`test_egress_proxy.py`), tools, dispatcher, model backends over mocked HTTP, pricing and retry, governor and metering, anchor, checklist import (`test_checklist_import.py`), verifier, witnesses (`test_witnesses.py`), trusted runner (`test_trusted_runner.py`), agent loop, planner, reviewer, orchestrator, memory, coordination, CLI wiring, redaction, `spec/` conformance; the feature files are listed below | nothing |
 | `tests/unit/test_large_missions.py` | the large-mission features through the real loop, dispatcher, verifier, `local` sandbox and git anchor with a scripted model: witnesses, trusted checks, protected paths, replanning of blocked items (and its budget and depth limits), approval gates and fingerprints, `fetch_url` registration, references and `lha vendor` | nothing |
-| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions (`test_durable_spine.py`); durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again); the escalation ladder, SLEEPING and the deadlock gate's `impossible` (`test_human_gates.py`); the mission row the workflow writes: `SLEEPING` while sleeping, `WAITING_ON_HUMAN` while the deadlock gate is open, the final status after retry, abort, impossible and a cancellation (while sleeping, at a gate, mid-cycle, which never parks; a mid-cycle abort waits for the cancelled cycle, whose late `RUNNING` write lands first, and a cycle that completes anyway cannot swallow the abort), and a failing row write that never fails the mission (`test_mission_row.py`); sub-agent fan-out (`test_subagent_fanout.py`); the opt-in multi-agent organization (`test_org_workflow.py`: researcher child workflows with failures surfaced, a parallel wave merged one checkpoint at a time, review that reopens, the options validated, a failed implementer recorded as a failed attempt, an implementer outage that parks after integrating the rest, a review that cannot run, an abort during a wave that waits for both implementers, integrates nothing and ends `ABORTED` in the workflow and the row, and the org activities' retry safety and leases); ClaimCheck and the object store (`test_hardening.py`); history replay (`test_replay.py`) | the Temporal test server (downloaded automatically) |
+| `tests/durability/` | `MissionWorkflow` and `SubAgentWorkflow` on a real Temporal test server: completion, crash after and before commit, Continue-As-New, deadlock, outage park and resume, budget exhaustion, gate decisions (`test_durable_spine.py`); durable approval of irreversible actions (`test_approvals.py`: `WAITING_ON_HUMAN` with the question in `open_question`, an approval reaches the next cycle once, a rejected action is not asked again); the escalation ladder, SLEEPING and the deadlock gate's `impossible` (`test_human_gates.py`); the mission row the workflow writes: `SLEEPING` while sleeping, `WAITING_ON_HUMAN` while the deadlock gate is open, the final status after retry, abort, impossible and a cancellation (while sleeping, at a gate, mid-cycle, which never parks; a mid-cycle abort waits for the cancelled cycle, whose late `RUNNING` write lands first, and a cycle that completes anyway cannot swallow the abort), and a failing row write that never fails the mission (`test_mission_row.py`); sub-agent fan-out (`test_subagent_fanout.py`); the opt-in multi-agent organization (`test_org_workflow.py`: researcher child workflows with failures surfaced, a parallel wave merged one checkpoint at a time, review that reopens, the options validated, a failed implementer recorded as a failed attempt, an implementer outage that parks after integrating the rest, a review that cannot run, an abort during a wave that waits for both implementers, integrates nothing and ends `ABORTED` in the workflow and the row, and the org activities' retry safety and leases); ClaimCheck and the object store (`test_hardening.py`); history replay (`test_replay.py`); the cross-language worker guard (`test_worker_guard.py`: the startup check, the periodic re-check that shuts a running worker down when a Go worker appears, and `lha worker`'s exit 2, with a fake server; on a real server, a refused queue and a re-check that stops a running worker) | the Temporal test server (downloaded automatically); a real Temporal server for the guard's real-server tests (skipped without one, see below) |
 | `tests/load/` | `test_long_run.py`: many cycles with Continue-As-New firing repeatedly; history stays bounded and every item completes once | the Temporal test server |
 | `tests/integration/` | real Postgres + pgvector: migrations, schema, cost ledger, mission upsert, semantic index (`test_postgres.py`), and `PostgresStore`, pgvector memory, the SQLite fallback for an unmigrated database and a `run-local` mission persisted to Postgres (`test_postgres_store.py`); the real Docker sandbox (exit codes, timeouts, OOM, read-only harness dirs, no network); the egress proxy against real Docker and the internet (`test_docker_egress.py`); and one mission that uses every large-mission feature together (`test_large_mission_e2e.py`) | opt-in, see below |
 
@@ -57,6 +57,27 @@ and caches it. Durable timers (the park backoff, gate timeouts) complete without
 a test that parks for "an hour" runs in seconds. Each test builds its own `Worker` with injected
 activities (for example a cycle activity bound to a scripted model via `make_cycle_activity`), so
 crashes and outages are simulated deterministically.
+
+## A real Temporal server
+
+The time-skipping test server does not implement every API: `DescribeTaskQueue`, which the
+cross-language worker guard calls, is missing. The tests that need a real server use
+`LHA_IT_TEMPORAL_ADDRESS` (an existing server, e.g. `temporal server start-dev`), else start
+`temporal server start-dev --headless` on free ports with a temporary database when the
+[Temporal CLI](https://docs.temporal.io/cli) is on `PATH` (and stop it), else skip: the real-server
+half of `tests/durability/test_worker_guard.py`, and in Go the cross-language durable tests in
+`go/cmd/lha/durable_e2e_test.go` and `durable_org_e2e_test.go` (a Go mission driven by the Python
+CLI and back, each worker refusing a queue the other polls, two workers started together leaving
+at most one running, the re-check stopping workers that raced past the startup check) and the
+real-server tests of `go/internal/durable` (`TestRecordHistories`, an abort during an org wave).
+Without the Temporal CLI the Go tests fall back to the Python SDK's cached test server, where the
+guard tests skip.
+
+```bash
+temporal server start-dev --headless --port 7233 &   # or let the tests start their own
+LHA_IT_TEMPORAL_ADDRESS=127.0.0.1:7233 uv run pytest -q tests/durability/test_worker_guard.py
+cd ../go && LHA_IT_TEMPORAL_ADDRESS=127.0.0.1:7233 go test ./cmd/lha ./internal/durable
+```
 
 ## The replay test
 
@@ -180,8 +201,8 @@ On every push to `main` and every pull request:
 
 | Job | Steps |
 |---|---|
-| `python-check` | `uv sync --locked`; `ruff check`; `ruff format --check`; `ty check`; `pytest tests/unit` with coverage; `pytest tests/durability tests/load` with coverage appended (12-minute timeout); `coverage report` (fails under 90%) |
-| `go` | Go 1.26 with the module cache; uv and `uv sync --locked` in `python/` (the cross-implementation tests run the Python implementation); `gofmt -l .` must print nothing; `go vet ./...`; `GOOS=windows go vet ./...`; `go test -race ./...` (15-minute timeout) |
+| `python-check` | `uv sync --locked`; `ruff check`; `ruff format --check`; `ty check`; `pytest tests/unit` with coverage; the Temporal CLI (a pinned, checksum-verified release) and a `temporal server start-dev` on `127.0.0.1:7233`; `pytest tests/durability tests/load` with coverage appended and `LHA_IT_TEMPORAL_ADDRESS` set, so the worker-guard tests run on the dev server (12-minute timeout); `coverage report` (fails under 90%) |
+| `go` | Go 1.26 with the module cache; uv and `uv sync --locked` in `python/` (the cross-implementation tests run the Python implementation); `gofmt -l .` must print nothing; `go vet ./...`; `GOOS=windows go vet ./...`; the Temporal CLI and a dev server as in `python-check`; `go test -race ./...` with `LHA_IT_TEMPORAL_ADDRESS` set, so the cross-language durable e2e tests, the worker guard and the recorded histories run on the dev server (15-minute timeout) |
 | `python-services-integration` | a `pgvector/pgvector:pg16` service container; `uv sync --locked --extra postgres --extra sandbox`; Go 1.26 (for the trusted `go run` check); `docker build -t lha-sandbox:dev sandbox/`; `pytest tests/integration` with `LHA_IT_POSTGRES_DSN` and `LHA_IT_DOCKER=1` set (20-minute timeout) |
 
 A separate workflow, [`docs-site.yml`](../.github/workflows/docs-site.yml), builds this
@@ -230,5 +251,7 @@ when `uv` is not on `PATH` or under `-short`. `cmd/lha/e2e_test.go` builds the G
 through Python's `lha run-local` (and a scripted stub mission through `run_mission_local`),
 comparing exit codes, reports, checkpoint commits and the `.lha/` files; `internal/hitl` runs
 Python's `TerminalApprover` on the same scenarios as the Go console gate. Both skip the Python
-half when `uv` is not on `PATH`; the Docker run is gated on `LHA_IT_DOCKER=1`. There is no Go
-Temporal worker, so no Go test exercises a workflow or its replay.
+half when `uv` is not on `PATH`; the Docker run is gated on `LHA_IT_DOCKER=1`. The Go
+Temporal worker's workflows run in the SDK's test environment and replay the histories recorded in
+`internal/durable/testdata/histories`; the tests that need a real server are listed under
+[A real Temporal server](#a-real-temporal-server).

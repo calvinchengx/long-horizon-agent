@@ -574,8 +574,11 @@ What differs:
   differently, so a history recorded by one worker implementation never replays on the other.
   Each `lha worker` marks its identity (`lha-py:` / `lha-go:`) and, before polling, refuses to
   start (exit 2) when `DescribeTaskQueue` lists a poller of the other implementation on
-  `LHA_TASK_QUEUE` ([wire contract](19-wire-contract.md#cross-language-workers)). Clients are not
-  affected: either CLI drives missions served by either worker.
+  `LHA_TASK_QUEUE` ([wire contract](19-wire-contract.md#cross-language-workers)). Two workers
+  started at the same moment can both pass that check, so a running worker re-checks every
+  `LHA_WORKER_GUARD_INTERVAL_S` seconds (default 30) and, when a poller of the other
+  implementation appears, shuts down gracefully and exits 2 with the same message. Clients are
+  not affected: either CLI drives missions served by either worker.
 - **Versioning.** A Go behaviour change after histories are recorded is guarded with
   `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", workflow.DefaultVersion, <n>)` instead of
   `workflow.patched`. The first is the organization (`lha-go-durable-org-v1`, the counterpart of

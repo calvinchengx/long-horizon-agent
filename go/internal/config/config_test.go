@@ -57,6 +57,7 @@ func TestNewFieldDefaults(t *testing.T) {
 		"FallbackModels":            {s.FallbackModels, ""},
 		"FallbackMaxRounds":         {s.FallbackMaxRounds, 2},
 		"ModelProbeTimeoutS":        {s.ModelProbeTimeoutS, 10.0},
+		"WorkerGuardIntervalS":      {s.WorkerGuardIntervalS, 30.0},
 		"ConsoleApprovalTimeoutS":   {s.ConsoleApprovalTimeoutS, 3600},
 		"DeadlockGateDefault":       {s.DeadlockGateDefault, "abort"},
 		"ImpossibleAfterFailures":   {s.ImpossibleAfterFailures, 3},
@@ -79,7 +80,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 83 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 84 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }

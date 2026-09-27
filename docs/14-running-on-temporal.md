@@ -74,6 +74,14 @@ Give each implementation its own queue. Temporal keeps listing a stopped worker 
 few minutes, so switching a queue to the other implementation means waiting that long (or using a
 new queue name).
 
+The startup check alone has a window: two workers of different implementations started within
+the same second can both pass it. So a running worker repeats the check every
+`LHA_WORKER_GUARD_INTERVAL_S` seconds (default `30`). When a worker of the other implementation
+appears, it stops polling, shuts down (the SDK's graceful worker shutdown) and exits 2
+with the same message. In such a race both workers stop, since each still sees the other listed;
+restart one of them on its own queue. A re-check that cannot reach the server is logged as a
+warning and retried at the next interval.
+
 [`python/Dockerfile`](../python/Dockerfile) builds a worker image whose default command is
 `lha worker`. Do not mount the host Docker socket into it; point `DOCKER_HOST` at a separate
 daemon or use `LHA_SANDBOX=e2b`.

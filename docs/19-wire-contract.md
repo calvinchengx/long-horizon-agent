@@ -197,7 +197,7 @@ Go SDK uses one shared counter. A history recorded by one implementation's worke
 not replay on a worker of the other, so one workflow execution must stay with one implementation:
 a Python worker and a Go worker must never poll the same task queue.
 
-Both workers enforce this, failing closed at startup:
+Both workers enforce this, failing closed at startup and re-checking while they run:
 
 - **Identity marker.** The worker identity is `lha-py:<pid>@<host>` (Python,
   [`durable/worker.py`](../python/src/lha/durable/worker.py) `worker_identity`) or
@@ -208,19 +208,28 @@ Both workers enforce this, failing closed at startup:
   marker, the worker refuses to start: exit code 2 and a message naming the poller and suggesting
   another queue (`LHA_TASK_QUEUE=<queue>-go`, or `-py`). A server that cannot answer
   `DescribeTaskQueue` also stops the worker.
+- **Re-check.** Two workers of different implementations started within the same second can
+  both pass the startup check, so a running worker repeats it every `LHA_WORKER_GUARD_INTERVAL_S`
+  seconds (default 30; Python `guard_task_queue` / `serve_guarded`, Go `durable.GuardTaskQueue` /
+  `durable.RunGuarded`). When a poller of the other implementation appears, the worker stops
+  polling (the SDK's graceful worker shutdown) and exits 2 with the same message.
+  In such a race both workers stop (each still sees the other listed): fail closed. A re-check
+  that cannot reach the server is logged and retried at the next interval.
 - Temporal keeps listing a poller for a few minutes after it stops, so moving a queue from one
-  implementation to the other means waiting that long, or using a new queue. The check runs once,
-  at startup: two workers of different implementations started within the same second can both
-  pass it.
+  implementation to the other means waiting that long, or using a new queue.
 
 Everything outside the workflow task is shared: either CLI starts a mission on either
 implementation's queue (`lha mission-start` with that `LHA_TASK_QUEUE`), queries it, signals it and
 aborts it; the payloads, the ClaimCheck codec and object store, the `.lha/` anchor, the spend
 journal (`.git/lha/spend.ndjson`) and the workdir lock (`flock` on `.git/lha-cycle.lock`) are the
 same. `go/cmd/lha/durable_e2e_test.go` drives a Go-served mission with the Python CLI and a
-Python-served mission with the Go CLI (identical `mission-status` output), and checks that each
-worker refuses a queue the other polls. It needs `uv` and a Temporal server
-(`LHA_IT_TEMPORAL_ADDRESS`, or the `temporal` CLI on `PATH`).
+Python-served mission with the Go CLI (identical `mission-status` output), checks that each
+worker refuses a queue the other polls, that of two workers started together at most one keeps
+running, and that the re-check stops workers that raced past the startup check. It needs `uv` and
+a real Temporal server (`LHA_IT_TEMPORAL_ADDRESS`, or the `temporal` CLI on `PATH`, which the tests
+start as `temporal server start-dev`); CI runs it against a dev server. The Python half,
+[`tests/durability/test_worker_guard.py`](../python/tests/durability/test_worker_guard.py), runs
+the guard against the same kind of server.
 
 ## Mission anchor (`.lha/`)
 
@@ -465,7 +474,7 @@ JSON files exported from the Python implementation by
 | `contracts/check_names.json` | check names from argv, de-duplication | yes | yes |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, transitions, `split` (child ids, dependencies and witnesses) | yes | yes |
 | `coordination/decision_chain.json` | canonical JSON bytes and SHA-256 chain of the decision log; `log`: an anchor `decisions.ndjson` with a legacy prefix, its running hashes, and verification verdicts for tampered variants | yes | yes |
-| `coordination/shared_paths.json` | files only the lead engineer may write | yes | not yet |
+| `coordination/shared_paths.json` | files only the lead engineer may write | yes | yes |
 | `verify/harness_files.json` | test/harness files the agent may not weaken | yes | yes |
 | `model/pricing.json` | Claude price table and per-call cost | yes | yes |
 | `memory/hash_embedder.json` | the hash embedder's vectors and cosine similarity, exactly (CPython's compensated `sum`) | yes | yes |
@@ -473,8 +482,8 @@ JSON files exported from the Python implementation by
 | `memory/recall.json` | episodic lines, search terms, and the memory blocks `MissionMemory` recalls for a fixture (hybrid on SQLite, lexical with `git grep`, a tight budget) | yes | yes |
 
 Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit/test_spec_conformance.py),
-Go in `go/internal/spec/conformance_*_test.go`. `shared_paths.json` waits for a Go port of the
-ownership map.
+Go in `go/internal/spec/conformance_*_test.go` (`shared_paths.json` in
+`conformance_agent_test.go`, against `agents.IsShared`).
 
 The Go worker implements the payload types, queries and fingerprints above
 ([`go/internal/durable/`](../go/internal/durable/)), the organization's activities
