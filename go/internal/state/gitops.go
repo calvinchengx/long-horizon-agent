@@ -265,12 +265,38 @@ func runRaw(ctx context.Context, cwd string, args []string, timeout time.Duratio
 }
 
 func runRawEnv(ctx context.Context, cwd string, args []string, timeout time.Duration, extraEnv map[string]string) (gitResult, error) {
+	raw, err := runBytesEnv(ctx, cwd, args, timeout, extraEnv)
+	if err != nil {
+		return gitResult{}, err
+	}
+	return gitResult{
+		ReturnCode: raw.ReturnCode,
+		Stdout:     universalNewlines(string(raw.Stdout)),
+		Stderr:     universalNewlines(string(raw.Stderr)),
+	}, nil
+}
+
+// GitBytesResult is a completed hardened git process: raw output, exit code unchecked.
+type GitBytesResult struct {
+	ReturnCode int
+	Stdout     []byte
+	Stderr     []byte
+}
+
+// RunGitBytes is the hardened `git <args>` in cwd with raw bytes and the exit code unchecked
+// (python: run_git_bytes); timeout 0 means GitTimeout. A refused .git/config or a timeout is a
+// *GitError.
+func RunGitBytes(ctx context.Context, cwd string, timeout time.Duration, args ...string) (GitBytesResult, error) {
+	return runBytesEnv(ctx, cwd, args, timeout, nil)
+}
+
+func runBytesEnv(ctx context.Context, cwd string, args []string, timeout time.Duration, extraEnv map[string]string) (GitBytesResult, error) {
 	if timeout <= 0 {
 		timeout = GitTimeout
 	}
 	argv, err := GitArgv(ctx, cwd, args)
 	if err != nil {
-		return gitResult{}, err
+		return GitBytesResult{}, err
 	}
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -285,20 +311,17 @@ func runRawEnv(ctx context.Context, cwd string, args []string, timeout time.Dura
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err = cmd.Run()
 	if ctx.Err() != nil {
-		return gitResult{}, fmt.Errorf("git %s: %w", strings.Join(args, " "), ctx.Err())
+		return GitBytesResult{}, fmt.Errorf("git %s: %w", strings.Join(args, " "), ctx.Err())
 	}
 	if tctx.Err() != nil {
-		return gitResult{}, &GitError{fmt.Sprintf("git %s timed out after %ss",
+		return GitBytesResult{}, &GitError{fmt.Sprintf("git %s timed out after %ss",
 			strings.Join(args, " "), pyFloatRepr(timeout.Seconds()))}
 	}
-	res := gitResult{
-		Stdout: universalNewlines(stdout.String()),
-		Stderr: universalNewlines(stderr.String()),
-	}
+	res := GitBytesResult{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
 	if err != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) {
-			return gitResult{}, err // git missing, cwd missing, ...
+			return GitBytesResult{}, err // git missing, cwd missing, ...
 		}
 		res.ReturnCode = exitErr.ExitCode()
 	}
