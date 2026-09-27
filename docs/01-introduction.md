@@ -82,6 +82,17 @@ it. See [verification](07-verification.md).
   (`LHA_BUDGET_USD_CEILING`, default 10.0). Calls whose cost cannot be computed are refused
   unless `LHA_ALLOW_UNPRICED_MODELS=true`.
 
+### Fast judgments, never verdicts
+
+LHA can optionally use a second kind of model: a **System One decision model**, such as TypeSafe's
+hosted Jev or the open-weights Kev. It answers typed questions (yes/no, pick an option, rate on a
+scale) with calibrated probabilities, in about 100 ms and for a fraction of an LLM call, and
+generates no text. LHA asks it only questions where a wrong answer costs effort, not safety. When
+an item keeps failing, triage asks whether the item is too big (split it now) or the environment is
+broken (hand it to a human now). It can also rerank recalled memory. It can never allow an action,
+answer a gate or mark work done, and when it is unavailable LHA behaves exactly as without it. Off
+by default; see [System One decision models](25-system-one.md).
+
 ### Honesty policy
 
 Numbers reported by LHA (tokens, cost) come from the provider responses. The `stub` model is a
@@ -107,6 +118,7 @@ The project is early and under active development.
 | Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
 | File ownership with lease granting, tickets, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` and into durable missions started with `--max-parallel`; the blackboard and reflection only in `orchestrate` |
 | Flaky-check quarantine in the verifier; OTLP trace export (a collector or Langfuse) | Implemented and wired into every Python run path (the Lead's cycle, parallel implementers and branch integration alike); export is off until an endpoint or the Langfuse keys are set and needs the `observability` extra |
+| System One decision models (Jev, Kev): stall triage and memory reranking | Implemented and wired into every run path in Python and Go, off by default; tested with a stub and mocked HTTP, not against a live Jev or Kev ([25](25-system-one.md)) |
 | Go port | A `go/cmd/lha` binary with every `lha` command: missions run locally (`run-local`, `mission`, and the organization with `orchestrate`) in the local or Docker sandbox, and missions durably on Temporal (`worker`, `mission-*`, the durable organization's research / review / parallel rounds included), with the same tools, gates, `.lha/` anchor, mission store and tiered memory as Python; everything except E2B and the `sentence_transformers` / `cross_encoder` extras, and its worker cannot share a task queue with Python workers ([04](04-choosing-an-implementation.md)) |
 | Fully hands-off multi-week autonomy | Not claimed. The system is built to run for weeks; the model advances it in verified bursts |
 

@@ -370,6 +370,16 @@ activities raise a non-retryable `ERROR_CONFIG`. A human gate (including the dur
 `DeferredApprovalGate`) does not lift this check. It is run-level because the agents of a run
 share context (research briefs reach the Lead).
 
+**System One decision models.** A System One endpoint ([25](25-system-one.md)) is called by the
+harness, not by the agent: it gets no tool, and its answers can only split or block an item early
+or reorder recalled memory, never allow a command or answer a gate. A remote endpoint must be
+https, is re-resolved and checked for public addresses on every request, is dialled only at the
+vetted addresses, and receives its API key only for its own host. What it is sent is redacted
+first. It receives what the lead's model provider already receives, so it adds no Rule of Two
+capability. Because it is a second recipient, a run with `LHA_PRIVATE_DATA=true` still refuses a
+remote endpoint unless `LHA_SYSTEM_ONE_PRIVATE_DATA_OK=true`. A loopback endpoint (a self-hosted
+Kev) is always allowed.
+
 **Per dispatcher.** The dispatcher derives its capability set from its usable tools (`egress`
 gives external comms, `untrusted_input` gives untrusted content) plus the capabilities the caller
 declares (`build_run_dispatcher()` declares private data as above). Without a gate, holding all

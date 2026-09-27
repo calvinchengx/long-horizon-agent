@@ -105,6 +105,12 @@ a blocked item are.
   implements everything except the E2B sandbox and the `sentence_transformers` / `cross_encoder`
   extras, and a Go and a Python worker cannot serve the same
   mission (each refuses a task queue the other polls).
+- **System One triage improves missions.** The client, triage and reranker are tested with a
+  stub model and mocked HTTP, and the Python and Go implementations are checked against the same
+  cases. No test or recorded run uses a live Jev or Kev, and nothing measures whether triage saves
+  cycles or ever makes the wrong call. The accuracy and calibration figures in
+  [25-system-one.md](25-system-one.md) are published by TypeSafe, Kev's authors and independent
+  testers, not measured by LHA.
 - **Real-service paths without CI coverage.** The E2B sandbox is tested only against a fake SDK;
   the real E2B service is never run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama and Voyage embedders are tested
   against mocked HTTP, not live endpoints, so no test shows how much a real embedding model

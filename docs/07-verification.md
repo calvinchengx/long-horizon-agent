@@ -45,6 +45,10 @@ a vacuous pass: a mission cannot be configured so that items become `done` witho
 `Checklist.record_success` additionally refuses to mark an item done with an empty list of
 passing gating checks.
 
+Only these rules mark an item done. With [System One triage](25-system-one.md) on, a model's
+answer can split or block an item that keeps failing, earlier than the failure limit. It can never
+mark one done: a split's last child still carries the parent's witnesses.
+
 ## When verification runs
 
 Within a cycle (see [architecture](05-architecture.md#the-cycle)):

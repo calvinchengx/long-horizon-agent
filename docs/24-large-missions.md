@@ -18,6 +18,7 @@ webhook and the mission store have their own tests.
 | A real toolchain and package downloads, nothing else | Sandbox image + egress allow-list | `LHA_SANDBOX_IMAGE`, `LHA_SANDBOX_EGRESS` |
 | Knowledge of an API the model has not memorized | Vendored references | `lha vendor`, `--reference` |
 | Coarse items that turn out too big | Replanning | `LHA_MAX_REPLANS`, `LHA_MAX_SPLIT_DEPTH` |
+| Stalled items noticed before the failure limit (optional) | System One triage | `LHA_SYSTEM_ONE_BACKEND` |
 | Pushes and releases stay a human decision | Durable approvals | `lha mission-approve` |
 | Someone notices when a gate is waiting | Escalation ladder and webhook | `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL` |
 | Spend and status you can query after the fact | Mission store | `lha missions`, `lha costs` |
@@ -176,6 +177,12 @@ lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decis
   2–6 smaller children (`03.1`, `03.2`, ...). The parent's witnesses move to the last child, so
   splitting can make work tractable but never makes it pass more easily. At most `LHA_MAX_REPLANS`
   splits per mission (default 20), nested at most `LHA_MAX_SPLIT_DEPTH` levels (default 2).
+- **Triage (optional).** With a System One model configured (`LHA_SYSTEM_ONE_BACKEND`; a
+  self-hosted Kev keeps the mission's text on your machine), an item that fails twice is triaged.
+  If the model is confident it is too big, it is split then; if the environment is at fault (a
+  missing tool, no network), it is blocked for a human then. On a mission with hundreds of items
+  this saves the attempts that cannot succeed. Each answer is committed as a `system_one` event.
+  See [System One decision models](25-system-one.md).
 - **Deadlock.** If nothing is actionable, the mission waits up to `--deadlock-gate-hours` for
   `retry` (unblock and continue), `abort`, or `impossible` (a final checkpoint records the mission
   as impossible). Unanswered, it applies `--deadlock-default` (`LHA_DEADLOCK_GATE_DEFAULT`,

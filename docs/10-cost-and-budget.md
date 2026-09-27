@@ -156,7 +156,9 @@ Two mechanisms stop repeated failure on the same item:
 - **Per-item failure budget.** `Checklist.record_failure()`
   ([contracts/state.py](../python/src/lha/contracts/state.py)) increments
   `consecutive_failures`. At `max_consecutive_failures` it sets the item to `blocked`. `AgentLoop`
-  defaults this to 3, and no entry point overrides it. Blocked items are skipped, so independent
+  defaults this to 3, and no entry point overrides it. With [System One triage](25-system-one.md)
+  on, a confident answer can block or split the item after `LHA_SYSTEM_ONE_TRIAGE_MIN_FAILURES`
+  (default 2) instead, which saves the remaining attempts. Blocked items are skipped, so independent
   items continue. When only blocked items remain, the mission is deadlocked. `Checklist.unblock()`
   (or the durable `unblock_items` activity) resets the item to `todo` with a fresh count. This
   applies on every path.
@@ -172,6 +174,13 @@ In the durable workflow, `ops.lifecycle.should_declare_impossible()` compares th
 consecutive non-passing verified cycles on one item (`MissionState.fail_streak`) with
 `MissionInput.impossible_after_failures` (default 3). When it is reached, the deadlock gate
 recommends `impossible` ([Running on Temporal](14-running-on-temporal.md#5-gates-sleep-and-abort)).
+
+System One calls ([25](25-system-one.md)) are metered like model calls, under the ledger role
+`system_one`. Each is authorized against its worst case before it is sent and recorded at the
+input tokens it reported (output is free). The price is `LHA_SYSTEM_ONE_PRICE_IN_PER_MTOK`, or
+$0.042 per million for TypeSafe's host and $0 on loopback. Any other endpoint must set a price,
+because an unpriced call would make the whole ledger unverifiable. A call the budget refuses is
+skipped; it never stops the run.
 
 ## Cost ledger
 

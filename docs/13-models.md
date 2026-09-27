@@ -19,6 +19,12 @@ the budget governor checks each call's worst-case cost *before* it is sent and r
 cost *after*. Token counts come from the provider response (`usage`); nothing is estimated after
 the fact.
 
+These are the generative models that do the work. LHA can also use a second, separate kind of
+model: a System One decision model (TypeSafe's Jev, or a self-hosted Kev), set with
+`LHA_SYSTEM_ONE_BACKEND`. It generates no text; it answers typed questions with calibrated
+probabilities, and LHA uses it only for stall triage and memory reranking. It is not a
+`ModelProvider` and cannot drive a cycle. See [System One decision models](25-system-one.md).
+
 ## `stub`: tests and CI only
 
 `StubModel` ([`model/stub.py`](../python/src/lha/model/stub.py)) is a deterministic test double.
