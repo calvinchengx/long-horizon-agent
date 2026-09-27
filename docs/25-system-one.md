@@ -138,6 +138,31 @@ a model's answer), strict answer parsing, the confidence formulas, the triage qu
 action table, reranking, and endpoint prices. In Go, `LHA_MEMORY_RERANK=system_one` is the one
 reranker that actually reranks (Go has no cross-encoder).
 
+## Measured
+
+On 27 September 2026 we ran one small experiment to see whether triage lowers the cost of a
+mission. The lead was `gemma4` on Ollama and the System One model was a self-hosted Kev-4B. There
+were three arms: triage off, triage at the default 0.9 threshold, and triage at 0.7. Each arm ran
+the same three-item roadmap twice, with a cap of 20 cycles per mission. The roadmap had an
+ordinary item, a deliberately oversized item and an item that could never pass in the sandbox
+(it needs a host the sandbox cannot reach).
+
+**Triage never acted.** Across ten triage calls on real failures, Kev-4B's confidence ranged from
+0.09 to 0.71, so no answer reached either threshold. Its answers were also mostly wrong for the
+failures it saw: "defect" 3 times, "scope" 5 and "environment" once, for failures of an ordinary
+item. With nothing acting, the arms differed only by about 0.4 s per call.
+
+The missions' cost varied 3–4× within each arm, from $0.44 to $4.84 at Claude Sonnet 4.6 prices.
+That spread came from the lead model: in four of the six runs it stalled on the easiest item, on
+which every other item depended. The item triage should catch, the impossible one, was reached in
+only one run, which had triage off. There the replanner split it into three children that could
+not pass either, which is the waste triage is meant to prevent.
+
+What this shows: with a small local lead and an uncalibrated Kev-4B, triage costs almost nothing
+and saves nothing. It does not show what a stronger lead model, a better-calibrated System One
+model, or a model fine-tuned on LHA's own failures would do. Kev's authors recommend fine-tuning
+on your own labels, and LHA records the evidence needed for that in every `system_one` event.
+
 ## Not built yet
 
 These uses were considered and left for later, because each needs thresholds measured on real

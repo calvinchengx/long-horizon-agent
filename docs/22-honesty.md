@@ -107,8 +107,10 @@ a blocked item are.
   mission (each refuses a task queue the other polls).
 - **System One triage improves missions.** The client, triage and reranker are tested with a
   stub model and mocked HTTP, and the Python and Go implementations are checked against the same
-  cases. No test or recorded run uses a live Jev or Kev, and nothing measures whether triage saves
-  cycles or ever makes the wrong call. The accuracy and calibration figures in
+  cases. One small experiment with a live, self-hosted Kev-4B (6 missions, 27 September 2026)
+  measured **no saving**: triage never acted, because Kev-4B was never confident enough about a
+  real failure ([details](25-system-one.md#measured)). Nothing shows triage saving cycles with
+  another model or setup. The accuracy and calibration figures in
   [25-system-one.md](25-system-one.md) are published by TypeSafe, Kev's authors and independent
   testers, not measured by LHA.
 - **Real-service paths without CI coverage.** The E2B sandbox is tested only against a fake SDK;
