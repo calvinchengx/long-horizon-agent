@@ -102,7 +102,8 @@ export LHA_OPENAI_PRICE_OUT_PER_MTOK=...
 
 The configured prices apply to whatever model the endpoint reports in its response. Requests
 always carry `max_tokens` (the call's value, else 8192) so the meter's worst-case reservation
-bounds the real output. The HTTP timeout is 120 s.
+bounds the real output. The HTTP timeout is 120 s (`LHA_MODEL_TIMEOUT_S`; it also applies to
+Ollama).
 
 ## `claude`: the Anthropic Messages API
 
@@ -240,7 +241,14 @@ backends retry transient failures up to 3 times (4 attempts in total):
 The delay is the server's `Retry-After` (seconds or HTTP date) if present, else 1 s, 2 s, 4 s;
 every delay is capped at 60 s. After the last retry the error propagates. Inside a Temporal
 activity the attempt then fails and Temporal's own retry policy takes over (see
-[14-running-on-temporal.md](14-running-on-temporal.md)).
+[14-running-on-temporal.md](14-running-on-temporal.md)); when that is spent too, the mission parks
+in `DEGRADED_PARK` and probes the model until it answers. A local run (`lha run-local`,
+`lha mission`) has no durable timer to wait on, so it stops instead: `stopped_reason` is
+`model unavailable: <error> after <n> attempts` (for example `ReadTimeout after 4 attempts`,
+counting every call across retries and the fallback chain), the mission row is `ABORTED`, the
+committed cycles stay as they are and the command exits `1`. If the Planner's call is the one that
+fails, `lha mission` prints `error: model unavailable: ...` and exits `1` before the mission
+starts.
 
 **Failover** ([`model/failover.py`](../python/src/lha/model/failover.py)). `FailoverModel` wraps an
 ordered list of providers: on a transient error it tries the next provider; after a full round of

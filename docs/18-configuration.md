@@ -50,6 +50,7 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 | `LHA_ALLOW_UNPRICED_MODELS` | bool | `false` | let the governor run calls whose cost cannot be computed |
 | `LHA_FALLBACK_MODELS` | comma-separated list | empty | ordered fallback chain of `backend:model[@in/out]` entries; non-empty makes `build_provider` return a `FailoverModel` |
 | `LHA_FALLBACK_MAX_ROUNDS` | int (>= 1) | `2` | rounds over the whole chain before the last transient error is raised |
+| `LHA_MODEL_TIMEOUT_S` | float (> 0) | `120.0` | client timeout of one Ollama / OpenAI-compatible model call, in seconds. Raise it when a loaded machine makes local models slow; each timed-out call is retried (see [13-models.md](13-models.md#retries-and-failover)) |
 | `LHA_MODEL_PROBE_TIMEOUT_S` | float (> 0) | `10.0` | timeout of the model health probe a parked durable mission runs |
 | `LHA_LEAD_ENGINE` | `loop` \| `claude_code` | `loop` | `claude_code` runs each lead cycle as one `claude -p` session |
 | `LHA_CLAUDE_CODE_BIN` | string | `claude` | the Claude Code executable |

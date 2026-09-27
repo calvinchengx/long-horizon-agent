@@ -42,6 +42,7 @@ Event kinds emitted today:
 | `governor_block` | runner, orchestrator | `reason` |
 | `deadlocked` | runner, orchestrator | `reason` |
 | `loop_detected` | runner | `item_id` |
+| `model_unavailable` | runner | `reason` (`model unavailable: <error> after <n> attempts`; the run stops) |
 | `decision_chain_invalid` | runner, orchestrator | `reason` (the committed decision log failed verification; the run stops) |
 | `research`, `research_failed` | orchestrator | research fan-out results |
 | `reflection` | orchestrator | `item` |
