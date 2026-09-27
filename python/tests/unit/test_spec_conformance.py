@@ -610,3 +610,78 @@ def test_wire_bytes(tmp_path: Path) -> None:
             kind=f"gate_{notice.event}", cycle_id=f"gate:{notice.gate_id}", payload=payload
         )
         assert event.model_dump_json() == case["event"]
+
+
+def test_system_one_wire() -> None:
+    from lha.contracts.memory import MemoryRecord, RetrievalHit
+    from lha.contracts.state import ChecklistItem
+    from lha.contracts.system_one import ChoiceAnswer, SystemOneError
+    from lha.memory.rerank import apply_relevance, system_one_rerank_request
+    from lha.safety.egress import parse_url
+    from lha.systemone import triage
+    from lha.systemone.client import default_price_in_per_mtok, is_local_endpoint
+    from lha.systemone.wire import (
+        choice_confidence,
+        parse_response,
+        question_body,
+        question_from_wire,
+        request_body,
+        score_confidence,
+    )
+
+    spec = _load("systemone/wire.json")
+    for case in spec["requests"]:
+        questions = {qid: question_from_wire(q) for qid, q in case["questions"].items()}
+        if case["error"]:
+            with pytest.raises(SystemOneError):
+                request_body(case["model"], case["state"], questions)
+        else:
+            assert request_body(case["model"], case["state"], questions) == case["body"]
+    asked = {qid: question_from_wire(q) for qid, q in spec["questions"].items()}
+    for case in spec["responses"]:
+        if case["error"]:
+            with pytest.raises(SystemOneError):
+                parse_response(case["response"], asked)
+        else:
+            assert parse_response(case["response"], asked).model_dump() == case["result"]
+    for case in spec["choice_confidence"]:
+        assert choice_confidence(case["probabilities"]) == case["confidence"]
+    for case in spec["score_confidence"]:
+        assert score_confidence(case["probabilities"]) == case["confidence"]
+    assert spec["triage"]["question"] == question_body(triage.QUESTION)
+    for case in spec["triage"]["actions"]:
+        probs = {k: (0.9 if k == case["choice"] else 0.05) for k in triage.CAUSES}
+        answer = ChoiceAnswer(
+            choice=case["choice"], probabilities=probs, confidence=case["confidence"]
+        )
+        action = triage.triage_action(
+            answer, threshold=case["threshold"], can_split=case["can_split"]
+        )
+        assert action == case["action"]
+    for case in spec["triage"]["states"]:
+        state = triage.triage_state(
+            ChecklistItem(**case["item"]),
+            case["latest"],
+            case["previous"],
+            max_chars=case["max_chars"],
+        )
+        assert state == case["state"]
+
+    def hits(texts: list[str]) -> list[RetrievalHit]:
+        return [
+            RetrievalHit(record=MemoryRecord(id=f"r{i}", kind="semantic", text=t), score=0.1)
+            for i, t in enumerate(texts)
+        ]
+
+    for case in spec["rerank"]["requests"]:
+        state, questions = system_one_rerank_request(case["query"], hits(case["texts"]))
+        assert state == case["state"]
+        assert {qid: question_body(q) for qid, q in questions.items()} == case["questions"]
+    for case in spec["rerank"]["apply"]:
+        texts = [f"t{i}" for i in range(len(case["relevance"]))]
+        ranked = apply_relevance(hits(texts), case["relevance"], k=case["k"], min_p=case["min_p"])
+        assert [int(h.record.id[1:]) for h in ranked] == case["order"]
+        assert [h.score for h in ranked] == case["scores"]
+    for case in spec["endpoints"]:
+        assert is_local_endpoint(parse_url(case["endpoint"])) == case["local"]
+        assert default_price_in_per_mtok(case["endpoint"]) == case["default_price_in_per_mtok"]

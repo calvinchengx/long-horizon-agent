@@ -2059,6 +2059,304 @@ def export_wire_bytes() -> None:
     )
 
 
+def export_system_one() -> None:
+    """spec/systemone/wire.json: System One request bodies, strict answer parsing, confidence,
+    the stall-triage question and action table, reranking, endpoints and default prices."""
+    from lha.contracts.state import ChecklistItem as _Item
+    from lha.contracts.system_one import ChoiceAnswer, SystemOneError
+    from lha.memory.rerank import apply_relevance, system_one_rerank_request
+    from lha.safety.egress import parse_url
+    from lha.systemone import triage
+    from lha.systemone.client import default_price_in_per_mtok, is_local_endpoint
+    from lha.systemone.wire import (
+        MAX_CHOICE_OPTIONS,
+        MAX_SCORE_LEVELS,
+        MIN_SCORE_LEVELS,
+        SUM_TOLERANCE,
+        choice_confidence,
+        parse_response,
+        question_body,
+        question_from_wire,
+        request_body,
+        score_confidence,
+    )
+
+    noul = {"type": "noul", "instructions": "Is it urgent?"}
+    noul_c = {
+        "type": "noul",
+        "instructions": {"record": {"name": "Ann"}, "question": "Is `record` a person?"},
+        "criteria": {"true": "A named person", "false": "Anything else"},
+    }
+    choice = {
+        "type": "choice",
+        "instructions": "Which team?",
+        "criteria": {"billing": "Payments", "shipping": None, "déjà": ["a", 1]},
+    }
+    score = {"type": "score", "instructions": "How upset?", "criteria": ["calm", "upset", "angry"]}
+    request_cases: list[tuple[str, object, dict[str, Any]]] = [
+        ("jev-1.13.0", "Help! Payouts failing.", {"urgent": noul}),
+        (
+            "kev-latest",
+            {"ticket": {"id": 7, "tags": ["a", None, True, 1.5]}},
+            {"a": noul_c, "b": choice, "c": score},
+        ),
+        ("m", ["x", "y"], {}),
+        ("m", "s", {"q": {**choice, "criteria": {}}}),
+        ("m", "s", {"q": {**choice, "criteria": {str(i): None for i in range(256)}}}),
+        ("m", "s", {"q": {**choice, "criteria": {str(i): None for i in range(255)}}}),
+        ("m", "s", {"q": {**score, "criteria": ["one"]}}),
+        ("m", "s", {"q": {**score, "criteria": [str(i) for i in range(11)]}}),
+        ("m", "s", {"q": {**score, "criteria": [str(i) for i in range(10)]}}),
+    ]
+    requests = []
+    for model, state, qs in request_cases:
+        questions = {qid: question_from_wire(q) for qid, q in qs.items()}
+        try:
+            body: object = request_body(model, state, questions)
+            error = False
+        except SystemOneError:
+            body, error = None, True
+        requests.append(
+            {"model": model, "state": state, "questions": qs, "body": body, "error": error}
+        )
+
+    asked = {
+        "u": noul,
+        "t": {**choice, "criteria": {"billing": None, "shipping": None}},
+        "s": score,
+    }
+    good = {
+        "u": {"type": "noul", "noul": 0.95},
+        "t": {
+            "type": "choice",
+            "choice": "billing",
+            "probabilities": {"billing": 0.88, "shipping": 0.12},
+            "confidence": 0.76,
+        },
+        "s": {
+            "type": "score",
+            "score": 1.05,
+            "legend": {"0": "calm"},
+            "probabilities": {"0": 0.0, "1": 0.95, "2": 0.05},
+            "confidence": 0.92,
+        },
+    }
+    variants: list[object] = [
+        {
+            "model": "jev-1.13.0",
+            "answers": good,
+            "usage": {"input_tokens": 296, "output_tokens": 20},
+        },
+        {"answers": {**good, "extra": {"type": "noul", "noul": 2}}},
+        {"model": "x", "answers": good, "usage": None},
+        {"answers": {**good, "u": {"type": "noul", "noul": 0}}},
+        {"answers": {**good, "u": {"type": "noul", "noul": 1}}},
+        {
+            "answers": {
+                **good,
+                "t": {**good["t"], "probabilities": {"billing": 0.96, "shipping": 0.0}},
+            }
+        },
+        [],
+        {"answers": []},
+        {"model": 3, "answers": good},
+        {"answers": good, "usage": []},
+        {"answers": good, "usage": {"input_tokens": -1}},
+        {"answers": good, "usage": {"input_tokens": 1.5}},
+        {"answers": good, "usage": {"output_tokens": True}},
+        {"answers": {k: v for k, v in good.items() if k != "s"}},
+        {"answers": {**good, "u": "yes"}},
+        {"answers": {**good, "u": {"type": "choice", "noul": 0.5}}},
+        {"answers": {**good, "u": {"type": "noul", "noul": 1.01}}},
+        {"answers": {**good, "u": {"type": "noul", "noul": "0.5"}}},
+        {"answers": {**good, "u": {"type": "noul", "noul": False}}},
+        {"answers": {**good, "u": {"type": "noul"}}},
+        {"answers": {**good, "t": {**good["t"], "choice": "returns"}}},
+        {"answers": {**good, "t": {**good["t"], "choice": None}}},
+        {"answers": {**good, "t": {**good["t"], "probabilities": {"billing": 1.0}}}},
+        {
+            "answers": {
+                **good,
+                "t": {**good["t"], "probabilities": {"billing": 0.5, "shipping": 0.2}},
+            }
+        },
+        {"answers": {**good, "t": {**good["t"], "probabilities": []}}},
+        {"answers": {**good, "t": {**good["t"], "confidence": 1.2}}},
+        {"answers": {**good, "s": {**good["s"], "score": 2.01}}},
+        {"answers": {**good, "s": {**good["s"], "score": -0.01}}},
+        {"answers": {**good, "s": {**good["s"], "probabilities": {"0": 0.5, "1": 0.5}}}},
+        {"answers": {**good, "s": {**good["s"], "confidence": None}}},
+    ]
+    parsed_questions = {qid: question_from_wire(q) for qid, q in asked.items()}
+    responses = []
+    for data in variants:
+        try:
+            result: object = parse_response(data, parsed_questions).model_dump()
+            error = False
+        except SystemOneError:
+            result, error = None, True
+        responses.append({"response": data, "result": result, "error": error})
+
+    choice_probs = [
+        [1.0],
+        [0.5, 0.5],
+        [0.88, 0.12],
+        [0.47, 0.28, 0.25],
+        [0.1, 0.1, 0.8],
+        [0.25] * 4,
+        [0.0, 1.0, 0.0],
+    ]
+    score_probs = [
+        [1.0],
+        [0.0, 0.95, 0.05],
+        [0.0, 0.56, 0.44],
+        [1 / 3] * 3,
+        [0.5, 0.0, 0.5],
+        [0.1, 0.2, 0.3, 0.4],
+        [0.0, 0.0, 1.0],
+        [0.5, 0.5],
+    ]
+
+    def answer(probs: dict[str, float], confidence: float) -> ChoiceAnswer:
+        return ChoiceAnswer(
+            choice=max(probs, key=lambda k: probs[k]), probabilities=probs, confidence=confidence
+        )
+
+    action_cases = [
+        (choice_, conf, threshold, can_split)
+        for choice_ in triage.CAUSES
+        for conf in (0.5, 0.89, 0.9, 0.99)
+        for threshold in (0.9, 0.0)
+        for can_split in (True, False)
+    ]
+    actions = []
+    for choice_, conf, threshold, can_split in action_cases:
+        probs = {k: (0.9 if k == choice_ else 0.05) for k in triage.CAUSES}
+        actions.append(
+            {
+                "choice": choice_,
+                "confidence": conf,
+                "threshold": threshold,
+                "can_split": can_split,
+                "action": triage.triage_action(
+                    answer(probs, conf), threshold=threshold, can_split=can_split
+                ),
+            }
+        )
+    long_failure = "E   AssertionError: expected 3\n" * 200 + "key sk-ant-api03-" + "A" * 40
+    state_cases = [
+        ({"id": "01", "description": "Add greet", "witnesses": ["go:TestHello"]}, "boom", "", 3000),
+        (
+            {"id": "02", "description": "token ghp_" + "b" * 36, "witnesses": []},
+            long_failure,
+            "déjà vu 🐟",
+            100,
+        ),
+        ({"id": "03", "description": "x"}, "", "", 5),
+    ]
+    states = [
+        {
+            "item": item,
+            "latest": latest,
+            "previous": previous,
+            "max_chars": limit,
+            "state": triage.triage_state(_Item(**item), latest, previous, max_chars=limit),
+        }
+        for item, latest, previous, limit in state_cases
+    ]
+
+    from lha.contracts.memory import MemoryRecord, RetrievalHit
+
+    def hits(texts: list[str]) -> list[RetrievalHit]:
+        return [
+            RetrievalHit(record=MemoryRecord(id=f"r{i}", kind="semantic", text=t), score=0.1)
+            for i, t in enumerate(texts)
+        ]
+
+    rerank_requests = []
+    for query, texts in [
+        ("fix the parser", ["the parser fails on tabs", "unrelated"]),
+        ("q Bearer abcdefghijklmnopqrstuvwxyz0123", ["x" * 2000 + "tail"]),
+    ]:
+        state, questions = system_one_rerank_request(query, hits(texts))
+        rerank_requests.append(
+            {
+                "query": query,
+                "texts": texts,
+                "state": state,
+                "questions": {qid: question_body(q) for qid, q in questions.items()},
+            }
+        )
+    apply_cases = [
+        ([0.2, 0.9, 0.9, 0.05], 2, 0.1),
+        ([0.2, 0.9, 0.9, 0.05], None, 0.1),
+        ([0.2, 0.9, 0.9, 0.05], None, 0.0),
+        ([0.5, 0.5, 0.5], 1, 0.5),
+        ([0.0], None, 0.0),
+        ([0.3, 0.1], 0, 0.0),
+    ]
+    applied = []
+    for relevance, k, min_p in apply_cases:
+        ranked = apply_relevance(
+            hits([f"t{i}" for i in range(len(relevance))]), relevance, k=k, min_p=min_p
+        )
+        applied.append(
+            {
+                "relevance": relevance,
+                "k": k,
+                "min_p": min_p,
+                "order": [int(h.record.id[1:]) for h in ranked],
+                "scores": [h.score for h in ranked],
+            }
+        )
+    endpoints = [
+        "https://api.typesafe.ai/v1/systemone",
+        "https://API.TypeSafe.ai:443/v1/systemone",
+        "http://127.0.0.1:8009/v1/systemone",
+        "http://localhost:8009/v1/systemone",
+        "http://kev.localhost/v1/systemone",
+        "http://[::1]:8009/v1/systemone",
+        "https://kev.example.com/v1/systemone",
+        "http://10.0.0.2/v1/systemone",
+    ]
+    _write(
+        "systemone/wire.json",
+        {
+            "limits": {
+                "max_choice_options": MAX_CHOICE_OPTIONS,
+                "min_score_levels": MIN_SCORE_LEVELS,
+                "max_score_levels": MAX_SCORE_LEVELS,
+                "sum_tolerance": SUM_TOLERANCE,
+            },
+            "requests": requests,
+            "questions": asked,
+            "responses": responses,
+            "choice_confidence": [
+                {"probabilities": p, "confidence": choice_confidence(p)} for p in choice_probs
+            ],
+            "score_confidence": [
+                {"probabilities": p, "confidence": score_confidence(p)} for p in score_probs
+            ],
+            "triage": {
+                "question_id": triage.QUESTION_ID,
+                "question": question_body(triage.QUESTION),
+                "max_failure_chars": triage.MAX_FAILURE_CHARS,
+                "actions": actions,
+                "states": states,
+            },
+            "rerank": {"requests": rerank_requests, "apply": applied},
+            "endpoints": [
+                {
+                    "endpoint": e,
+                    "local": is_local_endpoint(parse_url(e)),
+                    "default_price_in_per_mtok": default_price_in_per_mtok(e),
+                }
+                for e in endpoints
+            ],
+        },
+    )
+
+
 def main() -> None:
     export_wire_bytes()
     export_memory()
@@ -2080,6 +2378,7 @@ def main() -> None:
     export_vendor_paths()
     export_agent_prompts()
     export_agent_org()
+    export_system_one()
 
 
 if __name__ == "__main__":

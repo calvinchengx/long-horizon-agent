@@ -1,0 +1,2921 @@
+{
+ "limits": {
+  "max_choice_options": 255,
+  "min_score_levels": 2,
+  "max_score_levels": 10,
+  "sum_tolerance": 0.05
+ },
+ "requests": [
+  {
+   "model": "jev-1.13.0",
+   "state": "Help! Payouts failing.",
+   "questions": {
+    "urgent": {
+     "type": "noul",
+     "instructions": "Is it urgent?"
+    }
+   },
+   "body": {
+    "model": "jev-1.13.0",
+    "state": "Help! Payouts failing.",
+    "questions": {
+     "urgent": {
+      "type": "noul",
+      "instructions": "Is it urgent?"
+     }
+    }
+   },
+   "error": false
+  },
+  {
+   "model": "kev-latest",
+   "state": {
+    "ticket": {
+     "id": 7,
+     "tags": [
+      "a",
+      null,
+      true,
+      1.5
+     ]
+    }
+   },
+   "questions": {
+    "a": {
+     "type": "noul",
+     "instructions": {
+      "record": {
+       "name": "Ann"
+      },
+      "question": "Is `record` a person?"
+     },
+     "criteria": {
+      "true": "A named person",
+      "false": "Anything else"
+     }
+    },
+    "b": {
+     "type": "choice",
+     "instructions": "Which team?",
+     "criteria": {
+      "billing": "Payments",
+      "shipping": null,
+      "déjà": [
+       "a",
+       1
+      ]
+     }
+    },
+    "c": {
+     "type": "score",
+     "instructions": "How upset?",
+     "criteria": [
+      "calm",
+      "upset",
+      "angry"
+     ]
+    }
+   },
+   "body": {
+    "model": "kev-latest",
+    "state": {
+     "ticket": {
+      "id": 7,
+      "tags": [
+       "a",
+       null,
+       true,
+       1.5
+      ]
+     }
+    },
+    "questions": {
+     "a": {
+      "type": "noul",
+      "instructions": {
+       "record": {
+        "name": "Ann"
+       },
+       "question": "Is `record` a person?"
+      },
+      "criteria": {
+       "true": "A named person",
+       "false": "Anything else"
+      }
+     },
+     "b": {
+      "type": "choice",
+      "instructions": "Which team?",
+      "criteria": {
+       "billing": "Payments",
+       "shipping": null,
+       "déjà": [
+        "a",
+        1
+       ]
+      }
+     },
+     "c": {
+      "type": "score",
+      "instructions": "How upset?",
+      "criteria": [
+       "calm",
+       "upset",
+       "angry"
+      ]
+     }
+    }
+   },
+   "error": false
+  },
+  {
+   "model": "m",
+   "state": [
+    "x",
+    "y"
+   ],
+   "questions": {},
+   "body": null,
+   "error": true
+  },
+  {
+   "model": "m",
+   "state": "s",
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Which team?",
+     "criteria": {}
+    }
+   },
+   "body": null,
+   "error": true
+  },
+  {
+   "model": "m",
+   "state": "s",
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Which team?",
+     "criteria": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null,
+      "11": null,
+      "12": null,
+      "13": null,
+      "14": null,
+      "15": null,
+      "16": null,
+      "17": null,
+      "18": null,
+      "19": null,
+      "20": null,
+      "21": null,
+      "22": null,
+      "23": null,
+      "24": null,
+      "25": null,
+      "26": null,
+      "27": null,
+      "28": null,
+      "29": null,
+      "30": null,
+      "31": null,
+      "32": null,
+      "33": null,
+      "34": null,
+      "35": null,
+      "36": null,
+      "37": null,
+      "38": null,
+      "39": null,
+      "40": null,
+      "41": null,
+      "42": null,
+      "43": null,
+      "44": null,
+      "45": null,
+      "46": null,
+      "47": null,
+      "48": null,
+      "49": null,
+      "50": null,
+      "51": null,
+      "52": null,
+      "53": null,
+      "54": null,
+      "55": null,
+      "56": null,
+      "57": null,
+      "58": null,
+      "59": null,
+      "60": null,
+      "61": null,
+      "62": null,
+      "63": null,
+      "64": null,
+      "65": null,
+      "66": null,
+      "67": null,
+      "68": null,
+      "69": null,
+      "70": null,
+      "71": null,
+      "72": null,
+      "73": null,
+      "74": null,
+      "75": null,
+      "76": null,
+      "77": null,
+      "78": null,
+      "79": null,
+      "80": null,
+      "81": null,
+      "82": null,
+      "83": null,
+      "84": null,
+      "85": null,
+      "86": null,
+      "87": null,
+      "88": null,
+      "89": null,
+      "90": null,
+      "91": null,
+      "92": null,
+      "93": null,
+      "94": null,
+      "95": null,
+      "96": null,
+      "97": null,
+      "98": null,
+      "99": null,
+      "100": null,
+      "101": null,
+      "102": null,
+      "103": null,
+      "104": null,
+      "105": null,
+      "106": null,
+      "107": null,
+      "108": null,
+      "109": null,
+      "110": null,
+      "111": null,
+      "112": null,
+      "113": null,
+      "114": null,
+      "115": null,
+      "116": null,
+      "117": null,
+      "118": null,
+      "119": null,
+      "120": null,
+      "121": null,
+      "122": null,
+      "123": null,
+      "124": null,
+      "125": null,
+      "126": null,
+      "127": null,
+      "128": null,
+      "129": null,
+      "130": null,
+      "131": null,
+      "132": null,
+      "133": null,
+      "134": null,
+      "135": null,
+      "136": null,
+      "137": null,
+      "138": null,
+      "139": null,
+      "140": null,
+      "141": null,
+      "142": null,
+      "143": null,
+      "144": null,
+      "145": null,
+      "146": null,
+      "147": null,
+      "148": null,
+      "149": null,
+      "150": null,
+      "151": null,
+      "152": null,
+      "153": null,
+      "154": null,
+      "155": null,
+      "156": null,
+      "157": null,
+      "158": null,
+      "159": null,
+      "160": null,
+      "161": null,
+      "162": null,
+      "163": null,
+      "164": null,
+      "165": null,
+      "166": null,
+      "167": null,
+      "168": null,
+      "169": null,
+      "170": null,
+      "171": null,
+      "172": null,
+      "173": null,
+      "174": null,
+      "175": null,
+      "176": null,
+      "177": null,
+      "178": null,
+      "179": null,
+      "180": null,
+      "181": null,
+      "182": null,
+      "183": null,
+      "184": null,
+      "185": null,
+      "186": null,
+      "187": null,
+      "188": null,
+      "189": null,
+      "190": null,
+      "191": null,
+      "192": null,
+      "193": null,
+      "194": null,
+      "195": null,
+      "196": null,
+      "197": null,
+      "198": null,
+      "199": null,
+      "200": null,
+      "201": null,
+      "202": null,
+      "203": null,
+      "204": null,
+      "205": null,
+      "206": null,
+      "207": null,
+      "208": null,
+      "209": null,
+      "210": null,
+      "211": null,
+      "212": null,
+      "213": null,
+      "214": null,
+      "215": null,
+      "216": null,
+      "217": null,
+      "218": null,
+      "219": null,
+      "220": null,
+      "221": null,
+      "222": null,
+      "223": null,
+      "224": null,
+      "225": null,
+      "226": null,
+      "227": null,
+      "228": null,
+      "229": null,
+      "230": null,
+      "231": null,
+      "232": null,
+      "233": null,
+      "234": null,
+      "235": null,
+      "236": null,
+      "237": null,
+      "238": null,
+      "239": null,
+      "240": null,
+      "241": null,
+      "242": null,
+      "243": null,
+      "244": null,
+      "245": null,
+      "246": null,
+      "247": null,
+      "248": null,
+      "249": null,
+      "250": null,
+      "251": null,
+      "252": null,
+      "253": null,
+      "254": null,
+      "255": null
+     }
+    }
+   },
+   "body": null,
+   "error": true
+  },
+  {
+   "model": "m",
+   "state": "s",
+   "questions": {
+    "q": {
+     "type": "choice",
+     "instructions": "Which team?",
+     "criteria": {
+      "0": null,
+      "1": null,
+      "2": null,
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null,
+      "11": null,
+      "12": null,
+      "13": null,
+      "14": null,
+      "15": null,
+      "16": null,
+      "17": null,
+      "18": null,
+      "19": null,
+      "20": null,
+      "21": null,
+      "22": null,
+      "23": null,
+      "24": null,
+      "25": null,
+      "26": null,
+      "27": null,
+      "28": null,
+      "29": null,
+      "30": null,
+      "31": null,
+      "32": null,
+      "33": null,
+      "34": null,
+      "35": null,
+      "36": null,
+      "37": null,
+      "38": null,
+      "39": null,
+      "40": null,
+      "41": null,
+      "42": null,
+      "43": null,
+      "44": null,
+      "45": null,
+      "46": null,
+      "47": null,
+      "48": null,
+      "49": null,
+      "50": null,
+      "51": null,
+      "52": null,
+      "53": null,
+      "54": null,
+      "55": null,
+      "56": null,
+      "57": null,
+      "58": null,
+      "59": null,
+      "60": null,
+      "61": null,
+      "62": null,
+      "63": null,
+      "64": null,
+      "65": null,
+      "66": null,
+      "67": null,
+      "68": null,
+      "69": null,
+      "70": null,
+      "71": null,
+      "72": null,
+      "73": null,
+      "74": null,
+      "75": null,
+      "76": null,
+      "77": null,
+      "78": null,
+      "79": null,
+      "80": null,
+      "81": null,
+      "82": null,
+      "83": null,
+      "84": null,
+      "85": null,
+      "86": null,
+      "87": null,
+      "88": null,
+      "89": null,
+      "90": null,
+      "91": null,
+      "92": null,
+      "93": null,
+      "94": null,
+      "95": null,
+      "96": null,
+      "97": null,
+      "98": null,
+      "99": null,
+      "100": null,
+      "101": null,
+      "102": null,
+      "103": null,
+      "104": null,
+      "105": null,
+      "106": null,
+      "107": null,
+      "108": null,
+      "109": null,
+      "110": null,
+      "111": null,
+      "112": null,
+      "113": null,
+      "114": null,
+      "115": null,
+      "116": null,
+      "117": null,
+      "118": null,
+      "119": null,
+      "120": null,
+      "121": null,
+      "122": null,
+      "123": null,
+      "124": null,
+      "125": null,
+      "126": null,
+      "127": null,
+      "128": null,
+      "129": null,
+      "130": null,
+      "131": null,
+      "132": null,
+      "133": null,
+      "134": null,
+      "135": null,
+      "136": null,
+      "137": null,
+      "138": null,
+      "139": null,
+      "140": null,
+      "141": null,
+      "142": null,
+      "143": null,
+      "144": null,
+      "145": null,
+      "146": null,
+      "147": null,
+      "148": null,
+      "149": null,
+      "150": null,
+      "151": null,
+      "152": null,
+      "153": null,
+      "154": null,
+      "155": null,
+      "156": null,
+      "157": null,
+      "158": null,
+      "159": null,
+      "160": null,
+      "161": null,
+      "162": null,
+      "163": null,
+      "164": null,
+      "165": null,
+      "166": null,
+      "167": null,
+      "168": null,
+      "169": null,
+      "170": null,
+      "171": null,
+      "172": null,
+      "173": null,
+      "174": null,
+      "175": null,
+      "176": null,
+      "177": null,
+      "178": null,
+      "179": null,
+      "180": null,
+      "181": null,
+      "182": null,
+      "183": null,
+      "184": null,
+      "185": null,
+      "186": null,
+      "187": null,
+      "188": null,
+      "189": null,
+      "190": null,
+      "191": null,
+      "192": null,
+      "193": null,
+      "194": null,
+      "195": null,
+      "196": null,
+      "197": null,
+      "198": null,
+      "199": null,
+      "200": null,
+      "201": null,
+      "202": null,
+      "203": null,
+      "204": null,
+      "205": null,
+      "206": null,
+      "207": null,
+      "208": null,
+      "209": null,
+      "210": null,
+      "211": null,
+      "212": null,
+      "213": null,
+      "214": null,
+      "215": null,
+      "216": null,
+      "217": null,
+      "218": null,
+      "219": null,
+      "220": null,
+      "221": null,
+      "222": null,
+      "223": null,
+      "224": null,
+      "225": null,
+      "226": null,
+      "227": null,
+      "228": null,
+      "229": null,
+      "230": null,
+      "231": null,
+      "232": null,
+      "233": null,
+      "234": null,
+      "235": null,
+      "236": null,
+      "237": null,
+      "238": null,
+      "239": null,
+      "240": null,
+      "241": null,
+      "242": null,
+      "243": null,
+      "244": null,
+      "245": null,
+      "246": null,
+      "247": null,
+      "248": null,
+      "249": null,
+      "250": null,
+      "251": null,
+      "252": null,
+      "253": null,
+      "254": null
+     }
+    }
+   },
+   "body": {
+    "model": "m",
+    "state": "s",
+    "questions": {
+     "q": {
+      "type": "choice",
+      "instructions": "Which team?",
+      "criteria": {
+       "0": null,
+       "1": null,
+       "2": null,
+       "3": null,
+       "4": null,
+       "5": null,
+       "6": null,
+       "7": null,
+       "8": null,
+       "9": null,
+       "10": null,
+       "11": null,
+       "12": null,
+       "13": null,
+       "14": null,
+       "15": null,
+       "16": null,
+       "17": null,
+       "18": null,
+       "19": null,
+       "20": null,
+       "21": null,
+       "22": null,
+       "23": null,
+       "24": null,
+       "25": null,
+       "26": null,
+       "27": null,
+       "28": null,
+       "29": null,
+       "30": null,
+       "31": null,
+       "32": null,
+       "33": null,
+       "34": null,
+       "35": null,
+       "36": null,
+       "37": null,
+       "38": null,
+       "39": null,
+       "40": null,
+       "41": null,
+       "42": null,
+       "43": null,
+       "44": null,
+       "45": null,
+       "46": null,
+       "47": null,
+       "48": null,
+       "49": null,
+       "50": null,
+       "51": null,
+       "52": null,
+       "53": null,
+       "54": null,
+       "55": null,
+       "56": null,
+       "57": null,
+       "58": null,
+       "59": null,
+       "60": null,
+       "61": null,
+       "62": null,
+       "63": null,
+       "64": null,
+       "65": null,
+       "66": null,
+       "67": null,
+       "68": null,
+       "69": null,
+       "70": null,
+       "71": null,
+       "72": null,
+       "73": null,
+       "74": null,
+       "75": null,
+       "76": null,
+       "77": null,
+       "78": null,
+       "79": null,
+       "80": null,
+       "81": null,
+       "82": null,
+       "83": null,
+       "84": null,
+       "85": null,
+       "86": null,
+       "87": null,
+       "88": null,
+       "89": null,
+       "90": null,
+       "91": null,
+       "92": null,
+       "93": null,
+       "94": null,
+       "95": null,
+       "96": null,
+       "97": null,
+       "98": null,
+       "99": null,
+       "100": null,
+       "101": null,
+       "102": null,
+       "103": null,
+       "104": null,
+       "105": null,
+       "106": null,
+       "107": null,
+       "108": null,
+       "109": null,
+       "110": null,
+       "111": null,
+       "112": null,
+       "113": null,
+       "114": null,
+       "115": null,
+       "116": null,
+       "117": null,
+       "118": null,
+       "119": null,
+       "120": null,
+       "121": null,
+       "122": null,
+       "123": null,
+       "124": null,
+       "125": null,
+       "126": null,
+       "127": null,
+       "128": null,
+       "129": null,
+       "130": null,
+       "131": null,
+       "132": null,
+       "133": null,
+       "134": null,
+       "135": null,
+       "136": null,
+       "137": null,
+       "138": null,
+       "139": null,
+       "140": null,
+       "141": null,
+       "142": null,
+       "143": null,
+       "144": null,
+       "145": null,
+       "146": null,
+       "147": null,
+       "148": null,
+       "149": null,
+       "150": null,
+       "151": null,
+       "152": null,
+       "153": null,
+       "154": null,
+       "155": null,
+       "156": null,
+       "157": null,
+       "158": null,
+       "159": null,
+       "160": null,
+       "161": null,
+       "162": null,
+       "163": null,
+       "164": null,
+       "165": null,
+       "166": null,
+       "167": null,
+       "168": null,
+       "169": null,
+       "170": null,
+       "171": null,
+       "172": null,
+       "173": null,
+       "174": null,
+       "175": null,
+       "176": null,
+       "177": null,
+       "178": null,
+       "179": null,
+       "180": null,
+       "181": null,
+       "182": null,
+       "183": null,
+       "184": null,
+       "185": null,
+       "186": null,
+       "187": null,
+       "188": null,
+       "189": null,
+       "190": null,
+       "191": null,
+       "192": null,
+       "193": null,
+       "194": null,
+       "195": null,
+       "196": null,
+       "197": null,
+       "198": null,
+       "199": null,
+       "200": null,
+       "201": null,
+       "202": null,
+       "203": null,
+       "204": null,
+       "205": null,
+       "206": null,
+       "207": null,
+       "208": null,
+       "209": null,
+       "210": null,
+       "211": null,
+       "212": null,
+       "213": null,
+       "214": null,
+       "215": null,
+       "216": null,
+       "217": null,
+       "218": null,
+       "219": null,
+       "220": null,
+       "221": null,
+       "222": null,
+       "223": null,
+       "224": null,
+       "225": null,
+       "226": null,
+       "227": null,
+       "228": null,
+       "229": null,
+       "230": null,
+       "231": null,
+       "232": null,
+       "233": null,
+       "234": null,
+       "235": null,
+       "236": null,
+       "237": null,
+       "238": null,
+       "239": null,
+       "240": null,
+       "241": null,
+       "242": null,
+       "243": null,
+       "244": null,
+       "245": null,
+       "246": null,
+       "247": null,
+       "248": null,
+       "249": null,
+       "250": null,
+       "251": null,
+       "252": null,
+       "253": null,
+       "254": null
+      }
+     }
+    }
+   },
+   "error": false
+  },
+  {
+   "model": "m",
+   "state": "s",
+   "questions": {
+    "q": {
+     "type": "score",
+     "instructions": "How upset?",
+     "criteria": [
+      "one"
+     ]
+    }
+   },
+   "body": null,
+   "error": true
+  },
+  {
+   "model": "m",
+   "state": "s",
+   "questions": {
+    "q": {
+     "type": "score",
+     "instructions": "How upset?",
+     "criteria": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10"
+     ]
+    }
+   },
+   "body": null,
+   "error": true
+  },
+  {
+   "model": "m",
+   "state": "s",
+   "questions": {
+    "q": {
+     "type": "score",
+     "instructions": "How upset?",
+     "criteria": [
+      "0",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9"
+     ]
+    }
+   },
+   "body": {
+    "model": "m",
+    "state": "s",
+    "questions": {
+     "q": {
+      "type": "score",
+      "instructions": "How upset?",
+      "criteria": [
+       "0",
+       "1",
+       "2",
+       "3",
+       "4",
+       "5",
+       "6",
+       "7",
+       "8",
+       "9"
+      ]
+     }
+    }
+   },
+   "error": false
+  }
+ ],
+ "questions": {
+  "u": {
+   "type": "noul",
+   "instructions": "Is it urgent?"
+  },
+  "t": {
+   "type": "choice",
+   "instructions": "Which team?",
+   "criteria": {
+    "billing": null,
+    "shipping": null
+   }
+  },
+  "s": {
+   "type": "score",
+   "instructions": "How upset?",
+   "criteria": [
+    "calm",
+    "upset",
+    "angry"
+   ]
+  }
+ },
+ "responses": [
+  {
+   "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": {
+     "input_tokens": 296,
+     "output_tokens": 20
+    }
+   },
+   "result": {
+    "model": "jev-1.13.0",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "input_tokens": 296,
+    "output_tokens": 20
+   },
+   "error": false
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     },
+     "extra": {
+      "type": "noul",
+      "noul": 2
+     }
+    }
+   },
+   "result": {
+    "model": "",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "input_tokens": 0,
+    "output_tokens": 0
+   },
+   "error": false
+  },
+  {
+   "response": {
+    "model": "x",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": null
+   },
+   "result": {
+    "model": "x",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "input_tokens": 0,
+    "output_tokens": 0
+   },
+   "error": false
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": {
+    "model": "",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.0
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "input_tokens": 0,
+    "output_tokens": 0
+   },
+   "error": false
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 1
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": {
+    "model": "",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 1.0
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "input_tokens": 0,
+    "output_tokens": 0
+   },
+   "error": false
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.96,
+       "shipping": 0.0
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": {
+    "model": "",
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.96,
+       "shipping": 0.0
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "input_tokens": 0,
+    "output_tokens": 0
+   },
+   "error": false
+  },
+  {
+   "response": [],
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": []
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "model": 3,
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": []
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": {
+     "input_tokens": -1
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": {
+     "input_tokens": 1.5
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    },
+    "usage": {
+     "output_tokens": true
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": "yes",
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "choice",
+      "noul": 0.5
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 1.01
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": "0.5"
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": false
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul"
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "returns",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": null,
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 1.0
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.5,
+       "shipping": 0.2
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": [],
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 1.2
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 2.01,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": -0.01,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.5,
+       "1": 0.5
+      },
+      "confidence": 0.92
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  },
+  {
+   "response": {
+    "answers": {
+     "u": {
+      "type": "noul",
+      "noul": 0.95
+     },
+     "t": {
+      "type": "choice",
+      "choice": "billing",
+      "probabilities": {
+       "billing": 0.88,
+       "shipping": 0.12
+      },
+      "confidence": 0.76
+     },
+     "s": {
+      "type": "score",
+      "score": 1.05,
+      "legend": {
+       "0": "calm"
+      },
+      "probabilities": {
+       "0": 0.0,
+       "1": 0.95,
+       "2": 0.05
+      },
+      "confidence": null
+     }
+    }
+   },
+   "result": null,
+   "error": true
+  }
+ ],
+ "choice_confidence": [
+  {
+   "probabilities": [
+    1.0
+   ],
+   "confidence": 1.0
+  },
+  {
+   "probabilities": [
+    0.5,
+    0.5
+   ],
+   "confidence": 0.0
+  },
+  {
+   "probabilities": [
+    0.88,
+    0.12
+   ],
+   "confidence": 0.76
+  },
+  {
+   "probabilities": [
+    0.47,
+    0.28,
+    0.25
+   ],
+   "confidence": 0.20499999999999996
+  },
+  {
+   "probabilities": [
+    0.1,
+    0.1,
+    0.8
+   ],
+   "confidence": 0.7000000000000001
+  },
+  {
+   "probabilities": [
+    0.25,
+    0.25,
+    0.25,
+    0.25
+   ],
+   "confidence": 0.0
+  },
+  {
+   "probabilities": [
+    0.0,
+    1.0,
+    0.0
+   ],
+   "confidence": 1.0
+  }
+ ],
+ "score_confidence": [
+  {
+   "probabilities": [
+    1.0
+   ],
+   "confidence": 1.0
+  },
+  {
+   "probabilities": [
+    0.0,
+    0.95,
+    0.05
+   ],
+   "confidence": 0.925
+  },
+  {
+   "probabilities": [
+    0.0,
+    0.56,
+    0.44
+   ],
+   "confidence": 0.33999999999999997
+  },
+  {
+   "probabilities": [
+    0.3333333333333333,
+    0.3333333333333333,
+    0.3333333333333333
+   ],
+   "confidence": 0.0
+  },
+  {
+   "probabilities": [
+    0.5,
+    0.0,
+    0.5
+   ],
+   "confidence": 0.0
+  },
+  {
+   "probabilities": [
+    0.1,
+    0.2,
+    0.3,
+    0.4
+   ],
+   "confidence": 0.0
+  },
+  {
+   "probabilities": [
+    0.0,
+    0.0,
+    1.0
+   ],
+   "confidence": 1.0
+  },
+  {
+   "probabilities": [
+    0.5,
+    0.5
+   ],
+   "confidence": 0.0
+  }
+ ],
+ "triage": {
+  "question_id": "cause",
+  "question": {
+   "type": "choice",
+   "instructions": "The attempts at `task` failed their checks, most recently with `latest_failure` and before that with `previous_failure`. Which option best describes why they fail?",
+   "criteria": {
+    "defect": "The code written for the task has a specific bug or omission that one more focused attempt can fix.",
+    "scope": "The task needs several distinct pieces of work, for example new files, packages or components that do not exist yet, and the attempts only got part of the way.",
+    "environment": "The failure comes from outside the code: a missing tool or dependency, no network access, permissions, disk or memory limits, or a broken check command."
+   }
+  },
+  "max_failure_chars": 3000,
+  "actions": [
+   {
+    "choice": "defect",
+    "confidence": 0.5,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.5,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.5,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.5,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.89,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.89,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.89,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.89,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.9,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.9,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.9,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.9,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.99,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.99,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.99,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "defect",
+    "confidence": 0.99,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.5,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.5,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.5,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "split"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.5,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.89,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.89,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.89,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "split"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.89,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.9,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "split"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.9,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.9,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "split"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.9,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.99,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "split"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.99,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.99,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "split"
+   },
+   {
+    "choice": "scope",
+    "confidence": 0.99,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.5,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.5,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.5,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.5,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.89,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "continue"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.89,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "continue"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.89,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.89,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.9,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.9,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.9,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.9,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.99,
+    "threshold": 0.9,
+    "can_split": true,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.99,
+    "threshold": 0.9,
+    "can_split": false,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.99,
+    "threshold": 0.0,
+    "can_split": true,
+    "action": "block"
+   },
+   {
+    "choice": "environment",
+    "confidence": 0.99,
+    "threshold": 0.0,
+    "can_split": false,
+    "action": "block"
+   }
+  ],
+  "states": [
+   {
+    "item": {
+     "id": "01",
+     "description": "Add greet",
+     "witnesses": [
+      "go:TestHello"
+     ]
+    },
+    "latest": "boom",
+    "previous": "",
+    "max_chars": 3000,
+    "state": {
+     "task": "Add greet",
+     "witnesses": [
+      "go:TestHello"
+     ],
+     "latest_failure": "boom",
+     "previous_failure": ""
+    }
+   },
+   {
+    "item": {
+     "id": "02",
+     "description": "token ghp_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     "witnesses": []
+    },
+    "latest": "E   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nkey sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "previous": "déjà vu 🐟",
+    "max_chars": 100,
+    "state": {
+     "task": "token ***",
+     "witnesses": [],
+     "latest_failure": "...E   AssertionError: expected 3\nE   AssertionError: expected 3\nE   AssertionError: expected 3\nkey ***",
+     "previous_failure": "déjà vu 🐟"
+    }
+   },
+   {
+    "item": {
+     "id": "03",
+     "description": "x"
+    },
+    "latest": "",
+    "previous": "",
+    "max_chars": 5,
+    "state": {
+     "task": "x",
+     "witnesses": [],
+     "latest_failure": "",
+     "previous_failure": ""
+    }
+   }
+  ]
+ },
+ "rerank": {
+  "requests": [
+   {
+    "query": "fix the parser",
+    "texts": [
+     "the parser fails on tabs",
+     "unrelated"
+    ],
+    "state": {
+     "task": "fix the parser"
+    },
+    "questions": {
+     "p0": {
+      "type": "noul",
+      "instructions": {
+       "passage": "the parser fails on tabs",
+       "question": "Does `passage` contain information that helps to carry out `task` (a fact, a past attempt or its outcome, a decision, or code it needs)?"
+      }
+     },
+     "p1": {
+      "type": "noul",
+      "instructions": {
+       "passage": "unrelated",
+       "question": "Does `passage` contain information that helps to carry out `task` (a fact, a past attempt or its outcome, a decision, or code it needs)?"
+      }
+     }
+    }
+   },
+   {
+    "query": "q Bearer abcdefghijklmnopqrstuvwxyz0123",
+    "texts": [
+     "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxtail"
+    ],
+    "state": {
+     "task": "q Bearer ***"
+    },
+    "questions": {
+     "p0": {
+      "type": "noul",
+      "instructions": {
+       "passage": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "question": "Does `passage` contain information that helps to carry out `task` (a fact, a past attempt or its outcome, a decision, or code it needs)?"
+      }
+     }
+    }
+   }
+  ],
+  "apply": [
+   {
+    "relevance": [
+     0.2,
+     0.9,
+     0.9,
+     0.05
+    ],
+    "k": 2,
+    "min_p": 0.1,
+    "order": [
+     1,
+     2
+    ],
+    "scores": [
+     0.9,
+     0.9
+    ]
+   },
+   {
+    "relevance": [
+     0.2,
+     0.9,
+     0.9,
+     0.05
+    ],
+    "k": null,
+    "min_p": 0.1,
+    "order": [
+     1,
+     2,
+     0
+    ],
+    "scores": [
+     0.9,
+     0.9,
+     0.2
+    ]
+   },
+   {
+    "relevance": [
+     0.2,
+     0.9,
+     0.9,
+     0.05
+    ],
+    "k": null,
+    "min_p": 0.0,
+    "order": [
+     1,
+     2,
+     0,
+     3
+    ],
+    "scores": [
+     0.9,
+     0.9,
+     0.2,
+     0.05
+    ]
+   },
+   {
+    "relevance": [
+     0.5,
+     0.5,
+     0.5
+    ],
+    "k": 1,
+    "min_p": 0.5,
+    "order": [
+     0
+    ],
+    "scores": [
+     0.5
+    ]
+   },
+   {
+    "relevance": [
+     0.0
+    ],
+    "k": null,
+    "min_p": 0.0,
+    "order": [
+     0
+    ],
+    "scores": [
+     0.0
+    ]
+   },
+   {
+    "relevance": [
+     0.3,
+     0.1
+    ],
+    "k": 0,
+    "min_p": 0.0,
+    "order": [],
+    "scores": []
+   }
+  ]
+ },
+ "endpoints": [
+  {
+   "endpoint": "https://api.typesafe.ai/v1/systemone",
+   "local": false,
+   "default_price_in_per_mtok": 0.042
+  },
+  {
+   "endpoint": "https://API.TypeSafe.ai:443/v1/systemone",
+   "local": false,
+   "default_price_in_per_mtok": 0.042
+  },
+  {
+   "endpoint": "http://127.0.0.1:8009/v1/systemone",
+   "local": true,
+   "default_price_in_per_mtok": 0.0
+  },
+  {
+   "endpoint": "http://localhost:8009/v1/systemone",
+   "local": true,
+   "default_price_in_per_mtok": 0.0
+  },
+  {
+   "endpoint": "http://kev.localhost/v1/systemone",
+   "local": true,
+   "default_price_in_per_mtok": 0.0
+  },
+  {
+   "endpoint": "http://[::1]:8009/v1/systemone",
+   "local": true,
+   "default_price_in_per_mtok": 0.0
+  },
+  {
+   "endpoint": "https://kev.example.com/v1/systemone",
+   "local": false,
+   "default_price_in_per_mtok": null
+  },
+  {
+   "endpoint": "http://10.0.0.2/v1/systemone",
+   "local": false,
+   "default_price_in_per_mtok": null
+  }
+ ]
+}
