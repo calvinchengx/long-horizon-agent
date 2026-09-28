@@ -371,6 +371,7 @@ _GIT_EXEC_CONFIG = (
     "uploadpack.",
     "receivepack.",
 )
+_PLAIN_PAGERS = frozenset({"cat", "less", "more"})
 _GIT_CONFIG_READS = frozenset(
     {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "get", "list"}
 )
@@ -507,7 +508,7 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
         spec, rest = _RUNNER_OPTS, rest[1:]
     if spec is None and head.startswith("python") and len(rest) >= 2 and rest[0] == "-m":
         return _unwrap(rest[1:], depth + 1)
-    if spec is None:
+    if spec is None or (head == "command" and _command_lookup(rest)):
         return [argv]
     out: list[list[str]] = []
     for scripts, command in _parse_opts(spec, rest):
@@ -521,6 +522,16 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
         if len(out) > _MAX_CANDIDATES:
             raise _Ambiguous("too many ways to read the launcher options")
     return out
+
+
+def _command_lookup(rest: list[str]) -> bool:
+    """``command -v`` / ``-V`` only prints how a name resolves; it runs nothing."""
+    for arg in rest:
+        if arg == "--" or not arg.startswith("-"):
+            return False
+        if "v" in arg or "V" in arg:
+            return True
+    return False
 
 
 def _escapes(path: str) -> bool:
@@ -560,7 +571,9 @@ def _classify_git(args: list[str]) -> str | None:
             config = opt.split("=", 1)[1]
         else:
             config = ""
-        if _git_exec_config(config.partition("=")[0]):
+        if _git_exec_config(config.partition("=")[0]) and not (
+            opt == "-c" and _plain_pager(config)
+        ):
             return f"git -c {config.partition('=')[0]} (defines what git runs or where it pushes)"
         takes_value = opt in ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env")
         args = args[2:] if takes_value else args[1:]
@@ -600,6 +613,12 @@ def _classify_git(args: list[str]) -> str | None:
 def _git_exec_config(key: str) -> bool:
     key = key.strip().lower()
     return bool(key) and (key.startswith(_GIT_EXEC_CONFIG) or key.endswith(".pushurl"))
+
+
+def _plain_pager(config: str) -> bool:
+    """``core.pager=cat`` (or ``less`` / ``more``) runs a pager, not an arbitrary command."""
+    key, _, value = config.partition("=")
+    return key.strip().lower() == "core.pager" and value in _PLAIN_PAGERS
 
 
 def _git_branch_force_delete(rest: list[str]) -> bool:
@@ -901,7 +920,25 @@ def _classify_script(script: str, depth: int) -> str | None:
         if reason:
             return reason
     segment: list[str] = []
-    for token in [*tokens, ";"]:
+    tokens.append(";")
+    # The tokenizer drops backslashes, so an escaped ``$`` or paren would look like (or unbalance) a
+    # substitution: with any backslash in the script, no group is skipped (fail closed).
+    skip_arguments = "\\" not in script
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if (
+            skip_arguments
+            and token.endswith("$")
+            and tokens[i + 1 : i + 2]
+            and tokens[i + 1][0] == "("
+            and _has_command(segment)
+        ):
+            # A substitution used as an argument (``echo $(date) $(cat f)``): its body was
+            # classified above, so skip it. One in command position still fails closed.
+            segment.append(token)
+            i = _skip_group(tokens, i + 1)
+            continue
         if token in _SHELL_SEPARATORS or set(token) <= set(";&|()\n"):
             reason = _classify_segment(segment, depth)
             if reason:
@@ -909,7 +946,34 @@ def _classify_script(script: str, depth: int) -> str | None:
             segment = []
         else:
             segment.append(token)
+        i += 1
     return None
+
+
+def _has_command(segment: list[str]) -> bool:
+    """True once ``segment`` holds a command word (after reserved words and assignments)."""
+    return any(t not in _RESERVED_PREFIX and not _is_assignment(t) for t in segment)
+
+
+def _skip_group(tokens: list[str], start: int) -> int:
+    """Index after the parenthesised group opening at ``tokens[start]``.
+
+    Punctuation tokens group runs such as ``))`` or ``);``: what follows the closing ``)`` is put
+    back as a token of its own, so a separator after the group still ends the segment.
+    """
+    depth = 0
+    for i in range(start, len(tokens)):
+        token = tokens[i]
+        if set(token) <= set(";&|()\n"):
+            for j, ch in enumerate(token):
+                depth += {"(": 1, ")": -1}.get(ch, 0)
+                if depth == 0:
+                    rest = token[j + 1 :]
+                    if rest:
+                        tokens[i] = rest
+                        return i
+                    return i + 1
+    return len(tokens)
 
 
 def _classify_segment(segment: list[str], depth: int) -> str | None:

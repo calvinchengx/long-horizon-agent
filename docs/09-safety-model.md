@@ -135,7 +135,7 @@ string if a human must decide, otherwise `None`. What it gates:
 |---|---|
 | Publish / push | `git push`, `send-pack`, `update-ref`, `remote-*`; `npm/pnpm/yarn/bun/uv/poetry/hatch/flit/pdm publish`, `twine upload`, `cargo publish`, `gem push`, `docker/podman push/login`, `mvn deploy`; `npm run <publish|deploy|release script>` |
 | Destructive git | `reset --hard`, `clean -f…`, `branch -D` / `-d -f`, `filter-branch`, `filter-repo`, `reflog expire`, `commit/rebase --amend|--root`, `checkout/switch/restore --force`, `remote add/set-url/remove` |
-| Git config that runs code or changes remotes | `git config` or `git -c` / `--config-env` keys `alias.*`, `include*`, `core.hookspath`, `core.sshcommand`, `core.pager`, `core.editor`, `credential.*`, `remote.*`, `url.*`, `*.pushurl`, `filter.*`, …; `GIT_CONFIG_*` environment assignments; `--upload-pack`, `--receive-pack`, `--exec=`, `ext::` transports |
+| Git config that runs code or changes remotes | `git config` or `git -c` / `--config-env` keys `alias.*`, `include*`, `core.hookspath`, `core.sshcommand`, `core.pager` (except `git -c core.pager=cat`, `less` or `more`), `core.editor`, `credential.*`, `remote.*`, `url.*`, `*.pushurl`, `filter.*`, …; `GIT_CONFIG_*` environment assignments; `--upload-pack`, `--receive-pack`, `--exec=`, `ext::` transports |
 | Infra and deploy CLIs | always gated: `aws`, `gcloud`, `gsutil`, `az`, `heroku`, `gh`, `glab`, `ansible*`; by subcommand: `kubectl`, `helm`, `terraform`, `tofu`, `pulumi`, `fly`, `vercel`, `netlify`, `firebase`, `serverless`, `wrangler` |
 | Uploads | `curl -d/-F/-T/--json/--data*/--form*`, `-X/--request POST|PUT|PATCH|DELETE`, `-K/--config`; `wget --post-*`, `--body-*`, `--method` writes, `-e` upload settings; httpie/xh with a body or a write method; `rsync` to `host:` |
 | Remote shells and mail | `ssh`, `scp`, `sftp`, `ftp`, `telnet`, `nc`/`ncat`/`netcat`, `socat`, `sendmail`, `mail`, `mailx` |
@@ -145,14 +145,17 @@ string if a human must decide, otherwise `None`. What it gates:
 
 To find the real command, it unwraps:
 
-- launchers: `env`, `nohup`, `nice`, `time`, `command`, `exec`, `stdbuf`, `ionice`, `timeout`,
+- launchers: `env`, `nohup`, `nice`, `time`, `command` (not `command -v` / `-V`, which only
+  looks a name up), `exec`, `stdbuf`, `ionice`, `timeout`,
   `xargs`, `npx`, `bunx`, `setsid`, `flock`, `taskset`, `chrt`, `unbuffer`, `caffeinate`,
   `watch`, `script`, `uvx`;
 - runners: `uv`/`poetry`/`pipenv`/`pdm`/`hatch`/`pipx run`, `pnpm`/`yarn exec|dlx`,
   `bundle exec`, and `python -m`;
 - `find -exec/-execdir/-ok/-okdir`;
 - `sh`/`bash`/`zsh`/`dash`/`ksh`/`fish -c` and `eval` scripts, split on `; && || | & ( )` and
-  newlines, including `$(…)`, backticks and process substitution.
+  newlines, including `$(…)`, backticks and process substitution. A `$(…)` used as an argument
+  (`echo $(date) $(cat f)`, `for i in $(seq 3)`) is classified by its body and then skipped, unless
+  the script contains a backslash.
 
 It fails closed in these cases:
 
@@ -161,10 +164,11 @@ It fails closed in these cases:
 - More than 64 readings, or more than 8 nested launchers, is "ambiguous".
 - An unparseable script or unterminated quote is gated.
 - Shell nesting deeper than 3 is gated.
-- A command name or git subcommand that contains `$` is gated.
+- A command name or git subcommand that contains `$` is gated, including a `$(…)` in command
+  position (`$(echo rm) -rf /`).
 
 The pinned behaviour is [`spec/safety/classify_command.json`](../spec/safety/classify_command.json).
-It has 206 cases of argv mapped to an exact reason, 64 of which are allowed (`null`). Both
+It has 224 cases of argv mapped to an exact reason, 70 of which are allowed (`null`). Both
 `python/tests/unit/test_spec_conformance.py` and `go/internal/spec/conformance_safety_test.go`
 run it. The Python code is the reference. To change behaviour, change Python, regenerate with
 `scripts/export_spec.py`, then make Go pass ([spec/README.md](../spec/README.md)).

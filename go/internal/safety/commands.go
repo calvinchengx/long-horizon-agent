@@ -402,7 +402,7 @@ func unwrap(argv []string, depth int) ([][]string, error) {
 	if spec == nil && strings.HasPrefix(head, "python") && len(rest) >= 2 && rest[0] == "-m" {
 		return unwrap(rest[1:], depth+1)
 	}
-	if spec == nil {
+	if spec == nil || (head == "command" && commandLookup(rest)) {
 		return [][]string{argv}, nil
 	}
 	readings, err := parseOpts(spec, rest)
@@ -434,6 +434,19 @@ func unwrap(argv []string, depth int) ([][]string, error) {
 		}
 	}
 	return out, nil
+}
+
+// commandLookup: command -v / -V only prints how a name resolves; it runs nothing.
+func commandLookup(rest []string) bool {
+	for _, arg := range rest {
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			return false
+		}
+		if strings.ContainsAny(arg, "vV") {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(xs []string, v string) bool {
@@ -528,7 +541,7 @@ func classifyGit(args []string) string {
 			_, _, config = partition(opt, "=")
 		}
 		key, _, _ := partition(config, "=")
-		if gitExecConfigKey(key) {
+		if gitExecConfigKey(key) && !(opt == "-c" && plainPager(config)) {
 			return fmt.Sprintf("git -c %s (defines what git runs or where it pushes)", key)
 		}
 		switch opt {
@@ -609,6 +622,14 @@ func anyIn(xs []string, set stringSet) bool {
 	}
 	return false
 }
+
+// plainPager: core.pager=cat (or less / more) runs a pager, not an arbitrary command.
+func plainPager(config string) bool {
+	key, _, value := partition(config, "=")
+	return pystr.Lower(pystr.Strip(key)) == "core.pager" && plainPagers.has(value)
+}
+
+var plainPagers = setOf("cat", "less", "more")
 
 func gitExecConfigKey(key string) bool {
 	key = pystr.Lower(pystr.Strip(key))
@@ -1186,7 +1207,20 @@ func classifyScript(script string, depth int) string {
 		}
 	}
 	var segment []string
-	for _, token := range append(tokens, ";") {
+	tokens = append(tokens, ";")
+	// The tokenizer drops backslashes, so an escaped $ or paren would look like (or unbalance) a
+	// substitution: with any backslash in the script, no group is skipped (fail closed).
+	skipArguments := !strings.Contains(script, "\\")
+	for i := 0; i < len(tokens); {
+		token := tokens[i]
+		if skipArguments && strings.HasSuffix(token, "$") && i+1 < len(tokens) &&
+			strings.HasPrefix(tokens[i+1], "(") && hasCommand(segment) {
+			// A substitution used as an argument (echo $(date) $(cat f)): its body was classified
+			// above, so skip it. One in command position still fails closed.
+			segment = append(segment, token)
+			i = skipGroup(tokens, i+1)
+			continue
+		}
 		if isSeparatorToken(token) {
 			if reason := classifySegment(segment, depth); reason != "" {
 				return reason
@@ -1195,8 +1229,48 @@ func classifyScript(script string, depth int) string {
 		} else {
 			segment = append(segment, token)
 		}
+		i++
 	}
 	return ""
+}
+
+// hasCommand: segment holds a command word (after reserved words and assignments).
+func hasCommand(segment []string) bool {
+	for _, t := range segment {
+		if !reservedPrefix.has(t) && !isAssignment(t) {
+			return true
+		}
+	}
+	return false
+}
+
+// skipGroup returns the index after the parenthesised group opening at tokens[start].
+// Punctuation tokens group runs such as "))" or ");": what follows the closing ")" is put back as
+// a token of its own, so a separator after the group still ends the segment.
+func skipGroup(tokens []string, start int) int {
+	depth := 0
+	for i := start; i < len(tokens); i++ {
+		token := tokens[i]
+		if !isSeparatorToken(token) {
+			continue
+		}
+		for j, ch := range token {
+			switch ch {
+			case '(':
+				depth++
+			case ')':
+				depth--
+			}
+			if depth == 0 {
+				if rest := token[j+1:]; rest != "" {
+					tokens[i] = rest
+					return i
+				}
+				return i + 1
+			}
+		}
+	}
+	return len(tokens)
 }
 
 // classifySegment drops leading reserved words ({, if, do...) and VAR=value prefixes.
