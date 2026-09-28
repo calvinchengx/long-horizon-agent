@@ -89,7 +89,7 @@ sandboxed tools, and LHA still verifies and commits the result. See
 | Path | Contents |
 |---|---|
 | [`python/`](python/) | Python implementation (uv, Python 3.12) |
-| [`go/`](go/) | Go implementation (one static binary), being ported in phases |
+| [`go/`](go/) | Go implementation (one static binary), with every `lha` command |
 | [`spec/`](spec/) | Conformance cases both implementations must pass |
 | [`db/migrations/`](db/migrations/) | Postgres schema shared by both |
 | [`docs/`](docs/) | Documentation source, published by [`website/`](website/) |

@@ -223,11 +223,11 @@ The mission store has the outcome and every model call:
 
 ```bash
 uv run lha missions
-uv run lha costs mission_bc32a2e8c538
+uv run lha costs mission_bc32a2e8c538 --limit 0   # totals only; the default also lists the calls
 ```
 
 ```text
-mission_bc32a2e8c538  DONE  $0.0000  calls 24  head 04e79c9c192d  updated 2026-09-27T06:50:44  Greeter
+mission_bc32a2e8c538  DONE             $0.0000  calls 24  head 04e79c9c192d  updated 2026-09-27T06:50:44  Greeter
 
 total: 24 calls  known $0.0000  unknown-cost calls 0  tokens in 28103 out 8287
 ```

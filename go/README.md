@@ -29,7 +29,7 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   allow-list proxy, and its requests are committed as `sandbox_egress` events).
 - The lead's tools: `read_file`, `write_file`, `list_files`, `grep`, `run_command` and
   `record_decision`, plus `fetch_url` / `web_search` when `LHA_WEB_ALLOW_HOSTS` or `--allow-host`
-  is set. An unsafe local sandbox and a Rule-of-Two (lethal trifecta) run are refused before the
+  is set, and `code_query` when `LHA_CODE_QUERY=true`. An unsafe local sandbox and a Rule-of-Two (lethal trifecta) run are refused before the
   workspace is touched (exit 2); bad web settings are refused before any model spend.
 - Irreversible commands (`git push`, publishing, uploads) are refused, or with
   `--approve-interactive` asked on the terminal (`internal/hitl`: the exact argv and the
@@ -45,6 +45,10 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   the `claude_code` lead engine (`LHA_LEAD_ENGINE=claude_code`: one `claude -p` session per
   cycle, with LHA's tools served over MCP by `internal/agent/mcpbridge`); `LHA_FALLBACK_MODELS`
   failover chains and the model health probe (`model.ProbeModel`).
+- Opt-in helpers, off by default, as in Python: System One stall triage and memory reranking
+  (`internal/systemone`, `LHA_SYSTEM_ONE_BACKEND`), the cycle-start code map
+  (`internal/agent/code_map.go`, `LHA_CODE_MAP=ripwire`) and the read-only `code_query` tool
+  (`internal/execution/tools`, `LHA_CODE_QUERY=true`).
 - `vendor`: reference pages snapshotted with the egress rules and a DNS-pinned fetch
   (`internal/state/vendor`, `safety.PinnedDialer`); the same files and `MANIFEST.json` as Python.
 - OTLP/HTTP trace export (`LHA_OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_ENDPOINT` or
@@ -77,7 +81,8 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
   after every verified item, with Python's activity names, payloads, gate-log lines, events and
   ledger keys. A Go-served and a Python-served org mission on the same scripted inputs leave the
   same commits and anchor (`cmd/lha/durable_org_e2e_test.go`). The org path is behind
-  `workflow.GetVersion("lha-go-durable-org-v1")`.
+  `workflow.GetVersion("lha-go-durable-org-v1")`; a completing cycle skips its approval gate
+  behind `lha-go-complete-skips-approvals-v1`.
 
 ## Python-only
 
@@ -130,8 +135,8 @@ Layout mirrors the Python packages: `internal/contracts` (shared types), `intern
 classifier, egress policy, Rule of Two), `internal/model` (backends, pricing, retry, failover),
 `internal/state` (git ops, the mission anchor and the hash-chained decision log),
 `internal/persistence` (the mission store; `services` opens store, ledger sink, mission tracker
-and memory for a run), `internal/memory` (the memory plane), `internal/ops` (degradation rules),
-`internal/checklistimport`, `internal/verify` (verifier, harness integrity, witnesses, trusted
+and memory for a run), `internal/memory` (the memory plane), `internal/systemone` (System One
+triage and reranking), `internal/checklistimport`, `internal/verify` (verifier, harness integrity, witnesses, trusted
 runner), `internal/governor`, `internal/obs`, `internal/execution` (local and Docker sandboxes,
 the egress proxy, path containment, the allow-list dispatcher and the tools), `internal/hitl`
 (the console approval gate, escalation ladder and gate webhook), `internal/agent` (prompts, the

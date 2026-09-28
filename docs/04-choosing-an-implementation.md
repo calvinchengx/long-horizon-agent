@@ -98,8 +98,9 @@ What the Go CLI can do today:
   `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible, Claude or Claude Code
   (`claude_code`) backend, and with the built-in turn loop or the `claude_code` lead engine
   (`LHA_LEAD_ENGINE=claude_code`, both `LHA_CLAUDE_CODE_TOOLS` modes).
-- The lead gets the same tools as in Python (file IO, `run_command`, `record_decision`, and
-  `fetch_url` / `web_search` under `LHA_WEB_ALLOW_HOSTS` / `--allow-host`). An unsafe local sandbox
+- The lead gets the same tools as in Python (file IO, `run_command`, `record_decision`,
+  `fetch_url` / `web_search` under `LHA_WEB_ALLOW_HOSTS` / `--allow-host`, and `code_query` when
+  `LHA_CODE_QUERY=true`). An unsafe local sandbox
   and a Rule-of-Two run are refused before the workspace is touched, with Python's messages and
   exit code 2.
 - Irreversible commands are refused, or asked on the terminal with `--approve-interactive`

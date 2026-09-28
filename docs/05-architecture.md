@@ -206,8 +206,8 @@ See [memory](12-memory.md).
   `--approve-interactive`, and with no gate they are denied. It also enforces the "rule of two".
 - **Tools** ([`execution/tools/`](../python/src/lha/execution/tools/)): the default set is
   `read_file`, `write_file`, `edit_file`, `list_files`, `grep` and `run_command`, and the lead
-  also gets
-  `record_decision`. When `LHA_WEB_ALLOW_HOSTS` (plus any `--allow-host`) is non-empty,
+  also gets `record_decision`; with `LHA_CODE_QUERY=true` every role also gets the read-only
+  `code_query` ([09](09-safety-model.md)). When `LHA_WEB_ALLOW_HOSTS` (plus any `--allow-host`) is non-empty,
   `fetch_url` is added, limited by an egress policy to those hosts, with public-address checks,
   per-redirect re-checks and credentials from `LHA_WEB_CREDENTIALS` injected only for the hosts
   they are bound to; `web_search` is added when a search provider and key are also configured
@@ -262,7 +262,7 @@ What runs where today:
 
 | Role | `lha mission` / `lha run-local` | durable (`lha mission-start`) | `lha orchestrate` |
 |---|---|---|---|
-| Planner | Yes (not in `run-local`, or when `--checklist` is given) | Yes (not with `--checklist`) | Yes |
+| Planner | Yes (not in `run-local`, or when `--checklist` is given) | Yes (not with `--checklist`) | Yes (not with `--checklist` or `--resume`) |
 | Lead Engineer (the `AgentLoop`) | Yes | Yes | Yes |
 | Replanner (splits a blocked item) | Yes, unless `LHA_MAX_REPLANS=0` | Yes | Yes |
 | Researchers | No | With `--research N`: N per item before each round, as child workflows | 2 per item, concurrently, with read-only tools |

@@ -45,7 +45,7 @@ trusted. The code enforces this split:
 |---|---|
 | `lha run-local` | Lead (checklist given with `--item` or `--checklist`), Replanner when an item blocks |
 | `lha mission` | Planner (skipped with `--checklist`), then Lead, Replanner when an item blocks |
-| `lha orchestrate` | Planner (checklist + file ownership), then rounds. A serial round runs 2 Researchers, then the Lead on one item. A parallel wave runs 2 Researchers per item, then one Implementer per item in its own worktree, then the Integrator. Reflection runs on failure, the Reviewer on success, and the Replanner when an item blocks |
+| `lha orchestrate` | Planner (checklist + file ownership; skipped with `--checklist`, which leaves no ownership map), then rounds. A serial round runs 2 Researchers, then the Lead on one item. A parallel wave runs 2 Researchers per item, then one Implementer per item in its own worktree, then the Integrator. Reflection runs on failure, the Reviewer on success, and the Replanner when an item blocks |
 | `lha mission-start` + `lha worker` | Planner (at start, in the CLI process; skipped with `--checklist`), then Lead cycles inside `MissionWorkflow`, Replanner when an item blocks. Opt-in, per mission: `--research N` Researchers per item before each round (child workflows), `--review` the Reviewer after every verified item, `--max-parallel N` parallel waves of Implementers (one activity each, in its own worktree) and the Integrator (one activity per branch); see [Durable execution](08-durable-execution.md#the-multi-agent-organization-opt-in) |
 
 All run paths build the Lead the same way ([agent/assembly.py](../python/src/lha/agent/assembly.py)),
@@ -155,8 +155,9 @@ and a `ticket` event. All worktrees and branches of the wave are removed at the 
 whatever the outcome.
 
 The command-line knobs are `--check`, `--no-default-checks`, `--sandbox`, `--unsafe-local`,
-`--reference`, `--approve-interactive` and `--allow-host`; the rest comes from `LHA_*` settings.
-`orchestrate` has no `--checklist` option. Parallel waves add no CLI option. They are tuned by
+`--reference`, `--approve-interactive`, `--allow-host`, `--checklist` (import a checklist instead
+of planning; no ownership map) and `--resume` (continue the mission anchored in `--workdir`; not
+with `--checklist`); the rest comes from `LHA_*` settings. Parallel waves add no CLI option. They are tuned by
 one setting, `LHA_MAX_PARALLEL_IMPLEMENTERS`. With a non-empty web allow-list the Lead and the
 Researchers get the web tools; the Reviewer and the implementers are not shown them because
 their roles do not set `allow_egress`. A run with web tools and private data
