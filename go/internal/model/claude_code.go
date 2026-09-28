@@ -534,19 +534,16 @@ func (m *ClaudeCodeModel) EstimateCostUSD(usage contracts.Usage) (float64, error
 	return math.Min(price.Cost(usage), m.maxBudgetUSD), nil
 }
 
-// HealthCheck runs claude --version: it proves the CLI is installed without spending tokens. It
-// cannot prove the login is valid; an expired login fails the first real call instead.
+// HealthCheck runs claude --version, then claude auth status, without spending tokens (python:
+// ClaudeCodeModel.health_check). A parked mission resumes only when this is healthy, so a
+// logged-out CLI must be DOWN. With ANTHROPIC_API_KEY set the CLI authenticates with the key and the
+// login is not checked; an auth status that is not JSON (older CLIs) is judged by --version alone.
 func (m *ClaudeCodeModel) HealthCheck(ctx context.Context, timeoutS float64) (ok bool, detail string) {
 	if _, err := exec.LookPath(m.binary); err != nil {
 		return false, fmt.Sprintf("%s: %s not found on PATH", m.name, contracts.PyRepr(m.binary))
 	}
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutS*float64(time.Second)))
-	defer cancel()
-	cmd := exec.CommandContext(ctx, m.binary, "--version")
-	cmd.Env = ClaudeCodeChildEnv(nil)
-	cmd.WaitDelay = time.Second
-	out, err := cmd.CombinedOutput()
-	if ctx.Err() == context.DeadlineExceeded {
+	out, timedOut, err := runClaudeCLI(ctx, m.binary, []string{"--version"}, timeoutS)
+	if timedOut {
 		return false, m.name + ": claude --version timed out"
 	}
 	if err != nil {
@@ -556,7 +553,31 @@ func (m *ClaudeCodeModel) HealthCheck(ctx context.Context, timeoutS float64) (ok
 		}
 		return false, fmt.Sprintf("%s: %v", m.name, err)
 	}
-	return true, m.name + ": " + pyfmt.PyStrip(strings.ToValidUTF8(string(out), "�"))
+	version := pyfmt.PyStrip(strings.ToValidUTF8(string(out), "�"))
+	for _, kv := range ClaudeCodeChildEnv(nil) {
+		if key, value, _ := strings.Cut(kv, "="); key == "ANTHROPIC_API_KEY" && value != "" {
+			return true, m.name + ": " + version + " (API key)"
+		}
+	}
+	status, timedOut, _ := runClaudeCLI(ctx, m.binary, []string{"auth", "status"}, timeoutS)
+	var parsed map[string]any
+	if !timedOut && json.Unmarshal(status, &parsed) == nil {
+		if loggedIn, isBool := parsed["loggedIn"].(bool); isBool && !loggedIn {
+			return false, m.name + ": not logged in; run `claude auth login` (or set ANTHROPIC_API_KEY)"
+		}
+	}
+	return true, m.name + ": " + version
+}
+
+// runClaudeCLI runs a short, prompt-less claude command and returns its combined output.
+func runClaudeCLI(ctx context.Context, binary string, args []string, timeoutS float64) ([]byte, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutS*float64(time.Second)))
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = ClaudeCodeChildEnv(nil)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.CombinedOutput()
+	return out, ctx.Err() == context.DeadlineExceeded, err
 }
 
 // DefaultSettingsModelName is LHA_MODEL_NAME's default (the stub's "stub-1"; python:

@@ -10,7 +10,7 @@
 | Node.js | 22.23.2 (`NODE_VERSION`), with npm and corepack |
 | pnpm | 10.34.5 (`PNPM_VERSION`) |
 | ripwire | 0.6.5 (`RIPWIRE_VERSION`, SHA-256 pinned per architecture); used by `LHA_CODE_MAP=ripwire` |
-| Other | git, make, curl, ca-certificates, openssh-client, xz-utils |
+| Other | git, make, curl, ca-certificates, openssh-client, xz-utils, gcc and libc6-dev (cgo, so `go test -race` works) |
 
 The default image (`ghcr.io/astral-sh/uv:python3.12-bookworm-slim`) covers Python projects. Use this
 image when the agent's checks also need Go or Node.
@@ -112,6 +112,7 @@ DockerSandbox starts containers with these settings:
 - a tmpfs at `/tmp` (`LHA_SANDBOX_TMP_SIZE`, default 1 GB), mounted `exec` (so `go test` can run the binaries it builds there)
 - `--cap-drop ALL`
 - `no-new-privileges`
+- `--init` (an init process reaps orphaned processes)
 
 The image is built for that setup:
 

@@ -40,7 +40,9 @@ Docker hardening, from `DockerSandbox.run_kwargs()` in
   egress for `run_command` is actually blocked.
 - `mem_limit` and `memswap_limit` `LHA_SANDBOX_MEMORY` (default 2g), `pids_limit` 512,
   `nano_cpus` for `LHA_SANDBOX_CPUS` CPUs (default 2).
-- `cap_drop=["ALL"]`, `security_opt=["no-new-privileges:true"]`.
+- `cap_drop=["ALL"]`, `security_opt=["no-new-privileges:true"]`, and `init=True` (an init
+  process as PID 1 reaps orphaned processes, so killing a command's process group on timeout
+  leaves no zombies).
 - A non-root user: the host `uid:gid` on POSIX, otherwise `65534:65534`.
 - `read_only=True` root filesystem, `tmpfs /tmp` (`rw,exec,nosuid,nodev`, size `LHA_SANDBOX_TMP_SIZE`, default 1g, counted
   against the memory limit). `/tmp` is

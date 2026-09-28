@@ -11,7 +11,8 @@
 //
 // Environment (the same as the Python fake): FAKE_CLAUDE_MODE (text | auth | budget | mcp, plus
 // the Go-only sleep and crash), FAKE_CLAUDE_LOG (append {"argv", "stdin", "cwd"} per run),
-// FAKE_CLAUDE_REPLY (text mode's result) and FAKE_CLAUDE_CALLS ([[name, arguments], ...]).
+// FAKE_CLAUDE_REPLY (text mode's result), FAKE_CLAUDE_CALLS ([[name, arguments], ...]) and
+// FAKE_CLAUDE_LOGGED_IN ("0": auth status reports logged out).
 package claudecodetest
 
 import (
@@ -85,6 +86,10 @@ func Calls(t *testing.T, log string) []Call {
 func run(args []string) int {
 	if len(args) == 1 && args[0] == "--version" {
 		fmt.Println("2.0.0 (Claude Code, fake)")
+		return 0
+	}
+	if len(args) == 2 && args[0] == "auth" && args[1] == "status" {
+		fmt.Printf("{\"loggedIn\": %t}\n", os.Getenv("FAKE_CLAUDE_LOGGED_IN") != "0")
 		return 0
 	}
 	prompt, _ := io.ReadAll(os.Stdin)
