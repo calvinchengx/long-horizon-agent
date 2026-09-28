@@ -170,6 +170,16 @@ class _Acting:
     dirty: bool = True  # workspace changed since the last verification (or none ran yet)
 
 
+#: How much of a failed tool call's error and output a ``tool_call`` event keeps (the end).
+TOOL_ERROR_TAIL = 500
+
+
+def tool_error_detail(result: ToolResult) -> str:
+    """The end of a failed call's error and output: for ``run_command``, the stderr tail."""
+    detail = "\n".join(part for part in (result.error, result.content) if part)
+    return detail[-TOOL_ERROR_TAIL:]
+
+
 class AgentLoop:
     """Runs one verified cycle of work using a model + tools + sandbox + verifier + anchor.
 
@@ -567,7 +577,17 @@ class AgentLoop:
         self, call: ToolCall, ctx: ToolContext, mission_id: str, cycle_id: str
     ) -> ToolResult:
         tool_result = await traced_dispatch(self._dispatcher, call, ctx)
-        self._emit("tool_call", mission_id, cycle_id, tool=call.name, ok=tool_result.ok)
+        if tool_result.ok:
+            self._emit("tool_call", mission_id, cycle_id, tool=call.name, ok=True)
+        else:  # why it failed, so a trace can be diagnosed (the recorder redacts it)
+            self._emit(
+                "tool_call",
+                mission_id,
+                cycle_id,
+                tool=call.name,
+                ok=False,
+                error=tool_error_detail(tool_result),
+            )
         return tool_result
 
     async def _dispatch(

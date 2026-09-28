@@ -732,3 +732,32 @@ func TestRunningOutOfTurnsIsRecorded(t *testing.T) {
 		t.Fatal("a cycle that finished was reported as out of turns")
 	}
 }
+
+func TestAFailedToolCallRecordsWhy(t *testing.T) {
+	f := setup(t, item("01", "x"))
+	rec := obs.NewTraceRecorder(nil)
+	read := text(`{"tool": "read_file", "arguments": {"path": "missing-token=sk-live-abcdefghijklmnop.txt"}}`)
+	f.run(t, f.loop(model.NewStub([]contracts.TurnResult{read, writeTurn("out.txt", "hello")}),
+		func(o *LoopOptions) { o.MaxTurns, o.Recorder = 2, rec }), "c1", fileHasHello)
+	var calls []obs.TraceEvent
+	for _, e := range rec.Events() {
+		if e.Kind == "tool_call" {
+			calls = append(calls, e)
+		}
+	}
+	if len(calls) != 2 {
+		t.Fatalf("events: %+v", rec.Events())
+	}
+	errText, _ := calls[0].Data.Get("error")
+	if ok, _ := calls[0].Data.Get("ok"); ok != false || !strings.Contains(errText.(string), "missing") ||
+		strings.Contains(errText.(string), "sk-live-abcdefghijklmnop") {
+		t.Fatal(calls[0].Data)
+	}
+	if _, has := calls[1].Data.Get("error"); has {
+		t.Fatal(calls[1].Data)
+	}
+	long := ToolErrorDetail(contracts.ToolResult{OK: false, Error: contracts.Str("e"), Content: strings.Repeat("é", 1000) + "END"})
+	if n := len([]rune(long)); n != ToolErrorTail || !strings.HasSuffix(long, "END") {
+		t.Fatal(n)
+	}
+}

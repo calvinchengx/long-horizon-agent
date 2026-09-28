@@ -461,8 +461,28 @@ func (l *AgentLoop) dispatchResult(ctx context.Context, call contracts.ToolCall,
 		call.Arguments = map[string]any{}
 	}
 	result := tracing.TracedDispatch(ctx, l.opts.Dispatcher, call, cs.tctx)
-	l.emit("tool_call", cs.missionID, cs.cycleID, obs.F("tool", call.Name), obs.F("ok", result.OK))
+	if result.OK {
+		l.emit("tool_call", cs.missionID, cs.cycleID, obs.F("tool", call.Name), obs.F("ok", true))
+	} else { // why it failed, so a trace can be diagnosed (the recorder redacts it)
+		l.emit("tool_call", cs.missionID, cs.cycleID, obs.F("tool", call.Name), obs.F("ok", false),
+			obs.F("error", ToolErrorDetail(result)))
+	}
 	return result
+}
+
+// ToolErrorTail is how much of a failed tool call's error and output a tool_call event keeps.
+const ToolErrorTail = 500
+
+// ToolErrorDetail is the end of a failed call's error and output: for run_command, the stderr
+// tail.
+func ToolErrorDetail(result contracts.ToolResult) string {
+	parts := []string{}
+	for _, part := range []string{result.ErrorText(), result.Content} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	return pyfmt.Tail(strings.Join(parts, "\n"), ToolErrorTail)
 }
 
 // witnessChecks are the item's witnesses as checks, plus a failing result per unusable witness.

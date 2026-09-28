@@ -466,3 +466,45 @@ async def test_running_out_of_turns_is_recorded(tmp_path: Path) -> None:
     exhausted = [e for e in recorder.events if e.kind == "turns_exhausted"]
     assert exhausted[0].data == {"max_turns": 2, "tool_calls": 2}
     assert "turns_exhausted" not in await cycle([_write("out.txt", "hello"), DONE], "c2")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_tool_call_records_why(tmp_path: Path) -> None:
+    import json
+
+    from lha.agent.loop import TOOL_ERROR_TAIL, tool_error_detail
+    from lha.contracts.tools import ToolResult
+    from lha.obs.events import TraceRecorder
+
+    anchor, session = await _setup(
+        tmp_path, Checklist(items=[ChecklistItem(id="01", description="write a file")])
+    )
+    argv = [
+        PY,
+        "-c",
+        "import sys; sys.stderr.write('boom token=sk-live-abcdefghijklmnop'); sys.exit(3)",
+    ]
+    fail = TurnResult(text=json.dumps({"tool": "run_command", "arguments": {"argv": argv}}))
+    ok = TurnResult(text='{"tool": "list_files", "arguments": {}}')
+    recorder = TraceRecorder()
+    loop = AgentLoop(
+        model=StubModel(script=[fail, ok]),
+        dispatcher=AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True),
+        verifier=DeterministicVerifier(default_timeout_s=60),
+        anchor=anchor,
+        max_turns=2,
+        recorder=recorder,
+    )
+    await loop.run_cycle(
+        ctx=ToolContext(mission_id="m1", session=session),
+        mission_id="m1",
+        cycle_id="c1",
+        checks=[FILE_HAS_HELLO],
+    )
+    failed, passed = [e.data for e in recorder.events if e.kind == "tool_call"]
+    error = str(failed["error"])
+    assert failed["ok"] is False and error.startswith("exit 3\nexit_code=3") and "boom" in error
+    assert "sk-live-abcdefghijklmnop" not in error  # the recorder redacts it
+    assert passed == {"tool": "list_files", "ok": True}
+    long = tool_error_detail(ToolResult(ok=False, error="e", content="x" * 1000 + "END"))
+    assert len(long) == TOOL_ERROR_TAIL and long.endswith("END")
