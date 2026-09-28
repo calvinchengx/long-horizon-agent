@@ -1,0 +1,104 @@
+{
+ "spec": {
+  "name": "edit_file",
+  "description": "Replace one exact snippet in a UTF-8 text file (path relative to the workspace root). 'old_text' must appear exactly once: copy it from read_file with enough lines to be unique. Prefer this to write_file for changing an existing file.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string"
+    },
+    "old_text": {
+     "type": "string"
+    },
+    "new_text": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "path",
+    "old_text",
+    "new_text"
+   ]
+  },
+  "mutating": true,
+  "egress": false,
+  "untrusted_input": false,
+  "path_args": [
+   "path"
+  ],
+  "command_arg": null
+ },
+ "edits": [
+  {
+   "content": "a = 1\nb = 2\n",
+   "old_text": "a = 1",
+   "new_text": "a = 10",
+   "result": "a = 10\nb = 2\n",
+   "error": null
+  },
+  {
+   "content": "a = 1\nb = 2\n",
+   "old_text": "b = 2\n",
+   "new_text": "",
+   "result": "a = 1\n",
+   "error": null
+  },
+  {
+   "content": "déjà 🐟 vu\n",
+   "old_text": "🐟",
+   "new_text": "fish",
+   "result": "déjà fish vu\n",
+   "error": null
+  },
+  {
+   "content": "xx",
+   "old_text": "x",
+   "new_text": "y",
+   "result": null,
+   "error": "'old_text' matches 2 places; include more surrounding lines so it matches one"
+  },
+  {
+   "content": "aaa",
+   "old_text": "aa",
+   "new_text": "b",
+   "result": "ba",
+   "error": null
+  },
+  {
+   "content": "abc",
+   "old_text": "",
+   "new_text": "x",
+   "result": null,
+   "error": "'old_text' must not be empty"
+  },
+  {
+   "content": "abc",
+   "old_text": "zz",
+   "new_text": "x",
+   "result": null,
+   "error": "'old_text' was not found; read the file again and copy the text exactly"
+  },
+  {
+   "content": "abc",
+   "old_text": "b",
+   "new_text": "b",
+   "result": null,
+   "error": "'new_text' is the same as 'old_text'"
+  },
+  {
+   "content": "line\r\nnext\r\n",
+   "old_text": "line\nnext",
+   "new_text": "x",
+   "result": null,
+   "error": "'old_text' was not found; read the file again and copy the text exactly"
+  },
+  {
+   "content": "",
+   "old_text": "a",
+   "new_text": "b",
+   "result": null,
+   "error": "'old_text' was not found; read the file again and copy the text exactly"
+  }
+ ]
+}

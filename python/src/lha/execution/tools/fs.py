@@ -1,4 +1,4 @@
-"""Filesystem tools: read / write / list / grep, scoped to the sandbox workspace.
+"""Filesystem tools: read / write / edit / list / grep, scoped to the sandbox workspace.
 
 All paths are confined to the workspace (``lha.execution.paths``): absolute paths, ``..`` and
 symlinks pointing outside are rejected; walks skip symlinked entries that resolve outside.
@@ -128,6 +128,65 @@ class WriteFileTool:
         except OSError as exc:
             return ToolResult.failure(f"cannot write {path!r}: {exc}")
         return ToolResult.success(f"wrote {len(content)} bytes to {path}")
+
+
+def apply_edit(content: str, old_text: str, new_text: str) -> str:
+    """``content`` with its one occurrence of ``old_text`` replaced (``ValueError`` otherwise)."""
+    if not old_text:
+        raise ValueError("'old_text' must not be empty")
+    if old_text == new_text:
+        raise ValueError("'new_text' is the same as 'old_text'")
+    count = content.count(old_text)
+    if count == 0:
+        raise ValueError("'old_text' was not found; read the file again and copy the text exactly")
+    if count > 1:
+        raise ValueError(
+            f"'old_text' matches {count} places; include more surrounding lines so it matches one"
+        )
+    return content.replace(old_text, new_text, 1)
+
+
+class EditFileTool:
+    """Change part of a file without rewriting it: a whole-file rewrite can drop code by mistake."""
+
+    spec = ToolSpec(
+        name="edit_file",
+        description=(
+            "Replace one exact snippet in a UTF-8 text file (path relative to the workspace "
+            "root). 'old_text' must appear exactly once: copy it from read_file with enough "
+            "lines to be unique. Prefer this to write_file for changing an existing file."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "path": {"type": "string"},
+                "old_text": {"type": "string"},
+                "new_text": {"type": "string"},
+            },
+            "required": ["path", "old_text", "new_text"],
+        },
+        mutating=True,
+        path_args=["path"],
+    )
+
+    async def run(self, arguments: dict[str, object], ctx: ToolContext) -> ToolResult:
+        path = str(arguments.get("path", ""))
+        old_text, new_text = arguments.get("old_text", ""), arguments.get("new_text", "")
+        if not isinstance(old_text, str) or not isinstance(new_text, str):
+            return ToolResult.failure("'old_text' and 'new_text' must be strings")
+        try:
+            content = await ctx.session.read_file(path)
+        except (OSError, UnicodeDecodeError) as exc:
+            return ToolResult.failure(f"cannot read {path!r}: {exc}")
+        try:
+            edited = apply_edit(content, old_text, new_text)
+        except ValueError as exc:
+            return ToolResult.failure(f"{path}: {exc}")
+        try:
+            await ctx.session.write_file(path, edited)
+        except OSError as exc:
+            return ToolResult.failure(f"cannot write {path!r}: {exc}")
+        return ToolResult.success(f"edited {path}")
 
 
 class ListFilesTool:

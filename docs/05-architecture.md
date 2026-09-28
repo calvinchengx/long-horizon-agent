@@ -205,7 +205,8 @@ See [memory](12-memory.md).
   the durable path queues them for `lha mission-approve`, local runs ask on the terminal with
   `--approve-interactive`, and with no gate they are denied. It also enforces the "rule of two".
 - **Tools** ([`execution/tools/`](../python/src/lha/execution/tools/)): the default set is
-  `read_file`, `write_file`, `list_files`, `grep` and `run_command`, and the lead also gets
+  `read_file`, `write_file`, `edit_file`, `list_files`, `grep` and `run_command`, and the lead
+  also gets
   `record_decision`. When `LHA_WEB_ALLOW_HOSTS` (plus any `--allow-host`) is non-empty,
   `fetch_url` is added, limited by an egress policy to those hosts, with public-address checks,
   per-redirect re-checks and credentials from `LHA_WEB_CREDENTIALS` injected only for the hosts

@@ -1023,6 +1023,36 @@
     "command_arg": null
    },
    {
+    "name": "edit_file",
+    "description": "Replace one exact snippet in a UTF-8 text file (path relative to the workspace root). 'old_text' must appear exactly once: copy it from read_file with enough lines to be unique. Prefer this to write_file for changing an existing file.",
+    "parameters": {
+     "type": "object",
+     "properties": {
+      "path": {
+       "type": "string"
+      },
+      "old_text": {
+       "type": "string"
+      },
+      "new_text": {
+       "type": "string"
+      }
+     },
+     "required": [
+      "path",
+      "old_text",
+      "new_text"
+     ]
+    },
+    "mutating": true,
+    "egress": false,
+    "untrusted_input": false,
+    "path_args": [
+     "path"
+    ],
+    "command_arg": null
+   },
+   {
     "name": "list_files",
     "description": "List files under the workspace (optionally a subdirectory), ignoring noise.",
     "parameters": {
@@ -1131,7 +1161,7 @@
     "command_arg": null
    }
   ],
-  "rendered": "- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})"
+  "rendered": "- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- edit_file: Replace one exact snippet in a UTF-8 text file (path relative to the workspace root). 'old_text' must appear exactly once: copy it from read_file with enough lines to be unique. Prefer this to write_file for changing an existing file. (args: {'path': {'type': 'string'}, 'old_text': {'type': 'string'}, 'new_text': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})"
  },
  "render_memory_block": [
   {

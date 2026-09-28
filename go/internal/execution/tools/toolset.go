@@ -33,7 +33,7 @@ import (
 // DefaultLocalTools is the non-egress tool set (file IO + shell) every mission gets by default.
 // record_decision is not in it: it is bound to a mission's decision sink (WithDecisionTool).
 func DefaultLocalTools() []contracts.Tool {
-	return []contracts.Tool{ReadFileTool{}, WriteFileTool{}, ListFilesTool{}, GrepTool{}, ShellTool{}}
+	return []contracts.Tool{ReadFileTool{}, WriteFileTool{}, EditFileTool{}, ListFilesTool{}, GrepTool{}, ShellTool{}}
 }
 
 // WebConfigError reports inconsistent web/egress settings (e.g. a credential bound to a host

@@ -314,7 +314,7 @@ func TestSettingsAndRegistration(t *testing.T) {
 		t.Fatal(tools)
 	}
 	got := names(buildRun(t, none, RunDispatcherOptions{AllowMutating: true}).Specs())
-	if len(got) != 5 {
+	if len(got) != 6 {
 		t.Fatal(got)
 	}
 	onlyFetch := buildRun(t, base, RunDispatcherOptions{AllowMutating: true})

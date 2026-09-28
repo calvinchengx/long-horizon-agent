@@ -164,7 +164,7 @@ See [25-system-one.md](25-system-one.md).
 |---|---|---|---|
 | `LHA_BUDGET_USD_CEILING` | float | `10.0` | spend ceiling in USD per mission (local runs; durable missions started by the CLI) |
 | `LHA_MAX_CYCLES` | int | `1000` | cycle ceiling for local runs; `lha mission-start` passes it as `MissionInput.max_cycles` unless `--max-cycles` is given (read in the CLI process, not the worker) |
-| `LHA_MAX_TURNS_PER_CYCLE` | int | `8` | model turns per cycle before the acting phase ends |
+| `LHA_MAX_TURNS_PER_CYCLE` | int | `8` | model turns per cycle before the acting phase ends (logged as `turns_exhausted`) |
 | `LHA_STALL_LIMIT` | int | `5` | local runs stop when one item fails this many times in a row; unused by the durable workflow |
 | `LHA_MAX_REPLANS` | int | `20` | splits of blocked items allowed per mission (counted as items with status `split`); `0` disables the replanner |
 | `LHA_MAX_SPLIT_DEPTH` | int | `2` | how deeply splits may nest: an item whose id already has this many dots (`03.1.2`) is not split again |

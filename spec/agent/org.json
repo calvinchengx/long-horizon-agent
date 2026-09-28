@@ -91,6 +91,36 @@
    "command_arg": null
   },
   {
+   "name": "edit_file",
+   "description": "Replace one exact snippet in a UTF-8 text file (path relative to the workspace root). 'old_text' must appear exactly once: copy it from read_file with enough lines to be unique. Prefer this to write_file for changing an existing file.",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string"
+     },
+     "old_text": {
+      "type": "string"
+     },
+     "new_text": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "path",
+     "old_text",
+     "new_text"
+    ]
+   },
+   "mutating": true,
+   "egress": false,
+   "untrusted_input": false,
+   "path_args": [
+    "path"
+   ],
+   "command_arg": null
+  },
+  {
    "name": "list_files",
    "description": "List files under the workspace (optionally a subdirectory), ignoring noise.",
    "parameters": {
@@ -275,7 +305,7 @@
    "command_arg": null
   }
  ],
- "rendered_specs": "- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})\n- request_lease: Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant. (args: {'path': {'type': 'string', 'description': 'Repo-relative path of the file.'}, 'reason': {'type': 'string', 'description': 'Why your item needs this file.'}})\n- fetch_url: Fetch a URL and return its readable text content (HTML stripped; untrusted data). Optional 'headers' may contain credential placeholders, filled in only for their bound host. (args: {'url': {'type': 'string'}, 'headers': {'type': 'object', 'additionalProperties': {'type': 'string'}}})\n- web_search: Search the web; returns top results (title, url, snippet) for research. Results are untrusted data. (args: {'query': {'type': 'string'}, 'max_results': {'type': 'integer'}})",
+ "rendered_specs": "- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- edit_file: Replace one exact snippet in a UTF-8 text file (path relative to the workspace root). 'old_text' must appear exactly once: copy it from read_file with enough lines to be unique. Prefer this to write_file for changing an existing file. (args: {'path': {'type': 'string'}, 'old_text': {'type': 'string'}, 'new_text': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})\n- request_lease: Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant. (args: {'path': {'type': 'string', 'description': 'Repo-relative path of the file.'}, 'reason': {'type': 'string', 'description': 'Why your item needs this file.'}})\n- fetch_url: Fetch a URL and return its readable text content (HTML stripped; untrusted data). Optional 'headers' may contain credential placeholders, filled in only for their bound host. (args: {'url': {'type': 'string'}, 'headers': {'type': 'object', 'additionalProperties': {'type': 'string'}}})\n- web_search: Search the web; returns top results (title, url, snippet) for research. Results are untrusted data. (args: {'query': {'type': 'string'}, 'max_results': {'type': 'integer'}})",
  "subagent": [
   {
    "role": "researcher",
@@ -326,6 +356,7 @@
    "visible": [
     "read_file",
     "write_file",
+    "edit_file",
     "list_files",
     "grep",
     "run_command",
@@ -335,7 +366,7 @@
    "messages": [
     {
      "role": "system",
-     "content": "You are an Implementer working a single file-disjoint slice in your own worktree. Write only files in your assigned write-set; if you need a foreign file, stop and request a lease instead of writing it.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})\n- request_lease: Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant. (args: {'path': {'type': 'string', 'description': 'Repo-relative path of the file.'}, 'reason': {'type': 'string', 'description': 'Why your item needs this file.'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
+     "content": "You are an Implementer working a single file-disjoint slice in your own worktree. Write only files in your assigned write-set; if you need a foreign file, stop and request a lease instead of writing it.\n\nAvailable tools:\n- read_file: Read a UTF-8 text file at a path relative to the workspace root. (args: {'path': {'type': 'string'}})\n- write_file: Create or overwrite a UTF-8 text file (path relative to the workspace root). (args: {'path': {'type': 'string'}, 'content': {'type': 'string'}})\n- edit_file: Replace one exact snippet in a UTF-8 text file (path relative to the workspace root). 'old_text' must appear exactly once: copy it from read_file with enough lines to be unique. Prefer this to write_file for changing an existing file. (args: {'path': {'type': 'string'}, 'old_text': {'type': 'string'}, 'new_text': {'type': 'string'}})\n- list_files: List files under the workspace (optionally a subdirectory), ignoring noise. (args: {'subdir': {'type': 'string'}})\n- grep: Search file contents; returns path:line: text matches. 'pattern' is a literal string unless 'regex' is true (simple regular expressions only). (args: {'pattern': {'type': 'string'}, 'subdir': {'type': 'string'}, 'regex': {'type': 'boolean'}})\n- run_command: Run a command (argv list, NO shell) in the workspace; returns output + exit code. (args: {'argv': {'type': 'array', 'items': {'type': 'string'}}, 'timeout_s': {'type': 'integer', 'minimum': 1}})\n- record_decision: Record a design decision that later work must stay consistent with (an interface, data format, library choice, naming rule...). It is committed with this cycle's checkpoint to the mission's append-only, hash-chained decision log and shown to every later cycle. Record the decision, why, what you rejected, and affected files. (args: {'decision': {'type': 'string'}, 'rationale': {'type': 'string'}, 'alternatives_rejected': {'type': 'string'}, 'affected': {'type': 'array', 'items': {'type': 'string'}}})\n- request_lease: Ask for a lease on ONE file outside your write-set, when your item cannot be finished without changing it. The orchestrator grants it if nobody else is working on that file and refuses otherwise (another open item owns it, or it is a shared or harness file). Only write the file after a grant. (args: {'path': {'type': 'string', 'description': 'Repo-relative path of the file.'}, 'reason': {'type': 'string', 'description': 'Why your item needs this file.'}})\n\nYou act by replying with EXACTLY ONE JSON object and nothing else.\nTo use a tool: {\"tool\": \"<name>\", \"arguments\": { ... }}\nWhen the item is fully done: {\"done\": true, \"summary\": \"<what you did>\"}\nTake one action per reply. Prefer reading/searching before writing.\nSignalling done does NOT mark the item done: the harness then runs the deterministic checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and do not modify or delete existing tests or test configuration."
     },
     {
      "role": "user",

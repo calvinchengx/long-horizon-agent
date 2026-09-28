@@ -143,7 +143,7 @@ def test_no_allow_list_means_no_web_tools() -> None:
     assert web_tools(settings) == []
     names = {s.name for s in build_run_dispatcher(settings, allow_mutating=True).specs()}
     assert "fetch_url" not in names and "web_search" not in names
-    assert names == {"read_file", "write_file", "list_files", "grep", "run_command"}
+    assert names == {"read_file", "write_file", "edit_file", "list_files", "grep", "run_command"}
 
 
 def test_allow_list_registers_fetch_and_search_only_with_provider_and_key() -> None:

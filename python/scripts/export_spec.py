@@ -2474,6 +2474,45 @@ def export_code_query() -> None:
     )
 
 
+def export_edit_file() -> None:
+    """spec/execution/edit_file.json: the edit_file tool's spec and which edits apply or are
+    refused (counted in code points, so non-ASCII text must match the same way)."""
+    from lha.execution.tools.fs import EditFileTool, apply_edit
+
+    edits = [
+        ("a = 1\nb = 2\n", "a = 1", "a = 10"),
+        ("a = 1\nb = 2\n", "b = 2\n", ""),
+        ("déjà 🐟 vu\n", "🐟", "fish"),
+        ("xx", "x", "y"),
+        ("aaa", "aa", "b"),
+        ("abc", "", "x"),
+        ("abc", "zz", "x"),
+        ("abc", "b", "b"),
+        ("line\r\nnext\r\n", "line\nnext", "x"),
+        ("", "a", "b"),
+    ]
+    cases = []
+    for content, old_text, new_text in edits:
+        try:
+            result: object = apply_edit(content, old_text, new_text)
+            error: object = None
+        except ValueError as exc:
+            result, error = None, str(exc)
+        cases.append(
+            {
+                "content": content,
+                "old_text": old_text,
+                "new_text": new_text,
+                "result": result,
+                "error": error,
+            }
+        )
+    _write(
+        "execution/edit_file.json",
+        {"spec": EditFileTool.spec.model_dump(mode="json"), "edits": cases},
+    )
+
+
 def main() -> None:
     export_wire_bytes()
     export_memory()
@@ -2497,6 +2536,7 @@ def main() -> None:
     export_agent_org()
     export_system_one()
     export_code_query()
+    export_edit_file()
 
 
 if __name__ == "__main__":

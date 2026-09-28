@@ -7,6 +7,8 @@ package tools
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strconv"
@@ -183,6 +185,78 @@ func (WriteFileTool) Run(ctx context.Context, arguments map[string]any, tctx con
 		return contracts.Failure(pyval.ExcText(err))
 	}
 	return contracts.Success("wrote " + strconv.Itoa(pyval.Len(content)) + " bytes to " + path)
+}
+
+// ApplyEdit is content with its one occurrence of oldText replaced by newText; it is an error
+// when oldText is empty, equals newText, or does not match exactly once.
+func ApplyEdit(content, oldText, newText string) (string, error) {
+	if oldText == "" {
+		return "", errors.New("'old_text' must not be empty")
+	}
+	if oldText == newText {
+		return "", errors.New("'new_text' is the same as 'old_text'")
+	}
+	switch count := strings.Count(content, oldText); {
+	case count == 0:
+		return "", errors.New("'old_text' was not found; read the file again and copy the text exactly")
+	case count > 1:
+		return "", fmt.Errorf("'old_text' matches %d places; include more surrounding lines so it matches one", count)
+	}
+	return strings.Replace(content, oldText, newText, 1), nil
+}
+
+// EditFileTool changes part of a file without rewriting it (mutating): a whole-file rewrite
+// can drop code by mistake.
+type EditFileTool struct{}
+
+// Spec implements contracts.Tool.
+func (EditFileTool) Spec() contracts.ToolSpec {
+	return contracts.ToolSpec{
+		Name: "edit_file",
+		Description: "Replace one exact snippet in a UTF-8 text file (path relative to the workspace " +
+			"root). 'old_text' must appear exactly once: copy it from read_file with enough " +
+			"lines to be unique. Prefer this to write_file for changing an existing file.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": pyfmt.NewOrderedMap(
+				"path", map[string]any{"type": "string"},
+				"old_text", map[string]any{"type": "string"},
+				"new_text", map[string]any{"type": "string"},
+			),
+			"required": []any{"path", "old_text", "new_text"},
+		},
+		Mutating: true,
+		PathArgs: []string{"path"},
+	}
+}
+
+// Run implements contracts.Tool.
+func (EditFileTool) Run(ctx context.Context, arguments map[string]any, tctx contracts.ToolContext) contracts.ToolResult {
+	path := strArg(arguments, "path")
+	texts := [2]string{}
+	for i, name := range []string{"old_text", "new_text"} {
+		raw, present := arguments[name]
+		text, isStr := raw.(string)
+		if present && !isStr {
+			return contracts.Failure("'old_text' and 'new_text' must be strings")
+		}
+		texts[i] = text
+	}
+	content, err := tctx.Session.ReadFile(ctx, path)
+	if err != nil {
+		return failureFor("cannot read "+contracts.PyRepr(path)+": ", err)
+	}
+	edited, err := ApplyEdit(content, texts[0], texts[1])
+	if err != nil {
+		return contracts.Failure(path + ": " + err.Error())
+	}
+	if err := tctx.Session.WriteFile(ctx, path, edited); err != nil {
+		if pyval.IsOSError(err) {
+			return contracts.Failure("cannot write " + contracts.PyRepr(path) + ": " + pyval.OSErrorText(err))
+		}
+		return contracts.Failure(pyval.ExcText(err))
+	}
+	return contracts.Success("edited " + path)
 }
 
 // containedFiles are the regular files under start whose real path stays inside root (sorted by

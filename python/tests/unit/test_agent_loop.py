@@ -433,3 +433,36 @@ async def test_mission_anchor_survives_many_cycles(tmp_path: Path) -> None:
     progress = (tmp_path / ".lha/progress.md").read_text(encoding="utf-8")
     assert "Build the Frobnicator" in progress
     assert "c0 [01]" in progress and "c2 [01]" in progress  # appended, not overwritten
+
+
+@pytest.mark.asyncio
+async def test_running_out_of_turns_is_recorded(tmp_path: Path) -> None:
+    from lha.obs.events import TraceRecorder
+
+    anchor, session = await _setup(
+        tmp_path, Checklist(items=[ChecklistItem(id="01", description="write a file")])
+    )
+    read = TurnResult(text='{"tool": "list_files", "arguments": {}}')
+    recorder = TraceRecorder()
+
+    async def cycle(script: list[TurnResult], cycle_id: str) -> list[str]:
+        loop = AgentLoop(
+            model=StubModel(script=script),
+            dispatcher=AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True),
+            verifier=DeterministicVerifier(default_timeout_s=60),
+            anchor=anchor,
+            max_turns=2,
+            recorder=recorder,
+        )
+        await loop.run_cycle(
+            ctx=ToolContext(mission_id="m1", session=session),
+            mission_id="m1",
+            cycle_id=cycle_id,
+            checks=[FILE_HAS_HELLO],
+        )
+        return [e.kind for e in recorder.events if e.cycle_id == cycle_id]
+
+    assert "turns_exhausted" in await cycle([read, read], "c1")
+    exhausted = [e for e in recorder.events if e.kind == "turns_exhausted"]
+    assert exhausted[0].data == {"max_turns": 2, "tool_calls": 2}
+    assert "turns_exhausted" not in await cycle([_write("out.txt", "hello"), DONE], "c2")

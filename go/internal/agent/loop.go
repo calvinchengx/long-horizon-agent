@@ -368,6 +368,9 @@ func (l *AgentLoop) modelTurns(ctx context.Context, act *acting, messages []cont
 		act.toolsUsed = append(act.toolsUsed, call.Name)
 		act.dirty = true
 	}
+	// Out of turns without signalling done: say so, or the cycle looks like a failed attempt.
+	l.emit("turns_exhausted", cs.missionID, cs.cycleID, obs.F("max_turns", l.opts.MaxTurns),
+		obs.F("tool_calls", act.toolCalls))
 	return nil
 }
 

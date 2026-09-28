@@ -58,6 +58,37 @@ func TestWriteThenReadRoundTrips(t *testing.T) {
 	}
 }
 
+func TestEditFileChangesOneExactSnippetAndKeepsTheRest(t *testing.T) {
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{AllowMutating: true})
+	dir := t.TempDir()
+	tc := tctx(t, dir)
+	file := filepath.Join(dir, "m.py")
+	if err := os.WriteFile(file, []byte("a = 1\nb = 2\nb = 2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edit := func(path, old, new string) contracts.ToolCall {
+		return call("e", "edit_file", map[string]any{"path": path, "old_text": old, "new_text": new})
+	}
+	if r := dispatch(d, edit("m.py", "a = 1", "a = 10"), tc); !r.OK || r.Content != "edited m.py" {
+		t.Fatal(r)
+	}
+	for _, c := range []struct{ path, old, new, want string }{
+		{"m.py", "b = 2", "b = 3", "matches 2 places"},
+		{"m.py", "zzz", "y", "was not found"},
+		{"m.py", "", "y", "must not be empty"},
+		{"m.py", "a", "a", "the same"},
+		{"missing.py", "a", "b", "cannot read"},
+		{".lha/x", "a", "b", "harness-owned"},
+	} {
+		if r := dispatch(d, edit(c.path, c.old, c.new), tc); r.OK || !strings.Contains(r.ErrorText(), c.want) {
+			t.Errorf("%+v: %v", c, r)
+		}
+	}
+	if got, _ := os.ReadFile(file); string(got) != "a = 10\nb = 2\nb = 2\n" {
+		t.Fatal(string(got))
+	}
+}
+
 func TestEgressIsDefaultDenied(t *testing.T) {
 	search, _ := NewWebSearchTool(WebSearchOptions{APIKey: "unused"})
 	tools := append(DefaultLocalTools(), search)

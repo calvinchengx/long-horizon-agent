@@ -9,7 +9,13 @@ from lha.execution.tools.decisions import (
     RecordDecisionTool,
     with_decision_tool,
 )
-from lha.execution.tools.fs import GrepTool, ListFilesTool, ReadFileTool, WriteFileTool
+from lha.execution.tools.fs import (
+    EditFileTool,
+    GrepTool,
+    ListFilesTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from lha.execution.tools.leases import (
     REQUEST_LEASE,
     LeaseToolDispatcher,
@@ -25,7 +31,14 @@ def default_local_tools() -> list[Tool]:
     ``record_decision`` is not in this list: it is bound to a mission's decision sink and added
     by ``with_decision_tool`` (``lha.agent.assembly.build_lead_loop`` does this with the anchor).
     """
-    return [ReadFileTool(), WriteFileTool(), ListFilesTool(), GrepTool(), ShellTool()]
+    return [
+        ReadFileTool(),
+        WriteFileTool(),
+        EditFileTool(),
+        ListFilesTool(),
+        GrepTool(),
+        ShellTool(),
+    ]
 
 
 __all__ = [
@@ -34,6 +47,7 @@ __all__ = [
     "DecisionBuffer",
     "DecisionSink",
     "DecisionToolDispatcher",
+    "EditFileTool",
     "FetchUrlTool",
     "GrepTool",
     "LeaseToolDispatcher",

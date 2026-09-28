@@ -46,6 +46,33 @@ async def test_write_then_read_round_trips(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_edit_file_changes_one_exact_snippet_and_keeps_the_rest(tmp_path: Path) -> None:
+    dispatcher = AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True)
+    ctx = await _ctx(tmp_path)
+    (tmp_path / "m.py").write_text("a = 1\nb = 2\nb = 2\n", encoding="utf-8")
+
+    def edit(old: object, new: object, path: str = "m.py") -> ToolCall:
+        return ToolCall(
+            id="e", name="edit_file", arguments={"path": path, "old_text": old, "new_text": new}
+        )
+
+    done = await dispatcher.dispatch(edit("a = 1", "a = 10"), ctx)
+    assert done.ok and done.content == "edited m.py"
+    assert (tmp_path / "m.py").read_text(encoding="utf-8") == "a = 10\nb = 2\nb = 2\n"
+    for call, error in (
+        (edit("b = 2", "b = 3"), "matches 2 places"),
+        (edit("zzz", "y"), "was not found"),
+        (edit("", "y"), "must not be empty"),
+        (edit("a", "a"), "the same"),
+        (edit("a", "b", path="missing.py"), "cannot read"),
+        (edit("a", "b", path=".lha/x"), "harness-owned"),
+    ):
+        result = await dispatcher.dispatch(call, ctx)
+        assert not result.ok and error in (result.error or ""), (call, result.error)
+    assert (tmp_path / "m.py").read_text(encoding="utf-8") == "a = 10\nb = 2\nb = 2\n"
+
+
+@pytest.mark.asyncio
 async def test_egress_is_default_denied(tmp_path: Path) -> None:
     # Web search is egress=True; with default policy it must be blocked BEFORE any network call.
     dispatcher = AllowListDispatcher.for_tools(

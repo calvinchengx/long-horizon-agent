@@ -13,6 +13,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -700,5 +701,34 @@ func TestASplitItemDoesNotStarveIndependentItems(t *testing.T) {
 	}
 	if second.ItemID != "02" || !second.Verified {
 		t.Fatalf("second worked %q, want the independent item 02: %+v", second.ItemID, second)
+	}
+}
+
+func TestRunningOutOfTurnsIsRecorded(t *testing.T) {
+	f := setup(t, item("01", "x"))
+	rec := obs.NewTraceRecorder(nil)
+	kinds := func(cycleID string) (found []obs.TraceEvent) {
+		for _, e := range rec.Events() {
+			if e.CycleID == cycleID && e.Kind == "turns_exhausted" {
+				found = append(found, e)
+			}
+		}
+		return found
+	}
+	withRec := func(o *LoopOptions) { o.MaxTurns, o.Recorder = 2, rec }
+	f.run(t, f.loop(model.NewStub([]contracts.TurnResult{writeTurn("out.txt", "a"), writeTurn("out.txt", "b")}), withRec), "c1", fileHasHello)
+	got := kinds("c1")
+	if len(got) != 1 {
+		t.Fatalf("events: %+v", rec.Events())
+	}
+	if n, _ := got[0].Data.Get("max_turns"); n != 2 {
+		t.Fatal(got[0].Data)
+	}
+	if n, _ := got[0].Data.Get("tool_calls"); n != 2 {
+		t.Fatal(got[0].Data)
+	}
+	f.run(t, f.loop(model.NewStub([]contracts.TurnResult{writeTurn("out.txt", "hello"), done}), withRec), "c2", fileHasHello)
+	if len(kinds("c2")) != 0 {
+		t.Fatal("a cycle that finished was reported as out of turns")
 	}
 }

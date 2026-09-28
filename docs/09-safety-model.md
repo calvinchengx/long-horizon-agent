@@ -112,6 +112,7 @@ and never raises into the agent loop. Checks run in this order:
    checkpoint.
 
 The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
+`edit_file` (mutating: replaces one exact snippet, refused unless it matches exactly once),
 `list_files`, `grep` and `run_command` (mutating, `command_arg="argv"`, no shell). Every run path
 builds its dispatcher with `build_run_dispatcher()`
 ([toolset.py](../python/src/lha/execution/tools/toolset.py)); the lead's goes through

@@ -475,6 +475,14 @@ class AgentLoop:
             acting.tool_calls += 1
             acting.tools_used.append(call.name)
             acting.dirty = True
+        # Out of turns without signalling done: say so, or the cycle looks like a failed attempt.
+        self._emit(
+            "turns_exhausted",
+            mission_id,
+            cycle_id,
+            max_turns=self._max_turns,
+            tool_calls=acting.tool_calls,
+        )
 
     async def _engine_session(
         self,
