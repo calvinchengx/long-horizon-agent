@@ -108,7 +108,9 @@ class Settings(BaseSettings):
     # --- Governor (pre-emptive cost / loop guards) -----------------------------------
     budget_usd_ceiling: float = 10.0
     max_cycles: int = 1000
-    max_turns_per_cycle: int = 8
+    # Model turns in one cycle. A strong model spends many finding the code before it edits; with
+    # 8, Sonnet often ran out before writing anything (docs/24-large-missions.md).
+    max_turns_per_cycle: int = 20
     # Consecutive failed (non-progressing) attempts on the same item before it is declared
     # stuck (the LoopDetector threshold).
     stall_limit: int = 5

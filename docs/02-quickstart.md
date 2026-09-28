@@ -34,7 +34,7 @@ What happens:
    plan, so the Planner falls back to a single item, `01`, containing the task text.
 2. The workdir is initialized as a git repository with a `.lha/` mission anchor and an initial
    commit.
-3. Each cycle gives the model up to `LHA_MAX_TURNS_PER_CYCLE` (default 8) turns. The stub
+3. Each cycle gives the model up to `LHA_MAX_TURNS_PER_CYCLE` (default 20) turns. The stub
    replies with a fixed acknowledgement that is not a valid action, so it writes no files.
 4. At the end of the cycle the verifier runs the default checks (`uv run ruff check .`,
    `uv run ty check`, `uv run pytest -q`). With no tests in the workspace the pytest check

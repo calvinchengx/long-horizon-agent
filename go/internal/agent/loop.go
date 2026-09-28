@@ -107,10 +107,10 @@ type LoopOptions struct {
 	CodeMap *RipwireCodeMap
 }
 
-// DefaultLoopOptions are the Python defaults (max_turns=8, max_consecutive_failures=3,
+// DefaultLoopOptions are the Python defaults (max_turns=20, max_consecutive_failures=3,
 // verify_on_done=True, max_replans=0, max_split_depth=2).
 func DefaultLoopOptions() LoopOptions {
-	return LoopOptions{MaxTurns: 8, MaxConsecutiveFailures: 3, VerifyOnDone: true, MaxSplitDepth: 2}
+	return LoopOptions{MaxTurns: 20, MaxConsecutiveFailures: 3, VerifyOnDone: true, MaxSplitDepth: 2}
 }
 
 // AgentLoop runs one verified cycle of work using a model + tools + sandbox + verifier + anchor.

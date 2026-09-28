@@ -196,7 +196,7 @@ class AgentLoop:
         verifier: Verifier,
         anchor: GitMissionAnchor,
         recorder: TraceRecorder | None = None,
-        max_turns: int = 8,
+        max_turns: int = 20,
         max_consecutive_failures: int = 3,
         verify_on_done: bool = True,
         trusted_checks: Mapping[str, list[str]] | None = None,

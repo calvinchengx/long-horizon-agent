@@ -19,7 +19,7 @@ func TestDefaultsMatchPython(t *testing.T) {
 	}
 	if s.ModelBackend != "stub" || s.ModelName != "stub-1" || s.Sandbox != "docker" ||
 		s.TaskQueue != "lha-mission" || s.BudgetUSDCeiling != 10.0 || s.MaxCycles != 1000 ||
-		s.MaxTurnsPerCycle != 8 || s.StallLimit != 5 || s.AllowUnsafeLocal || s.OpenAIBaseURL != nil {
+		s.MaxTurnsPerCycle != 20 || s.StallLimit != 5 || s.AllowUnsafeLocal || s.OpenAIBaseURL != nil {
 		t.Fatalf("unexpected defaults: %+v", s)
 	}
 }

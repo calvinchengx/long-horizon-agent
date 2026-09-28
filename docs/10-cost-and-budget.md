@@ -120,7 +120,7 @@ the call that splits a blocked item is authorized against the budget and recorde
 |---|---|---|
 | `LHA_BUDGET_USD_CEILING` | 10.0 | all paths; durable missions use `MissionInput.budget_usd` if set |
 | `LHA_MAX_CYCLES` | 1000 | local runners, sub-agent meters. `MissionInput.max_cycles` has its own default of 1000 |
-| `LHA_MAX_TURNS_PER_CYCLE` | 8 | agent loop turns per cycle |
+| `LHA_MAX_TURNS_PER_CYCLE` | 20 | agent loop turns per cycle |
 | `LHA_STALL_LIMIT` | 5 | `LoopDetector` threshold (local runners) |
 | `LHA_ALLOW_UNPRICED_MODELS` | false | governor |
 

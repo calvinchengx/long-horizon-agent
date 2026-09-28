@@ -84,7 +84,7 @@ type Settings struct {
 	// --- Governor
 	BudgetUSDCeiling float64 `env:"budget_usd_ceiling" default:"10.0"`
 	MaxCycles        int     `env:"max_cycles" default:"1000"`
-	MaxTurnsPerCycle int     `env:"max_turns_per_cycle" default:"8"`
+	MaxTurnsPerCycle int     `env:"max_turns_per_cycle" default:"20"`
 	StallLimit       int     `env:"stall_limit" default:"5"`
 	MaxReplans       int     `env:"max_replans" default:"20"`
 	MaxSplitDepth    int     `env:"max_split_depth" default:"2"`

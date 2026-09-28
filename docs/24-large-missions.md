@@ -252,7 +252,8 @@ two runs per arm. Leave it off unless you measure a gain on your own missions.
 
 ## Give a strong model room: turns per cycle
 
-`LHA_MAX_TURNS_PER_CYCLE` (default 8) caps the model turns in one cycle. A strong model on an
+`LHA_MAX_TURNS_PER_CYCLE` caps the model turns in one cycle. The default is 20; it was 8 until
+the runs below. A strong model on an
 unfamiliar codebase spends many of them finding the code before it edits anything. In the same
 three changes with 8 turns, Sonnet used every turn reading and searching on one change and never
 wrote it; on another it rewrote a whole file with `write_file` and dropped 118 lines, which the
@@ -261,17 +262,19 @@ in nine cycles. With `edit_file` (a snippet replacement, now in the default tool
 every run finished all three in three cycles at about the same cost. The two changes landed
 together, so the runs do not say which one mattered more.
 
-A cycle that runs out of turns is logged as `turns_exhausted`. If you see it on most cycles, raise
-the limit; each extra turn costs a model call, and the budget ceiling still applies.
+A cycle that runs out of turns is logged as `turns_exhausted`. Most cycles in the 20-turn runs
+still did: Sonnet kept running commands after its edit instead of signalling done, and the
+verifier passed the work anyway. Lower the limit to cut that spend, or raise it if cycles end
+before the edit; each turn costs a model call, and the budget ceiling still applies.
 
 ## What this does not solve
 
 - **Model quality.** The harness refuses unverified work; it cannot make a weak model strong. In
   one real run with a local Ollama model (gemma4) on a toy mission its planner split into five items, four items were verified and the
   fifth ended blocked. Expect to use a strong model for a project of this size.
-- **Cost.** Order of magnitude only: about 8 turns of roughly 30k input and 2k output tokens per
-  cycle costs around $1 on Claude Sonnet before caching, so a thousand-cycle mission is in the
-  $1–2k range. Set the budget ceiling deliberately.
+- **Cost.** Order of magnitude only: in the Sonnet runs above, a cycle of up to 20 turns cost
+  about $1 in Claude Code's reported cost, so a thousand-cycle mission is in the $1k range, more
+  with a larger codebase or longer cycles. Set the budget ceiling deliberately.
 - **Egress is by hostname.** TLS is not intercepted, so allowing a host allows everything on it.
   `fetch_url` connects only to addresses it checked, so DNS rebinding cannot redirect it to a
   private address.
