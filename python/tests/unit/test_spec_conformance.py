@@ -716,6 +716,54 @@ def test_system_one_wire() -> None:
         assert default_price_in_per_mtok(case["endpoint"]) == case["default_price_in_per_mtok"]
 
 
+
+def test_system_one_authority() -> None:
+    """spec/systemone/authority.json: a System One answer can only ever narrow what happens.
+
+    docs/25-system-one.md's central safety claim, as a case: whatever the model answers -- an
+    option never offered, one naming an authority-widening outcome, maximum confidence under a
+    zero threshold -- triage may only continue, split or block, and reranking may only reorder
+    and drop passages, never add one.
+    """
+    from lha.contracts.memory import MemoryRecord, RetrievalHit
+    from lha.contracts.system_one import ChoiceAnswer
+    from lha.memory.rerank import apply_relevance
+    from lha.systemone import triage
+
+    spec = _load("systemone/authority.json")
+    permitted = set(spec["permitted_actions"])
+    widening = set(spec["widening_actions"])
+    assert permitted.isdisjoint(widening)
+    assert spec["triage_actions"], "the sweep must not be empty"
+
+    for case in spec["triage_actions"]:
+        answer = ChoiceAnswer(
+            choice=case["choice"],
+            probabilities={case["choice"]: case["confidence"]},
+            confidence=case["confidence"],
+        )
+        action = triage.triage_action(
+            answer, threshold=case["threshold"], can_split=case["can_split"]
+        )
+        assert action == case["action"], case
+        # the invariant itself, not just the pinned value
+        assert action in permitted, f"triage reached {action!r}, outside {sorted(permitted)}"
+        assert action not in widening, f"triage widened authority: {action!r}"
+        if action == "split":
+            assert case["can_split"], "split without the replanner's permission"
+
+    for case in spec["rerank"]:
+        given = [
+            RetrievalHit(record=MemoryRecord(id=gid, kind="semantic", text=gid), score=0.1)
+            for gid in case["given_ids"]
+        ]
+        kept = apply_relevance(given, case["relevance"], k=case["k"], min_p=case["min_p"])
+        kept_ids = [h.record.id for h in kept]
+        assert kept_ids == case["kept_ids"], case
+        # reranking may reorder and drop, never introduce
+        assert set(kept_ids) <= set(case["given_ids"]), "rerank invented a passage"
+        assert len(kept_ids) == len(set(kept_ids)), "rerank duplicated a passage"
+
 def test_execution_code_query() -> None:
     from lha.execution.tools.code_query import (
         KINDS,

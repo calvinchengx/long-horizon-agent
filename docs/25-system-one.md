@@ -16,7 +16,12 @@ cheaper:
 | **Memory reranking** (`LHA_MEMORY_RERANK=system_one`) | per recalled passage: *does it help with this task?* | recalled memory is reordered, and passages below `LHA_SYSTEM_ONE_RERANK_MIN` dropped |
 
 A System One answer never allows a command, never answers a human gate and never marks an item
-done. The deterministic verifier and the command classifier keep those decisions. When the
+done. The deterministic verifier and the command classifier keep those decisions. That is not
+just a design intention: [`spec/systemone/authority.json`](../spec/systemone/authority.json)
+sweeps the answer space — including option labels that were never offered, labels naming an
+authority-widening outcome, and confidence 1.00 under a zero threshold — and both
+implementations must show that triage still only continues, splits or blocks, and that
+reranking only reorders and drops passages. When the
 model is down, slow, over budget or returns a malformed answer, LHA behaves exactly as it does
 with System One off.
 
