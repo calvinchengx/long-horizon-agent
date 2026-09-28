@@ -240,8 +240,29 @@ On LHA's own code, `callers`, `uses`, `impact` and `definition` answers for `red
 each. ripwire's own measurements put the `grep`-and-read equivalent at several times that; LHA has
 not measured it. An
 unknown symbol comes back as a short tool error (`symbol not found`), and a sandbox without
-ripwire as a clear one. Whether models use it well, and whether it lowers a mission's cost, is not
-measured yet.
+ripwire as a clear one.
+
+Measured: no effect. Four missions on 29 September 2026 (two with, two without) ran the same three
+changes to LHA's own code with a Sonnet lead (`LHA_MODEL_BACKEND=claude_code`), 20 turns per
+cycle and the Docker sandbox. All four finished every change on its first attempt in three
+cycles. Sonnet called `code_query` once or twice per mission (two of the three calls failed) and
+kept using `grep` and `read_file`. Missions with the tool cost $2.77 and $2.90 in Claude Code's
+reported cost; missions without it cost $2.81 and $3.29. That difference is within the noise of
+two runs per arm. Leave it off unless you measure a gain on your own missions.
+
+## Give a strong model room: turns per cycle
+
+`LHA_MAX_TURNS_PER_CYCLE` (default 8) caps the model turns in one cycle. A strong model on an
+unfamiliar codebase spends many of them finding the code before it edits anything. In the same
+three changes with 8 turns, Sonnet used every turn reading and searching on one change and never
+wrote it; on another it rewrote a whole file with `write_file` and dropped 118 lines, which the
+verifier rolled back. Each run finished only one of the three changes (plus parts of a split one)
+in nine cycles. With `edit_file` (a snippet replacement, now in the default toolset) and 20 turns,
+every run finished all three in three cycles at about the same cost. The two changes landed
+together, so the runs do not say which one mattered more.
+
+A cycle that runs out of turns is logged as `turns_exhausted`. If you see it on most cycles, raise
+the limit; each extra turn costs a model call, and the budget ceiling still applies.
 
 ## What this does not solve
 

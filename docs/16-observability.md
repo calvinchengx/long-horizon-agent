@@ -33,7 +33,8 @@ Event kinds emitted today:
 |---|---|---|
 | `cycle_started` | `AgentLoop` | `item_id` |
 | `llm_turn` | `AgentLoop` | `model`, `output_tokens`, `stop_reason` |
-| `tool_call` | `AgentLoop` | `tool`, `ok` |
+| `tool_call` | `AgentLoop` | `tool`, `ok`; a failed call adds `error`: the last 500 characters of its error and output (for `run_command`, the stderr tail), redacted like every event |
+| `turns_exhausted` | `AgentLoop` | `max_turns`, `tool_calls`: the cycle used every turn in `LHA_MAX_TURNS_PER_CYCLE` without signalling done (the verifier still runs) |
 | `invalid_reply` | `AgentLoop` | `reason` |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict` |
 | `claude_code_session` | `AgentLoop` (the `claude_code` lead engine) | `turns`, `tool_calls`, `session_id`, `stopped` |

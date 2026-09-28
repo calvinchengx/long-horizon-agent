@@ -117,7 +117,11 @@ a blocked item are.
   2026, `gemma4` lead) showed the opposite: about 30% more input tokens per cycle and about 14% more
   cost with the map, about 18% fewer navigation calls, and no change finished in either arm
   ([details](24-large-missions.md#optional-a-code-map-each-cycle)). A stronger lead model is
-  untested, and so is the on-demand `code_query` tool.
+  untested with the map.
+- **The `code_query` tool saves work.** Four missions with a Sonnet lead (two with, two without,
+  29 September 2026) all finished every change; Sonnet rarely called the tool and the cost
+  difference was within the noise
+  ([details](24-large-missions.md#optional-ask-the-code-instead-of-reading-it)).
 - **Real-service paths without CI coverage.** The E2B sandbox is tested only against a fake SDK;
   the real E2B service is never run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama and Voyage embedders are tested
   against mocked HTTP, not live endpoints, so no test shows how much a real embedding model

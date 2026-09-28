@@ -114,7 +114,8 @@ quality with real models.
 | Auditor, Librarian, Tester and model-backed Integrator runners | removed: harness integrity and the verifier are the deterministic auditor, memory consolidation is the librarian, and `BranchIntegrator` integrates |
 | System One decision models (Jev / Kev): stall triage, memory reranking | done: every run path, Python and Go, off by default ([25-system-one.md](25-system-one.md)) |
 | System One: pre-review diff screen, untrusted-content screen, model-tier routing, command second opinion; exporting approvals, verdicts and reviews as calibration and fine-tuning labels | planned ([25-system-one.md](25-system-one.md#not-built-yet)) |
-| `code_query` tool (`LHA_CODE_QUERY=true`): ripwire find / definition / callers / uses / impact for every role | done: Python and Go, off by default; not measured yet ([24](24-large-missions.md#optional-ask-the-code-instead-of-reading-it)) |
+| `code_query` tool (`LHA_CODE_QUERY=true`): ripwire find / definition / callers / uses / impact for every role | done: Python and Go, off by default; one measurement (Sonnet lead) showed no gain ([24](24-large-missions.md#optional-ask-the-code-instead-of-reading-it)) |
+| `edit_file` (replace one exact snippet) and the `turns_exhausted` event | done: Python and Go, `edit_file` in the default toolset ([24](24-large-missions.md#give-a-strong-model-room-turns-per-cycle)) |
 | Cycle-start code map (`LHA_CODE_MAP=ripwire`) | done: every run path, Python and Go, off by default; one measurement showed no gain ([24](24-large-missions.md#optional-a-code-map-each-cycle)) |
 | Worker Build IDs / versioned deploys | planned |
 | Re-embedding after an embedding-model change | planned |
