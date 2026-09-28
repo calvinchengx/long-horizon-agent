@@ -2417,7 +2417,6 @@ def export_system_one() -> None:
     )
 
 
-
 def export_system_one_authority() -> None:
     """spec/systemone/authority.json: a System One answer can only ever narrow what happens.
 

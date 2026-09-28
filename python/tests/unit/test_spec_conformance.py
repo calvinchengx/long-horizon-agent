@@ -716,7 +716,6 @@ def test_system_one_wire() -> None:
         assert default_price_in_per_mtok(case["endpoint"]) == case["default_price_in_per_mtok"]
 
 
-
 def test_system_one_authority() -> None:
     """spec/systemone/authority.json: a System One answer can only ever narrow what happens.
 
@@ -763,6 +762,7 @@ def test_system_one_authority() -> None:
         # reranking may reorder and drop, never introduce
         assert set(kept_ids) <= set(case["given_ids"]), "rerank invented a passage"
         assert len(kept_ids) == len(set(kept_ids)), "rerank duplicated a passage"
+
 
 def test_execution_code_query() -> None:
     from lha.execution.tools.code_query import (
