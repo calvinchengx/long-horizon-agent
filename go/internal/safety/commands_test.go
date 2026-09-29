@@ -531,7 +531,7 @@ func TestRedirectEnd(t *testing.T) {
 			t.Errorf("redirectEnd(%q) = %d, want %d", token, got, want)
 		}
 	}
-	if !strings.Contains(redirectIntoProtected([]string{"echo", ">", ".git/x"}), ".git/x") {
+	if !strings.Contains(redirectIntoProtected([]string{"echo", ">", ".git/x"}, Scope{}), ".git/x") {
 		t.Error("separate redirection target not checked")
 	}
 }

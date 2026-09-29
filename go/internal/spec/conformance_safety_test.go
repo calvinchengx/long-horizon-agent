@@ -14,6 +14,12 @@ func TestClassifyCommand(t *testing.T) {
 			Argv   []string `json:"argv"`
 			Reason *string  `json:"reason"`
 		} `json:"cases"`
+		ScopedCases []struct {
+			Argv       []string `json:"argv"`
+			Workspace  *string  `json:"workspace"`
+			PrivateTmp bool     `json:"private_tmp"`
+			Reason     *string  `json:"reason"`
+		} `json:"scoped_cases"`
 	}
 	Load(t, "safety/classify_command.json", &s)
 	if len(s.Cases) == 0 {
@@ -26,6 +32,22 @@ func TestClassifyCommand(t *testing.T) {
 			t.Errorf("ClassifyCommand(%q) = %q, want allowed", c.Argv, reason)
 		case c.Reason != nil && (!gated || reason != *c.Reason):
 			t.Errorf("ClassifyCommand(%q) = %q (gated=%v), want %q", c.Argv, reason, gated, *c.Reason)
+		}
+	}
+	if len(s.ScopedCases) == 0 {
+		t.Fatal("no scoped cases")
+	}
+	for _, c := range s.ScopedCases {
+		scope := safety.Scope{PrivateTmp: c.PrivateTmp}
+		if c.Workspace != nil {
+			scope.Workspace = *c.Workspace
+		}
+		reason, gated := safety.ClassifyCommandIn(c.Argv, scope)
+		switch {
+		case c.Reason == nil && gated:
+			t.Errorf("ClassifyCommandIn(%q, %+v) = %q, want allowed", c.Argv, scope, reason)
+		case c.Reason != nil && (!gated || reason != *c.Reason):
+			t.Errorf("ClassifyCommandIn(%q, %+v) = %q (gated=%v), want %q", c.Argv, scope, reason, gated, *c.Reason)
 		}
 	}
 }

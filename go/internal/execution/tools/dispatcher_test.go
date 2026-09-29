@@ -421,3 +421,35 @@ func TestListFilesOrderAndIgnores(t *testing.T) {
 		t.Fatalf("%q", r.Content)
 	}
 }
+
+// containerSession looks like a Docker session (workdir /workspace over a host checkout) and
+// records commands instead of running them on this machine.
+type containerSession struct {
+	contracts.SandboxSession
+	host string
+	ran  [][]string
+}
+
+func (s *containerSession) Workdir() string     { return "/workspace" }
+func (s *containerSession) HostWorkdir() string { return s.host }
+func (s *containerSession) Exec(_ context.Context, argv []string, _ contracts.ExecOptions) (contracts.ExecResult, error) {
+	s.ran = append(s.ran, argv)
+	return contracts.ExecResult{ExitCode: 0}, nil
+}
+
+func TestASandboxWithItsOwnTmpIsNotAskedAboutDeletingThere(t *testing.T) {
+	gate := &callbackGate{decision: contracts.GateReject, by: "policy"}
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{AllowMutating: true, Gate: gate})
+	argv := []any{"rm", "-f", "/tmp/lha-dispatcher-test", "/workspace/.wtest"}
+	c := call("r", "run_command", map[string]any{"argv": argv})
+
+	// Local: the host's /tmp, and /workspace is not the workspace.
+	if r := dispatch(d, c, tctx(t, t.TempDir())); r.OK || len(gate.asked) != 1 {
+		t.Fatal(r, gate.asked)
+	}
+	container := &containerSession{host: t.TempDir()}
+	r := dispatch(d, c, contracts.ToolContext{MissionID: "m1", Session: container})
+	if !r.OK || len(gate.asked) != 1 || len(container.ran) != 1 { // run without asking again
+		t.Fatal(r, gate.asked, container.ran)
+	}
+}

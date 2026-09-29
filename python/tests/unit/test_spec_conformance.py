@@ -69,6 +69,9 @@ def _load(rel: str) -> Any:
 def test_classify_command() -> None:
     for case in _load("safety/classify_command.json")["cases"]:
         assert classify_command(case["argv"]) == case["reason"], case["argv"]
+    for case in _load("safety/classify_command.json")["scoped_cases"]:
+        scope = {"workspace": case["workspace"], "private_tmp": case["private_tmp"]}
+        assert classify_command(case["argv"], **scope) == case["reason"], case
 
 
 def test_egress() -> None:

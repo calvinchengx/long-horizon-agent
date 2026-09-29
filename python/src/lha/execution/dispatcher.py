@@ -156,7 +156,7 @@ class AllowListDispatcher:
         if path_error:
             return ToolResult.failure(path_error)
 
-        gate_reason = self._gate_reason(spec, call.arguments)
+        gate_reason = self._gate_reason(spec, call.arguments, ctx)
         if gate_reason is not None:
             denied = await self._ask_gate(call, ctx, gate_reason)
             if denied:
@@ -167,11 +167,19 @@ class AllowListDispatcher:
         except Exception as exc:
             return ToolResult.failure(f"{type(exc).__name__}: {exc}")
 
-    def _gate_reason(self, spec: ToolSpec, arguments: dict[str, object]) -> str | None:
+    def _gate_reason(
+        self, spec: ToolSpec, arguments: dict[str, object], ctx: ToolContext
+    ) -> str | None:
         if spec.command_arg is not None:
             argv = arguments.get(spec.command_arg)
             if isinstance(argv, list):
-                reason = classify_command([str(token) for token in argv])
+                # A sandbox whose workdir is not the host checkout (Docker, E2B) has its own /tmp.
+                workdir = ctx.session.workdir
+                reason = classify_command(
+                    [str(token) for token in argv],
+                    workspace=workdir,
+                    private_tmp=host_root(ctx.session) != workdir,
+                )
                 if reason:
                     return reason
         if spec.egress and self._gate_all_egress:

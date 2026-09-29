@@ -28,6 +28,7 @@ import posixpath
 import re
 import shlex
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 _PROTECTED = frozenset({".git", ".lha"})
 
@@ -371,6 +372,7 @@ _GIT_EXEC_CONFIG = (
     "uploadpack.",
     "receivepack.",
 )
+_PLAIN_PAGERS = frozenset({"cat", "less", "more"})
 _GIT_CONFIG_READS = frozenset(
     {"--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "get", "list"}
 )
@@ -507,7 +509,7 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
         spec, rest = _RUNNER_OPTS, rest[1:]
     if spec is None and head.startswith("python") and len(rest) >= 2 and rest[0] == "-m":
         return _unwrap(rest[1:], depth + 1)
-    if spec is None:
+    if spec is None or (head == "command" and _command_lookup(rest)):
         return [argv]
     out: list[list[str]] = []
     for scripts, command in _parse_opts(spec, rest):
@@ -523,27 +525,63 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
     return out
 
 
-def _escapes(path: str) -> bool:
-    """True for absolute, home-relative, or parent-escaping paths (and bare globs of cwd)."""
-    unified = path.replace("\\", "/")
+def _command_lookup(rest: list[str]) -> bool:
+    """``command -v`` / ``-V`` only prints how a name resolves; it runs nothing."""
+    for arg in rest:
+        if arg == "--" or not arg.startswith("-"):
+            return False
+        if "v" in arg or "V" in arg:
+            return True
+    return False
+
+
+@dataclass(frozen=True)
+class _Scope:
+    """Where a command runs: the workspace's absolute path there, and whether ``/tmp`` is the
+    sandbox's own (a container or microVM) rather than the host's."""
+
+    workspace: str | None = None
+    private_tmp: bool = False
+
+
+def _in_workspace(path: str, scope: _Scope) -> str:
+    """``path`` relative to the workspace when it is an absolute path inside it, else unchanged."""
+    root = posixpath.normpath(scope.workspace) if scope.workspace else ""
+    if not root.startswith("/") or root == "/" or not path.startswith("/"):
+        return path
+    normalized = posixpath.normpath(path)
+    if normalized == root:
+        return "."
+    return normalized[len(root) + 1 :] if normalized.startswith(root + "/") else path
+
+
+def _escapes(path: str, scope: _Scope) -> bool:
+    """True for absolute, home-relative, or parent-escaping paths (and bare globs of cwd).
+
+    An absolute path inside the workspace is read relative to it, and a path under ``/tmp`` is
+    inside when the sandbox has its own ``/tmp``.
+    """
+    unified = _in_workspace(path.replace("\\", "/"), scope)
+    if scope.private_tmp and posixpath.normpath(unified).startswith("/tmp/"):
+        return False
     if unified.startswith(("/", "~")) or (len(unified) > 1 and unified[1] == ":"):
         return True
     normalized = posixpath.normpath(unified)
     return normalized == ".." or normalized.startswith("../") or normalized in (".", "*")
 
 
-def _touches_protected(path: str) -> bool:
-    normalized = posixpath.normpath(path.replace("\\", "/"))
+def _touches_protected(path: str, scope: _Scope) -> bool:
+    normalized = posixpath.normpath(_in_workspace(path.replace("\\", "/"), scope))
     first = normalized.split("/", 1)[0].casefold()
     return first in _PROTECTED
 
 
-def _classify_rm(args: list[str]) -> str | None:
+def _classify_rm(args: list[str], scope: _Scope) -> str | None:
     flags = "".join(a.lstrip("-") for a in args if a.startswith("-") and not a.startswith("--"))
     recursive = "r" in flags.lower() or "--recursive" in args
     targets = [a for a in args if not a.startswith("-")]
     for target in targets:
-        if _escapes(target):
+        if _escapes(target, scope):
             kind = "recursive delete" if recursive else "delete"
             return f"{kind} outside the workspace: {target!r}"
     return None
@@ -560,7 +598,9 @@ def _classify_git(args: list[str]) -> str | None:
             config = opt.split("=", 1)[1]
         else:
             config = ""
-        if _git_exec_config(config.partition("=")[0]):
+        if _git_exec_config(config.partition("=")[0]) and not (
+            opt == "-c" and _plain_pager(config)
+        ):
             return f"git -c {config.partition('=')[0]} (defines what git runs or where it pushes)"
         takes_value = opt in ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env")
         args = args[2:] if takes_value else args[1:]
@@ -602,6 +642,12 @@ def _git_exec_config(key: str) -> bool:
     return bool(key) and (key.startswith(_GIT_EXEC_CONFIG) or key.endswith(".pushurl"))
 
 
+def _plain_pager(config: str) -> bool:
+    """``core.pager=cat`` (or ``less`` / ``more``) runs a pager, not an arbitrary command."""
+    key, _, value = config.partition("=")
+    return key.strip().lower() == "core.pager" and value in _PLAIN_PAGERS
+
+
 def _git_branch_force_delete(rest: list[str]) -> bool:
     """``-D``, ``-df``/``-Df`` bundles, or ``-d``/``--delete`` together with ``-f``/``--force``.
 
@@ -620,14 +666,14 @@ def _injects_git_config(tokens: list[str]) -> str | None:
     return f"git config injected via the environment ({hit.partition('=')[0]})"
 
 
-def _redirect_into_protected(tokens: list[str]) -> str | None:
+def _redirect_into_protected(tokens: list[str], scope: _Scope) -> str | None:
     """A shell redirection (``>``/``>>``/``&>``/``2>``...) whose target is ``.git``/``.lha``."""
     for i, token in enumerate(tokens):
         match = _REDIRECT.search(token)
         if match is None:
             continue
         target = token[match.end() :] or (tokens[i + 1] if i + 1 < len(tokens) else "")
-        if target and _touches_protected(target):
+        if target and _touches_protected(target, scope):
             return f"redirection writes a harness-owned path ({target!r})"
     return None
 
@@ -742,7 +788,7 @@ def _sed_in_place(args: list[str]) -> bool:
     return False
 
 
-def _classify_simple(argv: list[str], depth: int) -> str | None:
+def _classify_simple(argv: list[str], depth: int, scope: _Scope) -> str | None:
     injected = _injects_git_config(argv)
     if injected:
         return injected
@@ -751,13 +797,13 @@ def _classify_simple(argv: list[str], depth: int) -> str | None:
     except _Ambiguous as exc:
         return f"ambiguous command line ({exc})"
     for candidate in candidates:
-        reason = _classify_one(candidate, depth)
+        reason = _classify_one(candidate, depth, scope)
         if reason:
             return reason
     return None
 
 
-def _classify_one(argv: list[str], depth: int) -> str | None:
+def _classify_one(argv: list[str], depth: int, scope: _Scope) -> str | None:
     if not argv:
         return None
     tool, args = _base(argv[0]), argv[1:]
@@ -770,11 +816,11 @@ def _classify_one(argv: list[str], depth: int) -> str | None:
         for i, arg in enumerate(args):
             if arg == "-c" or (arg.startswith("-") and not arg.startswith("--") and "c" in arg):
                 if i + 1 < len(args):
-                    return _classify_script(args[i + 1], depth + 1)
+                    return _classify_script(args[i + 1], depth + 1, scope)
                 return None
         return None
     if tool == "eval":
-        return _classify_script(" ".join(args), depth + 1) if args else None
+        return _classify_script(" ".join(args), depth + 1, scope) if args else None
     if tool in _ALWAYS_GATED:
         return f"{tool} is an outward-facing / destructive tool"
     if tool == "git":
@@ -798,10 +844,10 @@ def _classify_one(argv: list[str], depth: int) -> str | None:
         return _classify_httpie(args)
     if tool == "find":
         for command in _find_exec_commands(args):
-            reason = _classify_simple(command, depth)
+            reason = _classify_simple(command, depth, scope)
             if reason:
                 return reason
-        if "-delete" in args and any(_touches_protected(a) for a in args if a[:1] != "-"):
+        if "-delete" in args and any(_touches_protected(a, scope) for a in args if a[:1] != "-"):
             return "find -delete removes a harness-owned path"
         return None
     if tool == "rsync":
@@ -809,14 +855,14 @@ def _classify_one(argv: list[str], depth: int) -> str | None:
         if any(":" in t.split("/", 1)[0] for t in targets):
             return "rsync to/from a remote host"
     if tool == "rm":
-        found = _classify_rm(args)
+        found = _classify_rm(args, scope)
         if found:
             return found
     if tool in _FS_MUTATORS:
         if tool == "sed" and not _sed_in_place(args):
             return None
         for arg in args:
-            if not arg.startswith("-") and _touches_protected(arg):
+            if not arg.startswith("-") and _touches_protected(arg, scope):
                 return f"{tool} mutates a harness-owned path ({arg!r})"
     return None
 
@@ -880,7 +926,7 @@ def _substitutions(script: str) -> list[str]:
     return bodies
 
 
-def _classify_script(script: str, depth: int) -> str | None:
+def _classify_script(script: str, depth: int, scope: _Scope) -> str | None:
     """Classify each simple command of a ``sh -c`` script string (and its substitutions)."""
     if depth > 3:
         return "deeply nested shell invocation"
@@ -894,35 +940,89 @@ def _classify_script(script: str, depth: int) -> str | None:
         return "unparseable shell script"
     for match in _SCRIPT_REDIRECT.finditer(script):
         target = match.group(1).strip("'\"")
-        if target and _touches_protected(target):
+        if target and _touches_protected(target, scope):
             return f"redirection writes a harness-owned path ({target!r})"
     for body in nested:
-        reason = _classify_script(body, depth + 1)
+        reason = _classify_script(body, depth + 1, scope)
         if reason:
             return reason
     segment: list[str] = []
-    for token in [*tokens, ";"]:
+    tokens.append(";")
+    # The tokenizer drops backslashes, so an escaped ``$`` or paren would look like (or unbalance) a
+    # substitution: with any backslash in the script, no group is skipped (fail closed).
+    skip_arguments = "\\" not in script
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if (
+            skip_arguments
+            and token.endswith("$")
+            and tokens[i + 1 : i + 2]
+            and tokens[i + 1][0] == "("
+            and _has_command(segment)
+        ):
+            # A substitution used as an argument (``echo $(date) $(cat f)``): its body was
+            # classified above, so skip it. One in command position still fails closed.
+            segment.append(token)
+            i = _skip_group(tokens, i + 1)
+            continue
         if token in _SHELL_SEPARATORS or set(token) <= set(";&|()\n"):
-            reason = _classify_segment(segment, depth)
+            reason = _classify_segment(segment, depth, scope)
             if reason:
                 return reason
             segment = []
         else:
             segment.append(token)
+        i += 1
     return None
 
 
-def _classify_segment(segment: list[str], depth: int) -> str | None:
+def _has_command(segment: list[str]) -> bool:
+    """True once ``segment`` holds a command word (after reserved words and assignments)."""
+    return any(t not in _RESERVED_PREFIX and not _is_assignment(t) for t in segment)
+
+
+def _skip_group(tokens: list[str], start: int) -> int:
+    """Index after the parenthesised group opening at ``tokens[start]``.
+
+    Punctuation tokens group runs such as ``))`` or ``);``: what follows the closing ``)`` is put
+    back as a token of its own, so a separator after the group still ends the segment.
+    """
+    depth = 0
+    for i in range(start, len(tokens)):
+        token = tokens[i]
+        if set(token) <= set(";&|()\n"):
+            for j, ch in enumerate(token):
+                depth += {"(": 1, ")": -1}.get(ch, 0)
+                if depth == 0:
+                    rest = token[j + 1 :]
+                    if rest:
+                        tokens[i] = rest
+                        return i
+                    return i + 1
+    return len(tokens)
+
+
+def _classify_segment(segment: list[str], depth: int, scope: _Scope) -> str | None:
     """Drop leading reserved words (``{``, ``if``, ``do``...) and ``VAR=value`` prefixes."""
-    blocked = _injects_git_config(segment) or _redirect_into_protected(segment)
+    blocked = _injects_git_config(segment) or _redirect_into_protected(segment, scope)
     if blocked:
         return blocked
     while segment and (segment[0] in _RESERVED_PREFIX or _is_assignment(segment[0])):
         segment = segment[1:]
     # Tokens glued to substitutions (``$(git``/```git``) were classified via ``_substitutions``.
-    return _classify_simple(segment, depth) if segment else None
+    return _classify_simple(segment, depth, scope) if segment else None
 
 
-def classify_command(argv: Sequence[str]) -> str | None:
-    """Return why ``argv`` needs a human decision (irreversible / outward-facing), else ``None``."""
-    return _classify_simple([str(a) for a in argv], 0)
+def classify_command(
+    argv: Sequence[str], *, workspace: str | None = None, private_tmp: bool = False
+) -> str | None:
+    """Return why ``argv`` needs a human decision (irreversible / outward-facing), else ``None``.
+
+    ``workspace`` is the workspace's absolute path where the command runs (``/workspace`` in
+    Docker), so an absolute path inside it is a workspace path; ``private_tmp`` says ``/tmp``
+    belongs to the sandbox (Docker, E2B), so deleting under it is not outside the workspace.
+    Without them every absolute path is outside, as before.
+    """
+    scope = _Scope(workspace, private_tmp)
+    return _classify_simple([str(a) for a in argv], 0, scope)

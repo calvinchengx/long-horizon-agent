@@ -126,7 +126,17 @@ def _command_corpus() -> list[list[str]]:
 
 def export_classifier() -> None:
     cases = [{"argv": argv, "reason": classify_command(argv)} for argv in _command_corpus()]
-    _write("safety/classify_command.json", {"cases": cases})
+    scoped = importlib.import_module("tests.unit.test_safety_commands").SCOPED
+    scoped_cases = [
+        {
+            "argv": argv,
+            "workspace": workspace,
+            "private_tmp": private_tmp,
+            "reason": classify_command(argv, workspace=workspace, private_tmp=private_tmp),
+        }
+        for argv, workspace, private_tmp, _ in scoped
+    ]
+    _write("safety/classify_command.json", {"cases": cases, "scoped_cases": scoped_cases})
 
 
 # --- safety/egress ----------------------------------------------------------------------------

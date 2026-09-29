@@ -348,6 +348,106 @@
   },
   {
    "argv": [
+    "sh",
+    "-c",
+    "$(echo rm) -rf /"
+   ],
+   "reason": "command name comes from a shell expansion (cannot classify)"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $(date); $(echo git) push"
+   ],
+   "reason": "command name comes from a shell expansion (cannot classify)"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $(git push origin main)"
+   ],
+   "reason": "git push (outward-facing / rewrites history)"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $((1+2)) $(date); git push"
+   ],
+   "reason": "git push (outward-facing / rewrites history)"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $(date);rm -rf /"
+   ],
+   "reason": "recursive delete outside the workspace: '/'"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $(echo \\() ; git push"
+   ],
+   "reason": "git push (outward-facing / rewrites history)"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $(case x in x) echo;; esac) ; git push"
+   ],
+   "reason": "git push (outward-facing / rewrites history)"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "command $b"
+   ],
+   "reason": "command name comes from a shell expansion (cannot classify)"
+  },
+  {
+   "argv": [
+    "command",
+    "-p",
+    "$x"
+   ],
+   "reason": "command name comes from a shell expansion (cannot classify)"
+  },
+  {
+   "argv": [
+    "git",
+    "-c",
+    "core.pager=sh -c x",
+    "log"
+   ],
+   "reason": "git -c core.pager (defines what git runs or where it pushes)"
+  },
+  {
+   "argv": [
+    "git",
+    "--config-env=core.pager=cat",
+    "log"
+   ],
+   "reason": "git -c core.pager (defines what git runs or where it pushes)"
+  },
+  {
+   "argv": [
+    "git",
+    "-c",
+    "core.pager=cat",
+    "-c",
+    "alias.s=push",
+    "s"
+   ],
+   "reason": "git -c alias.s (defines what git runs or where it pushes)"
+  },
+  {
+   "argv": [
     "pytest",
     "-q"
    ],
@@ -466,6 +566,56 @@
     "ruff",
     "check",
     "."
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "for b in zig gcc-12 musl-gcc; do command -v $b; done"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "command -V $tool"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo $(date +%s) $(cat /sys/fs/cgroup/memory.current) >> /tmp/mem.log"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "for i in $(seq 1 3); do echo $i; done"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "git",
+    "-c",
+    "core.pager=cat",
+    "status",
+    "--short"
+   ],
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "ls x && git -c core.pager=less log -1"
    ],
    "reason": null
   },
@@ -1973,6 +2123,167 @@
     "ls\npwd"
    ],
    "reason": null
+  }
+ ],
+ "scoped_cases": [
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/workspace/.wtest",
+    "/tmp/.wtest"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "rm -f /tmp/zig.whl; rm -rf /tmp/zigtc/cache; go env -w GOFLAGS=-p=4"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": null
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace/build"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": null
+  },
+  {
+   "argv": [
+    "rm",
+    "/home/me/ws/build/x.o"
+   ],
+   "workspace": "/home/me/ws",
+   "private_tmp": false,
+   "reason": null
+  },
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/tmp/x"
+   ],
+   "workspace": "/home/me/ws",
+   "private_tmp": false,
+   "reason": "delete outside the workspace: '/tmp/x'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/workspace/.wtest"
+   ],
+   "workspace": null,
+   "private_tmp": false,
+   "reason": "delete outside the workspace: '/workspace/.wtest'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/workspace'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/tmp"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/tmp'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/tmp/../etc"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/tmp/../etc'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace/../etc"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/workspace/../etc'"
+  },
+  {
+   "argv": [
+    "rm",
+    "/home/me/wsx/a"
+   ],
+   "workspace": "/home/me/ws",
+   "private_tmp": false,
+   "reason": "delete outside the workspace: '/home/me/wsx/a'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace/.git"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "rm mutates a harness-owned path ('/workspace/.git')"
+  },
+  {
+   "argv": [
+    "mv",
+    "/workspace/.lha/checklist.json",
+    "x"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "mv mutates a harness-owned path ('/workspace/.lha/checklist.json')"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo x > /workspace/.git/config"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "redirection writes a harness-owned path ('/workspace/.git/config')"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "~/x"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '~/x'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/workspace/x"
+   ],
+   "workspace": "workspace",
+   "private_tmp": true,
+   "reason": "delete outside the workspace: '/workspace/x'"
   }
  ]
 }
