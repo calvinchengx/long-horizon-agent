@@ -33,3 +33,6 @@ func exitCode(ps *os.ProcessState) int {
 	}
 	return ps.ExitCode()
 }
+
+// processGone reports whether pid no longer exists (kill(pid, 0) fails with ESRCH).
+func processGone(pid int) bool { return syscall.Kill(pid, 0) == syscall.ESRCH }

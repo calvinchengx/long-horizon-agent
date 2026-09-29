@@ -17,7 +17,10 @@ agent's edits), and commands run inside a locked-down container:
   cannot plant git hooks or rewrite the mission state;
 - every exec is wrapped in coreutils ``timeout`` (plus a host-side deadline) and its output is
   streamed into a bounded buffer;
-- file IO paths are validated lexically and re-checked with ``realpath`` inside the container.
+- file IO paths are validated lexically and re-checked with ``realpath`` inside the container;
+- every container and network carries an ``lha.owner`` label (``host:pid`` of the process that
+  opened it), and each ``open`` first removes those whose owner on this host has died, so a
+  killed worker's sandboxes do not run on forever.
 
 Snapshots commit the container to an image, whose id is stored in the durable workflow. Requires
 the ``sandbox`` extra (``docker``); the client can be injected (unit tests use a fake).
@@ -31,6 +34,7 @@ import io
 import os
 import posixpath
 import secrets
+import socket
 import tarfile
 import time
 from collections.abc import Callable, Sequence
@@ -57,6 +61,7 @@ _PROXY_SOURCE = Path(__file__).with_name("egress_proxy.py")
 _PROXY_READY = "lha-egress-proxy listening"  # egress_proxy.READY_MESSAGE
 _PROXY_READY_TIMEOUT_S = 60.0
 _RESOURCE_PREFIX = "lha-egress-"
+OWNER_LABEL = "lha.owner"
 # Indirection so tests can drive the exec deadline without touching the event loop's clock.
 _clock = time.monotonic
 _sleep = time.sleep
@@ -66,6 +71,58 @@ def _default_user() -> str:
     if hasattr(os, "getuid") and hasattr(os, "getgid"):
         return f"{os.getuid()}:{os.getgid()}"
     return "65534:65534"
+
+
+def _owner() -> str:
+    """This process as an ``lha.owner`` label value: ``host:pid``."""
+    return f"{socket.gethostname()}:{os.getpid()}"
+
+
+def owner_is_gone(owner: str) -> bool:
+    """True when ``owner`` (``host:pid``) is a process on this host that no longer exists.
+
+    Another host's owner, a malformed label, or a process that exists (even another user's) is
+    never gone; a reused pid keeps an orphan until that process ends too.
+    """
+    host, _, pid = owner.rpartition(":")
+    if host != socket.gethostname() or not pid.isdigit() or int(pid) <= 0 or os.name == "nt":
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def sweep_orphans(client: Any) -> list[str]:
+    """Remove the containers, then the networks, whose ``lha.owner`` has died (best effort).
+
+    Returns the names removed. Only resources this code labelled are considered, so containers of
+    other projects, and of LHA processes still running, are never touched.
+    """
+    removed: list[str] = []
+    try:
+        containers = client.containers.list(all=True, filters={"label": OWNER_LABEL})
+    except Exception:
+        containers = []
+    for container in containers:
+        with contextlib.suppress(Exception):
+            if owner_is_gone(str(container.labels.get(OWNER_LABEL, ""))):
+                container.remove(force=True)
+                removed.append(str(container.name))
+    try:
+        networks = client.networks.list(filters={"label": OWNER_LABEL})
+    except Exception:
+        networks = []
+    for network in networks:
+        with contextlib.suppress(Exception):
+            labels = network.attrs.get("Labels") or {}
+            if owner_is_gone(str(labels.get(OWNER_LABEL, ""))):
+                network.remove()
+                removed.append(str(network.name))
+    return removed
 
 
 def _validate_egress_hosts(hosts: Sequence[str]) -> None:
@@ -286,7 +343,10 @@ class _EgressGate:
 
     def create(self, *, proxy_image: str, egress_hosts: Sequence[str]) -> None:
         self.network = self._client.networks.create(
-            self.network_name, driver="bridge", internal=True, labels={"lha.egress": "network"}
+            self.network_name,
+            driver="bridge",
+            internal=True,
+            labels={"lha.egress": "network", OWNER_LABEL: _owner()},
         )
         self.proxy = self._client.containers.run(
             proxy_image,
@@ -301,7 +361,7 @@ class _EgressGate:
                 "PYTHONDONTWRITEBYTECODE": "1",
                 "PYTHONUNBUFFERED": "1",
             },
-            labels={"lha.egress": "proxy"},
+            labels={"lha.egress": "proxy", OWNER_LABEL: _owner()},
             user="65534:65534",
             cap_drop=["ALL"],
             security_opt=["no-new-privileges:true"],
@@ -455,10 +515,12 @@ class DockerSandbox(Sandbox):
             # so this adds nothing an agent could not do anyway. Go/uv/pnpm caches live here too.
             # tmpfs pages count against ``mem_limit``: size the two together.
             "tmpfs": {"/tmp": f"rw,exec,nosuid,nodev,size={self._tmp_size}"},
+            "labels": {OWNER_LABEL: _owner()},
         }
 
     async def open(self, *, workdir: str, snapshot_id: str | None = None) -> SandboxSession:
         image = snapshot_id or self._image
+        await asyncio.to_thread(sweep_orphans, self._client)
         await asyncio.to_thread(lambda: Path(workdir).mkdir(parents=True, exist_ok=True))
         host = str(Path(workdir).resolve())
         if not self._egress_hosts:

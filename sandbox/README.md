@@ -113,6 +113,7 @@ DockerSandbox starts containers with these settings:
 - `--cap-drop ALL`
 - `no-new-privileges`
 - `--init` (an init process reaps orphaned processes)
+- `--label lha.owner=<host>:<pid>` (a later sandbox removes it once that process has exited)
 
 The image is built for that setup:
 
