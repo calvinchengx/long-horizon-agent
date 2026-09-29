@@ -127,6 +127,27 @@ def test_parse_rejects_bad_syntax() -> None:
         parse_witness("bogus", TRUSTED)
 
 
+def test_the_lead_is_shown_how_to_run_each_witness() -> None:
+    from lha.agent.prompt import build_messages
+    from lha.contracts.state import SituationSnapshot
+    from lha.verify.witnesses import witness_command
+
+    assert witness_command("pytest:tests/a.py::t") == "uv run pytest -q tests/a.py::t"
+    assert witness_command("go:TestX@./internal/...") == (
+        "go test -count=1 -run '^TestX$' -v ./internal/..."
+    )
+    assert witness_command("cmd:make check") == "make check"
+    assert witness_command("trusted:e2e") is None  # runs outside the sandbox
+    assert witness_command("pytest:bad node") is None
+    item = ChecklistItem(
+        id="01", description="d", witnesses=["pytest:tests/a.py::t", "trusted:e2e"]
+    )
+    user = build_messages(
+        anchor_text="M", snapshot=SituationSnapshot(head_sha="h"), item=item, specs=[]
+    )[1].content
+    assert "- pytest:tests/a.py::t (run: uv run pytest -q tests/a.py::t)\n- trusted:e2e\n" in user
+
+
 def test_item_checks_are_ordered_and_unique() -> None:
     item = ChecklistItem(
         id="01",

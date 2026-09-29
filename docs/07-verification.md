@@ -141,6 +141,12 @@ command is defined, is recorded as a failing check (exit code 2, `invalid witnes
 skipped. When the replanner splits an item, its witnesses move to the last child, so splitting
 never weakens the item's acceptance.
 
+The lead's prompt lists the item's witnesses with the command that runs each one in the sandbox,
+for example `- pytest:tests/test_x.py::test_y (run: uv run pytest -q tests/test_x.py::test_y)`.
+A `trusted:` witness is listed without one, since only the verifier can run it. Without the
+command, models guessed `python -m pytest`, which fails in an image where pytest is installed only
+in the project's environment.
+
 Witnesses are written in a [checklist file](06-mission-anchor.md#importing-a-checklist); the
 Planner does not produce them.
 

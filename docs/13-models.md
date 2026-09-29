@@ -59,8 +59,9 @@ LHA_MODEL_BACKEND=ollama LHA_MODEL_NAME=qwen3:8b \
 
 The agent loop ([`agent/loop.py`](../python/src/lha/agent/loop.py)) does not pass a `tools`
 parameter: tools are described in the prompt, and the model acts by replying with a JSON object
-(`{"tool": ..., "arguments": ...}` or `{"done": true, ...}`). Native tool calls in a response are
-also accepted. A model that cannot reliably produce that JSON gets corrective turns and makes no
+(`{"tool": ..., "arguments": ...}` or `{"done": true, ...}`). A reply with no `arguments` key
+takes the other top-level keys as the arguments (`{"tool": "grep", "pattern": "x"}`), because
+models often write it that way. Native tool calls in a response are also accepted. A model that cannot reliably produce that JSON gets corrective turns and makes no
 progress.
 
 ## `openai_compat`: any chat-completions endpoint

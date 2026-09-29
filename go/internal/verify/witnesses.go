@@ -142,18 +142,42 @@ func ShellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
 }
 
+func goTestRun(test, packages string) string {
+	segs := strings.Split(test, "/")
+	for i, s := range segs {
+		segs[i] = "^" + s + "$"
+	}
+	return "go test -count=1 -run " + ShellQuote(strings.Join(segs, "/")) + " -v " + ShellQuote(packages)
+}
+
+// WitnessCommand is the command that runs a witness in the sandbox, as the model would type it;
+// "" for a trusted:/ci: witness (it runs outside the sandbox) or a malformed one. Shown in the
+// lead's prompt: without it, models guessed `python -m pytest`, which fails where pytest is
+// installed only in the project's environment.
+func WitnessCommand(witness string) string {
+	if ValidateWitness(witness) != nil {
+		return ""
+	}
+	scheme, rest, _ := splitWitness(witness)
+	switch scheme {
+	case "go":
+		test, packages, _ := goParts(witness, rest)
+		return goTestRun(test, packages)
+	case "pytest":
+		return "uv run pytest -q " + rest
+	case "cmd":
+		return rest
+	}
+	return ""
+}
+
 // GoTestCommand is argv that passes only if `go test` exits 0 AND reports "--- PASS: <test>".
 func GoTestCommand(test, packages string) []string {
 	if packages == "" {
 		packages = DefaultGoPackages
 	}
-	segs := strings.Split(test, "/")
-	for i, s := range segs {
-		segs[i] = "^" + s + "$"
-	}
-	runRegex := strings.Join(segs, "/")
 	passRegex := "^[[:space:]]*--- PASS: " + test + "( |$)"
-	goCmd := "go test -count=1 -run " + ShellQuote(runRegex) + " -v " + ShellQuote(packages)
+	goCmd := goTestRun(test, packages)
 	missing := "witness go:" + test + ": the test did not run and pass (missing, skipped or filtered)"
 	script := "out=$(" + goCmd + " 2>&1); rc=$?; " +
 		`printf "%s\n" "$out"; ` +

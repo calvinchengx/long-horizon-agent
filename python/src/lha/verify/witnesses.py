@@ -94,11 +94,36 @@ def validate_witness(witness: str) -> None:
         )
 
 
+def _go_test_run(test: str, packages: str) -> str:
+    run_regex = "/".join(f"^{seg}$" for seg in test.split("/"))
+    return f"go test -count=1 -run {shlex.quote(run_regex)} -v {shlex.quote(packages)}"
+
+
+def witness_command(witness: str) -> str | None:
+    """The command that runs a witness in the sandbox, as the model would type it.
+
+    ``None`` for a ``trusted:``/``ci:`` witness (it runs outside the sandbox) or a malformed one.
+    Shown in the lead's prompt: without it, models guessed ``python -m pytest``, which fails where
+    pytest is installed only in the project's environment.
+    """
+    try:
+        validate_witness(witness)
+    except ValueError:
+        return None
+    scheme, rest = _split(witness)
+    if scheme == "go":
+        return _go_test_run(*_go_parts(witness, rest))
+    if scheme == "pytest":
+        return f"uv run pytest -q {rest}"
+    if scheme == "cmd":
+        return rest
+    return None
+
+
 def go_test_command(test: str, packages: str = DEFAULT_GO_PACKAGES) -> list[str]:
     """argv that passes only if ``go test`` exits 0 AND reports ``--- PASS: <test>``."""
-    run_regex = "/".join(f"^{seg}$" for seg in test.split("/"))
     pass_regex = f"^[[:space:]]*--- PASS: {test}( |$)"
-    go_cmd = f"go test -count=1 -run {shlex.quote(run_regex)} -v {shlex.quote(packages)}"
+    go_cmd = _go_test_run(test, packages)
     missing = f"witness go:{test}: the test did not run and pass (missing, skipped or filtered)"
     script = (
         f"out=$({go_cmd} 2>&1); rc=$?; "

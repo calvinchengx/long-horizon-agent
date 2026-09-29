@@ -94,6 +94,10 @@ def test_parse_action_variants() -> None:
     assert done.done
     assert done.summary == "ok"
 
+    flat = parse_action('{"tool": "grep", "pattern": "x", "subdir": "src"}', [])
+    assert flat.tool == "grep" and flat.arguments == {"pattern": "x", "subdir": "src"}
+    assert parse_action('{"tool": "x", "arguments": 3, "pattern": "y"}', []).arguments == {}
+
     native = parse_action("ignored", [ToolCall(id="1", name="grep", arguments={"pattern": "x"})])
     assert native.tool == "grep"
     assert native.arguments == {"pattern": "x"}

@@ -11,6 +11,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
 // Prompt construction is provider-agnostic: tools are described in text and the model is asked
@@ -192,6 +193,9 @@ func BuildMessages(in PromptInput) []contracts.ModelMessage {
 		listed := make([]string, len(item.Witnesses))
 		for i, w := range item.Witnesses {
 			listed[i] = "- " + w
+			if command := verify.WitnessCommand(w); command != "" {
+				listed[i] += " (run: " + command + ")"
+			}
 		}
 		user += "This item is done only when ALL of these acceptance checks (witnesses) pass, in " +
 			"addition to the mission's checks:\n" + strings.Join(listed, "\n") + "\n\n"

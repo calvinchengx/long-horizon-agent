@@ -11,6 +11,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
 // spec/agent/prompts.json: the lead's prompts, the JSON reply protocol, and the Planner /
@@ -142,6 +143,10 @@ type promptSpec struct {
 		Summary    string          `json:"summary"`
 		Error      string          `json:"error"`
 	} `json:"parse_action"`
+	WitnessCommands []struct {
+		Witness string  `json:"witness"`
+		Command *string `json:"command"`
+	} `json:"witness_commands"`
 	ParsePlan []struct {
 		Text   string              `json:"text"`
 		Items  json.RawMessage     `json:"items"`
@@ -350,6 +355,23 @@ func TestAgentCodeMap(t *testing.T) {
 	for _, c := range s.CodeMap.FoundCode {
 		if got := agent.FoundCode(c.Output); got != c.Found {
 			t.Errorf("FoundCode(%q) = %v", c.Output, got)
+		}
+	}
+}
+
+// TestAgentWitnessCommands: the command shown beside each witness in the lead's prompt.
+func TestAgentWitnessCommands(t *testing.T) {
+	s := loadPrompts(t)
+	if len(s.WitnessCommands) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range s.WitnessCommands {
+		want := ""
+		if c.Command != nil {
+			want = *c.Command
+		}
+		if got := verify.WitnessCommand(c.Witness); got != want {
+			t.Errorf("WitnessCommand(%q) = %q, want %q", c.Witness, got, want)
 		}
 	}
 }

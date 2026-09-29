@@ -73,7 +73,18 @@ func ParseAction(text string, native []contracts.ToolCall, stopReason *string) A
 	}
 	if tool, ok := obj.Values["tool"].(string); ok && tool != "" {
 		args := map[string]any{}
-		if raw, ok := obj.Values["arguments"].(*pyfmt.OrderedMap); ok {
+		rawArgs, hasArgs := obj.Values["arguments"]
+		if !hasArgs {
+			// Models often write the arguments beside "tool" ({"tool": "grep", "pattern": "x"});
+			// dropping them made the call fail with "missing required args" again and again.
+			for _, k := range obj.Keys {
+				if k != "tool" {
+					args[k] = pyfmt.PlainJSON(obj.Values[k])
+				}
+			}
+			return Action{Tool: tool, Arguments: args}
+		}
+		if raw, ok := rawArgs.(*pyfmt.OrderedMap); ok {
 			args = pyfmt.PlainJSON(raw).(map[string]any)
 		}
 		return Action{Tool: tool, Arguments: args}

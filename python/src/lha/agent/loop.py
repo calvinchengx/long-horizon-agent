@@ -152,7 +152,11 @@ def parse_action(
         return Action(done=True, summary=str(obj.get("summary", "")))
     tool = obj.get("tool")
     if isinstance(tool, str) and tool:
-        raw_args = obj.get("arguments", {})
+        if "arguments" not in obj:
+            # Models often write the arguments beside "tool" ({"tool": "grep", "pattern": "x"});
+            # dropping them made the call fail with "missing required args" again and again.
+            return Action(tool=tool, arguments={k: v for k, v in obj.items() if k != "tool"})
+        raw_args = obj["arguments"]
         arguments: dict[str, object] = raw_args if isinstance(raw_args, dict) else {}
         return Action(tool=tool, arguments=arguments)
     return Action(error='JSON has neither "tool" nor "done": true', summary=text[:200])

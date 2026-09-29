@@ -76,6 +76,7 @@ from lha.safety.egress import (  # noqa: E402
 )
 from lha.state.vendor import _target_path  # noqa: E402
 from lha.verify.harness_integrity import _is_harness_file  # noqa: E402
+from lha.verify.witnesses import witness_command  # noqa: E402
 
 GENESIS = "0" * 64
 
@@ -904,6 +905,10 @@ _REPLIES = [
     ('{"done": "yes"}', None),
     ('{"tool": "", "arguments": {}}', None),
     ('{"tool": "x", "arguments": [1]}', None),
+    ('{"tool": "grep", "pattern": "deadlock_reason", "subdir": "src"}', None),
+    ('{"tool": "run", "argv": ["ls"], "timeout_s": 5, "extra": {"k": [1, null]}}', None),
+    ('{"tool": "list_files"}', None),
+    ('{"tool": "x", "arguments": null, "pattern": "y"}', None),
     ("I am finished.", None),
     ("{not json}", None),
     ('{"done": true}', "max_tokens"),
@@ -988,6 +993,21 @@ def export_agent_prompts() -> None:
             "code_map": _code_map_cases(),
             "corrective": corrective_message("no JSON object found in reply").content,
             "parse_action": _action_cases(),
+            "witness_commands": [
+                {"witness": w, "command": witness_command(w)}
+                for w in [
+                    "pytest:tests/a.py::test_x[a-1]",
+                    " pytest: tests/b.py ",
+                    "go:TestAPI",
+                    "go:TestX/sub@./internal/...",
+                    "cmd:make check && echo 'ok'",
+                    "trusted:e2e",
+                    "ci:e2e",
+                    "pytest:bad node",
+                    "nope:x",
+                    "",
+                ]
+            ],
             "parse_plan": _plan_cases(),
             "planner_messages": [
                 {"role": m.role, "content": m.content}

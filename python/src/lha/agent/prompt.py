@@ -17,6 +17,7 @@ from __future__ import annotations
 from lha.contracts.model import ModelMessage
 from lha.contracts.state import ChecklistItem, DecisionRecord, SituationSnapshot
 from lha.contracts.tools import ToolSpec
+from lha.verify.witnesses import witness_command
 
 ACTION_INSTRUCTIONS = (
     "You act by replying with EXACTLY ONE JSON object and nothing else.\n"
@@ -155,6 +156,12 @@ def render_memory_block(
     return "\n".join(out) if len(out) > 1 else ""
 
 
+def _witness_line(witness: str) -> str:
+    """A witness in the prompt, with the command that runs it when it runs in the sandbox."""
+    command = witness_command(witness)
+    return f"- {witness} (run: {command})" if command else f"- {witness}"
+
+
 def build_messages(
     *,
     anchor_text: str,
@@ -193,7 +200,7 @@ def build_messages(
     recent = "\n".join(snapshot.recent_commits[:10]) or "(none yet)"
     user = f"Active checklist item: [{item.id}] {item.description}\n\n"
     if item.witnesses:
-        listed = "\n".join(f"- {w}" for w in item.witnesses)
+        listed = "\n".join(_witness_line(w) for w in item.witnesses)
         user += (
             "This item is done only when ALL of these acceptance checks (witnesses) pass, in "
             f"addition to the mission's checks:\n{listed}\n\n"
