@@ -129,7 +129,9 @@ Which gate the Lead's dispatcher gets depends on the run path; see
 ## 3. Command classifier and human gates
 
 `classify_command(argv)` ([commands.py](../python/src/lha/safety/commands.py)) returns a reason
-string if a human must decide, otherwise `None`. What it gates:
+string if a human must decide, otherwise `None`. The dispatcher also passes where the command
+runs: the session's workdir (`/workspace` in Docker) and whether `/tmp` belongs to the sandbox,
+which is true when the workdir is not the host checkout (Docker, E2B) and never for `local`. What it gates:
 
 | Category | Examples |
 |---|---|
@@ -140,7 +142,7 @@ string if a human must decide, otherwise `None`. What it gates:
 | Uploads | `curl -d/-F/-T/--json/--data*/--form*`, `-X/--request POST|PUT|PATCH|DELETE`, `-K/--config`; `wget --post-*`, `--body-*`, `--method` writes, `-e` upload settings; httpie/xh with a body or a write method; `rsync` to `host:` |
 | Remote shells and mail | `ssh`, `scp`, `sftp`, `ftp`, `telnet`, `nc`/`ncat`/`netcat`, `socat`, `sendmail`, `mail`, `mailx` |
 | System | `shutdown`, `reboot`, `halt`, `mkfs`, `dd` |
-| Deletes and protected paths | `rm` of absolute, `~`, `..`, `.` or `*` targets; `rm`, `mv`, `cp`, `ln`, `chmod`, `chown`, `touch`, `tee`, `truncate`, `shred` or `sed -i` on `.git`/`.lha`; `find … -delete` on them; shell redirections (`>`, `>>`, `>\|`, `&>`, `2>`, `<>`) into them. In `sh -c` scripts, redirection targets are also checked in the raw script text, so a clobbering `>\|` (which the tokenizer splits into `>` and a pipe) is caught |
+| Deletes and protected paths | `rm` of absolute, `~`, `..`, `.` or `*` targets (an absolute path inside the workspace is read relative to it, and in Docker or E2B a path under `/tmp` is the sandbox's own, not outside); `rm`, `mv`, `cp`, `ln`, `chmod`, `chown`, `touch`, `tee`, `truncate`, `shred` or `sed -i` on `.git`/`.lha`; `find … -delete` on them; shell redirections (`>`, `>>`, `>\|`, `&>`, `2>`, `<>`) into them. In `sh -c` scripts, redirection targets are also checked in the raw script text, so a clobbering `>\|` (which the tokenizer splits into `>` and a pipe) is caught |
 | Privilege escalation | `sudo`, `doas`, `su`, `pkexec` |
 
 To find the real command, it unwraps:
@@ -168,7 +170,8 @@ It fails closed in these cases:
   position (`$(echo rm) -rf /`).
 
 The pinned behaviour is [`spec/safety/classify_command.json`](../spec/safety/classify_command.json).
-It has 224 cases of argv mapped to an exact reason, 70 of which are allowed (`null`). Both
+It has 224 cases of argv mapped to an exact reason, 70 of which are allowed (`null`), plus 16
+`scoped_cases` classified with a workspace path and a private `/tmp`. Both
 `python/tests/unit/test_spec_conformance.py` and `go/internal/spec/conformance_safety_test.go`
 run it. The Python code is the reference. To change behaviour, change Python, regenerate with
 `scripts/export_spec.py`, then make Go pass ([spec/README.md](../spec/README.md)).

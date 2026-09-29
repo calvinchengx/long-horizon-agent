@@ -2124,5 +2124,166 @@
    ],
    "reason": null
   }
+ ],
+ "scoped_cases": [
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/workspace/.wtest",
+    "/tmp/.wtest"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": null
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "rm -f /tmp/zig.whl; rm -rf /tmp/zigtc/cache; go env -w GOFLAGS=-p=4"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": null
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace/build"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": null
+  },
+  {
+   "argv": [
+    "rm",
+    "/home/me/ws/build/x.o"
+   ],
+   "workspace": "/home/me/ws",
+   "private_tmp": false,
+   "reason": null
+  },
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/tmp/x"
+   ],
+   "workspace": "/home/me/ws",
+   "private_tmp": false,
+   "reason": "delete outside the workspace: '/tmp/x'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/workspace/.wtest"
+   ],
+   "workspace": null,
+   "private_tmp": false,
+   "reason": "delete outside the workspace: '/workspace/.wtest'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/workspace'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/tmp"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/tmp'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/tmp/../etc"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/tmp/../etc'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace/../etc"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '/workspace/../etc'"
+  },
+  {
+   "argv": [
+    "rm",
+    "/home/me/wsx/a"
+   ],
+   "workspace": "/home/me/ws",
+   "private_tmp": false,
+   "reason": "delete outside the workspace: '/home/me/wsx/a'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "/workspace/.git"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "rm mutates a harness-owned path ('/workspace/.git')"
+  },
+  {
+   "argv": [
+    "mv",
+    "/workspace/.lha/checklist.json",
+    "x"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "mv mutates a harness-owned path ('/workspace/.lha/checklist.json')"
+  },
+  {
+   "argv": [
+    "sh",
+    "-c",
+    "echo x > /workspace/.git/config"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "redirection writes a harness-owned path ('/workspace/.git/config')"
+  },
+  {
+   "argv": [
+    "rm",
+    "-rf",
+    "~/x"
+   ],
+   "workspace": "/workspace",
+   "private_tmp": true,
+   "reason": "recursive delete outside the workspace: '~/x'"
+  },
+  {
+   "argv": [
+    "rm",
+    "-f",
+    "/workspace/x"
+   ],
+   "workspace": "workspace",
+   "private_tmp": true,
+   "reason": "delete outside the workspace: '/workspace/x'"
+  }
  ]
 }

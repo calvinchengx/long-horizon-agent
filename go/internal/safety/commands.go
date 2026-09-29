@@ -27,7 +27,21 @@ import (
 // ClassifyCommand reports why argv needs a human decision (irreversible / outward-facing).
 // gated is false (and reason "") when the command may run without approval.
 func ClassifyCommand(argv []string) (reason string, gated bool) {
-	reason = classifySimple(append([]string(nil), argv...), 0)
+	return ClassifyCommandIn(argv, Scope{})
+}
+
+// Scope is where a command runs (python: classify_command's keyword arguments). Workspace is the
+// workspace's absolute path there (/workspace in Docker), so an absolute path inside it is a
+// workspace path; PrivateTmp says /tmp belongs to the sandbox (Docker, E2B), so deleting under
+// it is not outside the workspace. The zero Scope treats every absolute path as outside.
+type Scope struct {
+	Workspace  string
+	PrivateTmp bool
+}
+
+// ClassifyCommandIn is ClassifyCommand for a command that runs in scope.
+func ClassifyCommandIn(argv []string, scope Scope) (reason string, gated bool) {
+	reason = classifySimple(append([]string(nil), argv...), 0, scope)
 	return reason, reason != ""
 }
 
@@ -488,9 +502,34 @@ func normpath(path string) string {
 	return out
 }
 
-// escapes: absolute, home-relative, or parent-escaping paths (and bare globs of cwd).
-func escapes(path string) bool {
-	unified := strings.ReplaceAll(path, "\\", "/")
+// inWorkspace returns path relative to the workspace when it is an absolute path inside it, else
+// path unchanged.
+func inWorkspace(path string, scope Scope) string {
+	root := ""
+	if scope.Workspace != "" {
+		root = normpath(scope.Workspace)
+	}
+	if !strings.HasPrefix(root, "/") || root == "/" || !strings.HasPrefix(path, "/") {
+		return path
+	}
+	n := normpath(path)
+	if n == root {
+		return "."
+	}
+	if strings.HasPrefix(n, root+"/") {
+		return n[len(root)+1:]
+	}
+	return path
+}
+
+// escapes: absolute, home-relative, or parent-escaping paths (and bare globs of cwd). An absolute
+// path inside the workspace is read relative to it, and a path under /tmp is inside when the
+// sandbox has its own /tmp.
+func escapes(path string, scope Scope) bool {
+	unified := inWorkspace(strings.ReplaceAll(path, "\\", "/"), scope)
+	if scope.PrivateTmp && strings.HasPrefix(normpath(unified), "/tmp/") {
+		return false
+	}
 	rs := []rune(unified)
 	if strings.HasPrefix(unified, "/") || strings.HasPrefix(unified, "~") || (len(rs) > 1 && rs[1] == ':') {
 		return true
@@ -499,13 +538,13 @@ func escapes(path string) bool {
 	return n == ".." || strings.HasPrefix(n, "../") || n == "." || n == "*"
 }
 
-func touchesProtected(path string) bool {
-	n := normpath(strings.ReplaceAll(path, "\\", "/"))
+func touchesProtected(path string, scope Scope) bool {
+	n := normpath(inWorkspace(strings.ReplaceAll(path, "\\", "/"), scope))
 	first, _, _ := partition(n, "/")
 	return protectedDirs.has(pystr.Casefold(first))
 }
 
-func classifyRm(args []string) string {
+func classifyRm(args []string, scope Scope) string {
 	var flags strings.Builder
 	for _, a := range args {
 		if strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") {
@@ -517,7 +556,7 @@ func classifyRm(args []string) string {
 		if strings.HasPrefix(target, "-") {
 			continue
 		}
-		if escapes(target) {
+		if escapes(target, scope) {
 			kind := "delete"
 			if recursive {
 				kind = "recursive delete"
@@ -758,7 +797,7 @@ func redirectEnd(rs []rune) int {
 }
 
 // redirectIntoProtected: a shell redirection (> / >> / &> / 2> ...) whose target is .git / .lha.
-func redirectIntoProtected(tokens []string) string {
+func redirectIntoProtected(tokens []string, scope Scope) string {
 	for i, token := range tokens {
 		rs := []rune(token)
 		end := redirectEnd(rs)
@@ -769,7 +808,7 @@ func redirectIntoProtected(tokens []string) string {
 		if target == "" && i+1 < len(tokens) {
 			target = tokens[i+1]
 		}
-		if target != "" && touchesProtected(target) {
+		if target != "" && touchesProtected(target, scope) {
 			return fmt.Sprintf("redirection writes a harness-owned path (%s)", contracts.PyRepr(target))
 		}
 	}
@@ -951,7 +990,7 @@ func sedInPlace(args []string) bool {
 	return false
 }
 
-func classifySimple(argv []string, depth int) string {
+func classifySimple(argv []string, depth int, scope Scope) string {
 	if injected := injectsGitConfig(argv); injected != "" {
 		return injected
 	}
@@ -964,14 +1003,14 @@ func classifySimple(argv []string, depth int) string {
 		return fmt.Sprintf("ambiguous command line (%s)", err)
 	}
 	for _, candidate := range candidates {
-		if reason := classifyOne(candidate, depth); reason != "" {
+		if reason := classifyOne(candidate, depth, scope); reason != "" {
 			return reason
 		}
 	}
 	return ""
 }
 
-func classifyOne(argv []string, depth int) string {
+func classifyOne(argv []string, depth int, scope Scope) string {
 	if len(argv) == 0 {
 		return ""
 	}
@@ -987,7 +1026,7 @@ func classifyOne(argv []string, depth int) string {
 		for i, arg := range args {
 			if arg == "-c" || (strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "c")) {
 				if i+1 < len(args) {
-					return classifyScript(args[i+1], depth+1)
+					return classifyScript(args[i+1], depth+1, scope)
 				}
 				return ""
 			}
@@ -998,7 +1037,7 @@ func classifyOne(argv []string, depth int) string {
 		if len(args) == 0 {
 			return ""
 		}
-		return classifyScript(strings.Join(args, " "), depth+1)
+		return classifyScript(strings.Join(args, " "), depth+1, scope)
 	}
 	if alwaysGated.has(tool) {
 		return fmt.Sprintf("%s is an outward-facing / destructive tool", tool)
@@ -1039,13 +1078,13 @@ func classifyOne(argv []string, depth int) string {
 	}
 	if tool == "find" {
 		for _, command := range findExecCommands(args) {
-			if reason := classifySimple(command, depth); reason != "" {
+			if reason := classifySimple(command, depth, scope); reason != "" {
 				return reason
 			}
 		}
 		if contains(args, "-delete") {
 			for _, a := range args {
-				if !strings.HasPrefix(a, "-") && touchesProtected(a) {
+				if !strings.HasPrefix(a, "-") && touchesProtected(a, scope) {
 					return "find -delete removes a harness-owned path"
 				}
 			}
@@ -1064,7 +1103,7 @@ func classifyOne(argv []string, depth int) string {
 		}
 	}
 	if tool == "rm" {
-		if found := classifyRm(args); found != "" {
+		if found := classifyRm(args, scope); found != "" {
 			return found
 		}
 	}
@@ -1073,7 +1112,7 @@ func classifyOne(argv []string, depth int) string {
 			return ""
 		}
 		for _, arg := range args {
-			if !strings.HasPrefix(arg, "-") && touchesProtected(arg) {
+			if !strings.HasPrefix(arg, "-") && touchesProtected(arg, scope) {
 				return fmt.Sprintf("%s mutates a harness-owned path (%s)", tool, contracts.PyRepr(arg))
 			}
 		}
@@ -1183,7 +1222,7 @@ func isSeparatorToken(token string) bool {
 // the tokenizer splits ">|" into ">" and a pipe, so the target is checked before tokenizing).
 var scriptRedirect = regexp.MustCompile(`(?:[0-9]+|&)?(?:>>?\|?|<>)[ \t]*("[^"]*"|'[^']*'|[^ \t\n\r\f\v;&|()<>]+)`)
 
-func classifyScript(script string, depth int) string {
+func classifyScript(script string, depth int, scope Scope) string {
 	if depth > 3 {
 		return "deeply nested shell invocation"
 	}
@@ -1197,12 +1236,12 @@ func classifyScript(script string, depth int) string {
 	}
 	for _, m := range scriptRedirect.FindAllStringSubmatch(script, -1) {
 		target := strings.Trim(m[1], "'\"")
-		if target != "" && touchesProtected(target) {
+		if target != "" && touchesProtected(target, scope) {
 			return "redirection writes a harness-owned path (" + contracts.PyRepr(target) + ")"
 		}
 	}
 	for _, body := range nested {
-		if reason := classifyScript(body, depth+1); reason != "" {
+		if reason := classifyScript(body, depth+1, scope); reason != "" {
 			return reason
 		}
 	}
@@ -1222,7 +1261,7 @@ func classifyScript(script string, depth int) string {
 			continue
 		}
 		if isSeparatorToken(token) {
-			if reason := classifySegment(segment, depth); reason != "" {
+			if reason := classifySegment(segment, depth, scope); reason != "" {
 				return reason
 			}
 			segment = nil
@@ -1274,11 +1313,11 @@ func skipGroup(tokens []string, start int) int {
 }
 
 // classifySegment drops leading reserved words ({, if, do...) and VAR=value prefixes.
-func classifySegment(segment []string, depth int) string {
+func classifySegment(segment []string, depth int, scope Scope) string {
 	if blocked := injectsGitConfig(segment); blocked != "" {
 		return blocked
 	}
-	if blocked := redirectIntoProtected(segment); blocked != "" {
+	if blocked := redirectIntoProtected(segment, scope); blocked != "" {
 		return blocked
 	}
 	for len(segment) > 0 && (reservedPrefix.has(segment[0]) || isAssignment(segment[0])) {
@@ -1288,5 +1327,5 @@ func classifySegment(segment []string, depth int) string {
 	if len(segment) == 0 {
 		return ""
 	}
-	return classifySimple(segment, depth)
+	return classifySimple(segment, depth, scope)
 }

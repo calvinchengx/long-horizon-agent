@@ -13,6 +13,7 @@ import pytest
 
 from lha.contracts.hitl import GateDecision, GateRequest, RiskTier
 from lha.contracts.model import ToolCall
+from lha.contracts.sandbox import ExecResult
 from lha.contracts.tools import ToolContext
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.sandbox_local import LocalSandbox
@@ -171,6 +172,39 @@ async def test_irreversible_commands_denied_without_gate(tmp_path: Path) -> None
     )
     assert not result.ok
     assert result.error is not None and "no human gate" in result.error
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_with_its_own_tmp_is_not_asked_about_deleting_there(
+    tmp_path: Path,
+) -> None:
+    asked: list[GateRequest] = []
+
+    async def reject(req: GateRequest) -> GateDecision:
+        asked.append(req)
+        return GateDecision.REJECT
+
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(), allow_mutating=True, gate=CallbackGate(reject)
+    )
+    argv = ["rm", "-f", "/tmp/lha-dispatcher-test", "/workspace/.wtest"]
+    call = ToolCall(id="r", name="run_command", arguments={"argv": argv})
+
+    local = await _ctx(tmp_path)  # the host's /tmp, and /workspace is not the workspace
+    assert not (await dispatcher.dispatch(call, local)).ok and len(asked) == 1
+
+    ran: list[list[str]] = []
+
+    async def exec_in_container(argv: list[str], **_: object) -> ExecResult:
+        ran.append(argv)  # recorded, never run on this machine
+        return ExecResult(exit_code=0)
+
+    container = await _ctx(tmp_path)  # as Docker mounts it: /workspace, with a host checkout
+    container.session.host_workdir = container.session.workdir  # type: ignore[attr-defined]
+    container.session.workdir = "/workspace"
+    container.session.exec = exec_in_container  # type: ignore[method-assign]
+    assert (await dispatcher.dispatch(call, container)).ok
+    assert len(asked) == 1 and ran == [argv]  # run without asking again
 
 
 @pytest.mark.asyncio

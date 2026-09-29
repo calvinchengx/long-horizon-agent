@@ -101,3 +101,38 @@ def test_gated_commands(argv: list[str]) -> None:
 )
 def test_benign_commands(argv: list[str]) -> None:
     assert classify_command(argv) is None, argv
+
+
+# (argv, workspace, private_tmp, gated): where the command runs changes what is "outside".
+DOCKER = ("/workspace", True)
+LOCAL = ("/home/me/ws", False)
+SCOPED = [
+    (["rm", "-f", "/workspace/.wtest", "/tmp/.wtest"], *DOCKER, False),
+    (
+        ["sh", "-c", "rm -f /tmp/zig.whl; rm -rf /tmp/zigtc/cache; go env -w GOFLAGS=-p=4"],
+        *DOCKER,
+        False,
+    ),
+    (["rm", "-rf", "/workspace/build"], *DOCKER, False),
+    (["rm", "/home/me/ws/build/x.o"], *LOCAL, False),
+    (["rm", "-f", "/tmp/x"], *LOCAL, True),  # the host's /tmp
+    (["rm", "-f", "/workspace/.wtest"], None, False, True),  # no scope: absolute is outside
+    (["rm", "-rf", "/workspace"], *DOCKER, True),  # the whole workspace
+    (["rm", "-rf", "/tmp"], *DOCKER, True),  # /tmp itself, not a path under it
+    (["rm", "-rf", "/tmp/../etc"], *DOCKER, True),
+    (["rm", "-rf", "/workspace/../etc"], *DOCKER, True),
+    (["rm", "/home/me/wsx/a"], *LOCAL, True),  # a sibling that shares the prefix
+    (["rm", "-rf", "/workspace/.git"], *DOCKER, True),
+    (["mv", "/workspace/.lha/checklist.json", "x"], *DOCKER, True),
+    (["sh", "-c", "echo x > /workspace/.git/config"], *DOCKER, True),
+    (["rm", "-rf", "~/x"], *DOCKER, True),
+    (["rm", "-f", "/workspace/x"], "workspace", True, True),  # a relative root is ignored
+]
+
+
+@pytest.mark.parametrize(("argv", "workspace", "private_tmp", "gated"), SCOPED)
+def test_where_a_command_runs_decides_what_is_outside(
+    argv: list[str], workspace: str | None, private_tmp: bool, gated: bool
+) -> None:
+    reason = classify_command(argv, workspace=workspace, private_tmp=private_tmp)
+    assert (reason is not None) is gated, (argv, reason)

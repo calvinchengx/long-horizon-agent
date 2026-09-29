@@ -207,7 +207,7 @@ func (d *AllowListDispatcher) Dispatch(ctx context.Context, call contracts.ToolC
 	if pathErr := checkPaths(spec, arguments, tctx); pathErr != "" {
 		return contracts.Failure(pathErr)
 	}
-	if reason, gated := d.gateReason(spec, arguments); gated {
+	if reason, gated := d.gateReason(spec, arguments, tctx); gated {
 		if denied := d.askGate(ctx, call, arguments, tctx, reason); denied != "" {
 			return contracts.Failure(denied)
 		}
@@ -220,14 +220,20 @@ func (d *AllowListDispatcher) Dispatch(ctx context.Context, call contracts.ToolC
 	return tool.Run(ctx, arguments, tctx)
 }
 
-func (d *AllowListDispatcher) gateReason(spec contracts.ToolSpec, arguments map[string]any) (string, bool) {
+func (d *AllowListDispatcher) gateReason(spec contracts.ToolSpec, arguments map[string]any, tctx contracts.ToolContext) (string, bool) {
 	if spec.CommandArg != nil {
 		if argv, ok := asList(arguments[*spec.CommandArg]); ok {
 			tokens := make([]string, len(argv))
 			for i, t := range argv {
 				tokens[i] = pyval.Str(t)
 			}
-			if reason, gated := safety.ClassifyCommand(tokens); gated {
+			// A sandbox whose workdir is not the host checkout (Docker, E2B) has its own /tmp.
+			scope := safety.Scope{}
+			if tctx.Session != nil {
+				workdir := tctx.Session.Workdir()
+				scope = safety.Scope{Workspace: workdir, PrivateTmp: contracts.HostRoot(tctx.Session) != workdir}
+			}
+			if reason, gated := safety.ClassifyCommandIn(tokens, scope); gated {
 				return reason, true
 			}
 		}
