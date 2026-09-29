@@ -235,6 +235,7 @@ func (s *DockerSandbox) RunArgs(image, workdir, egressNetwork string, proxyEnv m
 	// runs a binary there (go test). Code already runs from /workspace, so this adds nothing an
 	// agent could not do anyway. Go/uv/pnpm caches live here too; the size counts against --memory.
 	args = append(args, "--tmpfs", "/tmp:rw,exec,nosuid,nodev,size="+s.opts.TmpSize)
+	args = append(args, "--label", OwnerLabel+"="+owner())
 	return append(args, image, "sleep", "infinity")
 }
 
@@ -244,6 +245,7 @@ func (s *DockerSandbox) Open(ctx context.Context, workdir, snapshotID string) (c
 	if image == "" {
 		image = s.opts.Image
 	}
+	SweepOrphans(ctx, s.opts.CLI)
 	if err := mkdirParents(workdir); err != nil {
 		return nil, err
 	}
@@ -557,7 +559,7 @@ func (g *egressGate) proxyEnv() map[string]string {
 
 func (g *egressGate) create(ctx context.Context, proxyImage string, command, egressHosts []string) error {
 	if _, err := dockerMust(ctx, g.cli, nil, "network", "create", "--driver", "bridge", "--internal",
-		"--label", "lha.egress=network", g.networkName()); err != nil {
+		"--label", "lha.egress=network", "--label", OwnerLabel+"="+owner(), g.networkName()); err != nil {
 		return err
 	}
 	if len(command) == 0 {
@@ -579,6 +581,7 @@ func (g *egressGate) create(ctx context.Context, proxyImage string, command, egr
 	}
 	args = append(args,
 		"--label", "lha.egress=proxy",
+		"--label", OwnerLabel+"="+owner(),
 		"--user", "65534:65534",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges:true",
@@ -637,4 +640,58 @@ func (g *egressGate) teardown() {
 	defer cancel()
 	_, _, _, _ = dockerOutput(ctx, g.cli, nil, "rm", "-f", g.proxyName())
 	_, _, _, _ = dockerOutput(ctx, g.cli, nil, "network", "rm", g.networkName())
+}
+
+// OwnerLabel marks every container and network a session creates with the process that opened
+// it ("host:pid"; python: sandbox_docker.OWNER_LABEL), so a later Open can remove what a killed
+// process left behind.
+const OwnerLabel = "lha.owner"
+
+func owner() string {
+	host, _ := os.Hostname()
+	return host + ":" + strconv.Itoa(os.Getpid())
+}
+
+// OwnerIsGone reports whether owner ("host:pid") is a process on this host that no longer
+// exists. Another host's owner, a malformed label, or a process that exists (even another
+// user's) is never gone; a reused pid keeps an orphan until that process ends too.
+func OwnerIsGone(owner string) bool {
+	i := strings.LastIndex(owner, ":")
+	if i < 0 {
+		return false
+	}
+	host, _ := os.Hostname()
+	pid, err := strconv.Atoi(owner[i+1:])
+	if owner[:i] != host || err != nil || pid <= 0 || strings.ContainsAny(owner[i+1:], "+-") {
+		return false
+	}
+	return processGone(pid)
+}
+
+// SweepOrphans removes the containers, then the networks, whose lha.owner has died (best
+// effort; python: sweep_orphans) and returns the names removed. Only resources this code
+// labelled are considered, so containers of other projects, and of LHA processes still running,
+// are never touched.
+func SweepOrphans(ctx context.Context, cli DockerCLI) []string {
+	var removed []string
+	sweep := func(list []string, remove ...string) {
+		out, err := dockerMust(ctx, cli, nil, list...)
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(out, "\n") {
+			name, label, ok := strings.Cut(strings.TrimSpace(line), "\t")
+			if !ok || !OwnerIsGone(label) {
+				continue
+			}
+			if _, err := dockerMust(ctx, cli, nil, append(remove, name)...); err == nil {
+				removed = append(removed, name)
+			}
+		}
+	}
+	format := "{{.Names}}\t{{.Label \"" + OwnerLabel + "\"}}"
+	sweep([]string{"ps", "-a", "--filter", "label=" + OwnerLabel, "--format", format}, "rm", "-f")
+	format = "{{.Name}}\t{{.Label \"" + OwnerLabel + "\"}}"
+	sweep([]string{"network", "ls", "--filter", "label=" + OwnerLabel, "--format", format}, "network", "rm")
+	return removed
 }

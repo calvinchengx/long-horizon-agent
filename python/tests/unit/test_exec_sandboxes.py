@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+import socket
+import subprocess
+import sys
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -357,3 +361,69 @@ def test_docker_resource_limits_are_configurable(
     assert options["mem_limit"] == options["memswap_limit"] == "8g"
     assert options["nano_cpus"] == 6_000_000_000
     assert options["tmpfs"]["/tmp"] == "rw,exec,nosuid,nodev,size=4g"
+
+
+def _dead_pid() -> int:
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def test_an_owner_is_gone_only_when_its_process_on_this_host_has_exited() -> None:
+    host = socket.gethostname()
+    assert sandbox_docker.owner_is_gone(f"{host}:{_dead_pid()}")
+    assert not sandbox_docker.owner_is_gone(f"{host}:{os.getpid()}")
+    assert not sandbox_docker.owner_is_gone(f"another-host:{_dead_pid()}")
+    for malformed in ("", host, f"{host}:", f"{host}:x", f"{host}:0", f"{host}:-1"):
+        assert not sandbox_docker.owner_is_gone(malformed), malformed
+
+
+@dataclass
+class _Labelled:
+    name: str
+    labels: dict[str, str]
+    removed: bool = False
+
+    @property
+    def attrs(self) -> dict[str, Any]:
+        return {"Labels": self.labels}
+
+    def remove(self, **_: Any) -> None:
+        self.removed = True
+
+
+@dataclass
+class _Listing:
+    items: list[_Labelled]
+    filters: list[dict[str, Any]] = field(default_factory=list)
+
+    def list(self, **kwargs: Any) -> list[_Labelled]:
+        self.filters.append(kwargs["filters"])
+        return self.items
+
+
+@pytest.mark.asyncio
+async def test_open_removes_what_a_dead_process_left_and_labels_what_it_starts(
+    tmp_path: Path,
+) -> None:
+    owner, host = sandbox_docker.OWNER_LABEL, socket.gethostname()
+    dead = {owner: f"{host}:{_dead_pid()}"}
+    alive = {owner: f"{host}:{os.getpid()}"}
+    orphan, live = _Labelled("orphan", dead), _Labelled("live", alive)
+    orphan_net, live_net = _Labelled("lha-egress-dead", dead), _Labelled("lha-egress-live", alive)
+    client = _FakeClient()
+    client.containers.list = _Listing([orphan, live]).list  # type: ignore[attr-defined]
+    networks = _Listing([orphan_net, live_net])
+    client.networks = networks  # type: ignore[attr-defined]
+
+    await DockerSandbox(client=client).open(workdir=str(tmp_path))
+
+    assert orphan.removed and orphan_net.removed
+    assert not live.removed and not live_net.removed
+    assert networks.filters == [{"label": owner}]  # only what LHA labelled is considered
+    _, kwargs = client.containers.started[0]
+    assert kwargs["labels"] == {owner: f"{host}:{os.getpid()}"}
+
+
+def test_a_client_that_cannot_list_never_fails_the_sweep() -> None:
+    assert sandbox_docker.sweep_orphans(_FakeClient()) == []

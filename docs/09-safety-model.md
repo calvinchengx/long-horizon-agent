@@ -44,6 +44,10 @@ Docker hardening, from `DockerSandbox.run_kwargs()` in
   process as PID 1 reaps orphaned processes, so killing a command's process group on timeout
   leaves no zombies).
 - A non-root user: the host `uid:gid` on POSIX, otherwise `65534:65534`.
+- An `lha.owner` label (`host:pid` of the process that opened the sandbox) on the container, its
+  egress proxy and its network. Every `open` first removes the labelled resources whose owner on
+  this host has exited, so a killed worker's sandboxes do not run on; nothing unlabelled, and
+  nothing owned by a live process, is touched.
 - `read_only=True` root filesystem, `tmpfs /tmp` (`rw,exec,nosuid,nodev`, size `LHA_SANDBOX_TMP_SIZE`, default 1g, counted
   against the memory limit). `/tmp` is
   mounted `exec` because toolchains such as `go test` build and run binaries there; code can

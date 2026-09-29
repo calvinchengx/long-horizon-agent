@@ -7,8 +7,11 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -374,7 +377,7 @@ func TestEmptyEgressListKeepsNetworkNone(t *testing.T) {
 	if _, err := sb.Open(context.Background(), t.TempDir(), ""); err != nil {
 		t.Fatal(err)
 	}
-	if len(cli.find("network")) != 0 || len(cli.find("run")) != 1 {
+	if len(cli.find("network", "create")) != 0 || len(cli.find("run")) != 1 {
 		t.Fatal(cli.calls)
 	}
 	args := cli.find("run")[0]
@@ -426,5 +429,76 @@ func TestProxyThatDiesAtStartupFailsOpenAndCleansUp(t *testing.T) {
 	sb, _ = NewDockerSandbox(DockerOptions{CLI: cli, EgressHosts: []string{"pypi.org"}, Sleep: func(time.Duration) {}, Clock: tk.clock})
 	if _, err := sb.Open(context.Background(), t.TempDir(), ""); err == nil || err.Error() != "egress proxy not ready after 60.0s" {
 		t.Fatal(err)
+	}
+}
+
+func deadPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^$")
+	if err := cmd.Run(); err != nil {
+		t.Fatal(err)
+	}
+	return cmd.Process.Pid
+}
+
+func TestAnOwnerIsGoneOnlyWhenItsProcessOnThisHostHasExited(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("never gone off unix")
+	}
+	host, _ := os.Hostname()
+	dead := deadPID(t)
+	if !OwnerIsGone(host + ":" + strconv.Itoa(dead)) {
+		t.Fatal("a dead pid is not gone")
+	}
+	if OwnerIsGone(host + ":" + strconv.Itoa(os.Getpid())) {
+		t.Fatal("this process is gone")
+	}
+	if OwnerIsGone("another-host:" + strconv.Itoa(dead)) {
+		t.Fatal("another host's owner is gone")
+	}
+	for _, malformed := range []string{"", host, host + ":", host + ":x", host + ":0", host + ":-1", host + ":+1"} {
+		if OwnerIsGone(malformed) {
+			t.Fatalf("%q is gone", malformed)
+		}
+	}
+}
+
+// listingDocker answers the sweep's listings and records what it removes.
+type listingDocker struct {
+	fakeDocker
+	containers, networks string
+}
+
+func (f *listingDocker) Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) (int, error) {
+	switch {
+	case args[0] == "ps":
+		return 0, write(stdout, f.containers)
+	case len(args) > 1 && args[0] == "network" && args[1] == "ls":
+		return 0, write(stdout, f.networks)
+	}
+	return f.fakeDocker.Run(ctx, args, stdin, stdout, stderr)
+}
+
+func TestOpenRemovesWhatADeadProcessLeftAndLabelsWhatItStarts(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("never gone off unix")
+	}
+	host, _ := os.Hostname()
+	dead := host + ":" + strconv.Itoa(deadPID(t))
+	alive := host + ":" + strconv.Itoa(os.Getpid())
+	cli := &listingDocker{
+		containers: "orphan\t" + dead + "\nlive\t" + alive + "\n",
+		networks:   "lha-egress-dead\t" + dead + "\nlha-egress-live\t" + alive + "\n",
+	}
+	sb, _ := NewDockerSandbox(DockerOptions{CLI: cli})
+	if _, err := sb.Open(context.Background(), t.TempDir(), ""); err != nil {
+		t.Fatal(err)
+	}
+	if len(cli.find("rm", "-f", "orphan")) != 1 || len(cli.find("network", "rm", "lha-egress-dead")) != 1 ||
+		len(cli.find("rm", "-f", "live")) != 0 || len(cli.find("network", "rm", "lha-egress-live")) != 0 {
+		t.Fatal(cli.calls)
+	}
+	if got := flagValues(cli.find("run")[0], "--label"); !slices.Equal(got, []string{OwnerLabel + "=" + alive}) {
+		t.Fatal(got)
 	}
 }
