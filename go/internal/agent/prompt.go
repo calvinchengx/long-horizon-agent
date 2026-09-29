@@ -30,6 +30,12 @@ const ActionInstructions = "You act by replying with EXACTLY ONE JSON object and
 	"checks, and only a green result counts. Do not edit files under .lha/ (harness-owned) and " +
 	"do not modify or delete existing tests or test configuration."
 
+// LeadDoneInstructions is for the lead only: the loop verifies when it signals done and feeds a
+// failure back while turns remain. Without it, leads kept running tests (often unrelated suites)
+// until out of turns.
+const LeadDoneInstructions = "As soon as this item's acceptance checks pass, signal done instead of running more tests: " +
+	"if the harness's checks then fail, you get the failure report while turns remain."
+
 // EngineInstructions is the claude_code lead engine's prompt (Claude Code calls real tools, so
 // there is no JSON protocol). The engine itself is not ported; the text is kept for parity.
 const EngineInstructions = "Work this item in this session with the tools you have. When you believe it is done, call " +
@@ -177,7 +183,7 @@ func BuildMessages(in PromptInput) []contracts.ModelMessage {
 		system = anchor + "\n\n" + LeadRole + "\n\n" + EngineInstructions
 	} else {
 		system = anchor + "\n\n" + LeadRole + "\n\n" +
-			"Available tools:\n" + RenderTools(in.Specs) + "\n\n" + ActionInstructions
+			"Available tools:\n" + RenderTools(in.Specs) + "\n\n" + ActionInstructions + "\n" + LeadDoneInstructions
 	}
 	commits := in.Snapshot.RecentCommits
 	if len(commits) > 10 {

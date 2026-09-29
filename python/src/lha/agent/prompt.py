@@ -29,6 +29,13 @@ ACTION_INSTRUCTIONS = (
     "do not modify or delete existing tests or test configuration."
 )
 
+# The lead only: the loop verifies when it signals done and feeds a failure back while turns
+# remain. Without this, leads kept running tests (often unrelated suites) until out of turns.
+LEAD_DONE_INSTRUCTIONS = (
+    "As soon as this item's acceptance checks pass, signal done instead of running more tests: "
+    "if the harness's checks then fail, you get the failure report while turns remain."
+)
+
 # The claude_code lead engine: Claude Code calls real tools (LHA's over MCP), so no JSON protocol.
 ENGINE_INSTRUCTIONS = (
     "Work this item in this session with the tools you have. When you believe it is done, call "
@@ -195,7 +202,7 @@ def build_messages(
         system = (
             f"{anchor}\n\n{role}\n\n"
             f"Available tools:\n{render_tools(specs)}\n\n"
-            f"{ACTION_INSTRUCTIONS}"
+            f"{ACTION_INSTRUCTIONS}\n{LEAD_DONE_INSTRUCTIONS}"
         )
     recent = "\n".join(snapshot.recent_commits[:10]) or "(none yet)"
     user = f"Active checklist item: [{item.id}] {item.description}\n\n"

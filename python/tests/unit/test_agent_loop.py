@@ -512,3 +512,20 @@ async def test_a_failed_tool_call_records_why(tmp_path: Path) -> None:
     assert passed == {"tool": "list_files", "ok": True}
     long = tool_error_detail(ToolResult(ok=False, error="e", content="x" * 1000 + "END"))
     assert len(long) == TOOL_ERROR_TAIL and long.endswith("END")
+
+
+def test_only_the_built_in_lead_is_told_to_signal_done_once_its_checks_pass() -> None:
+    from lha.agent.prompt import ACTION_INSTRUCTIONS, LEAD_DONE_INSTRUCTIONS, build_messages
+    from lha.contracts.state import SituationSnapshot
+
+    def system(*, engine: bool) -> str:
+        item = ChecklistItem(id="01", description="d")
+        snapshot = SituationSnapshot(head_sha="h")
+        messages = build_messages(
+            anchor_text="M", snapshot=snapshot, item=item, specs=[], engine=engine
+        )
+        return messages[0].content
+
+    assert f"{ACTION_INSTRUCTIONS}\n{LEAD_DONE_INSTRUCTIONS}" in system(engine=False)
+    assert LEAD_DONE_INSTRUCTIONS not in system(engine=True)  # the engine has its verify tool
+    assert LEAD_DONE_INSTRUCTIONS not in ACTION_INSTRUCTIONS  # sub-agents get no failure report
