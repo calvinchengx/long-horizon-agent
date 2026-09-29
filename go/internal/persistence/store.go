@@ -249,6 +249,30 @@ type Embedding struct {
 	Version string
 }
 
+// StaleRecord is a semantic-memory row the dense channel cannot see, with its mission.
+type StaleRecord struct {
+	MissionID string
+	Record    contracts.MemoryRecord
+}
+
+// staleWhere is the StaleMemory filter; ph is the backend's placeholder for arg n (1-based).
+func staleWhere(missionID string, ph func(n int) string, validTrue string) (string, int) {
+	scope, n := "mission_id IS NOT NULL", 0
+	if missionID != "" {
+		n = 1
+		scope = "mission_id = " + ph(n)
+	}
+	return "WHERE valid" + validTrue + " AND " + scope + " AND (embedding IS NULL " +
+		"OR embedding_model <> " + ph(n+1) + " OR embedding_version <> " + ph(n+2) + ")", n + 2
+}
+
+func staleArgs(missionID, model, version string) []any {
+	if missionID == "" {
+		return []any{model, version}
+	}
+	return []any{missionID, model, version}
+}
+
 // Store is the backend-neutral persistence for missions, spend and the memory tiers
 // (python: MissionStore).
 type Store interface {
@@ -289,6 +313,13 @@ type Store interface {
 	ListMemory(ctx context.Context, missionID string, limit int) ([]contracts.MemoryRecord, error)
 	// InvalidateMemory soft-forgets (valid = false); never deletes. Returns rows changed.
 	InvalidateMemory(ctx context.Context, ids []string) (int, error)
+	// StaleMemory is the valid rows of missionID ("" = every mission) with no vector or a vector
+	// from another embedder model+version, oldest limit (<= 0 => 100) first. The dense channel
+	// cannot see them until they are re-embedded.
+	StaleMemory(ctx context.Context, missionID, model, version string, limit int) ([]StaleRecord, error)
+	// CountStaleMemory is how many StaleMemory rows each mission has (missions with none are
+	// left out).
+	CountStaleMemory(ctx context.Context, missionID, model, version string) (map[string]int, error)
 
 	// PutSkill upserts a VERIFIED skill (an unverified one is a *contracts.SkillNotVerifiedError).
 	PutSkill(ctx context.Context, skill contracts.Skill) error

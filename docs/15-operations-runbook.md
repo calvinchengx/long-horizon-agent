@@ -287,11 +287,12 @@ when it is back. Workers reconnect.
 **Postgres schema.** `lha db migrate` applies pending `db/migrations/*.sql` (see
 [17-cli.md](17-cli.md#lha-db-migrate)). The durable path does not need Postgres.
 
-**Re-embedding memory.** **Planned.** Every `semantic_memory` row records `embedding_model` and
-`embedding_version`, and dense queries only compare vectors of the same model and version, but
-there is no re-embed command: after changing `LHA_MEMORY_EMBEDDER` or `LHA_MEMORY_EMBEDDING_MODEL`
-(or re-pulling an Ollama model whose digest changed), older rows are not found by the dense
-channel.
+**Re-embedding memory.** Every `semantic_memory` row records `embedding_model` and
+`embedding_version`, and dense queries only compare vectors of the same model and version. After
+changing `LHA_MEMORY_EMBEDDER` or `LHA_MEMORY_EMBEDDING_MODEL` (or re-pulling an Ollama model
+whose digest changed), missions re-embed up to 64 older rows per cycle on their own. To do them
+all at once, run `lha memory reembed --dry-run` to count them, then `lha memory reembed` with the
+new settings ([12-memory.md](12-memory.md#re-embedding)).
 
 **Semantic memory with Ollama.** Set `LHA_MEMORY_EMBEDDER=ollama` (model:
 `LHA_MEMORY_EMBEDDING_MODEL`, default `nomic-embed-text`; server: `LHA_OLLAMA_BASE_URL`) on every

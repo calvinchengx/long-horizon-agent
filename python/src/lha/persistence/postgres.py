@@ -422,6 +422,56 @@ class PostgresStore:
         )
         return int(cursor.rowcount or 0)
 
+    @staticmethod
+    def _stale_where(mission_id: str | None) -> str:
+        scope = "mission_id = %s" if mission_id is not None else "mission_id IS NOT NULL"
+        return (
+            f"WHERE valid AND {scope} AND (embedding IS NULL "
+            "OR embedding_model <> %s OR embedding_version <> %s)"
+        )
+
+    async def stale_memory(
+        self,
+        mission_id: str | None,
+        *,
+        embedding_model: str,
+        embedding_version: str,
+        limit: int = 100,
+    ) -> list[tuple[str, MemoryRecord]]:
+        scope = () if mission_id is None else (mission_id,)
+        rows = await self._fetchall(
+            "SELECT mission_id, id, kind, text, metadata, embedding_model, embedding_version, "
+            f"valid FROM semantic_memory {self._stale_where(mission_id)} "
+            "ORDER BY created_at, id LIMIT %s",
+            (*scope, embedding_model, embedding_version, limit),
+        )
+        return [
+            (
+                str(r[0]),
+                MemoryRecord(
+                    id=str(r[1]),
+                    kind=str(r[2]),
+                    text=str(r[3]),
+                    metadata={str(k): str(v) for k, v in (r[4] or {}).items()},
+                    embedding_model=r[5],
+                    embedding_version=r[6],
+                    valid=bool(r[7]),
+                ),
+            )
+            for r in rows
+        ]
+
+    async def count_stale_memory(
+        self, mission_id: str | None, *, embedding_model: str, embedding_version: str
+    ) -> dict[str, int]:
+        scope = () if mission_id is None else (mission_id,)
+        rows = await self._fetchall(
+            f"SELECT mission_id, COUNT(*) FROM semantic_memory {self._stale_where(mission_id)} "
+            "GROUP BY mission_id ORDER BY mission_id",
+            (*scope, embedding_model, embedding_version),
+        )
+        return {str(r[0]): int(r[1]) for r in rows}
+
     # --- skills -------------------------------------------------------------------------
     async def put_skill(self, skill: Skill) -> None:
         if not skill.verified:

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 )
@@ -203,5 +204,72 @@ func TestStoreCommandsMatchPython(t *testing.T) {
 		if got.stdout != stdout.String() || got.code != code || got.stderr != stderr.String() {
 			t.Errorf("%v:\n go (%d) %q %q\n py (%d) %q %q", args, got.code, got.stdout, got.stderr, code, stdout.String(), stderr.String())
 		}
+	}
+}
+
+func seedStaleMemory(t *testing.T, path string) {
+	t.Helper()
+	store, err := persistence.OpenSQLite(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	records := []contracts.MemoryRecord{
+		contracts.NewMemoryRecord("a", "fact", "fact a", nil),
+		contracts.NewMemoryRecord("b", "fact", "fact b", nil),
+	}
+	if err := store.PutMemory(context.Background(), "m1", records, nil); err != nil { // stored while the dense channel was down
+		t.Fatal(err)
+	}
+}
+
+// TestMemoryReembed is python's test_cli_memory_reembed, and the two implementations agree on a
+// shared store: Python re-embeds what Go counted, and Go then finds nothing stale.
+func TestMemoryReembed(t *testing.T) {
+	dir := cleanEnv(t)
+	path := filepath.Join(dir, "lha.sqlite3")
+	t.Setenv("LHA_SQLITE_PATH", path)
+	seedStaleMemory(t, path)
+
+	dry := runCLI(t, nil, "memory", "reembed", "--dry-run")
+	if dry.code != 0 || dry.stdout != "m1  2 rows\n2 rows to re-embed with hash (1)\n" {
+		t.Fatalf("%+v", dry)
+	}
+	if pythonAvailable(t) {
+		py := runPythonLHA(t, dir, nil, "memory", "reembed", "--dry-run")
+		if py.code != 0 || !strings.HasSuffix(py.stdout, dry.stdout) {
+			t.Fatalf("python: %+v", py)
+		}
+		py = runPythonLHA(t, dir, nil, "memory", "reembed", "m1")
+		if py.code != 0 || !strings.HasSuffix(py.stdout, "m1  2 rows\n2 rows re-embedded with hash (1)\n") {
+			t.Fatalf("python: %+v", py)
+		}
+	} else if done := runCLI(t, nil, "memory", "reembed", "m1"); done.stdout != "m1  2 rows\n2 rows re-embedded with hash (1)\n" {
+		t.Fatalf("%+v", done)
+	}
+	if again := runCLI(t, nil, "memory", "reembed"); again.code != 0 || again.stdout != "nothing to re-embed for hash (1)\n" {
+		t.Fatalf("%+v", again)
+	}
+}
+
+func TestMemoryReembedNeedsMemoryAndAnEmbedder(t *testing.T) {
+	dir := cleanEnv(t)
+	t.Setenv("LHA_SQLITE_PATH", filepath.Join(dir, "lha.sqlite3"))
+	if r := runCLI(t, nil, "memory", "reembed"); r.code != 0 || r.stdout != "nothing to re-embed for hash (1)\n" {
+		t.Fatalf("%+v", r)
+	}
+	t.Setenv("LHA_MEMORY_EMBEDDER", "none")
+	if r := runCLI(t, nil, "memory", "reembed"); r.code != 2 || !strings.HasPrefix(r.stderr, "error: no embedder to re-embed with: ") {
+		t.Fatalf("%+v", r)
+	}
+	t.Setenv("LHA_MEMORY_ENABLED", "false")
+	if r := runCLI(t, nil, "memory", "reembed"); r.code != 2 || r.stderr != "error: memory is disabled (LHA_MEMORY_ENABLED=false)\n" {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "memory"); r.code != 2 || !strings.Contains(r.stdout, "reembed") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "memory", "nope"); r.code != 2 || !strings.Contains(r.stderr, "No such command 'nope'") {
+		t.Fatalf("%+v", r)
 	}
 }

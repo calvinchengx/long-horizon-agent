@@ -161,6 +161,20 @@ async def test_events_memory_and_skills_sql() -> None:
     assert skills[0].preconditions == ["pre"] and skills[0].verified
 
 
+async def test_stale_memory_sql() -> None:
+    row = ("m1", "a", "fact", "alpha", {"k": "v"}, "none", "0", True)
+    store, conn = _store(_Cursor([row]), _Cursor([("m1", 3)]), _Cursor([]))
+    stale = await store.stale_memory("m1", embedding_model="e", embedding_version="2", limit=5)
+    assert stale[0][0] == "m1" and stale[0][1].id == "a" and stale[0][1].metadata == {"k": "v"}
+    sql, params = conn.calls[0]
+    assert "embedding IS NULL OR embedding_model <> %s" in sql and "mission_id = %s" in sql
+    assert params == ("m1", "e", "2", 5)
+    counts = await store.count_stale_memory(None, embedding_model="e", embedding_version="2")
+    assert counts == {"m1": 3}
+    assert "mission_id IS NOT NULL" in conn.calls[1][0] and conn.calls[1][1] == ("e", "2")
+    assert await store.stale_memory(None, embedding_model="e", embedding_version="2") == []
+
+
 async def test_gate_sql_parameters_and_mapping() -> None:
     row = (
         "m1", "deadlock-3", "deadlock", "RESOLVED", "Q?", ["retry", "abort"], "abort",

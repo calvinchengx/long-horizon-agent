@@ -126,6 +126,20 @@ this run (`[]` when up to date). Exits `2` if `LHA_POSTGRES_DSN` is unset or `ps
 The Go `lha db migrate` applies the same files with the same `schema_migrations` bookkeeping and
 advisory lock, so either implementation sees what the other applied.
 
+## `lha memory reembed`
+
+```
+lha memory reembed [MISSION_ID] [--dry-run]
+```
+
+Re-embeds stored memory rows that the dense channel cannot see (no vector, or a vector from
+another embedder model or version) with the configured embedder, for `MISSION_ID` or every
+mission. Prints one `<mission>  <n> rows` line per mission, then `<total> rows re-embedded with
+<model> (<version>)`, or `nothing to re-embed for <model> (<version>)`. `--dry-run` only counts
+(`... rows to re-embed with ...`). Exits `2` when memory is disabled (`LHA_MEMORY_ENABLED=false`)
+or there is no embedder to use (`LHA_MEMORY_EMBEDDER=none`, or the embedder is unreachable).
+Missions also do this on their own, 64 rows per cycle ([12-memory.md](12-memory.md#re-embedding)).
+
 ## `lha vendor`
 
 ```

@@ -186,8 +186,21 @@ lexical-only (vectors are never truncated).
 Every `MemoryRecord` carries `embedding_model` and `embedding_version`. The SQLite index, the
 pgvector index and `InMemorySemanticIndex` only compare vectors from the same (model, version) as
 the current embedder. After an embedder change, old rows are still returned lexically (BM25) but
-not by the dense channel. The Ollama version includes the model's digest, so re-pulling a model
-whose weights changed is an embedder change too. Re-embedding is not implemented.
+not by the dense channel until they are re-embedded. The Ollama version includes the model's
+digest, so re-pulling a model whose weights changed is an embedder change too.
+
+## Re-embedding
+
+A stored row is stale when it has no vector (it was stored while the dense channel was down) or
+its vector comes from another model or model version. Stale rows are re-embedded with the current
+embedder and restamped, so the dense channel finds them again; soft-forgotten rows are left alone.
+
+- **On its own.** Each recall re-embeds up to 64 of the mission's stale rows before the dense
+  query, so an embedder change heals over a few cycles without one slow cycle. Each batch records
+  a `memory_reembedded` event (`count`, `embedding_model`, `embedding_version`). An embedder
+  failure here degrades memory to lexical-only, as any dense failure does.
+- **All at once.** `lha memory reembed [MISSION_ID]` re-embeds every stale row, of one mission or
+  of all of them; `--dry-run` only counts them ([CLI](17-cli.md#lha-memory-reembed)).
 
 `PgSemanticIndex` ([semantic_pg.py](../python/src/lha/memory/semantic_pg.py)) details:
 

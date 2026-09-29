@@ -59,6 +59,7 @@ var commandHelp = []struct{ name, help string }{
 	{"costs", costsHelp},
 	{"gates", gatesHelp},
 	{"db", dbHelp},
+	{"memory", memoryHelp},
 	{"worker", "Run a Temporal worker that serves missions (requires a Temporal server)."},
 	{"mission-start", "Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."},
 	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action) and gate events."},
@@ -157,6 +158,8 @@ func (c *cli) run(args []string) int {
 		err = c.gates(rest)
 	case "db":
 		err = c.db(rest)
+	case "memory":
+		err = c.memoryCmd(rest)
 	case "worker":
 		err = c.worker(rest)
 	case "mission-start":

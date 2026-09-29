@@ -628,6 +628,51 @@ class SqliteStore:
 
         return await self._run(_invalidate)
 
+    @staticmethod
+    def _stale_where(mission_id: str | None) -> str:
+        scope = "mission_id = ?" if mission_id is not None else "mission_id IS NOT NULL"
+        return (
+            f"WHERE valid = 1 AND {scope} AND (embedding IS NULL "
+            "OR embedding_model != ? OR embedding_version != ?)"
+        )
+
+    async def stale_memory(
+        self,
+        mission_id: str | None,
+        *,
+        embedding_model: str,
+        embedding_version: str,
+        limit: int = 100,
+    ) -> list[tuple[str, MemoryRecord]]:
+        scope = () if mission_id is None else (mission_id,)
+        params = (*scope, embedding_model, embedding_version, limit)
+
+        def _list(conn: sqlite3.Connection) -> list[tuple[str, MemoryRecord]]:
+            rows = conn.execute(
+                f"SELECT * FROM semantic_memory {self._stale_where(mission_id)} "
+                "ORDER BY rowid LIMIT ?",
+                params,
+            ).fetchall()
+            return [(str(r["mission_id"]), self._record(r)) for r in rows]
+
+        return await self._run(_list)
+
+    async def count_stale_memory(
+        self, mission_id: str | None, *, embedding_model: str, embedding_version: str
+    ) -> dict[str, int]:
+        scope = () if mission_id is None else (mission_id,)
+        params = (*scope, embedding_model, embedding_version)
+
+        def _count(conn: sqlite3.Connection) -> dict[str, int]:
+            rows = conn.execute(
+                f"SELECT mission_id, COUNT(*) FROM semantic_memory "
+                f"{self._stale_where(mission_id)} GROUP BY mission_id ORDER BY mission_id",
+                params,
+            ).fetchall()
+            return {str(r[0]): int(r[1]) for r in rows}
+
+        return await self._run(_count)
+
     # --- skills -------------------------------------------------------------------------
     async def put_skill(self, skill: Skill) -> None:
         if not skill.verified:

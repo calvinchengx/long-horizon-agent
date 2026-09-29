@@ -68,6 +68,14 @@ const OllamaTimeout = 30 * time.Second
 // SkillTTLDays is how long an admitted skill stays valid.
 const SkillTTLDays = 90
 
+// ReembedPerRecall is how many stale rows (no vector, or another embedder's) one recall
+// re-embeds, so an embedder change heals over a few cycles without stalling one; `lha memory
+// reembed` does the rest at once.
+var ReembedPerRecall = 64
+
+// reembedBatch is the rows Reembed fetches and embeds at a time.
+var reembedBatch = 64
+
 const (
 	chunkLines        = 40
 	maxFileBytes      = 100_000
@@ -478,11 +486,89 @@ func (m *MissionMemory) Embedder() contracts.Embedder {
 	return m.embedder
 }
 
-// SetEmbedder replaces the dense embedder (tests).
+// SetEmbedder replaces the dense embedder (tests), dropping the indexes built on the old one.
 func (m *MissionMemory) SetEmbedder(e contracts.Embedder) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.embedder = e
+	m.dense = map[string]contracts.SemanticIndex{}
+}
+
+// SetDenseIndex replaces missionID's dense index (tests).
+func (m *MissionMemory) SetDenseIndex(missionID string, index contracts.SemanticIndex) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dense[missionID] = index
+}
+
+// Reembed re-embeds stored rows the dense channel cannot see: rows stored while it was down, and
+// rows embedded by another model or model version (LHA_MEMORY_EMBEDDER or its model changed, or
+// `ollama pull` moved the digest). Scoped to missionID ("" = every mission); at most limit rows
+// (<= 0 => all). It returns the rows done per mission and records one memory_reembedded event
+// per mission, in mission order.
+func (m *MissionMemory) Reembed(ctx context.Context, missionID string, limit int, cycleID string) (map[string]int, error) {
+	embedder := m.Embedder()
+	done := map[string]int{}
+	if embedder == nil {
+		return done, nil
+	}
+	total := 0
+	seen := map[string]bool{}
+	var err error
+	for limit <= 0 || total < limit {
+		batch := reembedBatch
+		if limit > 0 {
+			batch = min(batch, limit-total)
+		}
+		var stale []persistence.StaleRecord
+		stale, err = m.Store.StaleMemory(ctx, missionID, embedder.Name(), embedder.Version(), batch)
+		if err != nil || len(stale) == 0 {
+			break
+		}
+		fresh := false
+		for _, sr := range stale {
+			if !seen[sr.Record.ID] {
+				fresh = true
+				seen[sr.Record.ID] = true
+			}
+		}
+		if !fresh { // the store did not restamp them: stop rather than loop forever
+			err = fmt.Errorf("re-embedded rows are still stale: %s", stale[0].Record.ID)
+			break
+		}
+		order := []string{}
+		byMission := map[string][]contracts.MemoryRecord{}
+		for _, sr := range stale {
+			if _, ok := byMission[sr.MissionID]; !ok {
+				order = append(order, sr.MissionID)
+			}
+			byMission[sr.MissionID] = append(byMission[sr.MissionID], sr.Record)
+		}
+		for _, owner := range order {
+			var index contracts.SemanticIndex
+			if index, err = m.denseIndex(owner); err != nil {
+				break
+			}
+			if err = index.Add(ctx, byMission[owner]); err != nil {
+				break
+			}
+			done[owner] += len(byMission[owner])
+			total += len(byMission[owner])
+		}
+		if err != nil || len(stale) < batch {
+			break
+		}
+	}
+	owners := make([]string, 0, len(done))
+	for owner := range done {
+		owners = append(owners, owner)
+	}
+	sort.Strings(owners)
+	for _, owner := range owners {
+		m.emit("memory_reembedded", owner, cycleID, obs.F("count", done[owner]),
+			obs.F("embedding_model", embedder.Name()), obs.F("embedding_version", embedder.Version()))
+	}
+	return done, err
 }
 
 // Errors is the number of memory errors recorded so far.
@@ -886,7 +972,7 @@ func (m *MissionMemory) semanticLines(ctx context.Context, missionID, cycleID st
 		rankings = append(rankings, ids(grep))
 	}
 	if m.Mode().Dense {
-		if dense, err := m.denseRankings(ctx, missionID, query, local, stored, candidates, depth); err != nil {
+		if dense, err := m.denseRankings(ctx, missionID, cycleID, query, local, stored, candidates, depth); err != nil {
 			m.degrade(missionID, cycleID, m.denseDep(), err)
 		} else {
 			rankings = append(rankings, dense...)
@@ -920,7 +1006,7 @@ func (m *MissionMemory) semanticLines(ctx context.Context, missionID, cycleID st
 	return out, nil
 }
 
-func (m *MissionMemory) denseRankings(ctx context.Context, missionID, query string, local, stored []contracts.MemoryRecord, candidates map[string]contracts.MemoryRecord, depth int) ([][]string, error) {
+func (m *MissionMemory) denseRankings(ctx context.Context, missionID, cycleID, query string, local, stored []contracts.MemoryRecord, candidates map[string]contracts.MemoryRecord, depth int) ([][]string, error) {
 	ranked, err := m.denseRank(ctx, query, local)
 	if err != nil {
 		return nil, err
@@ -931,6 +1017,9 @@ func (m *MissionMemory) denseRankings(ctx context.Context, missionID, query stri
 		return nil, err
 	}
 	if index != nil && len(stored) > 0 {
+		if _, err := m.Reembed(ctx, missionID, ReembedPerRecall, cycleID); err != nil {
+			return nil, err
+		}
 		found, err := index.Query(ctx, query, depth)
 		if err != nil {
 			return nil, err

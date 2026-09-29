@@ -84,6 +84,10 @@ _GREP_FILES = 10
 _GREP_LINES_PER_FILE = 5
 _EPISODE_SCAN = 500
 _MEMORY_SCAN = 500
+#: Stale rows (no vector, or another embedder's) re-embedded per recall, so an embedder change
+#: heals over a few cycles without stalling one; ``lha memory reembed`` does the rest at once.
+REEMBED_PER_RECALL = 64
+_REEMBED_BATCH = 64
 _LINE_CAP = 700
 _STOPWORDS = frozenset(
     (  # noqa: SIM905  (one readable line of words beats a 30-line list literal)
@@ -428,6 +432,60 @@ class MissionMemory:
                 self._degrade(mission_id, "", self._dense_dep, exc)
         await self.store.put_memory(mission_id, records)
 
+    async def reembed(
+        self, mission_id: str | None, *, limit: int | None = None, cycle_id: str = ""
+    ) -> dict[str, int]:
+        """Re-embed stored rows the dense channel cannot see: rows stored while it was down, and
+        rows embedded by another model or model version (``LHA_MEMORY_EMBEDDER`` or its model
+        changed, or ``ollama pull`` moved the digest). Scoped to ``mission_id``, or every mission
+        when ``None``; at most ``limit`` rows (all when ``None``). Returns rows done per mission,
+        and records one ``memory_reembedded`` event per mission (in mission order, also for the
+        rows done before an embedder or store error, which is raised).
+        """
+        if self.embedder is None:
+            return {}
+        embedder = self.embedder
+        done: dict[str, int] = {}
+        seen: set[str] = set()
+        try:
+            while limit is None or sum(done.values()) < limit:
+                batch = _REEMBED_BATCH
+                if limit is not None:
+                    batch = min(batch, limit - sum(done.values()))
+                stale = await self.store.stale_memory(
+                    mission_id,
+                    embedding_model=embedder.name,
+                    embedding_version=embedder.version,
+                    limit=batch,
+                )
+                if not stale:
+                    break
+                ids = {record.id for _, record in stale}
+                if ids <= seen:  # the store did not restamp them: stop rather than loop forever
+                    raise RuntimeError(f"re-embedded rows are still stale: {stale[0][1].id}")
+                seen |= ids
+                by_mission: dict[str, list[MemoryRecord]] = {}
+                for owner, record in stale:
+                    by_mission.setdefault(owner, []).append(record)
+                for owner, records in by_mission.items():
+                    index = self._dense_index(owner)
+                    assert index is not None  # the embedder is set
+                    await index.add(records)
+                    done[owner] = done.get(owner, 0) + len(records)
+                if len(stale) < batch:
+                    break
+        finally:
+            for owner in sorted(done):
+                self._emit(
+                    "memory_reembedded",
+                    owner,
+                    cycle_id,
+                    count=done[owner],
+                    embedding_model=embedder.name,
+                    embedding_version=embedder.version,
+                )
+        return done
+
     @property
     def _dense_dep(self) -> str:
         """The dependency blamed when the dense channel fails."""
@@ -557,6 +615,7 @@ class MissionMemory:
                 dense = [(await self._dense_rank(query, local))[:depth]]
                 index = self._dense_index(mission_id)
                 if index is not None and stored:
+                    await self.reembed(mission_id, limit=REEMBED_PER_RECALL, cycle_id=cycle_id)
                     found = await index.query(query, k=depth)
                     dense.append([h.record.id for h in found if h.record.id in candidates])
                 rankings.extend(dense)

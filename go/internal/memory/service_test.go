@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -777,5 +778,148 @@ func TestMemoryGitIsHardened(t *testing.T) {
 	}
 	if _, err := GitGrep(bg, ws, []string{"parse_config"}); err == nil || !strings.Contains(err.Error(), "refusing to run git") {
 		t.Fatalf("a refused git grep must fail with the refusal, got %v", err)
+	}
+}
+
+// --- re-embedding ----------------------------------------------------------------------------------
+
+// versioned is an embedder under a new model version (e.g. after an `ollama pull`).
+type versioned struct {
+	contracts.Embedder
+	version string
+}
+
+func (v versioned) Version() string { return v.version }
+
+func facts(texts ...string) []contracts.MemoryRecord {
+	out := []contracts.MemoryRecord{}
+	for _, t := range texts {
+		out = append(out, contracts.NewMemoryRecord(t, "fact", t, nil))
+	}
+	return out
+}
+
+func reembedEvents(recorder *obs.TraceRecorder) []string {
+	out := []string{}
+	for _, e := range recorder.Events() {
+		if e.Kind == "memory_reembedded" {
+			b, _ := json.Marshal(e.Data)
+			out = append(out, e.MissionID+"@"+e.CycleID+" "+string(b))
+		}
+	}
+	return out
+}
+
+func TestReembedRestoresDenseRecallAfterAnEmbedderChange(t *testing.T) {
+	recorder := obs.NewTraceRecorder(nil)
+	mem := newMemory(t, t.TempDir(), recorder, nil)
+	if err := mem.storeRecords(bg, "m1", facts("config parser keys", "port defaults")); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.Store.PutMemory(bg, "m2", facts("stored while degraded"), nil); err != nil {
+		t.Fatal(err)
+	}
+	query := func() []contracts.RetrievalHit {
+		index, err := mem.denseIndex("m1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		hits, err := index.Query(bg, "config parser", 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return hits
+	}
+	if len(query()) != 1 {
+		t.Fatal("no dense hit before the change")
+	}
+	mem.SetEmbedder(versioned{NewHashEmbedder(0), "2"})
+	if hits := query(); len(hits) != 0 {
+		t.Fatalf("another version's vectors were compared: %+v", hits)
+	}
+	done, err := mem.Reembed(bg, "", 0, "")
+	if err != nil || !reflect.DeepEqual(done, map[string]int{"m1": 2, "m2": 1}) {
+		t.Fatal(done, err)
+	}
+	if hits := query(); len(hits) != 1 || hits[0].Record.ID != "config parser keys" {
+		t.Fatalf("%+v", hits)
+	}
+	if done, err := mem.Reembed(bg, "", 0, ""); err != nil || len(done) != 0 {
+		t.Fatal(done, err)
+	}
+	want := []string{
+		`m1@ {"count":2,"embedding_model":"hash","embedding_version":"2"}`,
+		`m2@ {"count":1,"embedding_model":"hash","embedding_version":"2"}`,
+	}
+	if got := reembedEvents(recorder); !reflect.DeepEqual(got, want) {
+		t.Fatal(got)
+	}
+}
+
+func TestReembedHonoursTheLimitAndTheMission(t *testing.T) {
+	mem := newMemory(t, t.TempDir(), nil, nil)
+	if err := mem.Store.PutMemory(bg, "m1", facts("a", "b", "c"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.Store.PutMemory(bg, "m2", facts("d"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := mem.Reembed(bg, "m1", 2, ""); err != nil || !reflect.DeepEqual(done, map[string]int{"m1": 2}) {
+		t.Fatal(done, err)
+	}
+	if done, err := mem.Reembed(bg, "m1", 0, ""); err != nil || !reflect.DeepEqual(done, map[string]int{"m1": 1}) {
+		t.Fatal(done, err)
+	}
+	counts, err := mem.Store.CountStaleMemory(bg, "", "hash", "1")
+	if err != nil || !reflect.DeepEqual(counts, map[string]int{"m2": 1}) {
+		t.Fatal(counts, err)
+	}
+}
+
+func TestRecallReEmbedsABoundedBatchEachCycle(t *testing.T) {
+	defer func(n int) { ReembedPerRecall = n }(ReembedPerRecall)
+	ReembedPerRecall = 2
+	recorder := obs.NewTraceRecorder(nil)
+	mem := newMemory(t, repo(t, map[string]string{"README.md": "x\n"}), recorder, nil)
+	if err := mem.Store.PutMemory(bg, "m1", facts("parser one", "parser two", "parser three"), nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, cycle := range []string{"c1", "c2"} {
+		mem.Recall(bg, "m1", cycle, item("01", "fix the config parser"), contracts.SituationSnapshot{})
+	}
+	want := []string{
+		`m1@c1 {"count":2,"embedding_model":"hash","embedding_version":"1"}`,
+		`m1@c2 {"count":1,"embedding_model":"hash","embedding_version":"1"}`,
+	}
+	if got := reembedEvents(recorder); !reflect.DeepEqual(got, want) || mem.Errors() != 0 {
+		t.Fatal(got, mem.Errors())
+	}
+}
+
+func TestReembedWithoutAnEmbedderDoesNothing(t *testing.T) {
+	mem := newMemory(t, t.TempDir(), nil, nil)
+	if err := mem.Store.PutMemory(bg, "m1", facts("a"), nil); err != nil {
+		t.Fatal(err)
+	}
+	mem.SetEmbedder(nil)
+	if done, err := mem.Reembed(bg, "", 0, ""); err != nil || len(done) != 0 {
+		t.Fatal(done, err)
+	}
+}
+
+type deafIndex struct{ contracts.SemanticIndex }
+
+func (deafIndex) Add(context.Context, []contracts.MemoryRecord) error { return nil }
+
+func TestReembedStopsWhenTheStoreDoesNotRestamp(t *testing.T) {
+	defer func(n int) { reembedBatch = n }(reembedBatch)
+	reembedBatch = 2
+	mem := newMemory(t, t.TempDir(), nil, nil)
+	if err := mem.Store.PutMemory(bg, "m1", facts("a", "b", "c"), nil); err != nil {
+		t.Fatal(err)
+	}
+	mem.SetDenseIndex("m1", deafIndex{})
+	if _, err := mem.Reembed(bg, "m1", 0, ""); err == nil || err.Error() != "re-embedded rows are still stale: a" {
+		t.Fatal(err)
 	}
 }

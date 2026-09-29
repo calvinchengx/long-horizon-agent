@@ -535,6 +535,59 @@ func (s *PostgresStore) InvalidateMemory(ctx context.Context, ids []string) (int
 	return int(tag.RowsAffected()), nil
 }
 
+func pgPH(n int) string { return fmt.Sprintf("$%d", n) }
+
+// StaleMemory is the valid rows with no vector or another embedder's, oldest first.
+func (s *PostgresStore) StaleMemory(ctx context.Context, missionID, model, version string, limit int) ([]StaleRecord, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	where, n := staleWhere(missionID, pgPH, "")
+	rows, err := s.Pool.Query(ctx,
+		"SELECT mission_id, id, kind, text, metadata::text, embedding_model, embedding_version, valid "+
+			"FROM semantic_memory "+where+" ORDER BY created_at, id LIMIT "+pgPH(n+1),
+		append(staleArgs(missionID, model, version), limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []StaleRecord{}
+	for rows.Next() {
+		var sr StaleRecord
+		var metadata string
+		r := &sr.Record
+		if err := rows.Scan(&sr.MissionID, &r.ID, &r.Kind, &r.Text, &metadata, &r.EmbeddingModel, &r.EmbeddingVersion, &r.Valid); err != nil {
+			return nil, err
+		}
+		if r.Metadata, err = DecodeStringMap(metadata); err != nil {
+			return nil, err
+		}
+		out = append(out, sr)
+	}
+	return out, rows.Err()
+}
+
+// CountStaleMemory is how many StaleMemory rows each mission has.
+func (s *PostgresStore) CountStaleMemory(ctx context.Context, missionID, model, version string) (map[string]int, error) {
+	where, _ := staleWhere(missionID, pgPH, "")
+	rows, err := s.Pool.Query(ctx, "SELECT mission_id, COUNT(*) FROM semantic_memory "+where+" GROUP BY mission_id",
+		staleArgs(missionID, model, version)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var mission string
+		var n int64
+		if err := rows.Scan(&mission, &n); err != nil {
+			return nil, err
+		}
+		out[mission] = int(n)
+	}
+	return out, rows.Err()
+}
+
 // --- skills ------------------------------------------------------------------------------------
 
 // PutSkill upserts a VERIFIED skill.

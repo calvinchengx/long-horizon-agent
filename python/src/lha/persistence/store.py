@@ -276,6 +276,25 @@ class MissionStore(Protocol):
         """Soft-forget (``valid = false``); never deletes. Returns rows changed."""
         ...
 
+    async def stale_memory(
+        self,
+        mission_id: str | None,
+        *,
+        embedding_model: str,
+        embedding_version: str,
+        limit: int = 100,
+    ) -> list[tuple[str, MemoryRecord]]:
+        """Valid rows (``mission_id``'s, or every mission's when ``None``) with no vector or a
+        vector from another embedder model+version, oldest ``limit`` first, as
+        ``(mission_id, record)``. The dense channel cannot see them until they are re-embedded."""
+        ...
+
+    async def count_stale_memory(
+        self, mission_id: str | None, *, embedding_model: str, embedding_version: str
+    ) -> dict[str, int]:
+        """How many ``stale_memory`` rows each mission has (missions with none are left out)."""
+        ...
+
     # --- skills -------------------------------------------------------------------------
     async def put_skill(self, skill: Skill) -> None:
         """Upsert a VERIFIED skill (unverified skills raise ``SkillNotVerifiedError``)."""

@@ -29,6 +29,8 @@ app = typer.Typer(
 )
 db_app = typer.Typer(help="Database maintenance (Postgres).", no_args_is_help=True)
 app.add_typer(db_app, name="db")
+memory_app = typer.Typer(help="Tiered memory maintenance.", no_args_is_help=True)
+app.add_typer(memory_app, name="memory")
 
 
 @app.callback()
@@ -403,6 +405,56 @@ def gates(
     for row in rows:
         for line in format_gate_row(row):
             typer.echo(line)
+
+
+@memory_app.command()
+def reembed(
+    mission_id: str | None = typer.Argument(None, help="Mission id (default: every mission)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only count the rows to re-embed."),
+) -> None:
+    """Re-embed stored memory with the configured embedder.
+
+    Rows stored while the dense channel was down, or embedded by another model or model version
+    (a changed LHA_MEMORY_EMBEDDER or LHA_MEMORY_EMBEDDING_MODEL, or an `ollama pull` that moved
+    the model's digest), are invisible to dense recall until re-embedded. Missions re-embed up to
+    64 such rows per cycle on their own; this command does them all now.
+    """
+    from pathlib import Path
+
+    from lha.memory.service import open_mission_memory
+
+    settings = get_settings()
+
+    async def _reembed(store: MissionStore) -> list[str]:
+        memory = await open_mission_memory(
+            settings, store=store, workdir=Path.cwd(), mission_id=mission_id or ""
+        )
+        if memory is None:
+            _fail("memory is disabled (LHA_MEMORY_ENABLED=false)")
+        try:
+            embedder = memory.embedder
+            if embedder is None:
+                _fail(f"no embedder to re-embed with: {memory.mode.reason}")
+            if dry_run:
+                counts = await store.count_stale_memory(
+                    mission_id,
+                    embedding_model=embedder.name,
+                    embedding_version=embedder.version,
+                )
+                verb = "to re-embed"
+            else:
+                counts = await memory.reembed(mission_id)
+                verb = "re-embedded"
+            using = f"{embedder.name} ({embedder.version})"
+            if not counts:
+                return [f"nothing to re-embed for {using}"]
+            lines = [f"{owner}  {count} rows" for owner, count in sorted(counts.items())]
+            return [*lines, f"{sum(counts.values())} rows {verb} with {using}"]
+        finally:
+            await memory.close()
+
+    for line in _run(_with_store(_reembed)):
+        typer.echo(line)
 
 
 @app.command(name="run-local")

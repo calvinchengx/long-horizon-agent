@@ -16,6 +16,7 @@ import lha.cli.main as cli
 from lha.agent.runner import build_meter, plan_and_run_local, run_mission_local
 from lha.agents.orchestrator import Orchestrator
 from lha.config import Settings, get_settings
+from lha.contracts.memory import MemoryRecord
 from lha.contracts.model import ModelMessage, TurnResult, Usage
 from lha.contracts.state import Checklist, ChecklistItem, SituationSnapshot
 from lha.contracts.verify import Check
@@ -502,3 +503,37 @@ def test_cli_config_shows_the_resolved_store(
     result = runner.invoke(cli.app, ["config"])
     assert result.exit_code == 0, result.output
     assert f"mission store = sqlite {_isolated_mission_store.resolve()}" in result.output
+
+
+def test_cli_memory_reembed(_isolated_mission_store: Path) -> None:
+    async def _seed_memory() -> None:
+        store = await _store(_isolated_mission_store)
+        stale = [MemoryRecord(id=i, kind="fact", text=f"fact {i}") for i in ("a", "b")]
+        await store.put_memory("m1", stale)  # stored while the dense channel was down
+        await store.close()
+
+    asyncio.run(_seed_memory())
+    dry = runner.invoke(cli.app, ["memory", "reembed", "--dry-run"])
+    assert dry.exit_code == 0, dry.output
+    assert dry.output == "m1  2 rows\n2 rows to re-embed with hash (1)\n"
+    done = runner.invoke(cli.app, ["memory", "reembed", "m1"])
+    assert done.exit_code == 0, done.output
+    assert done.output.endswith("m1  2 rows\n2 rows re-embedded with hash (1)\n")
+    again = runner.invoke(cli.app, ["memory", "reembed"])
+    assert again.output.endswith("nothing to re-embed for hash (1)\n")
+
+
+def test_cli_memory_reembed_needs_memory_and_an_embedder(
+    _isolated_mission_store: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for env, message in (
+        ({"LHA_MEMORY_ENABLED": "false"}, "memory is disabled"),
+        ({"LHA_MEMORY_EMBEDDER": "none"}, "no embedder to re-embed with"),
+    ):
+        with monkeypatch.context() as mp:
+            for key, value in env.items():
+                mp.setenv(key, value)
+            get_settings.cache_clear()
+            result = runner.invoke(cli.app, ["memory", "reembed"])
+            assert result.exit_code == 2 and message in result.output, result.output
+    get_settings.cache_clear()

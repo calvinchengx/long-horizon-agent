@@ -265,3 +265,44 @@ async def test_run_local_on_postgres_persists_mission_and_ledger(
     finally:
         await store.close()
     assert not (tmp_path / "fallback.sqlite3").exists()  # nothing fell back to SQLite
+
+
+async def test_pgvector_reembed_after_an_embedder_change(pg_dsn: str, tmp_path: Path) -> None:
+    import uuid
+
+    from lha.memory.embeddings import HashEmbedder
+    from lha.memory.service import open_mission_memory
+    from lha.persistence.store import open_store
+
+    await _migrate(pg_dsn)
+    settings = _settings(pg_dsn, tmp_path)
+    store = await open_store(settings)
+    mission = f"re-{uuid.uuid4().hex[:8]}"
+    memory = await open_mission_memory(settings, store=store, workdir=tmp_path, mission_id=mission)
+    assert memory is not None and memory.embedder is not None
+    try:
+        facts = [MemoryRecord(id=f"{mission}-{i}", kind="fact", text=f"fact {i}") for i in "ab"]
+        await store.put_memory(mission, facts)  # stored while the dense channel was down
+        assert await memory.reembed(mission) == {mission: 2}
+
+        moved = HashEmbedder(dim=1024)
+        moved.version = "2"  # e.g. an `ollama pull` moved the model's digest
+        memory.embedder = moved
+        memory._dense.clear()
+        counts = await store.count_stale_memory(
+            mission, embedding_model="hash", embedding_version="2"
+        )
+        assert counts == {mission: 2}
+        assert await memory.reembed(mission) == {mission: 2}
+        async with await psycopg.AsyncConnection.connect(pg_dsn, autocommit=True) as conn:
+            cur = await conn.execute(
+                "SELECT count(*) FROM semantic_memory WHERE mission_id = %s "
+                "AND embedding IS NOT NULL AND embedding_version = '2'",
+                (mission,),
+            )
+            assert (await cur.fetchone())[0] == 2  # type: ignore[index]
+        hits = await memory._dense_index(mission).query("fact a", k=1)  # type: ignore[union-attr]
+        assert [h.record.id for h in hits] == [f"{mission}-a"]
+    finally:
+        await memory.close()
+        await store.close()

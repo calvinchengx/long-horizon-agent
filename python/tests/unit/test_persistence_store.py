@@ -267,6 +267,34 @@ async def test_memory_upsert_vectors_gating_and_soft_invalidation(store: SqliteS
         await store.put_memory("m1", [a, b], vectors=[[1.0]])
 
 
+async def test_stale_memory_is_unvectored_or_another_embedders(store: SqliteStore) -> None:
+    def rec(i: str) -> MemoryRecord:
+        return MemoryRecord(id=i, kind="fact", text=i)
+
+    await store.put_memory(
+        "m1", [rec("cur")], vectors=[[1.0]], embedding_model="e", embedding_version="2"
+    )
+    await store.put_memory(
+        "m1", [rec("old")], vectors=[[1.0]], embedding_model="e", embedding_version="1"
+    )
+    await store.put_memory("m1", [rec("lex")])  # stored while the dense channel was down
+    await store.put_memory(
+        "m2", [rec("other")], vectors=[[1.0]], embedding_model="f", embedding_version="2"
+    )
+    await store.put_memory("m1", [rec("gone")])
+    await store.invalidate_memory(["gone"])  # soft-forgotten rows are never re-embedded
+
+    stale = await store.stale_memory("m1", embedding_model="e", embedding_version="2")
+    assert [(m, r.id) for m, r in stale] == [("m1", "old"), ("m1", "lex")]
+    everyone = await store.stale_memory(None, embedding_model="e", embedding_version="2", limit=2)
+    assert [r.id for _, r in everyone] == ["old", "lex"]
+    assert await store.count_stale_memory(None, embedding_model="e", embedding_version="2") == {
+        "m1": 2,
+        "m2": 1,
+    }
+    assert await store.count_stale_memory("m2", embedding_model="f", embedding_version="2") == {}
+
+
 # --- skills -----------------------------------------------------------------------------------
 async def test_skills_round_trip_namespaced_and_verified_only(store: SqliteStore) -> None:
     skill = Skill(

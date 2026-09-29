@@ -337,6 +337,40 @@ func TestEventsAreOrderedFilterableAndBounded(t *testing.T) { checkEvents(t, ope
 
 // --- semantic memory -------------------------------------------------------------------------------
 
+func TestStaleMemoryIsUnvectoredOrAnotherEmbeddersRows(t *testing.T) {
+	store := openTestStore(t)
+	ctx := context.Background()
+	rec := func(id string) []contracts.MemoryRecord {
+		return []contracts.MemoryRecord{contracts.NewMemoryRecord(id, "fact", id, nil)}
+	}
+	vec := func(model, version string) *Embedding {
+		return &Embedding{Vectors: [][]float64{{1}}, Model: model, Version: version}
+	}
+	ok(t, store.PutMemory(ctx, "m1", rec("cur"), vec("e", "2")))
+	ok(t, store.PutMemory(ctx, "m1", rec("old"), vec("e", "1")))
+	ok(t, store.PutMemory(ctx, "m1", rec("lex"), nil)) // stored while the dense channel was down
+	ok(t, store.PutMemory(ctx, "m2", rec("other"), vec("f", "2")))
+	ok(t, store.PutMemory(ctx, "m1", rec("gone"), nil))
+	must(store.InvalidateMemory(ctx, []string{"gone"})) // soft-forgotten rows are never re-embedded
+	stale := must(store.StaleMemory(ctx, "m1", "e", "2", 0))
+	got := []string{}
+	for _, sr := range stale {
+		got = append(got, sr.MissionID+"/"+sr.Record.ID)
+	}
+	if !reflect.DeepEqual(got, []string{"m1/old", "m1/lex"}) {
+		t.Fatal(got)
+	}
+	if every := must(store.StaleMemory(ctx, "", "e", "2", 2)); len(every) != 2 || every[0].Record.ID != "old" || every[1].Record.ID != "lex" {
+		t.Fatalf("%+v", every)
+	}
+	if counts := must(store.CountStaleMemory(ctx, "", "e", "2")); !reflect.DeepEqual(counts, map[string]int{"m1": 2, "m2": 1}) {
+		t.Fatal(counts)
+	}
+	if counts := must(store.CountStaleMemory(ctx, "m2", "f", "2")); len(counts) != 0 {
+		t.Fatal(counts)
+	}
+}
+
 func TestMemoryUpsertVectorsGatingAndSoftInvalidation(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)

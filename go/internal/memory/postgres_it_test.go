@@ -2,6 +2,7 @@ package memory
 
 import (
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -70,6 +71,49 @@ func TestPgvectorMemoryRecallSkillsAndMissionScoping(t *testing.T) {
 	}
 	hits, err := index.Query(bg, "make the port configurable", 5)
 	if err != nil || len(hits) != 1 || hits[0].Record.Kind != "progress" || hits[0].Record.EmbeddingModel != "hash" {
+		t.Fatalf("%+v %v", hits, err)
+	}
+}
+
+// TestPgvectorReembedAfterAnEmbedderChange is python's integration test of the same name: rows
+// stored without a vector, then rows stamped by an older model version, are re-embedded through
+// pgvector and found by the dense channel again. Needs LHA_IT_POSTGRES_DSN.
+func TestPgvectorReembedAfterAnEmbedderChange(t *testing.T) {
+	dsn := pgtest.FreshDB(t)
+	if _, err := persistence.ApplyMigrations(bg, dsn, pgtest.MigrationsDir()); err != nil {
+		t.Fatal(err)
+	}
+	settings := settingsFrom(t, "LHA_POSTGRES_DSN="+dsn, "LHA_SQLITE_PATH="+filepath.Join(t.TempDir(), "fallback.sqlite3"))
+	store, err := persistence.OpenStore(bg, settings, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	mem := OpenMissionMemory(bg, settings, store, t.TempDir(), "m1", OpenOptions{})
+	defer mem.Close()
+	if err := store.PutMemory(bg, "m1", facts("fact a", "fact b"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if done, err := mem.Reembed(bg, "m1", 0, ""); err != nil || !reflect.DeepEqual(done, map[string]int{"m1": 2}) {
+		t.Fatal(done, err)
+	}
+	mem.SetEmbedder(versioned{NewHashEmbedder(PGEmbeddingDim), "2"})
+	if counts, err := store.CountStaleMemory(bg, "m1", "hash", "2"); err != nil || !reflect.DeepEqual(counts, map[string]int{"m1": 2}) {
+		t.Fatal(counts, err)
+	}
+	if done, err := mem.Reembed(bg, "m1", 0, ""); err != nil || !reflect.DeepEqual(done, map[string]int{"m1": 2}) {
+		t.Fatal(done, err)
+	}
+	var count int
+	if err := store.(*persistence.PostgresStore).Pool.QueryRow(bg, "SELECT count(*) FROM semantic_memory "+
+		"WHERE mission_id = 'm1' AND embedding IS NOT NULL AND embedding_version = '2'").Scan(&count); err != nil || count != 2 {
+		t.Fatal(count, err)
+	}
+	index, err := mem.denseIndex("m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits, err := index.Query(bg, "fact a", 1); err != nil || len(hits) != 1 || hits[0].Record.ID != "fact a" {
 		t.Fatalf("%+v %v", hits, err)
 	}
 }

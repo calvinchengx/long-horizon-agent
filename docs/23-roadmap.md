@@ -118,7 +118,7 @@ quality with real models.
 | `edit_file` (replace one exact snippet) and the `turns_exhausted` event | done: Python and Go, `edit_file` in the default toolset ([24](24-large-missions.md#give-a-strong-model-room-turns-per-cycle)) |
 | Cycle-start code map (`LHA_CODE_MAP=ripwire`) | done: every run path, Python and Go, off by default; one measurement showed no gain ([24](24-large-missions.md#optional-a-code-map-each-cycle)) |
 | Worker Build IDs / versioned deploys | planned |
-| Re-embedding after an embedding-model change | planned |
+| Re-embedding after an embedding-model change | done: Python and Go, 64 stale rows per recall and `lha memory reembed` ([12-memory.md](12-memory.md#re-embedding)) |
 
 ### Known limitations of built features
 

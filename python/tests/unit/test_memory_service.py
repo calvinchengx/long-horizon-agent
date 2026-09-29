@@ -13,6 +13,7 @@ import pytest
 from lha.agent.prompt import MEMORY_HEADER, build_messages, render_memory_block
 from lha.agent.runner import run_mission_local
 from lha.config import Settings
+from lha.contracts.memory import MemoryRecord
 from lha.contracts.model import ModelMessage, TurnResult
 from lha.contracts.state import Checklist, ChecklistItem, SituationSnapshot
 from lha.contracts.verify import Check
@@ -626,3 +627,93 @@ def test_memory_git_is_hardened(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     assert memsvc._changed_files(ws, before, after) == []
     with pytest.raises(RuntimeError, match="refusing to run git"):
         memsvc._git_grep(ws, ["parse_config"])
+
+
+# --- re-embedding -------------------------------------------------------------------------------
+class _HashV2(HashEmbedder):
+    """The hash embedder under a new model version (e.g. after an ``ollama pull``)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.version = "2"
+
+
+def _facts(*texts: str) -> list[MemoryRecord]:
+    return [MemoryRecord(id=t, kind="fact", text=t) for t in texts]
+
+
+async def test_reembed_restores_dense_recall_after_an_embedder_change(tmp_path: Path) -> None:
+    recorder = TraceRecorder()
+    memory = await _memory(tmp_path, tmp_path, recorder=recorder)
+    await memory._store_records("m1", _facts("config parser keys", "port defaults"))
+    await memory.store.put_memory("m2", _facts("stored while degraded"))  # no vector
+    index = memory._dense_index("m1")
+    assert index is not None and await index.query("config parser", k=5)
+
+    memory.embedder = _HashV2()
+    memory._dense.clear()
+    index = memory._dense_index("m1")
+    assert index is not None and await index.query("config parser", k=5) == []
+
+    assert await memory.reembed(None) == {"m1": 2, "m2": 1}
+    assert [h.record.id for h in await index.query("config parser", k=1)] == ["config parser keys"]
+    assert await memory.reembed(None) == {}
+    events = [e.data for e in recorder.events if e.kind == "memory_reembedded"]
+    assert events == [
+        {"count": 2, "embedding_model": "hash", "embedding_version": "2"},
+        {"count": 1, "embedding_model": "hash", "embedding_version": "2"},
+    ]
+    await memory.store.close()
+
+
+async def test_reembed_honours_the_limit_and_the_mission(tmp_path: Path) -> None:
+    memory = await _memory(tmp_path, tmp_path)
+    await memory.store.put_memory("m1", _facts("a", "b", "c"))
+    await memory.store.put_memory("m2", _facts("d"))
+    assert await memory.reembed("m1", limit=2) == {"m1": 2}
+    assert await memory.reembed("m1") == {"m1": 1}
+    assert await memory.store.count_stale_memory(
+        None, embedding_model="hash", embedding_version="1"
+    ) == {"m2": 1}
+    await memory.store.close()
+
+
+async def test_recall_re_embeds_a_bounded_batch_each_cycle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(memsvc, "REEMBED_PER_RECALL", 2)
+    recorder = TraceRecorder()
+    ws = _repo(tmp_path / "ws", {"README.md": "x\n"})
+    memory = await _memory(tmp_path, ws, recorder=recorder)
+    await memory.store.put_memory("m1", _facts("parser one", "parser two", "parser three"))
+    for cycle in ("c1", "c2"):
+        await memory.recall(mission_id="m1", cycle_id=cycle, item=_item(), snapshot=_snapshot())
+    counts = [
+        (e.cycle_id, e.data["count"]) for e in recorder.events if e.kind == "memory_reembedded"
+    ]
+    assert counts == [("c1", 2), ("c2", 1)] and memory.errors == 0
+    await memory.store.close()
+
+
+async def test_reembed_without_an_embedder_does_nothing(tmp_path: Path) -> None:
+    memory = await _memory(tmp_path, tmp_path)
+    await memory.store.put_memory("m1", _facts("a"))
+    memory.embedder = None
+    assert await memory.reembed(None) == {}
+    await memory.store.close()
+
+
+async def test_reembed_stops_when_the_store_does_not_restamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Deaf:
+        async def add(self, records: list[MemoryRecord]) -> None:
+            return None
+
+    monkeypatch.setattr(memsvc, "_REEMBED_BATCH", 2)
+    memory = await _memory(tmp_path, tmp_path)
+    await memory.store.put_memory("m1", _facts(*"abc"))
+    memory._dense["m1"] = _Deaf()  # type: ignore[assignment]
+    with pytest.raises(RuntimeError, match="still stale"):
+        await memory.reembed("m1")
+    await memory.store.close()

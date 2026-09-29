@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
@@ -22,6 +24,8 @@ const (
 	gatesHelp    = "List recorded human gates: kind, question, options, reminders, decision, who and when."
 	dbHelp       = "Database maintenance (Postgres)."
 	migrateHelp  = "Apply the SQL migrations to the Postgres database at LHA_POSTGRES_DSN."
+	memoryHelp   = "Tiered memory maintenance."
+	reembedHelp  = "Re-embed stored memory with the configured embedder."
 )
 
 // parseInterleaved parses flags and positional arguments in any order (click semantics); at
@@ -302,4 +306,75 @@ func (c *cli) db(args []string) error {
 // applyMigrations is persistence.ApplyMigrations (tests replace it).
 var applyMigrations = func(c *cli, dsn, dir string) ([]string, error) {
 	return persistence.ApplyMigrations(c.ctx, dsn, dir)
+}
+
+// memoryCmd is `lha memory reembed [MISSION_ID] [--dry-run]` (python: lha.cli.main reembed).
+// Rows stored while the dense channel was down, or embedded by another model or model version,
+// are invisible to dense recall until re-embedded; missions re-embed up to
+// memory.ReembedPerRecall of them per cycle on their own, and this does them all now.
+func (c *cli) memoryCmd(args []string) error {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		fmt.Fprintf(c.stdout, "Usage: lha memory [OPTIONS] COMMAND [ARGS]...\n\n%s\n\nCommands:\n  %-12s %s\n", memoryHelp, "reembed", reembedHelp)
+		if len(args) == 0 {
+			return &exitError{code: 2} // typer's no_args_is_help
+		}
+		return nil
+	}
+	if args[0] != "reembed" {
+		return &exitError{code: 2, message: "Usage: lha memory [OPTIONS] COMMAND [ARGS]...\nTry 'lha memory --help' for help.\n\n" +
+			"Error: No such command " + pyQuote(args[0]) + "."}
+	}
+	fs := c.newFlags("memory reembed", reembedHelp)
+	dryRun := fs.Bool("dry-run", false, "Only count the rows to re-embed.")
+	positional, err := c.parseInterleaved(fs, args[1:], 1)
+	if err != nil {
+		return err
+	}
+	missionID := ""
+	if len(positional) > 0 {
+		missionID = positional[0]
+	}
+	settings, err := config.Load()
+	if err != nil {
+		return err
+	}
+	return c.withStore(func(store persistence.Store) error {
+		mem := memory.OpenMissionMemory(c.ctx, settings, store, ".", missionID, memory.OpenOptions{})
+		if mem == nil {
+			return fail(2, "memory is disabled (LHA_MEMORY_ENABLED=false)")
+		}
+		defer mem.Close()
+		embedder := mem.Embedder()
+		if embedder == nil {
+			return fail(2, "no embedder to re-embed with: %s", mem.Mode().Reason)
+		}
+		var counts map[string]int
+		verb := "re-embedded"
+		if *dryRun {
+			counts, err = store.CountStaleMemory(c.ctx, missionID, embedder.Name(), embedder.Version())
+			verb = "to re-embed"
+		} else {
+			counts, err = mem.Reembed(c.ctx, missionID, 0, "")
+		}
+		if err != nil {
+			return err
+		}
+		using := fmt.Sprintf("%s (%s)", embedder.Name(), embedder.Version())
+		if len(counts) == 0 {
+			fmt.Fprintf(c.stdout, "nothing to re-embed for %s\n", using)
+			return nil
+		}
+		owners := make([]string, 0, len(counts))
+		total := 0
+		for owner, n := range counts {
+			owners = append(owners, owner)
+			total += n
+		}
+		sort.Strings(owners)
+		for _, owner := range owners {
+			fmt.Fprintf(c.stdout, "%s  %d rows\n", owner, counts[owner])
+		}
+		fmt.Fprintf(c.stdout, "%d rows %s with %s\n", total, verb, using)
+		return nil
+	})
 }

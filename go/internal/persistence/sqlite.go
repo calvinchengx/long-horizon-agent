@@ -785,6 +785,61 @@ func (s *SQLiteStore) MemoryVectors(ctx context.Context, missionID, model, versi
 	return out, err
 }
 
+func sqlitePH(int) string { return "?" }
+
+// StaleMemory is the valid rows with no vector or another embedder's, oldest first.
+func (s *SQLiteStore) StaleMemory(ctx context.Context, missionID, model, version string, limit int) ([]StaleRecord, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	where, _ := staleWhere(missionID, sqlitePH, " = 1")
+	out := []StaleRecord{}
+	err := s.run(ctx, func(c *sql.Conn) error {
+		rows, err := c.QueryContext(ctx,
+			"SELECT "+sqliteMemoryCols+", mission_id FROM semantic_memory "+where+" ORDER BY rowid LIMIT ?",
+			append(staleArgs(missionID, model, version), limit)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var mission string
+			r, err := scanRecord(rows, &mission)
+			if err != nil {
+				return err
+			}
+			out = append(out, StaleRecord{MissionID: mission, Record: r})
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// CountStaleMemory is how many StaleMemory rows each mission has.
+func (s *SQLiteStore) CountStaleMemory(ctx context.Context, missionID, model, version string) (map[string]int, error) {
+	where, _ := staleWhere(missionID, sqlitePH, " = 1")
+	out := map[string]int{}
+	err := s.run(ctx, func(c *sql.Conn) error {
+		rows, err := c.QueryContext(ctx,
+			"SELECT mission_id, COUNT(*) FROM semantic_memory "+where+" GROUP BY mission_id",
+			staleArgs(missionID, model, version)...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var mission string
+			var n int
+			if err := rows.Scan(&mission, &n); err != nil {
+				return err
+			}
+			out[mission] = n
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // InvalidateMemory soft-forgets ids; returns rows changed.
 func (s *SQLiteStore) InvalidateMemory(ctx context.Context, ids []string) (int, error) {
 	if len(ids) == 0 {
