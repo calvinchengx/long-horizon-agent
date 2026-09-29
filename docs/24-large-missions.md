@@ -104,6 +104,18 @@ export LHA_SANDBOX_EGRESS='proxy.golang.org,sum.golang.org,storage.googleapis.co
 ```
 
 `storage.googleapis.com` is needed because `proxy.golang.org` redirects module downloads there.
+Tests that fetch a tool at run time need its host too. Temporal's Python test environment
+(`WorkflowEnvironment.start_time_skipping()`) downloads its test server from
+`temporal.download`, which is not a package registry, so it goes in the extra-hosts list:
+
+```bash
+export LHA_SANDBOX_EGRESS_EXTRA_HOSTS=temporal.download
+```
+
+Without it, every test that starts that environment fails in the sandbox, and a model that runs
+the whole suite burns turns on failures it cannot fix. With it, LHA's own Python suite passes in
+the sandbox (1,372 passed; the 10 skipped need the Docker SDK or E2B, which the image does not
+install).
 A real project also needs a bigger sandbox than the defaults (2 GB of memory, a 1 GB `/tmp` for the
 toolchain caches). For fabric-emulator, `go build` was killed at 2 GB and the module cache did not
 fit in 1 GB:
