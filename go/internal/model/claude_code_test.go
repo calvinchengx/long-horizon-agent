@@ -230,6 +230,24 @@ func TestClaudeCodeHealthCheckRunsVersion(t *testing.T) {
 	}
 }
 
+func TestClaudeCodeHealthRequiresALoggedInCLI(t *testing.T) {
+	bin, _ := claudecodetest.Install(t)
+	t.Setenv("ANTHROPIC_API_KEY", "")
+	m := NewClaudeCode(ClaudeCodeOptions{Binary: bin})
+	if ok, detail := m.HealthCheck(context.Background(), 10); !ok {
+		t.Fatalf("logged in: %q", detail)
+	}
+	// Logged out: DOWN, so a parked mission does not resume just to fail on authentication.
+	t.Setenv("FAKE_CLAUDE_LOGGED_IN", "0")
+	if ok, detail := m.HealthCheck(context.Background(), 10); ok || !strings.Contains(detail, "claude auth login") {
+		t.Fatalf("logged out: %v %q", ok, detail)
+	}
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test") // the key authenticates instead
+	if ok, detail := m.HealthCheck(context.Background(), 10); !ok || !strings.HasSuffix(detail, "(API key)") {
+		t.Fatalf("api key: %v %q", ok, detail)
+	}
+}
+
 func TestClaudeCodeWorstCaseIsTheBudgetCapUnlessTheModelIsPriced(t *testing.T) {
 	unpriced := NewClaudeCode(ClaudeCodeOptions{ModelName: "opus", MaxBudgetUSD: 3.0})
 	big := contracts.Usage{InputTokens: 10_000_000, OutputTokens: 10_000_000}

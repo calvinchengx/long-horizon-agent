@@ -306,7 +306,7 @@ provider (including the fallback chain) and sends the cheapest request each back
 | `ollama` | `GET {LHA_OLLAMA_BASE_URL}/api/tags` | 2xx and `LHA_MODEL_NAME` (or `<name>:latest`) is pulled |
 | `openai_compat` | `GET {LHA_OPENAI_BASE_URL}/models` with the bearer key | 2xx |
 | `claude` | `GET https://api.anthropic.com/v1/models/{model}` with the API key | 2xx |
-| `claude_code` | `claude --version` | exit 0 (it cannot prove the login is valid) |
+| `claude_code` | `claude --version`, then `claude auth status` | exit 0 and not reported logged out (the login is not checked when `ANTHROPIC_API_KEY` is set) |
 | failover chain | every member, concurrently | any member is healthy |
 
 A configuration error, transport error, timeout or non-2xx response (including 401/403 and 404

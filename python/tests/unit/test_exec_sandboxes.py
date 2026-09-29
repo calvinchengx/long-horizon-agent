@@ -103,6 +103,7 @@ async def test_docker_container_is_hardened(tmp_path: Path) -> None:
     _, kwargs = client.containers.started[0]
     assert kwargs["network_mode"] == "none"
     assert kwargs["cap_drop"] == ["ALL"]
+    assert kwargs["init"] is True  # orphaned processes are reaped, not left as zombies
     assert "no-new-privileges:true" in kwargs["security_opt"]
     assert kwargs["read_only"] is True
     assert kwargs["mem_limit"] and kwargs["pids_limit"] and kwargs["nano_cpus"]

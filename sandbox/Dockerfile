@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 #
-# Reference polyglot sandbox image for LHA's Docker sandbox: git, make, curl, Go, uv + Python 3.12,
-# Node 22 + npm/pnpm/corepack, and ripwire (the code map behind LHA_CODE_MAP=ripwire). Built to run the way DockerSandbox runs it:
+# Reference polyglot sandbox image for LHA's Docker sandbox: git, make, curl, a C toolchain, Go,
+# uv + Python 3.12, Node 22 + npm/pnpm/corepack, and ripwire (the code map behind
+# LHA_CODE_MAP=ripwire). Built to run the way DockerSandbox runs it:
 #
 #   docker run --user <host uid>:<host gid> --read-only --tmpfs /tmp -e HOME=/workspace \
 #              -v <workdir>:/workspace --cap-drop ALL --security-opt no-new-privileges ...
@@ -31,6 +32,8 @@ ARG PNPM_VERSION=10.34.5
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates curl git make openssh-client xz-utils \
+        # A C toolchain: cgo, and so `go test -race`, needs one (as CI runners have).
+        gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/* \
     # The workspace is bind-mounted from the host and may be owned by a different uid.
     && git config --system safe.directory '*'

@@ -224,6 +224,9 @@ func (s *DockerSandbox) RunArgs(image, workdir, egressNetwork string, proxyEnv m
 		"--cpus", strconv.FormatFloat(float64(s.nanoCPUs)/1e9, 'f', -1, 64),
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges:true",
+		// A reaping PID 1: commands run via docker exec, so orphans (a timed-out command's killed
+		// grandchildren) are re-parented to PID 1, and sleep never reaps them.
+		"--init",
 	)
 	if !s.opts.WritableRoot {
 		args = append(args, "--read-only")

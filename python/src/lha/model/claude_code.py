@@ -323,25 +323,50 @@ class ClaudeCodeModel(ModelProvider):
         return min(price.cost(usage), self._max_budget_usd)
 
     async def health_check(self, *, timeout_s: float) -> ModelHealth:
-        """``claude --version``: proves the CLI is installed, without spending tokens.
+        """``claude --version`` then ``claude auth status``, without spending tokens.
 
-        It cannot prove the login is valid; an expired login fails the first real call instead.
+        A parked mission resumes only when this is healthy, so a logged-out CLI must be DOWN:
+        otherwise the mission would resume, fail on authentication and park again. With
+        ``ANTHROPIC_API_KEY`` set the CLI authenticates with the key, and the login is not checked;
+        a CLI whose ``auth status`` is not JSON (older versions) is judged by ``--version`` alone.
         """
         if shutil.which(self._binary) is None:
             return ModelHealth(False, f"{self.name}: {self._binary!r} not found on PATH")
-        proc = await asyncio.create_subprocess_exec(
-            self._binary,
-            "--version",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-            env=child_env(),
-        )
-        try:
-            out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
-        except TimeoutError:
-            proc.kill()
-            await proc.wait()
+        code, out = await _run_cli(self._binary, ["--version"], timeout_s)
+        if code is None:
             return ModelHealth(False, f"{self.name}: claude --version timed out")
-        if proc.returncode != 0:
-            return ModelHealth(False, f"{self.name}: claude --version exited {proc.returncode}")
-        return ModelHealth(True, f"{self.name}: {out.decode(errors='replace').strip()}")
+        if code != 0:
+            return ModelHealth(False, f"{self.name}: claude --version exited {code}")
+        version = out.strip()
+        if child_env().get("ANTHROPIC_API_KEY"):
+            return ModelHealth(True, f"{self.name}: {version} (API key)")
+        code, status = await _run_cli(self._binary, ["auth", "status"], timeout_s)
+        try:
+            logged_in = json.loads(status).get("loggedIn") if code is not None else None
+        except (json.JSONDecodeError, AttributeError):
+            logged_in = None
+        if logged_in is False:
+            return ModelHealth(
+                False,
+                f"{self.name}: not logged in; run `claude auth login` (or set ANTHROPIC_API_KEY)",
+            )
+        return ModelHealth(True, f"{self.name}: {version}")
+
+
+async def _run_cli(binary: str, args: list[str], timeout_s: float) -> tuple[int | None, str]:
+    """Run a short, prompt-less CLI command; ``(None, "")`` if it timed out."""
+    proc = await asyncio.create_subprocess_exec(
+        binary,
+        *args,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env=child_env(),
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return None, ""
+    return proc.returncode, out.decode(errors="replace")
