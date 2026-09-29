@@ -26,6 +26,9 @@ Resolver = Callable[[str, int], Awaitable[list[str]]]
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 DEFAULT_PORTS = _DEFAULT_PORTS  # public alias (scheme -> default port)
 
+# Python's built-in ``idna`` codec implements IDNA 2003 (RFC 3490); the ``idna`` package, IDNA 2008.
+_IDNA2003_CODEC = "idna"
+
 
 class EgressDenied(PermissionError):
     """Raised when a URL or its resolved addresses are not permitted."""
@@ -53,7 +56,7 @@ def normalize_host(host: str) -> str:
     if host.isascii():
         return host
     try:
-        return idna.encode(host, uts46=True).decode("ascii").lower()
+        return idna.encode(host, uts46=True).decode().lower()  # the encoded host is ASCII
     except (idna.IDNAError, UnicodeError, ValueError):
         return ""
 
@@ -68,7 +71,7 @@ def is_ambiguous_idn(host: str) -> bool:
         return False
     modern = normalize_host(host)
     try:
-        legacy = host.encode("idna").decode("ascii").lower()
+        legacy = host.encode(_IDNA2003_CODEC).decode().lower()  # the encoded host is ASCII
     except UnicodeError:
         return False
     return legacy != modern
@@ -139,7 +142,7 @@ class EgressPolicy(BaseModel):
 def is_public_address(address: str) -> bool:
     """True only for globally routable unicast addresses (v4-mapped/6to4-embedded v4 unwrapped)."""
     try:
-        ip = ipaddress.ip_address(address.split("%", 1)[0])
+        ip = ipaddress.ip_address(address.partition("%")[0])  # drop an IPv6 zone id
     except ValueError:
         return False
     if isinstance(ip, ipaddress.IPv6Address):
@@ -150,15 +153,12 @@ def is_public_address(address: str) -> bool:
             ip = ip.teredo[1]
     if isinstance(ip, ipaddress.IPv6Address) and ip.is_site_local:
         return False  # fec0::/10: deprecated site-local, still routed internally by some networks
-    return not (
-        ip.is_private
-        or ip.is_loopback
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-        or not ip.is_global
-    )
+    # Each of these implies ``not ip.is_global`` in the stdlib; they stay as defence in depth.
+    # pragma: no mutate start (merging these terms is equivalent: all imply not is_global)
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_unspecified:
+        # pragma: no mutate end
+        return False
+    return not (ip.is_multicast or ip.is_reserved or not ip.is_global)
 
 
 async def system_resolver(host: str, port: int) -> list[str]:
@@ -174,10 +174,9 @@ async def check_resolved_addresses(host: str, port: int, resolver: Resolver) -> 
     """
     try:
         ipaddress.ip_address(host)
-        literal = True
     except ValueError:
-        literal = False
-    if literal:
+        pass  # a name, not an IP literal: resolve it below
+    else:
         if not is_public_address(host):
             raise EgressDenied(f"{host!r} is a non-public address")
         return [host]
