@@ -248,7 +248,10 @@ cycle and the Docker sandbox. All four finished every change on its first attemp
 cycles. Sonnet called `code_query` once or twice per mission (two of the three calls failed) and
 kept using `grep` and `read_file`. Missions with the tool cost $2.77 and $2.90 in Claude Code's
 reported cost; missions without it cost $2.81 and $3.29. That difference is within the noise of
-two runs per arm. Leave it off unless you measure a gain on your own missions.
+two runs per arm. A second round on 30 September, after the fixes in the next section, gave the
+same answer: Sonnet called `code_query` once per mission, and missions with it cost $1.03 and
+$0.84 against $1.09 and $1.33 without it. One call cannot account for that gap. Leave it off
+unless you measure a gain on your own missions.
 
 ## Give a strong model room: turns per cycle
 
@@ -279,8 +282,17 @@ Measured on the single "sorted blocked ids" change, one Sonnet run per step (29 
 | flat arguments and witness commands | 20 | 2 | yes | $1.05 |
 | "signal done once the checks pass" | 11 | 0 | no | $0.42 |
 
-Each run passed on its first attempt. One run per step is a small sample, but the last drop is
-well beyond the spread between runs so far. If `turns_exhausted` still shows on most cycles,
+Each run passed on its first attempt. One run per step is a small sample, so the three-change
+missions were run again with all the fixes (four missions each round, Sonnet lead, 20 turns):
+
+| Round | Model calls per mission | Cycles out of turns | Cost per mission |
+|---|---|---|---|
+| `edit_file` and 20 turns (29 September) | 54–60 | 2–3 of 3 | $2.77–3.29 (mean $2.94) |
+| all three fixes (30 September) | 23–29 | none | $0.84–1.33 (mean $1.07) |
+
+Every mission in both rounds finished all three changes on the first attempt in three cycles.
+The few calls that still failed were the model's own: a wrong test path, or a wider test suite
+that needs network access the sandbox does not allow. If `turns_exhausted` still shows on most cycles,
 look at the failed `tool_call` events first; raise the limit only if cycles end before the edit.
 Each turn costs a model call, and the budget ceiling still applies.
 
@@ -289,9 +301,9 @@ Each turn costs a model call, and the budget ceiling still applies.
 - **Model quality.** The harness refuses unverified work; it cannot make a weak model strong. In
   one real run with a local Ollama model (gemma4) on a toy mission its planner split into five items, four items were verified and the
   fifth ended blocked. Expect to use a strong model for a project of this size.
-- **Cost.** Order of magnitude only: in the Sonnet runs above, a cycle cost $0.40–1 in Claude
-  Code's reported cost, so a thousand-cycle mission is in the $0.4–1k range, more with a larger
-  codebase or harder items. Set the budget ceiling deliberately.
+- **Cost.** Order of magnitude only: in the Sonnet runs above, a cycle cost $0.30–0.45 in Claude
+  Code's reported cost once the fixes landed, so a thousand-cycle mission is in the $300–450
+  range, more with a larger codebase or harder items. Set the budget ceiling deliberately.
 - **Egress is by hostname.** TLS is not intercepted, so allowing a host allows everything on it.
   `fetch_url` connects only to addresses it checked, so DNS rebinding cannot redirect it to a
   private address.

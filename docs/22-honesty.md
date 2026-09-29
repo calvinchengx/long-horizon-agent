@@ -118,9 +118,9 @@ a blocked item are.
   cost with the map, about 18% fewer navigation calls, and no change finished in either arm
   ([details](24-large-missions.md#optional-a-code-map-each-cycle)). A stronger lead model is
   untested with the map.
-- **The `code_query` tool saves work.** Four missions with a Sonnet lead (two with, two without,
-  29 September 2026) all finished every change; Sonnet rarely called the tool and the cost
-  difference was within the noise
+- **The `code_query` tool saves work.** Two rounds of four missions with a Sonnet lead (two
+  with, two without, 29 and 30 September 2026) all finished every change; Sonnet called the tool
+  once or twice per mission and the cost difference was within the noise
   ([details](24-large-missions.md#optional-ask-the-code-instead-of-reading-it)).
 - **Real-service paths without CI coverage.** The E2B sandbox is tested only against a fake SDK;
   the real E2B service is never run in CI. The Ollama, OpenAI-compatible and Claude backends and the Ollama and Voyage embedders are tested
