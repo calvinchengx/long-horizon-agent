@@ -50,11 +50,10 @@ def normalize_relpath(relpath: str) -> PurePosixPath:
         raise PathEscapeError(f"path must be a string, got {type(relpath).__name__}")
     if "\x00" in relpath:
         raise PathEscapeError("path contains a NUL byte")
-    unified = relpath.replace("\\", "/")
-    win = PureWindowsPath(relpath)
-    if unified.startswith("/") or win.drive or win.anchor:
+    # A Windows anchor is drive + root, so it covers "/x", "\\x", "C:x", "C:\\x" and UNC shares.
+    if PureWindowsPath(relpath).anchor:
         raise PathEscapeError(f"absolute paths are not allowed: {relpath!r}")
-    normalized = posixpath.normpath(unified) if unified else "."
+    normalized = posixpath.normpath(relpath.replace("\\", "/"))  # normpath("") == "."
     if normalized == ".." or normalized.startswith("../"):
         raise PathEscapeError(f"path escapes the workspace: {relpath!r}")
     return PurePosixPath(normalized)
@@ -123,7 +122,7 @@ def read_text_within(root: str | os.PathLike[str], relpath: str) -> str:
     fd = os.open(target, os.O_RDONLY | _O_NOFOLLOW | _O_BINARY | _O_NONBLOCK)
     with os.fdopen(fd, "rb") as handle:
         _verify_fd(Path(root).resolve(), relpath, handle.fileno(), target)
-        return handle.read().decode("utf-8")
+        return handle.read().decode()  # UTF-8
 
 
 def write_text_within(root: str | os.PathLike[str], relpath: str, content: str) -> Path:
@@ -144,5 +143,5 @@ def write_text_within(root: str | os.PathLike[str], relpath: str, content: str) 
         raise
     with os.fdopen(fd, "wb") as handle:
         _verify_fd(root_resolved, relpath, handle.fileno(), target)
-        handle.write(content.encode("utf-8"))
+        handle.write(content.encode())  # UTF-8
     return target
