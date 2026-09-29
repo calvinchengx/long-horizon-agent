@@ -34,3 +34,6 @@ Thumbs.db
 
 # Claude Code local state (agent worktrees, launch configs)
 .claude/
+
+# mutmut working copy (python/scripts/mutation_audit.sh)
+python/mutants/

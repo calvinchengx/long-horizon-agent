@@ -44,6 +44,9 @@ dev = [
     "opentelemetry-sdk>=1.25",
     "opentelemetry-exporter-otlp-proto-http>=1.25",
 ]
+mutation = [
+    "mutmut>=3.8",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -114,4 +117,34 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: needs real services (LHA_IT_POSTGRES_DSN / LHA_IT_DOCKER=1); skipped otherwise",
+]
+
+# Mutation audit of the safety code (scripts/mutation_audit.sh, the nightly `mutation` workflow):
+# every surviving mutant is a rule no test pins. Not part of the per-push checks (slow).
+[tool.mutmut]
+paths_to_mutate = [
+    "src/lha/safety/commands.py",
+    "src/lha/safety/egress.py",
+    "src/lha/safety/rule_of_two.py",
+    "src/lha/obs/redact.py",
+    "src/lha/execution/paths.py",
+    "src/lha/execution/egress_hosts.py",
+]
+# Only the tests of the mutated modules (they run once per mutant).
+tests_dir = [
+    "tests/unit/test_safety.py",
+    "tests/unit/test_safety_bypasses.py",
+    "tests/unit/test_safety_command_paths.py",
+    "tests/unit/test_safety_commands.py",
+    "tests/unit/test_safety_egress.py",
+    "tests/unit/test_review_fixes_safety.py",
+    "tests/unit/test_review_fixes_paths.py",
+    "tests/unit/test_exec_paths.py",
+    "tests/unit/test_obs_redact.py",
+    "tests/unit/test_sandbox_egress.py",
+    "tests/unit/test_spec_conformance.py",
+]
+also_copy = [
+    "src",  # the rest of the lha package; the mutated files overwrite their copies
+    "tests",  # conftest.py and helpers (only tests_dir runs)
 ]

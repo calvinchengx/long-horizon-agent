@@ -1,0 +1,51 @@
+name: Mutation audit
+
+# Nightly: mutate the safety code (command classifier, egress policy, Rule of Two, redaction,
+# path containment, sandbox egress lists) and fail when a mutant survives, i.e. when a rule is
+# not pinned by any test (docs/20-testing.md#mutation-audit). Too slow for every push.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.11.8"
+          enable-cache: true
+          cache-dependency-glob: python/uv.lock
+      - name: mutmut
+        run: MUTATION_WORKERS=4 scripts/mutation_audit.sh | tee mutation.txt
+      - name: Fail on survivors
+        run: |
+          if grep -q '^== ' mutation.txt; then
+            echo "::error::surviving mutants (see the log): add a test that kills each, or mark a proven-equivalent one '# pragma: no mutate'"
+            exit 1
+          fi
+
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go/go.sum
+      - name: Install gremlins
+        run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+      - name: gremlins
+        run: MUTATION_WORKERS=4 scripts/mutation_audit.sh

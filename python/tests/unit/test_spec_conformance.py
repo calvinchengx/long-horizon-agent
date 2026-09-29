@@ -59,7 +59,10 @@ from lha.safety.egress import (
 from lha.state.vendor import _target_path
 from lha.verify.harness_integrity import _is_harness_file
 
-SPEC = Path(__file__).resolve().parents[3] / "spec"
+# The repository's spec/ (found upwards, so a copy of the tests, e.g. mutmut's mutants/, finds it).
+SPEC = next(
+    p / "spec" for p in Path(__file__).resolve().parents if (p / "spec" / "README.md").is_file()
+)
 
 
 def _load(rel: str) -> Any:
