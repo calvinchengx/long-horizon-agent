@@ -6,7 +6,8 @@ missions. This guide covers setup and the checks every change must pass.
 ## Dev setup
 
 The repo holds two implementations: `python/` (the reference, with the `lha` CLI and worker) and
-`go/` (a port in progress: library packages only, no CLI or worker yet). Shared,
+`go/` (a full port: `go/cmd/lha` implements every `lha` command, including `worker` and the
+`mission-*` commands). Shared,
 language-neutral assets live at the root: `db/migrations/`, `spec/` (conformance cases both test
 suites run), `docs/` and `docker-compose.yml`. An observable behaviour change that `spec/` pins
 must land in both implementations, with a `spec/` case that pins it.
@@ -37,12 +38,14 @@ uv run pytest -q --cov --cov-report= tests/unit tests/durability tests/load
 uv run coverage report
 ```
 
-CI (`.github/workflows/ci.yml`) runs exactly these on every push/PR.
+CI (`.github/workflows/ci.yml`) runs the equivalent on every push/PR: it syncs with
+`uv sync --locked --extra e2b`, runs `tests/unit` and then `tests/durability tests/load` (against a
+Temporal dev server) as separate pytest steps, and applies the coverage floor once at the end.
 
-Go (from `go/`; CI does not run these, so run them locally):
+Go (from `go/`; CI runs these too, with `-race` and a Windows `go vet`):
 
 ```bash
-gofmt -l . && go vet ./... && go test ./...
+gofmt -l . && go vet ./... && GOOS=windows go vet ./... && go test -race ./...
 ```
 
 ### Integration tests (real Postgres + Docker)

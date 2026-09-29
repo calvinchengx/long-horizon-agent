@@ -207,7 +207,7 @@ On every push to `main` and every pull request:
 
 | Job | Steps |
 |---|---|
-| `python-check` | `uv sync --locked`; `ruff check`; `ruff format --check`; `ty check`; `pytest tests/unit` with coverage; the Temporal CLI (a pinned, checksum-verified release) and a `temporal server start-dev` on `127.0.0.1:7233`; `pytest tests/durability tests/load` with coverage appended and `LHA_IT_TEMPORAL_ADDRESS` set, so the worker-guard tests run on the dev server (12-minute timeout); `coverage report` (fails under 90%) |
+| `python-check` | `uv sync --locked --extra e2b`; `ruff check`; `ruff format --check`; `ty check`; `pytest tests/unit` with coverage; the Temporal CLI (a pinned, checksum-verified release) and a `temporal server start-dev` on `127.0.0.1:7233`; `pytest tests/durability tests/load` with coverage appended and `LHA_IT_TEMPORAL_ADDRESS` set, so the worker-guard tests run on the dev server (12-minute timeout); `coverage report` (fails under 90%) |
 | `go` | Go 1.26 with the module cache; uv and `uv sync --locked` in `python/` (the cross-implementation tests run the Python implementation); `gofmt -l .` must print nothing; `go vet ./...`; `GOOS=windows go vet ./...`; the Temporal CLI and a dev server as in `python-check`; `go test -race ./...` with `LHA_IT_TEMPORAL_ADDRESS` set, so the cross-language durable e2e tests, the worker guard and the recorded histories run on the dev server (15-minute timeout) |
 | `python-services-integration` | a `pgvector/pgvector:pg16` service container; `uv sync --locked --extra postgres --extra sandbox`; Go 1.26 (for the trusted `go run` check); `docker build -t lha-sandbox:dev sandbox/`; `pytest tests/integration` with `LHA_IT_POSTGRES_DSN` and `LHA_IT_DOCKER=1` set (20-minute timeout) |
 

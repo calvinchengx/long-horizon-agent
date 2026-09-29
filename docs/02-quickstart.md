@@ -127,7 +127,7 @@ cannot download pytest, so either allow the package index
 (`LHA_SANDBOX_EGRESS=pypi.org,files.pythonhosted.org`) or use an image that already has the
 tools; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds one with Go, uv and Node/pnpm. See
 [installation](03-installation.md#sandbox-image-and-egress). Without the extra, a docker run
-stops with `error: python module 'docker' is not installed; install the 'sandbox' extra`.
+stops with `error: python module 'docker' is not installed; install the 'sandbox' extra (lha[sandbox])`.
 
 ## Next steps
 

@@ -216,10 +216,11 @@ known spend.
 
 Read it back with `lha costs <mission_id>` (the most recent calls plus totals: known USD,
 unknown-cost calls, tokens) and `lha missions [--limit N]` (each mission's status and totals).
-The status column is the last status a run path wrote to the `missions` row; a durable mission's
-workflow-only states (`DEGRADED_PARK`, `SLEEPING`, an open deadlock gate) are not written there
-([wire contract](19-wire-contract.md#mission-store)). `lha mission-status` queries the live
-status.
+The status column is the last status a run path wrote to the `missions` row. A durable mission's
+workflow-only states (`DEGRADED_PARK`, `SLEEPING`, an open gate's `WAITING_ON_HUMAN`) are written
+there best effort by the workflow's `record_mission_status` activity, on histories that carry
+`lha-mission-row-v1` ([durable execution](08-durable-execution.md)). `lha mission-status` queries
+the live status.
 
 The Postgres schema is in [`db/migrations/`](../db/migrations/):
 

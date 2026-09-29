@@ -273,7 +273,7 @@ export LHA_FALLBACK_MODELS="openai_compat:llama-3.3-70b-versatile@0.59/0.79,olla
 
 | Setting | Default | Notes |
 |---|---|---|
-| `LHA_FALLBACK_MODELS` | empty | `backend` is `stub`, `ollama`, `openai_compat` or `claude`; the model part may contain `:` (`ollama:qwen3:8b`). A malformed entry raises `ValueError` when the provider is built |
+| `LHA_FALLBACK_MODELS` | empty | `backend` is `stub`, `ollama`, `openai_compat`, `claude` or `claude_code`; the model part may contain `:` (`ollama:qwen3:8b`). A malformed entry raises `ValueError` when the provider is built |
 | `LHA_FALLBACK_MAX_ROUNDS` | `2` | `FailoverModel.max_rounds` |
 
 - Fallback entries use the backend's shared settings: `openai_compat` entries use

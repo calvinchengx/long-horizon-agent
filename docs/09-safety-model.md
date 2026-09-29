@@ -404,8 +404,9 @@ gate.
   environment ([proc.py](../python/src/lha/execution/proc.py)): `PATH`, locale, `TZ`, `TERM`,
   `UV_CACHE_DIR`, Windows essentials, plus `HOME` pointing at the workspace. API keys and `LHA_*`
   variables are not inherited. Timeouts are capped at 3600 s, and the whole process group is
-  killed on timeout. Trusted checks are the exception: they run on the host with the host
-  environment ([verify/trusted.py](../python/src/lha/verify/trusted.py)).
+  killed on timeout. Trusted checks are the exception: they run on the host, outside the sandbox, with
+  their own minimal environment (`PATH` and the locale, a fresh `HOME` and `TMPDIR`, and
+  only the extra names listed in `LHA_TRUSTED_CHECK_ENV`; [verify/trusted.py](../python/src/lha/verify/trusted.py)).
 - Settings secrets are `SecretStr`. `lha config` prints `***` for them.
 - [obs/redact.py](../python/src/lha/obs/redact.py) masks values under secret-looking keys (not
   `input_tokens`-style counters) and secret-looking strings: `sk-…`, GitHub and Slack tokens, AWS

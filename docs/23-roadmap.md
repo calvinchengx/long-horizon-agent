@@ -187,7 +187,8 @@ missions row, `hitl_gates` and every metered call's `cost_ledger` row (keyed
 memory and, when the mission has an ownership map, the Lead's ownership guard. The durable
 organization runs on it too (`org_round.go`, `org_activities.go`: researcher child workflows over
 the real `run_subagent`, `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle`),
-behind `workflow.GetVersion("lha-go-durable-org-v1")`; a Go-served and a Python-served org
+behind `workflow.GetVersion("lha-go-durable-org-v1")` (the second Go version id is
+`lha-go-complete-skips-approvals-v1`); a Go-served and a Python-served org
 mission on the same scripted inputs leave the same commits and anchor.
 
 ### Go phase 3: organization, memory, Postgres, observability (done)

@@ -267,8 +267,8 @@ never committed. See
 
 ## Importing a checklist
 
-Instead of letting the Planner decompose a task, `lha run-local`, `lha mission` and
-`lha mission-start` accept `--checklist FILE`
+Instead of letting the Planner decompose a task, `lha run-local`, `lha mission`,
+`lha mission-start` and `lha orchestrate` accept `--checklist FILE`
 ([`state/checklist_import.py`](../python/src/lha/state/checklist_import.py)). The format is chosen
 by extension:
 

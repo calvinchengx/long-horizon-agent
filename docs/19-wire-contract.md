@@ -86,14 +86,18 @@ matched case-insensitively against the open gate's options; a non-matching value
 `workflow.patched` ids, for behaviour added after histories were recorded:
 `lha-gate-escalation-v1` (gates walk the escalation ladder and emit `notify_gate`; the deadlock
 gate offers `impossible`), `lha-sleeping-v1` (the SLEEPING timer before a cycle, and
-`cycle_pause_seconds`), `lha-mission-row-v1` (the workflow's `record_mission_status` writes) and
+`cycle_pause_seconds`), `lha-mission-row-v1` (the workflow's `record_mission_status` writes),
 `lha-cycle-wait-cancel-v1` (the `run_agent_cycle` activity is scheduled with cancellation type
 `WAIT_CANCELLATION_COMPLETED` instead of `TRY_CANCEL`, so a cancelled workflow waits for the cycle
 to acknowledge before it writes `ABORTED`; a cycle that completes anyway does not cancel the
-cancellation). These markers only matter to Python histories: the Go workflow never replays a
-Python history (see [cross-language workers](#cross-language-workers)), so it has no patch
-branches and always behaves as the latest Python code. A Go behaviour change after this point is
-guarded with `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", ...)`, and the Go histories in
+cancellation), `lha-complete-skips-approvals-v1` (a cycle that completes the mission opens no
+approval gate) and `lha-durable-org-v1` (the multi-agent round, reached only by a mission that
+opts in). These markers only matter to Python histories: the Go workflow never replays a Python
+history (see [cross-language workers](#cross-language-workers)), so it has no `patched` branches
+for them. A Go behaviour change is guarded with
+`workflow.GetVersion(ctx, "lha-go-<change>-v<n>", ...)`; the Go ids so far are
+`lha-go-durable-org-v1` and `lha-go-complete-skips-approvals-v1`
+([`go/internal/durable/names.go`](../go/internal/durable/names.go)), and the Go histories in
 [`go/internal/durable/testdata/histories/`](../go/internal/durable/testdata/histories/) must keep
 replaying.
 
@@ -387,7 +391,8 @@ reverse, and requires identical results. For `decisions.ndjson` that includes th
 re-encodes every Python-written link to the same line and hash, and each implementation verifies
 the other's chain. The Go chain code is `go/internal/state/decision_chain.go`, and the Go anchor
 verifies and appends through it just as the Python anchor does. The Go anchor carries
-`ownership.json` along (restore, force-add), but nothing in Go reads it.
+`ownership.json` along (restore, force-add), and `coordination.ReadOwnership` reads it back for
+the orchestrator and the durable activities.
 
 ## Postgres schema
 
@@ -525,11 +530,14 @@ JSON files exported from the Python implementation by
 | `model/fallback_models.json` | `LHA_FALLBACK_MODELS` entries parsed into backend, model and price | yes | yes |
 | `execution/paths.json` | workspace-relative path normalization, protected paths, containment | yes | yes |
 | `execution/arguments.json` | tool-argument validation against each tool's JSON schema, missing required arguments | yes | yes |
+| `execution/edit_file.json` | `edit_file` schema and edit results (one exact match, or the refusal) | yes | yes |
+| `execution/code_query.json` | `code_query` question kinds to ripwire argv, answer clipping, invalid questions | yes | yes |
 | `execution/sandbox_egress.json` | package-fetch and write hosts, the sandbox egress allow-list, the Rule of Two check, proxy log lines to events | yes | yes |
 | `state/vendor_paths.json` | where `lha vendor` stores each URL | yes | yes |
 | `verify/flaky_retry.json` | flaky-check re-runs, verdicts and quarantine | yes | yes |
 | `agent/prompts.json` | the lead's messages, tool rendering, memory block, reply and plan parsing, planner and replanner messages | yes | yes |
 | `agent/org.json` | role tool policies, sub-agent and reviewer messages, review parsing, reflection, implementer objectives, the ownership guard, lease decisions, ticket transitions | yes | yes |
+| `systemone/authority.json` | a System One answer can only narrow what happens: triage actions for every answer, reranking only reorders and drops | yes | yes |
 | `systemone/wire.json` | System One request bodies (key and option order), answer parsing, confidence, the stall-triage question, state and actions, reranking, endpoint prices ([25-system-one.md](25-system-one.md)) | yes | yes |
 
 Python runs them in [`tests/unit/test_spec_conformance.py`](../python/tests/unit/test_spec_conformance.py),

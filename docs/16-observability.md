@@ -38,6 +38,8 @@ Event kinds emitted today:
 | `invalid_reply` | `AgentLoop` | `reason` |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict` |
 | `claude_code_session` | `AgentLoop` (the `claude_code` lead engine) | `turns`, `tool_calls`, `session_id`, `stopped` |
+| `code_map` | `AgentLoop` (`LHA_CODE_MAP=ripwire`) | `item_id`, `mode` (`trace` or `task`), `ok`, `exit_code`, `timed_out`, `bytes`, `duration_s`, `fell_back`, `error` ([24-large-missions.md](24-large-missions.md#optional-a-code-map-each-cycle)) |
+| `system_one` | `AgentLoop` (stall triage, `LHA_SYSTEM_ONE_BACKEND`) | `use`, `item_id`, `model`, `answer`, `confidence`, `probabilities`, `threshold`, `action`, `error`; also committed to `.lha/events.ndjson` ([25-system-one.md](25-system-one.md)) |
 | `check_quarantined`, `quarantined_check_failed` | `AgentLoop` (from the verifier) | `check`, `revision`, `passes`, `fails` (also committed to `.lha/events.ndjson`; see [07-verification.md](07-verification.md#flaky-check-quarantine)) |
 | `sandbox_egress` | `AgentLoop` (from the Docker sandbox's egress proxy log) | `decision` (`allow`, `deny`, `fail`), `method`, `host`, `port`, `detail` (the address connected to, or the reason), `count` (requests with that decision, method, host and port in the cycle). Also committed to `.lha/events.ndjson`; see [09-safety-model.md](09-safety-model.md#sandbox-network) |
 | `governor_block` | runner, orchestrator | `reason` |

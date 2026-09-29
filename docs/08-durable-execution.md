@@ -27,7 +27,7 @@ The worker registers both workflows and these activities (Temporal activity type
 | Activity | Called by | Timeout / retry | What it does |
 |---|---|---|---|
 | `run_agent_cycle` | `MissionWorkflow`, every cycle | start-to-close 1 h, heartbeat 2 min, retry policy below | Advances the mission by one checklist item |
-| `check_mission_health` | `MissionWorkflow`, while parked | start-to-close 2 min, 1 attempt | Probes git, model config and sandbox |
+| `check_mission_health` | `MissionWorkflow`, while parked | start-to-close 2 min, 1 attempt | Probes git, the model (a real request) and the sandbox |
 | `unblock_items` | `MissionWorkflow`, after a human "retry" | start-to-close 5 min, 3 attempts | Resets every `blocked` item to `todo` and commits |
 | `notify_gate` | `MissionWorkflow`, on every gate event | start-to-close 3 min, 3 attempts | Commits a `gate_<event>` event to the anchor, writes the gate's `hitl_gates` row (`lha gates`) and POSTs it to the optional webhook |
 | `declare_impossible` | `MissionWorkflow`, after an "impossible" decision | start-to-close 5 min, 3 attempts | Final checkpoint: `mission_impossible` event, progress entry, commit `lha: mission declared impossible` |
@@ -136,8 +136,8 @@ sequenceDiagram
 Each iteration: stop at `max_cycles`, otherwise sleep while `resume_at` is in the future
 ([SLEEPING](#sleeping)), run one cycle (or, for a mission that opted in, one
 [organization round](#the-multi-agent-organization-opt-in)), absorb its result (`head_sha`,
-`items_done`, `items_total`, `last_item`), and ask a human about any irreversible actions it
-queued ([human gates](#human-gates)). The mission ends with an explicit outcome:
+`items_done`, `items_total`, `last_item`), and, unless the cycle completed the mission, ask a
+human about any irreversible actions it queued ([human gates](#human-gates)). The mission ends with an explicit outcome:
 
 | Outcome | Trigger | Final status |
 |---|---|---|
@@ -508,8 +508,9 @@ has these tests:
   `mission_cancel_mid_cycle.json` (a mission aborted while its first cycle runs) and
   `mission_org_wave_review.json` (the organization: a wave of two implementers with researcher
   child workflows and a review after each integration, then a serial round);
-- `test_fresh_cancel_mid_cycle_history_replays` / `test_fresh_org_history_replays`: record those
-  two missions and replay them;
+- `test_fresh_mission_row_history_replays` / `test_fresh_cancel_mid_cycle_history_replays` /
+  `test_fresh_org_history_replays`: record the mission-row, cancel and organization missions and
+  replay them;
 - `test_committed_histories_cover_what_they_claim`: the legacy histories carry no patch marker, the
   ladder history carries `lha-gate-escalation-v1` and its `notify_gate` activities, no history
   recorded before the mission row carries `lha-mission-row-v1` or schedules
@@ -529,6 +530,7 @@ Behaviour added to `MissionWorkflow` after histories were recorded is guarded by
 | `lha-sleeping-v1` | the `SLEEPING` durable timer (scheduled start, pause between cycles, snooze) |
 | `lha-mission-row-v1` | the `record_mission_status` activity: the workflow writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and every final status to the mission row |
 | `lha-cycle-wait-cancel-v1` | the cycle activity's cancellation type `WAIT_CANCELLATION_COMPLETED`: after `lha mission-abort`, the workflow waits for the cycle to acknowledge (or finish) before it writes `ABORTED`, and re-raises a cancellation that a cycle finishing normally would otherwise swallow |
+| `lha-complete-skips-approvals-v1` | a cycle that completes the mission opens no approval gate for the actions it queued: no later cycle could use them |
 | `lha-durable-org-v1` | an organization round; reached only by a mission whose `MissionInput` opts in, so a history recorded without those fields never hits it. The round's activities always wait for a cancellation the same way (the org path is new, so it needs no separate patch) |
 
 Without the `lha-gate-escalation-v1` guard both legacy histories fail replay with a
@@ -583,9 +585,12 @@ What differs:
   not affected: either CLI drives missions served by either worker.
 - **Versioning.** A Go behaviour change after histories are recorded is guarded with
   `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", workflow.DefaultVersion, <n>)` instead of
-  `workflow.patched`. The first is the organization (`lha-go-durable-org-v1`, the counterpart of
-  `lha-durable-org-v1`): it is consulted only by a mission that opts in, and a history recorded
-  by a Go build that still refused the options (`DefaultVersion`) replays down that refusal.
+  `workflow.patched`. There are two. The organization (`lha-go-durable-org-v1`, the counterpart
+  of `lha-durable-org-v1`) is consulted only by a mission that opts in, and a history recorded by
+  a Go build that still refused the options (`DefaultVersion`) replays down that refusal.
+  `lha-go-complete-skips-approvals-v1` (the counterpart of `lha-complete-skips-approvals-v1`) is
+  consulted only when a completing cycle queued an approval; an older history replays down the
+  path that asked.
 - **Replay tests.** `go/internal/durable/replay_test.go` replays the Go histories in
   [`testdata/histories/`](../go/internal/durable/testdata/histories/) (a completed mission, an
   approval gate with an escalation reminder, `SLEEPING` with a snooze, a deadlock gate declared

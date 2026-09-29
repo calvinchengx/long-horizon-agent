@@ -179,7 +179,7 @@ and are reverted. Do this for anything a `trusted:` check runs.
 | Class | Dependencies | Decision when DOWN |
 |---|---|---|
 | critical | `git`, `model`, `sandbox` | park |
-| optional | `pgvector`, `langfuse`, `egress_proxy` | continue, listed as degraded |
+| optional | `postgres`, `pgvector`, `embeddings`, `langfuse`, `egress_proxy` | continue, listed as degraded |
 
 What actually happens, by failure:
 
