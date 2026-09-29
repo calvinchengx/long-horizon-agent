@@ -39,6 +39,7 @@ ModelBackend = Literal["stub", "ollama", "openai_compat", "claude", "claude_code
 LeadEngine = Literal["loop", "claude_code"]
 ClaudeCodeTools = Literal["lha", "native"]
 SandboxKind = Literal["docker", "e2b", "local"]
+WorkerVersioningBehavior = Literal["pinned", "auto_upgrade"]
 
 REDACTED = "***"
 
@@ -98,6 +99,16 @@ class Settings(BaseSettings):
     # How often a running worker re-checks who polls its task queue (the cross-language guard,
     # lha.durable.worker): a worker of the other implementation that appears stops this one.
     worker_guard_interval_s: float = Field(default=30.0, gt=0)
+    # Worker versioning (Temporal Worker Deployments): off unless both are set. The worker then
+    # polls as build ``worker_build_id`` of deployment ``worker_deployment``, and a mission stays
+    # on the build that started it (``pinned``) or moves to the current build at its next task
+    # (``auto_upgrade``, relying on the workflows' patch guards).
+    worker_deployment: str = ""
+    worker_build_id: str = ""
+    worker_versioning_behavior: WorkerVersioningBehavior = "pinned"
+    # Make this worker's build the deployment's current version once it polls, so new missions
+    # start on it (otherwise: `temporal worker deployment set-current-version`).
+    worker_promote: bool = False
 
     # --- Persistence -----------------------------------------------------------------
     # If unset, local SQLite + filesystem stores are used (zero-infra default).
@@ -403,6 +414,26 @@ class Settings(BaseSettings):
                     "ignored paths such as 'target' or '.cache', not the whole tree, .git or .lha"
                 )
         return entries
+
+    def worker_deployment_version(self) -> tuple[str, str] | None:
+        """``(deployment, build_id)`` when worker versioning is on, else ``None``; raises
+        ``ValueError`` when only one is set, the deployment name has a ``.``, or
+        ``worker_promote`` is set without them."""
+        name, build = self.worker_deployment.strip(), self.worker_build_id.strip()
+        if not name and not build:
+            if self.worker_promote:
+                raise ValueError(
+                    "LHA_WORKER_PROMOTE needs LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID"
+                )
+            return None
+        if not (name and build):
+            raise ValueError(
+                "LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID must be set together "
+                "(worker versioning)"
+            )
+        if "." in name:
+            raise ValueError(f"LHA_WORKER_DEPLOYMENT {name!r} must not contain '.'")
+        return name, build
 
     def trusted_check_commands(self) -> dict[str, list[str]]:
         """``trusted_checks`` parsed (raises ``ValueError`` on malformed JSON or entries)."""

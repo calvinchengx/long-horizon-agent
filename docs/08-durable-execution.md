@@ -544,9 +544,10 @@ LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py -k test_fresh
 ```
 
 Recording rewrites machine-specific paths in payloads (the workdir becomes `/workspace/mission`,
-the interpreter becomes `python3`) so the committed history is portable. The code does not
-configure worker versioning or Build IDs. Pinning builds is an operational step outside the
-repository. See [Running on Temporal](14-running-on-temporal.md) and the
+the interpreter becomes `python3`) so the committed history is portable. Versioned workers
+(`LHA_WORKER_DEPLOYMENT`, `LHA_WORKER_BUILD_ID`) keep each mission on the build that started it,
+so a deploy need not replay in-flight missions at all
+([versioned deploys](14-running-on-temporal.md#versioned-deploys-worker-build-ids)). See [Running on Temporal](14-running-on-temporal.md) and the
 [operations runbook](15-operations-runbook.md).
 
 ## The Go worker

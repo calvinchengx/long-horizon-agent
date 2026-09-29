@@ -59,6 +59,10 @@ func TestNewFieldDefaults(t *testing.T) {
 		"ModelTimeoutS":              {s.ModelTimeoutS, 120.0},
 		"ModelProbeTimeoutS":         {s.ModelProbeTimeoutS, 10.0},
 		"WorkerGuardIntervalS":       {s.WorkerGuardIntervalS, 30.0},
+		"WorkerDeployment":           {s.WorkerDeployment, ""},
+		"WorkerBuildID":              {s.WorkerBuildID, ""},
+		"WorkerVersioningBehavior":   {s.WorkerVersioningBehavior, "pinned"},
+		"WorkerPromote":              {s.WorkerPromote, false},
 		"ConsoleApprovalTimeoutS":    {s.ConsoleApprovalTimeoutS, 3600},
 		"DeadlockGateDefault":        {s.DeadlockGateDefault, "abort"},
 		"ImpossibleAfterFailures":    {s.ImpossibleAfterFailures, 3},
@@ -95,7 +99,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 104 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 108 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -502,5 +506,37 @@ func TestResetKeepPaths(t *testing.T) {
 	s, _ := LoadFrom([]string{"LHA_RESET_KEEP=target,.cache/,build/out"}, "")
 	if got, err := s.ResetKeepPaths(); err != nil || strings.Join(got, "|") != "target|.cache/|build/out" {
 		t.Fatalf("%v %v", got, err)
+	}
+}
+
+func TestWorkerDeploymentVersion(t *testing.T) {
+	for _, c := range []struct {
+		env               []string
+		name, build, fail string
+	}{
+		{nil, "", "", ""},
+		{[]string{"LHA_WORKER_DEPLOYMENT=lha", "LHA_WORKER_BUILD_ID=b7"}, "lha", "b7", ""},
+		{[]string{"LHA_WORKER_DEPLOYMENT=lha"}, "", "", "LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID must be set together (worker versioning)"},
+		{[]string{"LHA_WORKER_BUILD_ID=b1"}, "", "", "LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID must be set together (worker versioning)"},
+		{[]string{"LHA_WORKER_PROMOTE=true"}, "", "", "LHA_WORKER_PROMOTE needs LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID"},
+		{[]string{"LHA_WORKER_DEPLOYMENT=lha.v2", "LHA_WORKER_BUILD_ID=b1"}, "", "", "LHA_WORKER_DEPLOYMENT 'lha.v2' must not contain '.'"},
+	} {
+		s, err := LoadFrom(c.env, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		name, build, ok, err := s.WorkerDeploymentVersion()
+		if c.fail != "" {
+			if err == nil || err.Error() != c.fail {
+				t.Errorf("%v: %v", c.env, err)
+			}
+			continue
+		}
+		if err != nil || name != c.name || build != c.build || ok != (c.name != "") {
+			t.Errorf("%v: %q %q %v %v", c.env, name, build, ok, err)
+		}
+	}
+	if _, err := LoadFrom([]string{"LHA_WORKER_VERSIONING_BEHAVIOR=sometimes"}, ""); err == nil {
+		t.Error("an unknown versioning behaviour was accepted")
 	}
 }

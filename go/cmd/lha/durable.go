@@ -112,6 +112,10 @@ func (c *cli) worker(args []string) error {
 	if _, err := settings.ResetKeepPaths(); err != nil { // fails here, not in every cycle
 		return fail(2, "%s", err.Error())
 	}
+	deployment, versioned, err := durable.DeploymentOptions(settings) // a half-set deployment fails here
+	if err != nil {
+		return fail(2, "%s", err.Error())
+	}
 	obs.ConfigureLogging(c.stderr, false)
 	cl, err := durable.Dial(c.ctx, settings, durable.Logger(c.stderr, slog.LevelInfo))
 	if err != nil {
@@ -131,15 +135,30 @@ func (c *cli) worker(args []string) error {
 		lead := c.leadModel
 		acts.ModelFactory = func(*config.Settings, contracts.SituationSnapshot) (contracts.ModelProvider, error) { return lead, nil }
 	}
-	w := durable.NewWorker(cl, settings.TaskQueue, acts)
+	w := durable.NewVersionedWorker(cl, settings.TaskQueue, acts, deployment)
+	var onStart func(context.Context) error
+	if versioned {
+		version := deployment.Version
+		onStart = func(ctx context.Context) error {
+			if err := durable.AnnounceVersion(ctx, cl.WorkflowService(), settings.TemporalNamespace,
+				version.DeploymentName, version.BuildID, settings.WorkerPromote, slog.Default()); err != nil {
+				return &promoteError{err}
+			}
+			return nil
+		}
+	}
 	// Keep re-checking: a Python worker that raced past its own startup check stops this one.
 	interval := time.Duration(settings.WorkerGuardIntervalS * float64(time.Second))
-	err = durable.RunGuarded(c.ctx, w, cl, settings.TaskQueue, interval, func(err error) {
+	err = durable.RunGuardedWith(c.ctx, w, cl, settings.TaskQueue, interval, func(err error) {
 		slog.Warn("cannot re-check who polls the task queue", "task_queue", settings.TaskQueue, "error", err)
-	})
+	}, onStart)
 	var mixed *durable.MixedWorkersError
 	if errors.As(err, &mixed) {
 		return fail(2, "%s", err)
+	}
+	var promote *promoteError
+	if errors.As(err, &promote) { // LHA_WORKER_PROMOTE could not promote this build
+		return fail(1, "%s", promote.err)
 	}
 	return err
 }
@@ -642,3 +661,9 @@ func (c *cli) missionAbort(args []string) error {
 	fmt.Fprintf(c.stdout, "cancelled mission %s\n", id)
 	return nil
 }
+
+// promoteError marks a failure to announce or promote the worker's build.
+type promoteError struct{ err error }
+
+func (e *promoteError) Error() string { return e.err.Error() }
+func (e *promoteError) Unwrap() error { return e.err }

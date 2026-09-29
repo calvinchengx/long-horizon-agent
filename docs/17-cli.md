@@ -342,7 +342,10 @@ reminders only raise the count of an open gate, and a closed gate stays closed. 
 Connects to `LHA_TEMPORAL_ADDRESS` / `LHA_TEMPORAL_NAMESPACE` and serves `MissionWorkflow` and
 `SubAgentWorkflow`, with every activity they use (including the organization's `plan_round`,
 `run_implementer`, `integrate_branch` and `review_cycle`), on `LHA_TASK_QUEUE` until
-interrupted. No options. The model, sandbox, egress,
+interrupted. No options. With `LHA_WORKER_DEPLOYMENT` and `LHA_WORKER_BUILD_ID` it polls as that
+build of a Temporal Worker Deployment
+([versioned deploys](14-running-on-temporal.md#versioned-deploys-worker-build-ids)); a half-set
+pair exits `2`, and a failed `LHA_WORKER_PROMOTE` exits `1`. The model, sandbox, egress,
 trusted checks, protected paths, replanning limits and budget used by durable missions come from
 this process's settings. See
 [14-running-on-temporal.md](14-running-on-temporal.md).

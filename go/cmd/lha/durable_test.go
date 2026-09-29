@@ -294,3 +294,11 @@ func TestPyValueAndIsoFull(t *testing.T) {
 		t.Fatal(durable.IsoFull(1790000000.25))
 	}
 }
+
+func TestWorkerRefusesHalfSetVersioning(t *testing.T) {
+	cleanEnv(t, "LHA_WORKER_BUILD_ID=b1")
+	r := runCLI(t, nil, "worker")
+	if r.code != 2 || r.stderr != "error: LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID must be set together (worker versioning)\n" {
+		t.Fatalf("%+v", r)
+	}
+}

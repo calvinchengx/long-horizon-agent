@@ -128,13 +128,27 @@ func GuardTaskQueue(ctx context.Context, c TaskQueueDescriber, taskQueue string,
 // other implementation on taskQueue: then w stops polling and shuts down (worker.Stop) and the
 // *MixedWorkersError is returned.
 func RunGuarded(ctx context.Context, w worker.Worker, c TaskQueueDescriber, taskQueue string, interval time.Duration, onError func(error)) error {
+	return RunGuardedWith(ctx, w, c, taskQueue, interval, onError, nil)
+}
+
+// RunGuardedWith is RunGuarded that also runs onStart once the worker runs (e.g.
+// AnnounceVersion); an error from onStart stops the worker and is returned.
+func RunGuardedWith(ctx context.Context, w worker.Worker, c TaskQueueDescriber, taskQueue string, interval time.Duration, onError func(error), onStart func(context.Context) error) error {
 	guardCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := make(chan any)
 	ran := make(chan error, 1)
 	go func() { ran <- w.Run(stop) }()
 	guarded := make(chan error, 1)
-	go func() { guarded <- GuardTaskQueue(guardCtx, c, taskQueue, interval, onError) }()
+	go func() {
+		if onStart != nil {
+			if err := onStart(guardCtx); err != nil && guardCtx.Err() == nil {
+				guarded <- err
+				return
+			}
+		}
+		guarded <- GuardTaskQueue(guardCtx, c, taskQueue, interval, onError)
+	}()
 	select {
 	case err := <-ran: // the worker failed to start or failed fatally
 		cancel()
@@ -205,7 +219,13 @@ func registerWith(r worker.Registry, acts *Activities, overrides map[string]any)
 // NewWorker is a worker on taskQueue, identified as an lha-go worker, hosting every durable
 // workflow and activity (python: build_worker).
 func NewWorker(c client.Client, taskQueue string, acts *Activities) worker.Worker {
-	w := worker.New(c, taskQueue, worker.Options{Identity: WorkerIdentity()})
+	return NewVersionedWorker(c, taskQueue, acts, worker.DeploymentOptions{})
+}
+
+// NewVersionedWorker is NewWorker polling as one build of a worker deployment (DeploymentOptions;
+// the zero value is unversioned).
+func NewVersionedWorker(c client.Client, taskQueue string, acts *Activities, deployment worker.DeploymentOptions) worker.Worker {
+	w := worker.New(c, taskQueue, worker.Options{Identity: WorkerIdentity(), DeploymentOptions: deployment})
 	Register(w, acts)
 	return w
 }

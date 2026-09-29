@@ -718,6 +718,8 @@ def worker() -> None:
         asyncio.run(run_worker())
     except (MixedWorkersError, ValueError) as exc:  # a Go worker polls this queue; bad settings
         _fail(str(exc))
+    except RuntimeError as exc:  # LHA_WORKER_PROMOTE could not promote this build
+        _fail(str(exc), code=1)
 
 
 @app.command(name="mission-start")

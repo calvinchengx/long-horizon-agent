@@ -82,6 +82,36 @@ with the same message. In such a race both workers stop, since each still sees t
 restart one of them on its own queue. A re-check that cannot reach the server is logged as a
 warning and retried at the next interval.
 
+### Versioned deploys (worker Build IDs)
+
+By default every worker on the queue may run any mission's next workflow task, so a deploy that
+changes workflow code relies on the patch guards to replay in-flight missions. With worker
+versioning on, a mission stays on the build that started it instead:
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `LHA_WORKER_DEPLOYMENT` | unset | Temporal Worker Deployment name (no `.`); set with `LHA_WORKER_BUILD_ID` |
+| `LHA_WORKER_BUILD_ID` | unset | this worker's build, e.g. the image tag or git sha |
+| `LHA_WORKER_VERSIONING_BEHAVIOR` | `pinned` | `pinned`: a mission, its Continue-As-New runs and its sub-agent children stay on their build; `auto_upgrade`: they move to the current build at their next workflow task |
+| `LHA_WORKER_PROMOTE` | `false` | once this worker polls, make its build the deployment's current version |
+
+A deploy then goes:
+
+1. Start the new build's workers alongside the old ones, with the same deployment name and task
+   queue and a new build id.
+2. Make it current: `LHA_WORKER_PROMOTE=true` on the new workers, or
+   `temporal worker deployment set-current-version --deployment-name <name> --build-id <build>`.
+   New missions start on it; running missions stay on their old build.
+3. Keep the old workers until their missions finish. `temporal worker deployment
+   describe-version --deployment-name <name> --build-id <old>` shows when the old version is
+   drained; then stop them.
+
+A versioned worker whose deployment has no current version logs a warning with the command
+above: new missions wait until a current version is set. A half-set pair exits 2, and a failed
+`LHA_WORKER_PROMOTE` exits 1. Missions last days, so a pinned build can be needed for as long;
+`auto_upgrade` avoids keeping old workers, at the price of relying on the patch guards (see
+[08-durable-execution.md](08-durable-execution.md#replay-safety-net)).
+
 [`python/Dockerfile`](../python/Dockerfile) builds a worker image whose default command is
 `lha worker`. Do not mount the host Docker socket into it; point `DOCKER_HOST` at a separate
 daemon or use `LHA_SANDBOX=e2b`.

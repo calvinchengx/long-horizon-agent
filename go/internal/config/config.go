@@ -7,6 +7,7 @@ package config
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -75,6 +76,13 @@ type Settings struct {
 	TaskQueue         string `env:"task_queue" default:"lha-mission"`
 	// How often a running worker re-checks who polls its task queue (durable.GuardTaskQueue).
 	WorkerGuardIntervalS float64 `env:"worker_guard_interval_s" default:"30.0" gt:"0"`
+	// Worker versioning (Temporal Worker Deployments): off unless both are set; see
+	// Settings.WorkerDeploymentVersion and durable.DeploymentOptions.
+	WorkerDeployment         string `env:"worker_deployment" default:""`
+	WorkerBuildID            string `env:"worker_build_id" default:""`
+	WorkerVersioningBehavior string `env:"worker_versioning_behavior" default:"pinned" choices:"pinned,auto_upgrade"`
+	// Make this worker's build the deployment's current version once it polls.
+	WorkerPromote bool `env:"worker_promote" default:"false"`
 
 	// --- Persistence
 	PostgresDSN     *Secret `env:"postgres_dsn"`
@@ -566,6 +574,25 @@ func (s *Settings) FallbackModelEntries() []string { return CSV(s.FallbackModels
 
 // HarnessGlobs is harness_paths split (python: harness_globs).
 func (s *Settings) HarnessGlobs() []string { return CSV(s.HarnessPaths) }
+
+// WorkerDeploymentVersion is (deployment, build id) when worker versioning is on (ok); an error
+// when only one is set, the deployment name has a ".", or LHA_WORKER_PROMOTE is set without them
+// (python: Settings.worker_deployment_version).
+func (s *Settings) WorkerDeploymentVersion() (name, build string, ok bool, err error) {
+	name, build = strings.TrimSpace(s.WorkerDeployment), strings.TrimSpace(s.WorkerBuildID)
+	switch {
+	case name == "" && build == "":
+		if s.WorkerPromote {
+			return "", "", false, errors.New("LHA_WORKER_PROMOTE needs LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID")
+		}
+		return "", "", false, nil
+	case name == "" || build == "":
+		return "", "", false, errors.New("LHA_WORKER_DEPLOYMENT and LHA_WORKER_BUILD_ID must be set together (worker versioning)")
+	case strings.Contains(name, "."):
+		return "", "", false, fmt.Errorf("LHA_WORKER_DEPLOYMENT %s must not contain '.'", contracts.PyRepr(name))
+	}
+	return name, build, true, nil
+}
 
 // ResetKeepPaths is reset_keep parsed (python: reset_keep_paths). An entry that could keep the
 // work tree, the repository or the anchor (".", "*", "**", "..", an absolute path, anything under

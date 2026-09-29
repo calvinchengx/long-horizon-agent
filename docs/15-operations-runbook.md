@@ -263,8 +263,10 @@ Before deploying a workflow change:
    `replay_histories("h", object_store_root=...)` with the object store the worker used.
 3. If replay fails, do not deploy that change to workers serving in-flight missions.
 
-**Planned**: worker Build IDs / worker versioning. `build_worker` sets no Build ID, so every worker
-on the queue can pick up any mission; mixed old and new workers are not separated.
+To keep in-flight missions off new workflow code entirely, run versioned workers
+(`LHA_WORKER_DEPLOYMENT`, `LHA_WORKER_BUILD_ID`): each mission stays on the build that started it,
+new missions start on the deployment's current version, and old workers run until their missions
+finish ([14-running-on-temporal.md](14-running-on-temporal.md#versioned-deploys-worker-build-ids)).
 
 When a change is intentionally incompatible, re-record one history with
 `LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py -k <test>` and keep the older
