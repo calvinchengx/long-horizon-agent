@@ -263,18 +263,35 @@ every run finished all three in three cycles at about the same cost. The two cha
 together, so the runs do not say which one mattered more.
 
 A cycle that runs out of turns is logged as `turns_exhausted`. Most cycles in the 20-turn runs
-still did: Sonnet kept running commands after its edit instead of signalling done, and the
-verifier passed the work anyway. Lower the limit to cut that spend, or raise it if cycles end
-before the edit; each turn costs a model call, and the budget ceiling still applies.
+still did, and failed tool calls explained much of it. Recording why each call failed showed
+three causes. The model wrote tool arguments beside `"tool"` instead of under `"arguments"`,
+which LHA dropped, so the same `grep` failed again and again. It guessed `python -m pytest`,
+which fails where pytest is installed only in the project's environment. And after its edit it
+ran unrelated test suites instead of signalling done. LHA now accepts the flat form, shows the
+command beside each witness, and tells the lead to signal done once its acceptance checks pass
+(the loop verifies then and returns any failure while turns remain).
+
+Measured on the single "sorted blocked ids" change, one Sonnet run per step (29 September 2026):
+
+| After | Model calls | Failed tool calls | Out of turns | Cost |
+|---|---|---|---|---|
+| `edit_file` and 20 turns | 20 | 7 | yes | $1.00 |
+| flat arguments and witness commands | 20 | 2 | yes | $1.05 |
+| "signal done once the checks pass" | 11 | 0 | no | $0.42 |
+
+Each run passed on its first attempt. One run per step is a small sample, but the last drop is
+well beyond the spread between runs so far. If `turns_exhausted` still shows on most cycles,
+look at the failed `tool_call` events first; raise the limit only if cycles end before the edit.
+Each turn costs a model call, and the budget ceiling still applies.
 
 ## What this does not solve
 
 - **Model quality.** The harness refuses unverified work; it cannot make a weak model strong. In
   one real run with a local Ollama model (gemma4) on a toy mission its planner split into five items, four items were verified and the
   fifth ended blocked. Expect to use a strong model for a project of this size.
-- **Cost.** Order of magnitude only: in the Sonnet runs above, a cycle of up to 20 turns cost
-  about $1 in Claude Code's reported cost, so a thousand-cycle mission is in the $1k range, more
-  with a larger codebase or longer cycles. Set the budget ceiling deliberately.
+- **Cost.** Order of magnitude only: in the Sonnet runs above, a cycle cost $0.40–1 in Claude
+  Code's reported cost, so a thousand-cycle mission is in the $0.4–1k range, more with a larger
+  codebase or harder items. Set the budget ceiling deliberately.
 - **Egress is by hostname.** TLS is not intercepted, so allowing a host allows everything on it.
   `fetch_url` connects only to addresses it checked, so DNS rebinding cannot redirect it to a
   private address.
