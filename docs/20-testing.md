@@ -188,6 +188,39 @@ uv run coverage report
 The floor applies to unit + durability + load together. Integration tests are not included in the
 measured total.
 
+## Mutation audit
+
+Coverage says a line ran; it does not say a test would notice if the line were wrong. The mutation
+audit checks that for the code where an unnoticed change is a security hole: the command
+classifier, the egress policy and public-address checks, the Rule of Two, redaction, workspace
+path containment and the sandbox egress lists. A tool changes that code one small edit at a time
+(`<` to `<=`, `and` to `or`, a string or a constant) and runs the tests against each change, a
+mutant. A mutant no test fails on *survived*: a rule that could break unnoticed.
+
+| | Python | Go |
+|---|---|---|
+| Tool | mutmut 3.8 (the `mutation` dependency group) | gremlins v0.6.0 |
+| Code | `[tool.mutmut]` `paths_to_mutate` in [`pyproject.toml`](../python/pyproject.toml) | `internal/safety` (`commands.go`, `egress.go`, `ipaddr.go`, `rule_of_two.go`), `internal/obs/redact.go`, `internal/execution/paths.go`, `internal/execution/egressproxy/policy.go` |
+| Tests | the safety tests and the spec conformance cases (`tests_dir`) | each file's own package tests |
+| Script | [`python/scripts/mutation_audit.sh`](../python/scripts/mutation_audit.sh) | [`go/scripts/mutation_audit.sh`](../go/scripts/mutation_audit.sh) |
+
+```bash
+python/scripts/mutation_audit.sh   # about 4 minutes with 8 workers (MUTATION_WORKERS)
+go/scripts/mutation_audit.sh       # needs gremlins on PATH
+```
+
+Both scripts fail on any survivor, timeout or uncovered mutant that is not a proven-equivalent
+mutant: one that changes the code but not what it does, so no test can fail on it. Python marks
+those lines `# pragma: no mutate (<why>)`. gremlins has no such comment, so the Go script reads
+[`go/scripts/mutation_equivalents.txt`](../go/scripts/mutation_equivalents.txt), which names each
+by mutator, file, column and the line's text (so edits elsewhere do not break the list) with the
+reason. The Go spec cases run in `internal/spec`, not in the mutated packages, so Go survivors are
+killed by package-level tests.
+
+The [`mutation.yml`](../.github/workflows/mutation.yml) workflow runs both nightly and on demand;
+a mutation run re-runs the tests once per mutant, which is too slow for every push. A red run
+means a new survivor: add a test that fails on it, or prove it equivalent and mark it.
+
 ## Static checks
 
 ```bash
@@ -212,7 +245,9 @@ On every push to `main` and every pull request:
 | `python-services-integration` | a `pgvector/pgvector:pg16` service container; `uv sync --locked --extra postgres --extra sandbox`; Go 1.26 (for the trusted `go run` check); `docker build -t lha-sandbox:dev sandbox/`; `pytest tests/integration` with `LHA_IT_POSTGRES_DSN` and `LHA_IT_DOCKER=1` set (20-minute timeout) |
 
 A separate workflow, [`docs-site.yml`](../.github/workflows/docs-site.yml), builds this
-documentation site on changes to `docs/` or `website/`.
+documentation site on changes to `docs/` or `website/`, and
+[`mutation.yml`](../.github/workflows/mutation.yml) runs the [mutation audit](#mutation-audit)
+nightly.
 
 The Go Docker integration tests (`LHA_IT_DOCKER`) are not run by the `go` job.
 
