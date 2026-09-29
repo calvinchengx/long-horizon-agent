@@ -29,6 +29,7 @@ the matching package is ported; it runs every file below.
 | `systemone/wire.json` | System One request bodies, answer parsing, confidence, the stall-triage question, state and actions, reranking, endpoint prices |
 | `execution/paths.json` | workspace path containment: normalization, harness-owned paths, container joins |
 | `execution/arguments.json` | tool-argument JSON-Schema validation errors and missing required arguments |
+| `execution/edit_file.json` | the `edit_file` tool: its schema, and the result of each edit (one exact match replaced, or the exact refusal) |
 | `execution/code_query.json` | the `code_query` tool: question kinds to ripwire argv, answer caps and clipping, invalid questions |
 | `execution/sandbox_egress.json` | the sandbox egress lists (package-fetch, extra and write hosts) and their errors, the run-level Rule of Two with sandbox egress, and `sandbox_egress` events parsed from the proxy log |
 | `memory/hash_embedder.json` | hash-embedder vectors and cosine similarity, exactly |

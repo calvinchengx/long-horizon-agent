@@ -27,9 +27,10 @@ LHA_SANDBOX=local LHA_ALLOW_UNSAFE_LOCAL=true ./lha run-local --item "say hello"
 - Sandboxes: `local` (only with `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) and `docker`
   (`LHA_SANDBOX_IMAGE`; the `LHA_SANDBOX_EGRESS*` settings route egress through a per-session
   allow-list proxy, and its requests are committed as `sandbox_egress` events).
-- The lead's tools: `read_file`, `write_file`, `list_files`, `grep`, `run_command` and
+- The lead's tools: `read_file`, `write_file`, `edit_file`, `list_files`, `grep`, `run_command` and
   `record_decision`, plus `fetch_url` / `web_search` when `LHA_WEB_ALLOW_HOSTS` or `--allow-host`
-  is set, and `code_query` when `LHA_CODE_QUERY=true`. An unsafe local sandbox and a Rule-of-Two (lethal trifecta) run are refused before the
+  is set, and `code_query` when `LHA_CODE_QUERY=true`. An unsafe local sandbox and a Rule-of-Two
+  (lethal trifecta) run are refused before the
   workspace is touched (exit 2); bad web settings are refused before any model spend.
 - Irreversible commands (`git push`, publishing, uploads) are refused, or with
   `--approve-interactive` asked on the terminal (`internal/hitl`: the exact argv and the
