@@ -14,6 +14,7 @@ permissions:
 jobs:
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: python
@@ -36,6 +37,7 @@ jobs:
 
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     defaults:
       run:
         working-directory: go
@@ -47,5 +49,7 @@ jobs:
           cache-dependency-path: go/go.sum
       - name: Install gremlins
         run: go install github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0
+      # Two workers: each runs its own `go test` build, and four starved the 7 GB runner (partial
+      # coverage, then the step was killed).
       - name: gremlins
-        run: MUTATION_WORKERS=4 scripts/mutation_audit.sh
+        run: MUTATION_WORKERS=2 scripts/mutation_audit.sh
