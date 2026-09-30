@@ -15,6 +15,10 @@ import (
 // ReviewDiffCap bounds the diff shown to the Reviewer.
 const ReviewDiffCap = 8000
 
+// ReviewEvent is the anchor event a review verdict is committed as (payload: item_id, verdict,
+// blocking, blocking_issues, advisory, reopened, blocked, base, head).
+const ReviewEvent = "review"
+
 // ReviewObjective is the Reviewer's objective.
 const ReviewObjective = "Review the diff against the acceptance criteria. Identify correctness, security, and scope " +
 	"issues. Investigate with the tools if needed. When finished, reply with EXACTLY one JSON " +

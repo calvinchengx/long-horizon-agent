@@ -14,6 +14,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
 // The mission-store commands (python/tests/unit/test_persistence_wiring.py and test_wiring_cli.py):
@@ -314,6 +315,108 @@ func TestObjectsPrune(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	if r := runCLI(t, nil, "objects", "prune", "--older-than-days", "0"); r.code != 2 || !strings.Contains(r.stderr, "not in the range x>=1") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// TestLabelsExport is python's test_cli_exports_the_anchor_and_the_missions_gates, with Python's
+// output on the same anchor and store.
+func TestLabelsExport(t *testing.T) {
+	dir := cleanEnv(t)
+	sqlitePath := filepath.Join(dir, "lha.sqlite3") // where pythonEnv points the Python CLI too
+	t.Setenv("LHA_SQLITE_PATH", sqlitePath)
+	ws := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	anchor := state.NewGitMissionAnchor(ws)
+	checklist := contracts.Checklist{SchemaVersion: 1, Items: []contracts.ChecklistItem{contracts.NewChecklistItem("01", "do it")}}
+	if _, err := anchor.Initialize(ctx, "T", "D", checklist); err != nil {
+		t.Fatal(err)
+	}
+	approval := func(fp, decision string, defaulted bool) contracts.EventRecord {
+		by := "terminal:calvin"
+		if defaulted {
+			by = "timeout"
+		}
+		return contracts.EventRecord{Kind: "tool_approval", CycleID: "c1", Payload: contracts.Payload(
+			"tool", "run_command", "arguments", `{"argv": ["git", "push"], "token": "sk-ant-abcdefghijklmnop1234"}`,
+			"reason", "pushes to a remote", "fingerprint", fp, "decision", decision, "approved", decision == "approve",
+			"resolved_by", by, "defaulted", defaulted,
+		)}
+	}
+	if _, err := anchor.CommitCheckpoint(ctx, contracts.Checkpoint{
+		CycleID: "c1", ProgressSummary: "- c1", Checklist: checklist, Decisions: []contracts.DecisionRecord{},
+		Events: []contracts.EventRecord{
+			{Kind: "orchestrate", Payload: contracts.Payload("mission_id", "m1", "run", 1)},
+			approval("fp1", "approve", false),
+			approval("fp9", "reject", true),
+			{Kind: "cycle", CycleID: "c2", Payload: contracts.Payload(
+				"item_id", "01", "verified", true, "verdict", "passed", "status", "done", "tool_calls", 4,
+				"split_into", []any{}, "rolled_back", []any{},
+				"checks", []any{contracts.Payload("name", "pytest", "passed", true, "gating", true, "exit_code", 0, "duration_s", 1.234)},
+			)},
+			{Kind: "review", CycleID: "c3", Payload: contracts.Payload(
+				"item_id", "01", "verdict", "approve", "blocking", false, "blocking_issues", []any{}, "advisory", []any{"rename x"},
+				"reopened", false, "blocked", false, "base", "aaa111", "head", "bbb222",
+			)},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := persistence.OpenSQLite(ctx, sqlitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []struct{ event, at, decision, by string }{
+		{"opened", "2026-01-01T01:00:00+00:00", "", ""},
+		{"resolved", "2026-01-01T01:05:00+00:00", "approve", "terminal:calvin"},
+	} {
+		if err := store.RecordGateEvent(ctx, persistence.GateEvent{
+			MissionID: "m1", GateID: "m1:tool:fp1", Kind: "tool_call", Event: e.event, At: e.at,
+			Question: "Allow `git push`?", Options: []string{"approve", "reject"}, DefaultAction: "reject",
+			Decision: e.decision, ResolvedBy: e.by, Risk: "high", Request: map[string]string{"fingerprint": "fp1", "tool": "run_command"},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store.Close()
+
+	want := `{"at":"","by":"default","cycle_id":"c1","input":{"arguments":"{\"argv\": [\"git\", \"push\"], \"token\": \"***\"}","fingerprint":"fp9","reason":"pushes to a remote","tool":"run_command"},"item_id":"","label":"reject","mission_id":"m1","schema":1,"source":"tool_approval"}
+{"at":"","by":"verifier","cycle_id":"c2","input":{"checks":[{"exit_code":0,"gating":true,"name":"pytest","passed":true}],"rolled_back":[],"split_into":[],"status":"done","tool_calls":4,"verified":true},"item_id":"01","label":"passed","mission_id":"m1","schema":1,"source":"verifier"}
+{"at":"","by":"reviewer","cycle_id":"c3","input":{"advisory":["rename x"],"base":"aaa111","blocking":false,"blocking_issues":[],"head":"bbb222"},"item_id":"01","label":"approve","mission_id":"m1","schema":1,"source":"review"}
+{"at":"2026-01-01T01:05:00+00:00","by":"terminal:calvin","cycle_id":"","input":{"kind":"tool_call","options":["approve","reject"],"question":"Allow ` + "`git push`" + `?","request":{"fingerprint":"fp1","tool":"run_command"},"risk":"high"},"item_id":"","label":"approve","mission_id":"m1","schema":1,"source":"gate"}
+`
+	r := runCLI(t, nil, "labels", "export", "--workdir", ws)
+	if r.code != 0 || r.stdout != want || r.stderr != "4 labels (1 gate, 1 tool_approval, 1 verifier, 1 review)\n" {
+		t.Fatalf("%+v", r)
+	}
+	if pythonAvailable(t) {
+		// The Python anchor reads events with git, so the process needs PATH.
+		py := runPythonLHA(t, dir, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}, "labels", "export", "--workdir", ws)
+		if py.code != 0 || py.stdout != want {
+			t.Fatalf("python: %+v", py)
+		}
+	}
+	out := filepath.Join(dir, "labels.jsonl")
+	if r := runCLI(t, nil, "labels", "export", "--workdir", ws, "--out", out, "--diffs"); r.code != 0 || r.stdout != "" {
+		t.Fatalf("%+v", r)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil || !strings.Contains(string(data), `"diff":"`) {
+		t.Fatalf("%v %s", err, data)
+	}
+	if r := runCLI(t, nil, "labels", "export", "m1", "--workdir", filepath.Join(dir, "none")); r.code != 0 || strings.Count(r.stdout, "\n") != 1 || !strings.Contains(r.stdout, `"source":"gate"`) {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "labels", "export", "--workdir", filepath.Join(dir, "none")); r.code != 2 || !strings.HasPrefix(r.stderr, "error: no mission anchor at ") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "labels"); r.code != 2 || !strings.Contains(r.stdout, "export") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "labels", "nope"); r.code != 2 || !strings.Contains(r.stderr, "No such command 'nope'") {
 		t.Fatalf("%+v", r)
 	}
 }

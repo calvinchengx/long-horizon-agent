@@ -602,3 +602,15 @@ func runGroup(fns []func() error) []error {
 	wg.Wait()
 	return errs
 }
+
+// CapList is the first n of items as JSON values (a review event's issue lists are capped).
+func CapList(items []string, n int) []any {
+	out := []any{}
+	for i, s := range items {
+		if i >= n {
+			break
+		}
+		out = append(out, s)
+	}
+	return out
+}

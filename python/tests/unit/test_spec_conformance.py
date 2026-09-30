@@ -770,6 +770,22 @@ def test_system_one_authority() -> None:
         assert len(kept_ids) == len(set(kept_ids)), "rerank duplicated a passage"
 
 
+def test_system_one_labels() -> None:
+    from lha.contracts.state import EventRecord
+    from lha.persistence.store import GateRow
+    from lha.systemone.labels import label_rows, to_jsonl
+
+    spec = _load("systemone/labels.json")
+    for case in spec["cases"]:
+        events = [EventRecord.model_validate(e) for e in case["events"]]
+        gates = [GateRow(**g) for g in case["gates"]]
+        table = case["diffs"]
+        supplier = (lambda b, h, t=table: t.get(f"{b}..{h}", "")) if table is not None else None
+        rows = label_rows(events, gates, mission_id=case["mission_id"], diffs=supplier)
+        assert [r.to_json() for r in rows] == case["expected"], case["name"]
+        assert to_jsonl(rows) == case["jsonl"], case["name"]
+
+
 def test_execution_code_query() -> None:
     from lha.execution.tools.code_query import (
         KINDS,

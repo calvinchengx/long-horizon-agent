@@ -55,7 +55,7 @@ import (
 // appended to the spend journal and written to the cost ledger call by call, like a cycle's.
 
 // ReviewEvent is the event kind of a committed review verdict.
-const ReviewEvent = "review"
+const ReviewEvent = agents.ReviewEvent
 
 const (
 	implementerCacheDir = "lha/implementers"
@@ -769,17 +769,6 @@ func blockingStreak(events []contracts.EventRecord, itemID string) int {
 	return streak
 }
 
-func capList(items []string, n int) []any {
-	out := []any{}
-	for i, s := range items {
-		if i >= n {
-			break
-		}
-		out = append(out, s)
-	}
-	return out
-}
-
 // ReviewCycle is review_cycle: an independent review of one verified item, its verdict committed
 // (exactly once per reviewed cycle).
 func (a *Activities) ReviewCycle(ctx context.Context, inp ReviewInput) (CycleResult, error) {
@@ -905,7 +894,7 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		Checklist:       checklist,
 		Events: []contracts.EventRecord{{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
 			"item_id", inp.ItemID, "verdict", review.Verdict, "blocking", review.Blocking,
-			"blocking_issues", capList(review.BlockingIssues, 20), "advisory", capList(review.Advisory, 20),
+			"blocking_issues", org.CapList(review.BlockingIssues, 20), "advisory", org.CapList(review.Advisory, 20),
 			"reopened", review.Blocking && !blocked, "blocked", blocked, "base", base, "head", inp.HeadSHA,
 		)}},
 		CommitMessage: fmt.Sprintf("lha: review %s %s", outcome, inp.ItemID),

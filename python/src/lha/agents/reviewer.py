@@ -48,6 +48,11 @@ _REVIEW_OBJECTIVE = (
 )
 
 
+#: The anchor event a review verdict is committed as (payload: item_id, verdict, blocking,
+#: blocking_issues, advisory, reopened, blocked, base, head).
+REVIEW_EVENT = "review"
+
+
 @dataclass
 class ReviewResult:
     brief: str

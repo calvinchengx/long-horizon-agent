@@ -42,6 +42,7 @@ from temporalio.exceptions import ApplicationError
 from lha.agent.assembly import lead_verifier, open_lead_sandbox
 from lha.agent.prompt import render_decisions
 from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_worktree
+from lha.agents.reviewer import REVIEW_EVENT as _REVIEW_EVENT
 from lha.agents.reviewer import Reviewer
 from lha.agents.router import model_for_role
 from lha.agents.waves import (
@@ -102,7 +103,7 @@ from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 
-REVIEW_EVENT = "review"
+REVIEW_EVENT = _REVIEW_EVENT
 _CACHE_DIR = "lha/implementers"
 _REVIEW_DIFF_CAP = 20_000
 _SAFE = re.compile(r"[^A-Za-z0-9_.-]")

@@ -2670,6 +2670,201 @@ def export_edit_file() -> None:
     )
 
 
+# --- systemone/labels ------------------------------------------------------------------------
+def export_labels() -> None:
+    """spec/systemone/labels.json: the label rows ``lha labels export`` derives from an anchor's
+    events and the store's gates (``lha.systemone.labels.label_rows``), with the diff supplier
+    given as a table."""
+    from lha.contracts.state import EventRecord
+    from lha.persistence.store import GateRow
+    from lha.systemone.labels import label_rows, to_jsonl
+
+    def gate(fp: str, status: str, decision: str | None, by: str | None, **kw: object) -> dict:
+        row = {
+            "mission_id": "m1",
+            "gate_id": f"m1:tool:{fp}",
+            "kind": "tool_call",
+            "status": status,
+            "question": f"Allow `curl -H 'Authorization: Bearer abc.def.ghi'`? ({fp})",
+            "options": ["approve", "reject"],
+            "default_action": "reject",
+            "risk": "high",
+            "deadline": "2026-01-01T02:00:00+00:00",
+            "decision": decision,
+            "resolved_by": by,
+            "reminders": 0,
+            "request": {"fingerprint": fp, "tool": "run_command", "argv": '["curl"]'},
+            "opened_at": f"2026-01-01T0{fp[-1]}:00:00+00:00",
+            "resolved_at": f"2026-01-01T0{fp[-1]}:05:00+00:00" if decision else "",
+            "updated_at": f"2026-01-01T0{fp[-1]}:05:00+00:00",
+        }
+        row.update(kw)
+        return row
+
+    def approval(fp: str, decision: str, *, defaulted: bool, cycle: str) -> dict:
+        return {
+            "kind": "tool_approval",
+            "cycle_id": cycle,
+            "payload": {
+                "tool": "run_command",
+                "arguments": '{"argv": ["git", "push"], "env": {"GH_TOKEN": "ghp_abcdefghijklmnopqrstuvwxyz0123"}}',
+                "reason": "pushes to a remote",
+                "fingerprint": fp,
+                "decision": decision,
+                "approved": decision == "approve",
+                "resolved_by": "timeout" if defaulted else "terminal:calvin",
+                "defaulted": defaulted,
+            },
+            "payload_ref": None,
+        }
+
+    def cycle(item: str, verdict: str, cycle: str, **extra: object) -> dict:
+        return {
+            "kind": "cycle",
+            "cycle_id": cycle,
+            "payload": {
+                "item_id": item,
+                "verified": verdict == "passed",
+                "verdict": verdict,
+                "status": "done" if verdict == "passed" else "in_progress",
+                "tool_calls": 7,
+                "split_into": [],
+                "rolled_back": ["src/x.py"] if verdict != "passed" else [],
+                "checks": [
+                    {
+                        "name": "pytest",
+                        "passed": verdict == "passed",
+                        "gating": True,
+                        "exit_code": 0 if verdict == "passed" else 1,
+                        "duration_s": 12.5,
+                    },
+                    {
+                        "name": "ruff",
+                        "passed": True,
+                        "gating": False,
+                        "exit_code": 0,
+                        "duration_s": 0.25,
+                    },
+                ],
+                **extra,
+            },
+            "payload_ref": None,
+        }
+
+    def review(item: str, verdict: str, cycle: str, base: str, head: str) -> dict:
+        return {
+            "kind": "review",
+            "cycle_id": cycle,
+            "payload": {
+                "item_id": item,
+                "verdict": verdict,
+                "blocking": verdict == "block",
+                "blocking_issues": ["weakens test_x"] if verdict == "block" else [],
+                "advisory": ["token sk-ant-abcdefghijklmnop1234 in a comment"],
+                "reopened": verdict == "block",
+                "blocked": False,
+                "base": base,
+                "head": head,
+            },
+            "payload_ref": None,
+        }
+
+    orchestrate = {
+        "kind": "orchestrate",
+        "cycle_id": "",
+        "payload": {"mission_id": "m1", "resumed": False, "run": 1},
+        "payload_ref": None,
+    }
+    other = {
+        "kind": "lease_granted",
+        "cycle_id": "c1",
+        "payload": {"path": "src/x.py"},
+        "payload_ref": None,
+    }
+    no_verdict = {
+        "kind": "cycle",
+        "cycle_id": "c9",
+        "payload": {"outcome": "impossible", "blocked": ["01"]},
+        "payload_ref": None,
+    }
+    diffs = {
+        "aaa111..bbb222": "diff --git a/x b/x\n+secret=sk-ant-abcdefghijklmnop1234\n",
+        "bbb222..ccc333": "d" * 25_000,
+    }
+
+    cases = [
+        {
+            "name": "events_then_closed_gates_deduped_by_fingerprint",
+            "mission_id": "",
+            "events": [
+                orchestrate,
+                approval("fp1", "approve", defaulted=False, cycle="c1"),
+                approval("fp9", "reject", defaulted=True, cycle="c1"),
+                cycle("01", "failed", "c1"),
+                no_verdict,
+                other,
+                review("01", "block", "c2", "aaa111", "bbb222"),
+                cycle("01", "passed", "c3"),
+                review("01", "approve", "c4", "bbb222", "ccc333"),
+            ],
+            "gates": [
+                gate("fp2", "DEFAULTED", "reject", "default (timeout)"),
+                gate("fp1", "RESOLVED", "approve", "terminal:calvin"),
+                gate("fp3", "OPEN", None, None),
+                gate("fp4", "ESCALATED", None, None, reminders=2),
+            ],
+            "diffs": None,
+        },
+        {
+            "name": "diffs_supplied_and_capped",
+            "mission_id": "",
+            "events": [
+                orchestrate,
+                review("01", "block", "c2", "aaa111", "bbb222"),
+                review("01", "approve", "c4", "bbb222", "ccc333"),
+                review("02", "approve", "c5", "", "ddd444"),
+            ],
+            "gates": [],
+            "diffs": diffs,
+        },
+        {
+            "name": "mission_id_given_and_no_orchestrate_event",
+            "mission_id": "given",
+            "events": [
+                cycle("01", "passed", "c1"),
+                approval("fp1", "approve", defaulted=False, cycle="c1"),
+            ],
+            "gates": [
+                gate(
+                    "fp1",
+                    "RESOLVED",
+                    "approve",
+                    "human (human_decision signal)",
+                    mission_id="m7",
+                    gate_id="m7:tool:fp1",
+                )
+            ],
+            "diffs": None,
+        },
+        {
+            "name": "no_mission_no_gates",
+            "mission_id": "",
+            "events": [cycle("01", "failed", "c1", status="blocked", split_into=["01.1", "01.2"])],
+            "gates": [],
+            "diffs": None,
+        },
+    ]
+    for case in cases:
+        events = [EventRecord.model_validate(e) for e in case["events"]]
+        gates = [GateRow(**g) for g in case["gates"]]
+        table = case["diffs"]
+        supplier = (lambda b, h, t=table: t.get(f"{b}..{h}", "")) if table is not None else None
+        rows = label_rows(events, gates, mission_id=case["mission_id"], diffs=supplier)
+        case["expected"] = [r.to_json() for r in rows]
+        case["jsonl"] = to_jsonl(rows)
+    _write("systemone/labels.json", {"cases": cases})
+
+
 def main() -> None:
     export_wire_bytes()
     export_memory()
@@ -2693,6 +2888,7 @@ def main() -> None:
     export_agent_org()
     export_system_one()
     export_system_one_authority()
+    export_labels()
     export_code_query()
     export_edit_file()
 

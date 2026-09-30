@@ -65,7 +65,7 @@ from lha.agent.runner import (
 )
 from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_worktree
 from lha.agents.reflection import reflect_on_failure
-from lha.agents.reviewer import Reviewer, ReviewResult
+from lha.agents.reviewer import REVIEW_EVENT, Reviewer, ReviewResult
 from lha.agents.router import model_for_role
 from lha.agents.team import research_fanout
 from lha.agents.waves import (
@@ -675,6 +675,25 @@ class _MissionRun:
             item=item.id,
             blocking=review.blocking,
             verdict=review.verdict,
+        )
+        # Committed with the next checkpoint (the durable path commits the same event with its
+        # review cycle), so the verdict outlives the process: ``lha labels export`` reads it.
+        await self.anchor.append_event(
+            EventRecord(
+                kind=REVIEW_EVENT,
+                cycle_id=cycle_id,
+                payload={
+                    "item_id": item.id,
+                    "verdict": review.verdict,
+                    "blocking": review.blocking,
+                    "blocking_issues": review.blocking_issues[:20],
+                    "advisory": review.advisory[:20],
+                    "reopened": review.blocking,
+                    "blocked": False,
+                    "base": base,
+                    "head": head,
+                },
+            )
         )
         if not review.blocking:
             self.loop_detector.observe(f"{item.id}:review_blocked", failed=False)

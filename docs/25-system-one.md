@@ -168,6 +168,19 @@ and saves nothing. It does not show what a stronger lead model, a better-calibra
 model, or a model fine-tuned on LHA's own failures would do. Kev's authors recommend fine-tuning
 on your own labels, and LHA records the evidence needed for that in every `system_one` event.
 
+## Labels
+
+Every mission records three judgments that can fit those thresholds: a human's approve or reject
+of a gated tool call, the verifier's verdict on an attempt, and the reviewer's verdict on a
+verified diff. [`lha labels export`](17-cli.md#lha-labels-export) writes them as JSON Lines, one
+object per judgment with `source`, `label`, `by` and a redacted `input`: the anchor's committed
+`tool_approval`, `cycle` and `review` events, then the mission's closed gates from the store. The
+reviewer's verdict is committed as a `review` event by both the local orchestrator and the durable
+`review_cycle` activity, so it survives the process like the other two. Nothing in a row is new
+data: it is the record LHA already keeps, joined and redacted, and no label leaves the machine
+unless you send the file somewhere. Both implementations derive identical rows from the same
+events and gates (`spec/systemone/labels.json`).
+
 ## Not built yet
 
 These uses were considered and left for later, because each needs thresholds measured on real
@@ -181,9 +194,9 @@ LHA missions first:
 - a second opinion on commands the classifier allows, sending only the command, never tool
   output.
 
-LHA already produces labels for fitting those thresholds: a human's approve or reject, the
-verifier's pass or fail, and the reviewer's verdicts. Exporting them as Kev fine-tuning data is
-the planned next step. See [the roadmap](23-roadmap.md).
+The labels for fitting those thresholds already exist and [`lha labels export`](#labels) writes
+them; training a Kev on them, and measuring the thresholds on real missions, is the next step. See
+[the roadmap](23-roadmap.md).
 
 ## Sources
 
