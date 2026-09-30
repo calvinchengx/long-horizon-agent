@@ -34,6 +34,7 @@ from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.systemone.build import build_stall_triage
 from lha.verify.flaky_quarantine import FlakyRetryVerifier
+from lha.verify.mutation_gate import MutationGateVerifier
 from lha.verify.trusted import CommandTrustedRunner, TrustedAwareVerifier
 from lha.verify.verifier import DeterministicVerifier
 
@@ -75,9 +76,10 @@ def lead_dispatcher(
 def lead_verifier(workdir: str, settings: Settings | None = None) -> Verifier:
     """Sandbox checks in the sandbox; operator ``trusted:`` checks on the trusted runner; a
     failing gating check re-run up to ``LHA_FLAKY_RETRIES`` times, and proven flakes quarantined
-    (``lha.verify.flaky_quarantine``)."""
+    (``lha.verify.flaky_quarantine``); with ``LHA_MUTATION_CHECK``, a green verdict must also
+    survive the mutation gate (``lha.verify.mutation_gate``)."""
     settings = settings or get_settings()
-    return FlakyRetryVerifier(
+    verifier: Verifier = FlakyRetryVerifier(
         TrustedAwareVerifier(
             DeterministicVerifier(),
             CommandTrustedRunner(env_allow=settings.trusted_check_env_names()),
@@ -86,6 +88,14 @@ def lead_verifier(workdir: str, settings: Settings | None = None) -> Verifier:
         retries=settings.flaky_retries,
         workdir=workdir,
     )
+    if settings.mutation_check.strip():
+        verifier = MutationGateVerifier(
+            verifier,
+            command=settings.mutation_check,
+            workdir=workdir,
+            timeout_s=settings.mutation_timeout_s,
+        )
+    return verifier
 
 
 def lead_engine(settings: Settings, *, guarded: bool = False) -> ClaudeCodeEngine | None:

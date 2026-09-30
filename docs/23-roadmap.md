@@ -39,8 +39,11 @@ workflow calls it.
   (`LHA_FLAKY_RETRIES`, default 1); one that passes and fails on the same work tree is
   quarantined with a committed `check_quarantined` event, and a quarantined check can keep an
   item red but never make it green ([07-verification.md](07-verification.md#flaky-check-quarantine)).
-- Removed: the mutation-testing wrapper and the coverage "trust bootstrap". Both were
-  Python-specific (`mutmut`, `pytest --cov`) and no policy consumed their numbers.
+- Done, every run path, opt-in: the mutation gate. With `LHA_MUTATION_CHECK`, a green verdict
+  must also survive a mutation run over the changed files, whose survivors keep the item red and
+  go into the failure report ([07-verification.md](07-verification.md#mutation-gate)). It
+  replaces the removed Python-only `mutmut` wrapper, whose score no policy consumed.
+- Removed: the coverage "trust bootstrap" (Python-specific, and no policy consumed its number).
 - Not done: measurements of how much the gate changes outcomes on real tasks.
 
 ### Large missions (done)

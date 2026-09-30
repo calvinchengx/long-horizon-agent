@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
@@ -156,7 +157,9 @@ var LeadEngineError = errors.New("LHA_LEAD_ENGINE=claude_code is not available")
 // LeadVerifier is the lead's verifier (python: lead_verifier): sandbox checks in the sandbox,
 // operator trusted: checks on the trusted runner, and a failing gating check re-run up to
 // LHA_FLAKY_RETRIES times with proven flakes quarantined (verify.FlakyRetryVerifier).
-func LeadVerifier(workdir string, settings *config.Settings) *verify.FlakyRetryVerifier {
+// With LHA_MUTATION_CHECK, a green verdict must also survive the mutation gate
+// (verify.MutationGateVerifier).
+func LeadVerifier(workdir string, settings *config.Settings) contracts.Verifier {
 	return leadVerifierWith(workdir, settings, trustedRunnerFor(settings))
 }
 
@@ -172,10 +175,15 @@ func trustedRunnerFor(settings *config.Settings) *verify.CommandTrustedRunner {
 	return verify.NewCommandTrustedRunner()
 }
 
-func leadVerifierWith(workdir string, settings *config.Settings, runner *verify.CommandTrustedRunner) *verify.FlakyRetryVerifier {
-	return verify.NewFlakyRetryVerifier(
+func leadVerifierWith(workdir string, settings *config.Settings, runner *verify.CommandTrustedRunner) contracts.Verifier {
+	var v contracts.Verifier = verify.NewFlakyRetryVerifier(
 		verify.NewTrustedAwareVerifier(verify.NewDeterministicVerifier(), runner, workdir),
 		settings.FlakyRetries, workdir)
+	if strings.TrimSpace(settings.MutationCheck) != "" {
+		v = &verify.MutationGateVerifier{Inner: v, Command: settings.MutationCheck, Workdir: workdir,
+			TimeoutS: settings.MutationTimeoutS}
+	}
+	return v
 }
 
 // BuildLeadLoop is the lead's AgentLoop with every capability wired from settings (python:

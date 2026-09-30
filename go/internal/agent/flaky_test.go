@@ -17,12 +17,12 @@ import (
 // reaches the lead's verifier, and a quarantine is committed with the cycle's checkpoint.
 
 func TestLeadVerifierUsesTheConfiguredRetries(t *testing.T) {
-	v := LeadVerifier(t.TempDir(), runnerSettings(t, "LHA_FLAKY_RETRIES=3"))
-	if v.Retries() != 3 {
-		t.Fatal(v.Retries())
+	v, ok := LeadVerifier(t.TempDir(), runnerSettings(t, "LHA_FLAKY_RETRIES=3")).(*verify.FlakyRetryVerifier)
+	if !ok || v.Retries() != 3 {
+		t.Fatal(ok, v)
 	}
-	if def := LeadVerifier(t.TempDir(), runnerSettings(t)); def.Retries() != 1 {
-		t.Fatal(def.Retries())
+	if def, ok := LeadVerifier(t.TempDir(), runnerSettings(t)).(*verify.FlakyRetryVerifier); !ok || def.Retries() != 1 {
+		t.Fatal(ok, def)
 	}
 }
 

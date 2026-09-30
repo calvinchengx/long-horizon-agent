@@ -184,6 +184,11 @@ class Settings(BaseSettings):
     # as failed; a check that passes on a re-run is quarantined (non-gating for the rest of the
     # mission, see lha.verify.flaky_quarantine). 0 = no re-runs and no quarantine.
     flaky_retries: int = Field(default=1, ge=0, le=5)
+    # Opt-in mutation gate (lha.verify.mutation_gate): a shell command run in the sandbox after
+    # every gating check passed, with the changed files in LHA_CHANGED_FILES; a non-zero exit
+    # (surviving mutants) keeps the item red. Empty = off.
+    mutation_check: str = ""
+    mutation_timeout_s: int = Field(default=1800, gt=0)
 
     # --- Multi-agent coordination (lha orchestrate) ---------------------------------
     # Most checklist items one parallel wave runs at once, each by its own implementer in its

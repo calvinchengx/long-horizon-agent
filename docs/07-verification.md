@@ -305,3 +305,49 @@ event to the anchor.
 
 The cycle event's `checks` list shows each result's `gating` flag, so a quarantined check is
 visible in every checkpoint (`"gating": false`), and its output starts with `[flaky]`.
+
+## Mutation gate
+
+Passing tests prove the code does what the tests check, not that the tests check anything. When a
+model writes the code and its tests in the same cycle, it can write tests that run the code and
+assert nothing, and a gate of ruff, ty and pytest passes them. The opt-in mutation gate
+([`verify/mutation_gate.py`](../python/src/lha/verify/mutation_gate.py), Go:
+[`verify/mutation_gate.go`](../go/internal/verify/mutation_gate.go)) asks the question mutation
+testing answers: if this code had a small bug, would a test fail?
+
+Set `LHA_MUTATION_CHECK` to a shell command that runs a mutation tool on the changed code and
+exits non-zero when mutants survive. Every run path's verifier (`lead_verifier`, so the Lead, the
+implementers and the integrator) then applies these rules:
+
+1. **Only on a green verdict.** The command runs after every gating check passed. On a red or
+   `unverified` verdict it does not run: mutating code whose tests fail, or that has none, tells
+   nothing and costs a full mutation run.
+2. **Scoped to the item.** It runs with `sh -c` in the sandbox, like a `cmd:` witness, and gets the
+   files the item changed (`git diff HEAD` plus untracked files, outside `.lha/`) in
+   `LHA_CHANGED_FILES`, one per line. With no changed files it does not run. A failed attempt is
+   rolled back, so these are the current attempt's changes.
+3. **It can only keep an item red.** Its result is the gating check `mutation`: exit 0 passes, any
+   other exit fails the item, and the command's output tail is in the failure report the model
+   reads, so the surviving mutants tell it which behaviour no test pins. It is not re-run as a
+   possible flake. If the changed files cannot be listed, it fails.
+4. **Bounded.** `LHA_MUTATION_TIMEOUT_S` (default 1800) caps each run; a timeout fails the check.
+
+The command names the tool, so the gate works for any language. For a Go project, gremlins
+(v0.6) mutates only the lines changed since `HEAD`; print the mutants that lived or timed out and
+fail if there are any (its `--threshold-efficacy` does not set the exit code):
+
+```bash
+LHA_MUTATION_CHECK="! gremlins unleash --diff HEAD --timeout-coefficient 20 -S lt | grep -E 'LIVED|TIMED OUT'"
+```
+
+For a Python project, mutmut reads its scope from `[tool.mutmut]` in `pyproject.toml`, and
+`mutmut results` lists only the mutants that were not killed; print them and fail if there are any:
+
+```bash
+LHA_MUTATION_CHECK='uv run mutmut run >/dev/null; ! uv run mutmut results | grep .'
+```
+
+The tool must be in the sandbox image. A full mutation run re-runs the tests once per mutant, so
+scope it to the changed code, and budget for it: it runs on every green verification.
+LHA's own safety code has a nightly mutation audit of its own
+([20-testing.md](20-testing.md#mutation-audit)).

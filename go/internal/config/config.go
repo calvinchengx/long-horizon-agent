@@ -123,6 +123,11 @@ type Settings struct {
 	// cycle attempt (python: reset_keep; see ResetKeepPaths).
 	ResetKeep    string `env:"reset_keep" default:""`
 	FlakyRetries int    `env:"flaky_retries" default:"1" ge:"0" le:"5"`
+	// Opt-in mutation gate (verify.MutationGateVerifier): a shell command run in the sandbox
+	// after every gating check passed, with the changed files in LHA_CHANGED_FILES; a non-zero
+	// exit keeps the item red. "" = off.
+	MutationCheck    string `env:"mutation_check" default:""`
+	MutationTimeoutS int    `env:"mutation_timeout_s" default:"1800" gt:"0"`
 
 	// --- Multi-agent coordination
 	MaxParallelImplementers int `env:"max_parallel_implementers" default:"3"`

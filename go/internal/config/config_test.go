@@ -59,6 +59,8 @@ func TestNewFieldDefaults(t *testing.T) {
 		"ModelTimeoutS":              {s.ModelTimeoutS, 120.0},
 		"ModelProbeTimeoutS":         {s.ModelProbeTimeoutS, 10.0},
 		"WorkerGuardIntervalS":       {s.WorkerGuardIntervalS, 30.0},
+		"MutationCheck":              {s.MutationCheck, ""},
+		"MutationTimeoutS":           {s.MutationTimeoutS, 1800},
 		"WorkerDeployment":           {s.WorkerDeployment, ""},
 		"WorkerBuildID":              {s.WorkerBuildID, ""},
 		"WorkerVersioningBehavior":   {s.WorkerVersioningBehavior, "pinned"},
@@ -99,7 +101,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 108 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 110 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
