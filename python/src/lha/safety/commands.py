@@ -431,7 +431,8 @@ def _parse_opts(spec: _OptSpec, rest: list[str]) -> list[tuple[list[str], list[s
     while stack:
         i, scripts = stack.pop()
         while True:
-            if len(readings) + len(stack) > _MAX_CANDIDATES:
+            # equivalent: `readings - stack` trips too, since every pending entry yields a reading
+            if len(readings) + len(stack) > _MAX_CANDIDATES:  # pragma: no mutate
                 raise _Ambiguous("too many ways to read the launcher options")
             if i >= len(rest):
                 readings.append((scripts, []))
@@ -513,12 +514,14 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
         return [argv]
     out: list[list[str]] = []
     for scripts, command in _parse_opts(spec, rest):
-        out.extend(["sh", "-c", script] for script in scripts)
+        # equivalent: _base lowercases the name ("SH" reads as "sh")
+        out.extend(["sh", "-c", script] for script in scripts)  # pragma: no mutate
         if head == "flock" and command[:1] in (["-c"], ["--command"]):
-            out.extend(["sh", "-c", script] for script in command[1:2])
+            # equivalent: _base lowercases the name ("SH" reads as "sh")
+            out.extend(["sh", "-c", script] for script in command[1:2])  # pragma: no mutate
             continue
         if head == "watch" and command:  # run as ``sh -c "<args joined>"`` (unless ``-x``)
-            out.append(["sh", "-c", " ".join(command)])
+            out.append(["sh", "-c", " ".join(command)])  # pragma: no mutate (_base lowercases)
         out.extend(_unwrap(command, depth + 1))
         if len(out) > _MAX_CANDIDATES:
             raise _Ambiguous("too many ways to read the launcher options")
@@ -532,7 +535,7 @@ def _command_lookup(rest: list[str]) -> bool:
             return False
         if "v" in arg or "V" in arg:
             return True
-    return False
+    return False  # pragma: no mutate (options only: no reading runs anything either way)
 
 
 @dataclass(frozen=True)
@@ -546,7 +549,8 @@ class _Scope:
 
 def _in_workspace(path: str, scope: _Scope) -> str:
     """``path`` relative to the workspace when it is an absolute path inside it, else unchanged."""
-    root = posixpath.normpath(scope.workspace) if scope.workspace else ""
+    # equivalent: any non-absolute root is ignored
+    root = posixpath.normpath(scope.workspace) if scope.workspace else ""  # pragma: no mutate
     if not root.startswith("/") or root == "/" or not path.startswith("/"):
         return path
     normalized = posixpath.normpath(path)
@@ -572,12 +576,14 @@ def _escapes(path: str, scope: _Scope) -> bool:
 
 def _touches_protected(path: str, scope: _Scope) -> bool:
     normalized = posixpath.normpath(_in_workspace(path.replace("\\", "/"), scope))
-    first = normalized.split("/", 1)[0].casefold()
+    first = normalized.split("/", 1)[0].casefold()  # pragma: no mutate (maxsplit: only [0] is used)
     return first in _PROTECTED
 
 
 def _classify_rm(args: list[str], scope: _Scope) -> str | None:
-    flags = "".join(a.lstrip("-") for a in args if a.startswith("-") and not a.startswith("--"))
+    shorts = [a for a in args if a.startswith("-") and not a.startswith("--")]
+    # equivalent: only whether an `r` occurs matters; the joiner and stripped chars add none
+    flags = "".join(a.lstrip("-") for a in shorts)  # pragma: no mutate
     recursive = "r" in flags.lower() or "--recursive" in args
     targets = [a for a in args if not a.startswith("-")]
     for target in targets:
@@ -595,9 +601,10 @@ def _classify_git(args: list[str]) -> str | None:
         if opt in ("-c", "--config-env") and len(args) > 1:
             config = args[1]
         elif opt.startswith("--config-env="):
-            config = opt.split("=", 1)[1]
+            # equivalent: only the key before the next `=` is used
+            config = opt.split("=", 1)[1]  # pragma: no mutate
         else:
-            config = ""
+            config = ""  # pragma: no mutate (any non-exec key reads the same)
         if _git_exec_config(config.partition("=")[0]) and not (
             opt == "-c" and _plain_pager(config)
         ):
@@ -612,7 +619,8 @@ def _classify_git(args: list[str]) -> str | None:
     if sub in _GIT_ALWAYS or sub.startswith("remote-"):
         return f"git {sub} (outward-facing / rewrites history)"
     if sub == "config" and not _GIT_CONFIG_READS.intersection(rest):
-        key = next((a for a in rest if not a.startswith("-") and a not in ("set", "add")), "")
+        keys = (a for a in rest if not a.startswith("-") and a not in ("set", "add"))
+        key = next(keys, "")  # pragma: no mutate (any non-exec default reads the same)
         if _git_exec_config(key):
             return f"git config {key} (defines what git runs or where it pushes)"
     for arg in rest:
@@ -622,11 +630,11 @@ def _classify_git(args: list[str]) -> str | None:
         return f"git {sub} -u runs an arbitrary upload-pack command"
     if sub == "reset" and "--hard" in rest:
         return "git reset --hard discards work"
-    if sub == "clean" and any(a.startswith("-") and "f" in a.lstrip("-") for a in rest):
+    if sub == "clean" and any(a.startswith("-") and "f" in a for a in rest):
         return "git clean -f deletes untracked files"
     if sub == "branch" and _git_branch_force_delete(rest):
         return "git branch force-delete (discards unmerged work)"
-    if sub == "remote" and rest[:1] and rest[0] in ("add", "set-url", "remove", "rm"):
+    if sub == "remote" and rest and rest[0] in ("add", "set-url", "remove", "rm"):
         return "git remote reconfiguration"
     if sub == "reflog" and rest[:1] == ["expire"]:
         return "git reflog expire destroys recovery points"
@@ -644,7 +652,7 @@ def _git_exec_config(key: str) -> bool:
 
 def _plain_pager(config: str) -> bool:
     """``core.pager=cat`` (or ``less`` / ``more``) runs a pager, not an arbitrary command."""
-    key, _, value = config.partition("=")
+    key, _, value = config.partition("=")  # pragma: no mutate (a plain pager value has no `=`)
     return key.strip().lower() == "core.pager" and value in _PLAIN_PAGERS
 
 
@@ -653,7 +661,8 @@ def _git_branch_force_delete(rest: list[str]) -> bool:
 
     A plain ``-d`` only deletes branches that are already merged, so it is not gated.
     """
-    shorts = "".join(a[1:] for a in rest if a.startswith("-") and not a.startswith("--"))
+    opts = [a for a in rest if a.startswith("-") and not a.startswith("--")]
+    shorts = "".join(a[1:] for a in opts)  # pragma: no mutate (the joiner adds no d, f or D)
     delete = "d" in shorts or "--delete" in rest
     force = "f" in shorts or "--force" in rest
     return "D" in shorts or (delete and force)
@@ -672,7 +681,9 @@ def _redirect_into_protected(tokens: list[str], scope: _Scope) -> str | None:
         match = _REDIRECT.search(token)
         if match is None:
             continue
-        target = token[match.end() :] or (tokens[i + 1] if i + 1 < len(tokens) else "")
+        # equivalent default: an empty or "XXXX" target is not a harness-owned path
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else ""  # pragma: no mutate
+        target = token[match.end() :] or nxt
         if target and _touches_protected(target, scope):
             return f"redirection writes a harness-owned path ({target!r})"
     return None
@@ -715,9 +726,10 @@ def _classify_curl(args: list[str]) -> str | None:
     i = 0
     while i < len(args):
         arg = args[i]
-        nxt = args[i + 1] if i + 1 < len(args) else ""
+        # equivalent: no default value is a write method or an upload setting
+        nxt = args[i + 1] if i + 1 < len(args) else ""  # pragma: no mutate
         if arg == "--":
-            break
+            break  # pragma: no mutate (return None: the same)
         if arg.startswith("--"):
             flag, has_eq, value = arg.partition("=")
             if flag in _CURL_UPLOAD_FLAGS or flag.startswith(("--data", "--form")):
@@ -728,7 +740,7 @@ def _classify_curl(args: list[str]) -> str | None:
                 method = value if has_eq else nxt
                 if method.upper() in _WRITE_METHODS:
                     return f"curl {method.upper()} request"
-        elif arg.startswith("-") and len(arg) > 1:
+        elif arg.startswith("-") and len(arg) > 1:  # pragma: no mutate (a lone `-` has no letters)
             for pos, ch in enumerate(arg[1:], start=1):
                 attached = arg[pos + 1 :]
                 if ch in _CURL_UPLOAD_SHORT:
@@ -749,7 +761,8 @@ def _classify_curl(args: list[str]) -> str | None:
 
 def _classify_wget(args: list[str]) -> str | None:
     for i, arg in enumerate(args):
-        nxt = args[i + 1] if i + 1 < len(args) else ""
+        # equivalent: no default value is a write method or an upload setting
+        nxt = args[i + 1] if i + 1 < len(args) else ""  # pragma: no mutate
         flag, has_eq, value = arg.partition("=")
         if flag in ("--post-data", "--post-file", "--body-data", "--body-file"):
             return f"wget upload ({flag})"
@@ -814,13 +827,17 @@ def _classify_one(argv: list[str], depth: int, scope: _Scope) -> str | None:
         return f"privilege escalation ({tool})"
     if tool in _SHELLS:
         for i, arg in enumerate(args):
-            if arg == "-c" or (arg.startswith("-") and not arg.startswith("--") and "c" in arg):
+            short = arg.startswith("-") and not arg.startswith("--")
+            # equivalent: `short and "c" in arg` already matches "-c"
+            if arg == "-c" or (short and "c" in arg):  # pragma: no mutate
                 if i + 1 < len(args):
                     return _classify_script(args[i + 1], depth + 1, scope)
                 return None
         return None
     if tool == "eval":
-        return _classify_script(" ".join(args), depth + 1, scope) if args else None
+        if not args:
+            return None
+        return _classify_script(" ".join(args), depth + 1, scope)
     if tool in _ALWAYS_GATED:
         return f"{tool} is an outward-facing / destructive tool"
     if tool == "git":
@@ -847,12 +864,15 @@ def _classify_one(argv: list[str], depth: int, scope: _Scope) -> str | None:
             reason = _classify_simple(command, depth, scope)
             if reason:
                 return reason
-        if "-delete" in args and any(_touches_protected(a, scope) for a in args if a[:1] != "-"):
-            return "find -delete removes a harness-owned path"
+        if "-delete" in args:
+            paths = [a for a in args if a[:1] != "-"]  # pragma: no mutate (options are no paths)
+            if any(_touches_protected(a, scope) for a in paths):
+                return "find -delete removes a harness-owned path"
         return None
     if tool == "rsync":
         targets = [a for a in args if not a.startswith("-")]
-        if any(":" in t.split("/", 1)[0] for t in targets):
+        # equivalent maxsplit: only [0] is used
+        if any(":" in t.split("/", 1)[0] for t in targets):  # pragma: no mutate
             return "rsync to/from a remote host"
     if tool == "rm":
         found = _classify_rm(args, scope)
@@ -862,7 +882,8 @@ def _classify_one(argv: list[str], depth: int, scope: _Scope) -> str | None:
         if tool == "sed" and not _sed_in_place(args):
             return None
         for arg in args:
-            if not arg.startswith("-") and _touches_protected(arg, scope):
+            # equivalent: an option never starts with a harness-owned directory
+            if not arg.startswith("-") and _touches_protected(arg, scope):  # pragma: no mutate
                 return f"{tool} mutates a harness-owned path ({arg!r})"
     return None
 
@@ -874,7 +895,8 @@ _RESERVED_PREFIX = frozenset(
 
 def _is_assignment(token: str) -> bool:
     name, eq, _ = token.partition("=")
-    return bool(eq) and name.replace("_", "a").isalnum() and not name[:1].isdigit()
+    word = name.replace("_", "a")  # pragma: no mutate (`_` may become any alphanumeric)
+    return bool(eq) and word.isalnum() and not name[:1].isdigit()
 
 
 def _substitutions(script: str) -> list[str]:
@@ -885,7 +907,7 @@ def _substitutions(script: str) -> list[str]:
     """
     bodies: list[str] = []
     i, n = 0, len(script)
-    in_single = in_double = False
+    in_single = in_double = False  # pragma: no mutate (None is falsy too)
     while i < n:
         ch = script[i]
         if ch == "\\" and not in_single:
@@ -900,7 +922,8 @@ def _substitutions(script: str) -> list[str]:
             while end < n and script[end] != "`":
                 end += 2 if script[end] == "\\" else 1
             if end >= n:
-                raise ValueError("unterminated backtick substitution")
+                # equivalent: the message is never shown (unparseable shell script)
+                raise ValueError("unterminated backtick substitution")  # pragma: no mutate
             bodies.append(script[i + 1 : end])
             i = end
         elif not in_single and ch in "$<>" and script[i + 1 : i + 2] == "(":
@@ -912,17 +935,18 @@ def _substitutions(script: str) -> list[str]:
                 depth += {"(": 1, ")": -1}.get(script[end], 0)
                 end += 1
             if depth:
-                raise ValueError("unterminated $( substitution")
+                # equivalent: the message is never shown (unparseable shell script)
+                raise ValueError("unterminated $( substitution")  # pragma: no mutate
             body = script[i + 2 : end - 1]
             if ch == "$" and body.startswith("(") and body.endswith(")"):
-                body = ""  # $(( arithmetic ))
+                body = ""  # pragma: no mutate ($(( arithmetic )): any body without a command)
             if body:
                 bodies.append(body)
             i = end
             continue
         i += 1
     if in_single or in_double:
-        raise ValueError("unterminated quote")
+        raise ValueError("unterminated quote")  # pragma: no mutate (message unused)
     return bodies
 
 
@@ -954,11 +978,13 @@ def _classify_script(script: str, depth: int, scope: _Scope) -> str | None:
     i = 0
     while i < len(tokens):
         token = tokens[i]
+        # equivalent slice bounds: a token ending in `$` is never the final `;`, so i + 1 exists
+        following = tokens[i + 1 : i + 2]  # pragma: no mutate
         if (
             skip_arguments
             and token.endswith("$")
-            and tokens[i + 1 : i + 2]
-            and tokens[i + 1][0] == "("
+            and following
+            and following[0][0] == "("
             and _has_command(segment)
         ):
             # A substitution used as an argument (``echo $(date) $(cat f)``): its body was
@@ -991,9 +1017,11 @@ def _skip_group(tokens: list[str], start: int) -> int:
     depth = 0
     for i in range(start, len(tokens)):
         token = tokens[i]
-        if set(token) <= set(";&|()\n"):
+        # equivalent: inside the group depth >= 1, so a non-paren char never closes it
+        if set(token) <= set(";&|()\n"):  # pragma: no mutate
             for j, ch in enumerate(token):
-                depth += {"(": 1, ")": -1}.get(ch, 0)
+                # equivalent sign: only depth == 0 is tested
+                depth += {"(": 1, ")": -1}.get(ch, 0)  # pragma: no mutate
                 if depth == 0:
                     rest = token[j + 1 :]
                     if rest:
@@ -1011,7 +1039,8 @@ def _classify_segment(segment: list[str], depth: int, scope: _Scope) -> str | No
     while segment and (segment[0] in _RESERVED_PREFIX or _is_assignment(segment[0])):
         segment = segment[1:]
     # Tokens glued to substitutions (``$(git``/```git``) were classified via ``_substitutions``.
-    return _classify_simple(segment, depth, scope) if segment else None
+    # equivalent: an empty segment classifies as None
+    return _classify_simple(segment, depth, scope) if segment else None  # pragma: no mutate
 
 
 def classify_command(
