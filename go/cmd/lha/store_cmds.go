@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/durable"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
@@ -25,6 +26,8 @@ const (
 	dbHelp       = "Database maintenance (Postgres)."
 	migrateHelp  = "Apply the SQL migrations to the Postgres database at LHA_POSTGRES_DSN."
 	memoryHelp   = "Tiered memory maintenance."
+	objectsHelp  = "ClaimCheck object store maintenance."
+	pruneHelp    = "Delete old payloads from the object store at LHA_OBJECT_STORE_ROOT."
 	reembedHelp  = "Re-embed stored memory with the configured embedder."
 )
 
@@ -377,4 +380,52 @@ func (c *cli) memoryCmd(args []string) error {
 		fmt.Fprintf(c.stdout, "%d rows %s with %s\n", total, verb, using)
 		return nil
 	})
+}
+
+// objectsCmd is `lha objects prune --older-than-days N [--dry-run]` (python: lha.cli.main prune).
+func (c *cli) objectsCmd(args []string) error {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		fmt.Fprintf(c.stdout, "Usage: lha objects [OPTIONS] COMMAND [ARGS]...\n\n%s\n\nCommands:\n  %-12s %s\n", objectsHelp, "prune", pruneHelp)
+		if len(args) == 0 {
+			return &exitError{code: 2} // typer's no_args_is_help
+		}
+		return nil
+	}
+	if args[0] != "prune" {
+		return &exitError{code: 2, message: "Usage: lha objects [OPTIONS] COMMAND [ARGS]...\nTry 'lha objects --help' for help.\n\n" +
+			"Error: No such command " + pyQuote(args[0]) + "."}
+	}
+	fs := c.newFlags("objects prune", pruneHelp)
+	days := fs.Int("older-than-days", 0, "Delete objects not modified for this many days.")
+	dryRun := fs.Bool("dry-run", false, "Only count and size them.")
+	if err := c.parse(fs, args[1:]); err != nil {
+		return err
+	}
+	if *days < 1 {
+		if !isFlagSet(fs, "older-than-days") {
+			return &exitError{code: 2, message: "Usage: lha objects prune [OPTIONS]\nTry 'lha objects prune --help' for help.\n\n" +
+				"Error: Missing option '--older-than-days'."}
+		}
+		return rangeError("objects prune", "older-than-days", *days, 1, 0, false)
+	}
+	settings, err := config.Load()
+	if err != nil {
+		return err
+	}
+	result, err := durable.PruneObjects(config.ResolvePath(config.ExpandUser(settings.ObjectStoreRoot)), *days, *dryRun)
+	if err != nil {
+		return err
+	}
+	verb := "deleted"
+	if *dryRun {
+		verb = "to delete"
+	}
+	fmt.Fprintf(c.stdout, "%d objects %s (%.1f MiB), %d kept\n", result.Count, verb, float64(result.Bytes)/(1<<20), result.Kept)
+	return nil
+}
+
+func isFlagSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) { set = set || f.Name == name })
+	return set
 }

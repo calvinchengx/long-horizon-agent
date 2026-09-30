@@ -23,6 +23,8 @@ import hashlib
 import os
 import re
 import tempfile
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -102,3 +104,42 @@ class LocalFileObjectStore(ObjectStore):
             return data
 
         return await asyncio.to_thread(_read)
+
+
+@dataclass(frozen=True)
+class PruneResult:
+    """What ``prune_objects`` deleted (or would delete) and what it kept."""
+
+    count: int
+    bytes: int
+    kept: int
+
+
+def prune_objects(root: str | Path, *, older_than_days: int, dry_run: bool = False) -> PruneResult:
+    """Delete the objects under ``root`` not modified for ``older_than_days`` days (``dry_run``:
+    only count them). Only files named by a sha256 key are considered; a missing root is empty.
+    Deleting an object a live workflow history still refers to breaks that mission, so the age
+    must exceed the longest mission plus Temporal's history retention (see the runbook)."""
+    if older_than_days < 1:
+        raise ValueError("older_than_days must be >= 1")
+    cutoff = time.time() - older_than_days * 86_400
+    count = size = kept = 0
+    base = Path(root)
+    if not base.is_dir():
+        return PruneResult(0, 0, 0)
+    for path in base.iterdir():
+        try:
+            validate_key(path.name)
+            stat = path.stat()
+        except (InvalidObjectKeyError, OSError):
+            continue
+        if not path.is_file():
+            continue
+        if stat.st_mtime >= cutoff:
+            kept += 1
+            continue
+        count += 1
+        size += stat.st_size
+        if not dry_run:
+            path.unlink(missing_ok=True)
+    return PruneResult(count, size, kept)

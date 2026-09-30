@@ -272,6 +272,48 @@ When a change is intentionally incompatible, re-record one history with
 `LHA_RECORD_HISTORY=1 uv run pytest tests/durability/test_replay.py -k <test>` and keep the older
 histories replaying.
 
+## Memory and disk over a long mission
+
+A local mission (`run-local`, `mission`, `orchestrate`) is one process for as long as it runs,
+and every checkpoint event carries the process's peak resident memory (`peak_rss_mb`), so a
+structure that grew with every cycle would show as a peak that climbs cycle after cycle. Nothing
+in the run paths is allowed to grow with the number of cycles; each long-lived structure has a
+bound, pinned by tests in both implementations
+([`test_bounded_memory.py`](../python/tests/unit/test_bounded_memory.py)):
+
+| Structure | Bound |
+|---|---|
+| Memory's embedding cache (vectors of the checkout's chunks, recalled skills, decisions and queries) | only the vectors the latest recall used; an edited file's old chunks are dropped, not kept, and at most 200 skills are recalled |
+| Trace recorder (`MissionSummary.trace_jsonl`) | the newest 10,000 events; every event is also logged as it happens |
+| Cost ledger | running totals over every call; the newest 5,000 entries (the rows are in the mission store) |
+| Blackboard (`orchestrate`) | the newest 256 posts; later rounds see the last 6 |
+| Committed flaky-check quarantine | read from the events log once per verifier, not once per verification |
+| `progress.md` | trimmed to 16,000 characters; `checklist.json` is one entry per item; `gate_log` in workflow state the newest 50 lines |
+| Recalled memory | at most 500 stored records, 500 episodes and 200 skills are read per recall |
+| Temporal history | Continue-As-New every `cycles_before_can` cycles |
+
+A durable cycle runs as one activity that opens and closes its own memory, ledger and stores, so
+the worker process holds nothing across cycles. Measured with the stub model and the hash
+embedder: a 300-cycle local mission editing a 150-file checkout went from 23 MB of traced memory
+(growing about 50 KB per cycle) to 12 MB, flat once the caps were reached, and a 120-cycle
+durable mission's worker stayed at 3 MB from cycle 20 on. The load tests
+([`test_memory_growth.py`](../python/tests/load/test_memory_growth.py), Go
+[`growth_test.go`](../go/internal/agent/growth_test.go)) fail if per-cycle growth returns.
+
+What does grow, on disk, and how to bound it:
+
+- **The mission store** (`episodic_events`, `semantic_memory`, `skills`, `cost_ledger`): the
+  mission's memory and ledger, by design. Reads are bounded (above).
+- **The workspace repository**: one checkpoint commit per cycle; git's auto-gc packs it
+  (300 cycles: about 1 MB).
+- **The ClaimCheck object store** (`LHA_OBJECT_STORE_ROOT`): durable missions offload every
+  payload over 32 KiB there and nothing removes an object on its own. Run
+  `lha objects prune --older-than-days N` (`--dry-run` first) with `N` longer than your longest
+  mission plus the Temporal namespace's history retention: an object a live history still refers
+  to must not be deleted ([17-cli.md](17-cli.md#lha-objects-prune)).
+- **The spend journal** (`.git/lha/spend.ndjson`, durable path): one line per attempt, read at
+  the start of each cycle.
+
 ## Recovery
 
 **Worker or host crash.** Restart `lha worker` (any worker polling `LHA_TASK_QUEUE` works). Temporal

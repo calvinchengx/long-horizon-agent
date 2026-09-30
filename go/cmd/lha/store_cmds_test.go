@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -270,6 +271,49 @@ func TestMemoryReembedNeedsMemoryAndAnEmbedder(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	if r := runCLI(t, nil, "memory", "nope"); r.code != 2 || !strings.Contains(r.stderr, "No such command 'nope'") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// TestObjectsPrune is python's test_cli_objects_prune, with Python's output on the same store.
+func TestObjectsPrune(t *testing.T) {
+	dir := cleanEnv(t)
+	root := filepath.Join(dir, "objects")
+	t.Setenv("LHA_OBJECT_STORE_ROOT", root)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := filepath.Join(root, strings.Repeat("c", 64))
+	if err := os.WriteFile(old, make([]byte, 2<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-10 * 24 * time.Hour)
+	if err := os.Chtimes(old, past, past); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, strings.Repeat("d", 64)), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dry := runCLI(t, nil, "objects", "prune", "--older-than-days", "7", "--dry-run")
+	if dry.code != 0 || dry.stdout != "1 objects to delete (2.0 MiB), 1 kept\n" {
+		t.Fatalf("%+v", dry)
+	}
+	if pythonAvailable(t) {
+		py := runPythonLHA(t, dir, []string{"LHA_OBJECT_STORE_ROOT=" + root}, "objects", "prune", "--older-than-days", "7", "--dry-run")
+		if py.code != 0 || !strings.HasSuffix(py.stdout, dry.stdout) {
+			t.Fatalf("python: %+v", py)
+		}
+	}
+	if r := runCLI(t, nil, "objects", "prune", "--older-than-days", "7"); r.stdout != "1 objects deleted (2.0 MiB), 1 kept\n" {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(old); !os.IsNotExist(err) {
+		t.Fatal("old object kept")
+	}
+	if r := runCLI(t, nil, "objects", "prune"); r.code != 2 || !strings.Contains(r.stderr, "Missing option '--older-than-days'") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "objects", "prune", "--older-than-days", "0"); r.code != 2 || !strings.Contains(r.stderr, "not in the range x>=1") {
 		t.Fatalf("%+v", r)
 	}
 }

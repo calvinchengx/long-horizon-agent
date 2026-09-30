@@ -31,6 +31,8 @@ db_app = typer.Typer(help="Database maintenance (Postgres).", no_args_is_help=Tr
 app.add_typer(db_app, name="db")
 memory_app = typer.Typer(help="Tiered memory maintenance.", no_args_is_help=True)
 app.add_typer(memory_app, name="memory")
+objects_app = typer.Typer(help="ClaimCheck object store maintenance.", no_args_is_help=True)
+app.add_typer(objects_app, name="objects")
 
 
 @app.callback()
@@ -455,6 +457,31 @@ def reembed(
 
     for line in _run(_with_store(_reembed)):
         typer.echo(line)
+
+
+@objects_app.command()
+def prune(
+    older_than_days: int = typer.Option(
+        ..., "--older-than-days", min=1, help="Delete objects not modified for this many days."
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Only count and size them."),
+) -> None:
+    """Delete old payloads from the object store at LHA_OBJECT_STORE_ROOT.
+
+    Durable missions offload every payload over 32 KiB there and journal only its key, so the
+    store grows with every cycle and nothing removes an object on its own. An object is safe to
+    delete once no workflow history can still refer to it: choose a retention longer than your
+    longest mission plus the Temporal namespace's history retention.
+    """
+    from lha.persistence.object_store import prune_objects
+
+    result = prune_objects(
+        get_settings().object_store_root, older_than_days=older_than_days, dry_run=dry_run
+    )
+    verb = "to delete" if dry_run else "deleted"
+    typer.echo(
+        f"{result.count} objects {verb} ({result.bytes / 2**20:.1f} MiB), {result.kept} kept"
+    )
 
 
 @app.command(name="run-local")

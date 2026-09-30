@@ -126,6 +126,20 @@ this run (`[]` when up to date). Exits `2` if `LHA_POSTGRES_DSN` is unset or `ps
 The Go `lha db migrate` applies the same files with the same `schema_migrations` bookkeeping and
 advisory lock, so either implementation sees what the other applied.
 
+## `lha objects prune`
+
+```
+lha objects prune --older-than-days N [--dry-run]
+```
+
+Deletes the objects in the ClaimCheck store at `LHA_OBJECT_STORE_ROOT` not modified for `N` days
+(`N` >= 1; only files named by a sha256 key are considered). Prints
+`<count> objects deleted (<MiB> MiB), <kept> kept`, or `... to delete ...` with `--dry-run`.
+Durable missions offload every payload over 32 KiB there and journal only its key, so the store
+grows with every cycle. An object a live workflow history still refers to must not be deleted:
+choose `N` longer than your longest mission plus the Temporal namespace's history retention
+([runbook](15-operations-runbook.md#memory-and-disk-over-a-long-mission)).
+
 ## `lha memory reembed`
 
 ```

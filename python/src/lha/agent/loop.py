@@ -51,6 +51,7 @@ from lha.contracts.verify import (
 )
 from lha.obs.events import TraceRecorder
 from lha.obs.otel import span, traced_dispatch
+from lha.obs.procmem import peak_rss_mb
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.harness_integrity import (
@@ -371,6 +372,7 @@ class AgentLoop:
             head_sha=head,
             verified=verification.all_green,
             verdict=verification.verdict,
+            peak_rss_mb=peak_rss_mb(),
         )
         if self._memory is not None:
             from lha.memory.service import CycleObservation

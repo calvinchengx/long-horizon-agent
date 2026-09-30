@@ -45,6 +45,9 @@ const (
 	quarantineEventsPath    = ".lha/events.ndjson"
 )
 
+// committedQuarantine is CommittedQuarantine (swapped by tests).
+var committedQuarantine = CommittedQuarantine
+
 // CommittedQuarantine returns the check names quarantined by check_quarantined events committed
 // at HEAD of workdir (the agent's uncommitted edits to .lha/ are ignored). Any git failure (no
 // repository, no event log at HEAD) yields an empty set.
@@ -94,8 +97,9 @@ type FlakyRetryVerifier struct {
 	// uses TreeRevision of the workdir, falling back to a per-call id without git.
 	Revision func(ctx context.Context) (string, error)
 
-	retries int
-	workdir string
+	retries  int
+	workdir  string
+	restored bool
 
 	mu     sync.Mutex
 	events []contracts.EventRecord
@@ -134,8 +138,11 @@ func (v *FlakyRetryVerifier) Verify(ctx context.Context, session contracts.Sandb
 	if err != nil || v.retries == 0 {
 		return first, err
 	}
-	if v.workdir != "" {
-		v.Quarantine.Restore(CommittedQuarantine(ctx, v.workdir))
+	if v.workdir != "" && !v.restored {
+		// Once per verifier: the committed log grows every cycle, and every quarantine decided
+		// after this point is this verifier's own.
+		v.Quarantine.Restore(committedQuarantine(ctx, v.workdir))
+		v.restored = true
 	}
 	byName := make(map[string]contracts.Check, len(checks))
 	for _, c := range checks {

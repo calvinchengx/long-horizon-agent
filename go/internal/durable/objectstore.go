@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Content-addressed object store for large-blob spillover (claim-check pattern)
@@ -146,4 +147,51 @@ func (s *LocalFileObjectStore) Get(_ context.Context, key string) ([]byte, error
 		return nil, &ObjectCorruptError{Key: key}
 	}
 	return data, nil
+}
+
+// PruneResult is what PruneObjects deleted (or would delete) and what it kept.
+type PruneResult struct {
+	Count int
+	Bytes int64
+	Kept  int
+}
+
+// PruneObjects deletes the objects under root not modified for olderThanDays days (dryRun: only
+// counts them). Only files named by a sha256 key are considered; a missing root is empty.
+// Deleting an object a live workflow history still refers to breaks that mission, so the age must
+// exceed the longest mission plus Temporal's history retention (python: prune_objects).
+func PruneObjects(root string, olderThanDays int, dryRun bool) (PruneResult, error) {
+	if olderThanDays < 1 {
+		return PruneResult{}, errors.New("older_than_days must be >= 1")
+	}
+	cutoff := time.Now().Add(-time.Duration(olderThanDays) * 24 * time.Hour)
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return PruneResult{}, nil
+	}
+	if err != nil {
+		return PruneResult{}, err
+	}
+	var out PruneResult
+	for _, e := range entries {
+		if _, err := ValidateKey(e.Name()); err != nil || !e.Type().IsRegular() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if !info.ModTime().Before(cutoff) {
+			out.Kept++
+			continue
+		}
+		out.Count++
+		out.Bytes += info.Size()
+		if !dryRun {
+			if err := os.Remove(filepath.Join(root, e.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return out, err
+			}
+		}
+	}
+	return out, nil
 }

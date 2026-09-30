@@ -346,3 +346,22 @@ def run_flaky_scenario(case: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return {"runs": inner.runs, "calls": calls}
+
+
+# The committed events log grows every cycle: a verifier reads it once, not on every verify.
+@pytest.mark.asyncio
+async def test_the_committed_quarantine_is_read_once_per_verifier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    reads = 0
+
+    def committed(_workdir: str) -> set[str]:
+        nonlocal reads
+        reads += 1
+        return {"old"}
+
+    monkeypatch.setattr("lha.verify.flaky_quarantine.committed_quarantine", committed)
+    verifier = FlakyRetryVerifier(_Scripted({"t": ["pass"]}), retries=1, workdir=str(tmp_path))
+    for _ in range(3):
+        await verifier.verify(_SESSION, _checks("t"))
+    assert reads == 1 and verifier.quarantine.is_flaky("old")

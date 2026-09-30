@@ -266,7 +266,8 @@ func (l *AgentLoop) runCycle(ctx context.Context, tctx contracts.ToolContext, mi
 		return CycleOutcome{}, err
 	}
 	l.emit("checkpoint", missionID, cycleID, obs.F("head_sha", head),
-		obs.F("verified", verification.AllGreen), obs.F("verdict", verification.Verdict))
+		obs.F("verified", verification.AllGreen), obs.F("verdict", verification.Verdict),
+		obs.F("peak_rss_mb", obs.PeakRSSMB()))
 	final := checklist.Get(item.ID)
 	if l.opts.Memory != nil {
 		failure := ""

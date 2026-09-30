@@ -298,3 +298,20 @@ func TestQuarantineUsesTheTreeRevisionInAGitWorkdir(t *testing.T) {
 		t.Fatal(r.Results[0].OutputTail)
 	}
 }
+
+// The committed events log grows every cycle: a verifier reads it once, not on every Verify.
+func TestTheCommittedQuarantineIsReadOncePerVerifier(t *testing.T) {
+	reads := 0
+	defer func(f func(context.Context, string) map[string]bool) { committedQuarantine = f }(committedQuarantine)
+	committedQuarantine = func(context.Context, string) map[string]bool { reads++; return map[string]bool{"old": true} }
+	inner := &scripted{outcomes: map[string][]string{"t": {"pass"}}}
+	v := NewFlakyRetryVerifier(inner, 1, t.TempDir())
+	for i := 0; i < 3; i++ {
+		if _, err := v.Verify(context.Background(), nil, []contracts.Check{{Name: "t", Gating: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if reads != 1 || !v.Quarantine.IsFlaky("old") {
+		t.Fatal(reads, v.Quarantine.IsFlaky("old"))
+	}
+}

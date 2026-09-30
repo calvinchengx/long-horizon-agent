@@ -43,7 +43,7 @@ The other connections, each used only when it is configured:
 | the worker | the object store (payloads over 32 KiB) | always, for large payloads ([ClaimCheck](08-durable-execution.md#claimcheck-payload-codec)) |
 | the CLI and the worker | an OTLP collector or Langfuse | an OTLP endpoint or the Langfuse keys are set |
 | `lha vendor` | the named pages on the internet | when run |
-| `lha db migrate`, `missions`, `costs`, `gates`, `memory reembed` | the mission store | when run |
+| `lha db migrate`, `missions`, `costs`, `gates`, `memory reembed`, `objects prune` | the mission store and the object store | when run |
 | `lha decisions --verify` | the workspace's decision log | when run |
 
 A model provider is Ollama, an OpenAI-compatible endpoint, Claude, Claude Code (`claude -p`) or

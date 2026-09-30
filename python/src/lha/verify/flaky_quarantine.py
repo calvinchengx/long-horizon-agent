@@ -148,6 +148,7 @@ class FlakyRetryVerifier:
         self.quarantine = FlakyQuarantine()
         self._events: list[EventRecord] = []
         self._calls = 0
+        self._restored = False
 
     def drain_events(self) -> list[EventRecord]:
         events, self._events = self._events, []
@@ -158,8 +159,11 @@ class FlakyRetryVerifier:
         first = await self._inner.verify(session, checks)
         if self._retries == 0:
             return first
-        if self._workdir is not None:
+        if self._workdir is not None and not self._restored:
+            # Once per verifier: the committed log grows every cycle, and every quarantine
+            # decided after this point is this verifier's own.
             self.quarantine.restore(await asyncio.to_thread(committed_quarantine, self._workdir))
+            self._restored = True
         by_name = {check.name: check for check in checks}
         revision: str | None = None
         results: list[CheckResult] = []
