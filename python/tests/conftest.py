@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import tempfile
 from collections.abc import Iterator
 from pathlib import Path
@@ -48,3 +49,37 @@ def _isolated_mission_store(tmp_path_factory: pytest.TempPathFactory) -> Iterato
     finally:
         mp.undo()
         get_settings.cache_clear()
+
+
+# Modules that exercise the shell-command classifier. Every input must be classified quickly: a
+# parser loop that never ends would hang the dispatcher, so these tests fail after a deadline
+# (this also turns a mutation that makes such a loop infinite into a failure, not a timeout).
+_CLASSIFIER_TEST_MODULES = frozenset(
+    {
+        "test_safety_commands",
+        "test_safety_bypasses",
+        "test_safety_command_paths",
+        "test_review_fixes_safety",
+        "test_spec_conformance",
+    }
+)
+_CLASSIFIER_DEADLINE_S = 5
+
+
+def _classifier_deadline_hit(signum: int, frame: object) -> None:
+    raise TimeoutError(f"no result within {_CLASSIFIER_DEADLINE_S}s (a parser loop never ends?)")
+
+
+@pytest.fixture(autouse=True)
+def _classifier_deadline(request: pytest.FixtureRequest) -> Iterator[None]:
+    module = request.module.__name__.rpartition(".")[2]
+    if module not in _CLASSIFIER_TEST_MODULES or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+    previous = signal.signal(signal.SIGALRM, _classifier_deadline_hit)
+    signal.alarm(_CLASSIFIER_DEADLINE_S)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous)

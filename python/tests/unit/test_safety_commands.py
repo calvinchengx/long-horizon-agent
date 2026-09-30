@@ -127,6 +127,7 @@ SCOPED = [
     (["sh", "-c", "echo x > /workspace/.git/config"], *DOCKER, True),
     (["rm", "-rf", "~/x"], *DOCKER, True),
     (["rm", "-f", "/workspace/x"], "workspace", True, True),  # a relative root is ignored
+    (["rm", "-rf", "//etc"], "/", False, True),  # a workspace at / holds no absolute path
 ]
 
 
@@ -136,3 +137,22 @@ def test_where_a_command_runs_decides_what_is_outside(
 ) -> None:
     reason = classify_command(argv, workspace=workspace, private_tmp=private_tmp)
     assert (reason is not None) is gated, (argv, reason)
+
+
+# Exact reasons. Only an `r` among short options (or --recursive) makes a delete recursive.
+REASONS = [
+    (["rm", "-r", "/x"], "recursive delete outside the workspace: '/x'"),
+    (["rm", "--recursive", "/x"], "recursive delete outside the workspace: '/x'"),
+    (["rm", "-f", "/x"], "delete outside the workspace: '/x'"),
+    (["rm", "--force", "/x"], "delete outside the workspace: '/x'"),
+    # the config key named in a reason ends at the first `=`
+    (
+        ["git", "-c", "alias.p=a=b", "p"],
+        "git -c alias.p (defines what git runs or where it pushes)",
+    ),
+]
+
+
+@pytest.mark.parametrize(("argv", "reason"), REASONS)
+def test_reason(argv: list[str], reason: str) -> None:
+    assert classify_command(argv) == reason
