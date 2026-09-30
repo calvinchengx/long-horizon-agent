@@ -25,6 +25,16 @@ func TestExecutionCodeQuery(t *testing.T) {
 			Argv   []string `json:"argv"`
 			Error  *string  `json:"error"`
 		} `json:"questions"`
+		SymbolMisses []string `json:"symbol_misses"`
+		Alternates   []struct {
+			Kind       string   `json:"kind"`
+			Target     string   `json:"target"`
+			Alternates []string `json:"alternates"`
+		} `json:"alternates"`
+		Misses []struct {
+			Detail string `json:"detail"`
+			Miss   bool   `json:"miss"`
+		} `json:"misses"`
 		Clip []struct {
 			Text    string `json:"text"`
 			Clipped string `json:"clipped"`
@@ -50,6 +60,19 @@ func TestExecutionCodeQuery(t *testing.T) {
 			t.Errorf("CodeQueryArgv(%q, %.20q): err %v, want %q", c.Kind, c.Target, err, *c.Error)
 		case c.Error == nil && (err != nil || !reflect.DeepEqual(argv, c.Argv)):
 			t.Errorf("CodeQueryArgv(%q, %.20q) = %q, %v; want %q", c.Kind, c.Target, argv, err, c.Argv)
+		}
+	}
+	if !reflect.DeepEqual(s.SymbolMisses, tools.SymbolMisses) || len(s.Alternates) == 0 || len(s.Misses) == 0 {
+		t.Fatalf("symbol misses differ or no cases")
+	}
+	for _, c := range s.Alternates {
+		if got := tools.AlternateTargets(c.Kind, c.Target); !reflect.DeepEqual(got, c.Alternates) {
+			t.Errorf("AlternateTargets(%q, %q) = %q, want %q", c.Kind, c.Target, got, c.Alternates)
+		}
+	}
+	for _, c := range s.Misses {
+		if got := tools.IsSymbolMiss(c.Detail); got != c.Miss {
+			t.Errorf("IsSymbolMiss(%q) = %v", c.Detail, got)
 		}
 	}
 	for i, c := range s.Clip {

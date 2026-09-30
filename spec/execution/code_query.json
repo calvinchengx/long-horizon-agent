@@ -183,6 +183,105 @@
    "error": "'kind' must be one of find, definition, callers, uses, impact"
   }
  ],
+ "symbol_misses": [
+  "matched no symbol",
+  "symbol not found",
+  "matched no indexed definition"
+ ],
+ "alternates": [
+  {
+   "kind": "callers",
+   "target": "Checklist.deadlock_reason",
+   "alternates": [
+    "Checklist::deadlock_reason",
+    "deadlock_reason"
+   ]
+  },
+  {
+   "kind": "definition",
+   "target": " lha.state.Checklist.deadlock_reason ",
+   "alternates": [
+    "Checklist::deadlock_reason",
+    "deadlock_reason"
+   ]
+  },
+  {
+   "kind": "uses",
+   "target": "a.py:Thing",
+   "alternates": []
+  },
+  {
+   "kind": "impact",
+   "target": "deadlock_reason",
+   "alternates": []
+  },
+  {
+   "kind": "find",
+   "target": "Checklist.deadlock_reason",
+   "alternates": []
+  },
+  {
+   "kind": "callers",
+   "target": "Checklist::deadlock_reason",
+   "alternates": []
+  },
+  {
+   "kind": "callers",
+   "target": "state.py",
+   "alternates": [
+    "state::py",
+    "py"
+   ]
+  },
+  {
+   "kind": "callers",
+   "target": "a..b",
+   "alternates": []
+  },
+  {
+   "kind": "callers",
+   "target": "a.b\n",
+   "alternates": [
+    "a::b",
+    "b"
+   ]
+  },
+  {
+   "kind": "callers",
+   "target": "déjà.vu",
+   "alternates": []
+  },
+  {
+   "kind": "callers",
+   "target": "_x.y_2",
+   "alternates": [
+    "_x::y_2",
+    "y_2"
+   ]
+  }
+ ],
+ "misses": [
+  {
+   "detail": "ripwire: --expand=X.y matched no symbol",
+   "miss": true
+  },
+  {
+   "detail": "ripwire: --callers symbol not found: X.y",
+   "miss": true
+  },
+  {
+   "detail": "ripwire: --uses selector matched no indexed definition: X.y",
+   "miss": true
+  },
+  {
+   "detail": "ripwire: cannot read index",
+   "miss": false
+  },
+  {
+   "detail": "",
+   "miss": false
+  }
+ ],
  "clip": [
   {
    "text": "",

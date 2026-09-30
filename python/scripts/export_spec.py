@@ -2552,9 +2552,12 @@ def export_code_query() -> None:
         MAX_ANSWER_CHARS,
         MAX_FIND_CHARS,
         MAX_SYMBOL_CHARS,
+        SYMBOL_MISSES,
         CodeQueryTool,
+        alternate_targets,
         clip_answer,
         code_query_argv,
+        is_symbol_miss,
     )
 
     questions = [
@@ -2593,6 +2596,33 @@ def export_code_query() -> None:
             "max_answer_chars": MAX_ANSWER_CHARS,
             "spec": CodeQueryTool.spec.model_dump(mode="json"),
             "questions": cases,
+            "symbol_misses": list(SYMBOL_MISSES),
+            "alternates": [
+                {"kind": k, "target": t, "alternates": alternate_targets(k, t)}
+                for k, t in [
+                    ("callers", "Checklist.deadlock_reason"),
+                    ("definition", " lha.state.Checklist.deadlock_reason "),
+                    ("uses", "a.py:Thing"),
+                    ("impact", "deadlock_reason"),
+                    ("find", "Checklist.deadlock_reason"),
+                    ("callers", "Checklist::deadlock_reason"),
+                    ("callers", "state.py"),
+                    ("callers", "a..b"),
+                    ("callers", "a.b\n"),
+                    ("callers", "déjà.vu"),
+                    ("callers", "_x.y_2"),
+                ]
+            ],
+            "misses": [
+                {"detail": d, "miss": is_symbol_miss(d)}
+                for d in [
+                    "ripwire: --expand=X.y matched no symbol",
+                    "ripwire: --callers symbol not found: X.y",
+                    "ripwire: --uses selector matched no indexed definition: X.y",
+                    "ripwire: cannot read index",
+                    "",
+                ]
+            ],
             "clip": [
                 {"text": t, "clipped": clip_answer(t)}
                 for t in ["", "short", "é" * MAX_ANSWER_CHARS, "é" * (MAX_ANSWER_CHARS + 3)]

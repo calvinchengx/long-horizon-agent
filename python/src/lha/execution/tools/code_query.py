@@ -10,12 +10,15 @@ reference image in ``sandbox/`` has). One read-only tool, five kinds of question
 - ``impact``: what reaches a symbol, the blast radius of changing it (``--impact``).
 
 Each answer is small next to reading whole files, and the model pays for it only when it asks
-(the cycle-start code map, by contrast, is re-sent with every turn). ripwire runs in the sandbox,
+(the cycle-start code map, by contrast, is re-sent with every turn). A symbol question that
+misses on ``Class.method`` is retried as ``Class::method`` (ripwire's form), then ``method``. ripwire runs in the sandbox,
 offline, and writes nothing into the workspace. The target is one argument (no shell). Answers
 are ranked and can miss things; the verifier still decides what is done.
 """
 
 from __future__ import annotations
+
+import re
 
 from lha.contracts.tools import ToolContext, ToolResult, ToolSpec
 
@@ -32,6 +35,9 @@ MAX_SYMBOL_CHARS = 300
 MAX_FIND_CHARS = 1000
 #: The longest answer returned to the model.
 MAX_ANSWER_CHARS = 16_000
+#: What ripwire prints when a symbol question names nothing it indexed.
+SYMBOL_MISSES = ("matched no symbol", "symbol not found", "matched no indexed definition")
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def code_query_argv(kind: str, target: str, token_budget: int) -> list[str]:
@@ -53,6 +59,24 @@ def code_query_argv(kind: str, target: str, token_budget: int) -> list[str]:
     elif kind == "definition":
         argv.append("--top-k=0")  # the body only, not the ranked map that otherwise rides along
     return argv
+
+
+def alternate_targets(kind: str, target: str) -> list[str]:
+    """Other spellings to try when a symbol question misses: ``Class.method`` is how models
+    write a method, ripwire's form is ``Class::method``, and the bare name is the last resort.
+
+    Only for symbol kinds and a dotted run of identifiers (``a.py:Thing`` and paths are left
+    alone). Empty when there is nothing else to try.
+    """
+    parts = target.strip().split(".")
+    if kind == "find" or len(parts) < 2 or not all(_IDENTIFIER.fullmatch(p) for p in parts):
+        return []
+    return [f"{parts[-2]}::{parts[-1]}", parts[-1]]
+
+
+def is_symbol_miss(detail: str) -> bool:
+    """True if ripwire's error says the symbol was not found (not a crash or a timeout)."""
+    return any(miss in detail for miss in SYMBOL_MISSES)
 
 
 def clip_answer(text: str) -> str:
@@ -94,6 +118,7 @@ class CodeQueryTool:
             )
         except ValueError as exc:
             return ToolResult.failure(str(exc))
+        kind, target = str(arguments.get("kind", "")), str(arguments.get("target", "")).strip()
         result = await ctx.session.exec(argv, timeout_s=max(1, int(self.timeout_s)))
         if result.exit_code == 127:
             return ToolResult.failure(
@@ -101,6 +126,15 @@ class CodeQueryTool:
             )
         if not result.ok:
             detail = (result.stderr or result.stdout).strip()[-500:]
+            if not result.timed_out and is_symbol_miss(detail):
+                for other in alternate_targets(kind, target):
+                    retry = await ctx.session.exec(
+                        code_query_argv(kind, other, self.token_budget),
+                        timeout_s=max(1, int(self.timeout_s)),
+                    )
+                    if retry.ok:
+                        note = f"(no symbol {target!r}; answered for {other!r})\n"
+                        return ToolResult.success(clip_answer(note + retry.stdout))
             reason = "timed out" if result.timed_out else detail or f"exit {result.exit_code}"
             return ToolResult.failure(f"code_query: {reason}")
         return ToolResult.success(clip_answer(result.stdout))

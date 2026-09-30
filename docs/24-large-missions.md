@@ -263,7 +263,9 @@ On LHA's own code, `callers`, `uses`, `impact` and `definition` answers for `red
 each. ripwire's own measurements put the `grep`-and-read equivalent at several times that; LHA has
 not measured it. An
 unknown symbol comes back as a short tool error (`symbol not found`), and a sandbox without
-ripwire as a clear one.
+ripwire as a clear one. Models write a method as `Class.method`; ripwire spells it
+`Class::method`, so a symbol question that misses on a dotted name is asked again as
+`Class::method`, then as the bare `method`, and the answer says which name it matched.
 
 Measured: no effect. Four missions on 29 September 2026 (two with, two without) ran the same three
 changes to LHA's own code with a Sonnet lead (`LHA_MODEL_BACKEND=claude_code`), 20 turns per

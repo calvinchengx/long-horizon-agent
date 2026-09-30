@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -28,6 +29,39 @@ const (
 	MaxFindChars   = 1000
 	MaxAnswerChars = 16_000
 )
+
+// SymbolMisses are what ripwire prints when a symbol question names nothing it indexed.
+var SymbolMisses = []string{"matched no symbol", "symbol not found", "matched no indexed definition"}
+
+var identifierRE = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// AlternateTargets are other spellings to try when a symbol question misses: Class.method is how
+// models write a method, ripwire's form is Class::method, and the bare name is the last resort.
+// Only for symbol kinds and a dotted run of identifiers (python: alternate_targets).
+func AlternateTargets(kind, target string) []string {
+	parts := strings.Split(pyfmt.PyStrip(target), ".")
+	if kind == "find" || len(parts) < 2 {
+		return []string{}
+	}
+	for _, p := range parts {
+		if !identifierRE.MatchString(p) {
+			return []string{}
+		}
+	}
+	n := len(parts)
+	return []string{parts[n-2] + "::" + parts[n-1], parts[n-1]}
+}
+
+// IsSymbolMiss reports whether ripwire's error says the symbol was not found (python:
+// is_symbol_miss).
+func IsSymbolMiss(detail string) bool {
+	for _, miss := range SymbolMisses {
+		if strings.Contains(detail, miss) {
+			return true
+		}
+	}
+	return false
+}
 
 // CodeQueryArgv is the ripwire command for one question; an unusable question is an error with
 // Python's message (python: code_query_argv).
@@ -115,7 +149,8 @@ func (t CodeQueryTool) Run(ctx context.Context, arguments map[string]any, tctx c
 	if err != nil {
 		return contracts.Failure(err.Error())
 	}
-	res, err := tctx.Session.Exec(ctx, argv, contracts.ExecOptions{TimeoutS: max(1, int(t.TimeoutS))})
+	opts := contracts.ExecOptions{TimeoutS: max(1, int(t.TimeoutS))}
+	res, err := tctx.Session.Exec(ctx, argv, opts)
 	if err != nil {
 		return contracts.Failure("code_query: " + err.Error())
 	}
@@ -128,6 +163,17 @@ func (t CodeQueryTool) Run(ctx context.Context, arguments map[string]any, tctx c
 			detail = res.Stdout
 		}
 		detail = pyfmt.Tail(pyfmt.PyStrip(detail), 500)
+		if !res.TimedOut && IsSymbolMiss(detail) {
+			for _, other := range AlternateTargets(kind, target) {
+				otherArgv, _ := CodeQueryArgv(kind, other, t.TokenBudget)
+				retry, err := tctx.Session.Exec(ctx, otherArgv, opts)
+				if err == nil && retry.OK() {
+					note := "(no symbol " + contracts.PyRepr(pyfmt.PyStrip(target)) + "; answered for " +
+						contracts.PyRepr(other) + ")\n"
+					return contracts.Success(ClipAnswer(note + retry.Stdout))
+				}
+			}
+		}
 		reason := detail
 		switch {
 		case res.TimedOut:

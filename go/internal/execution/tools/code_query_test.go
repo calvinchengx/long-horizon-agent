@@ -107,3 +107,56 @@ func TestRealRipwireAnswersCallers(t *testing.T) {
 		t.Fatalf("%+v", missing)
 	}
 }
+
+// answerSession answers by the target in ripwire's argv (a symbol miss for any other target).
+type answerSession struct {
+	contracts.SandboxSession
+	answers map[string]contracts.ExecResult
+	targets []string
+}
+
+func (s *answerSession) Exec(_ context.Context, argv []string, _ contracts.ExecOptions) (contracts.ExecResult, error) {
+	target := strings.SplitN(argv[2], "=", 2)[1]
+	s.targets = append(s.targets, target)
+	if res, ok := s.answers[target]; ok {
+		return res, nil
+	}
+	return contracts.ExecResult{ExitCode: 1, Stderr: "ripwire: --callers symbol not found: " + target}, nil
+}
+
+func ask(t *testing.T, s *answerSession, kind, target string) contracts.ToolResult {
+	t.Helper()
+	return CodeQueryTool{TokenBudget: 1500, TimeoutS: 5}.Run(context.Background(),
+		map[string]any{"kind": kind, "target": target}, contracts.ToolContext{MissionID: "m", Session: s})
+}
+
+func TestADottedMethodThatMissesIsAskedTheWayRipwireSpellsIt(t *testing.T) {
+	s := &answerSession{answers: map[string]contracts.ExecResult{"Checklist::deadlock_reason": {Stdout: "<c/>"}}}
+	res := ask(t, s, "callers", "Checklist.deadlock_reason")
+	if !res.OK || res.Content != "(no symbol 'Checklist.deadlock_reason'; answered for 'Checklist::deadlock_reason')\n<c/>" ||
+		strings.Join(s.targets, " ") != "Checklist.deadlock_reason Checklist::deadlock_reason" {
+		t.Fatalf("%+v %v", res, s.targets)
+	}
+	bare := &answerSession{answers: map[string]contracts.ExecResult{"deadlock_reason": {Stdout: "<c/>"}}}
+	if res := ask(t, bare, "uses", "a.b.deadlock_reason"); !res.OK ||
+		strings.Join(bare.targets, " ") != "a.b.deadlock_reason b::deadlock_reason deadlock_reason" {
+		t.Fatalf("%+v %v", res, bare.targets)
+	}
+	none := &answerSession{answers: map[string]contracts.ExecResult{}}
+	if res := ask(t, none, "callers", "X.y"); res.OK || !strings.Contains(*res.Error, "not found: X.y") ||
+		strings.Join(none.targets, " ") != "X.y X::y y" {
+		t.Fatalf("%+v %v", res, none.targets)
+	}
+}
+
+func TestOnlyASymbolMissIsRetried(t *testing.T) {
+	for _, res := range []contracts.ExecResult{
+		{ExitCode: 1, Stderr: "ripwire: cannot read index"},
+		{ExitCode: 124, TimedOut: true, Stderr: "symbol not found"},
+	} {
+		s := &answerSession{answers: map[string]contracts.ExecResult{"X.y": res}}
+		if out := ask(t, s, "callers", "X.y"); out.OK || len(s.targets) != 1 {
+			t.Fatalf("%+v %v", out, s.targets)
+		}
+	}
+}

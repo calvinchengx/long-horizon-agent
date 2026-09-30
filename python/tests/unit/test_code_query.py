@@ -139,3 +139,70 @@ async def test_real_ripwire_answers_callers(tmp_path: Path) -> None:
     assert found.ok and 'n="caller"' in found.content
     missing = await CodeQueryTool().run({"kind": "callers", "target": "nope_xyz"}, ctx)
     assert not missing.ok and "not found" in (missing.error or "")
+
+
+class _Answers:
+    """A session answering by the target in ripwire's argv (a miss for any other target)."""
+
+    def __init__(self, answers: dict[str, ExecResult]) -> None:
+        self.answers = answers
+        self.targets: list[str] = []
+
+    async def exec(self, argv: list[str], **_: object) -> ExecResult:
+        target = argv[2].split("=", 1)[1]
+        self.targets.append(target)
+        miss = ExecResult(exit_code=1, stderr=f"ripwire: --callers symbol not found: {target}")
+        return self.answers.get(target, miss)
+
+
+async def test_a_dotted_method_that_misses_is_asked_the_way_ripwire_spells_it() -> None:
+    session = _Answers({"Checklist::deadlock_reason": ExecResult(exit_code=0, stdout="<c/>")})
+    ctx = ToolContext(mission_id="m", session=session)  # type: ignore[arg-type]
+    found = await CodeQueryTool().run(
+        {"kind": "callers", "target": "Checklist.deadlock_reason"}, ctx
+    )
+    assert found.ok and found.content == (
+        "(no symbol 'Checklist.deadlock_reason'; answered for 'Checklist::deadlock_reason')\n<c/>"
+    )
+    assert session.targets == ["Checklist.deadlock_reason", "Checklist::deadlock_reason"]
+
+    bare = _Answers({"deadlock_reason": ExecResult(exit_code=0, stdout="<c/>")})
+    ctx = ToolContext(mission_id="m", session=bare)  # type: ignore[arg-type]
+    assert (await CodeQueryTool().run({"kind": "uses", "target": "a.b.deadlock_reason"}, ctx)).ok
+    assert bare.targets == ["a.b.deadlock_reason", "b::deadlock_reason", "deadlock_reason"]
+
+    none = _Answers({})
+    ctx = ToolContext(mission_id="m", session=none)  # type: ignore[arg-type]
+    missed = await CodeQueryTool().run({"kind": "callers", "target": "X.y"}, ctx)
+    assert not missed.ok and "not found: X.y" in (missed.error or "")  # the original miss
+    assert none.targets == ["X.y", "X::y", "y"]
+
+
+async def test_only_a_symbol_miss_is_retried() -> None:
+    crash = _Answers({"X.y": ExecResult(exit_code=1, stderr="ripwire: cannot read index")})
+    ctx = ToolContext(mission_id="m", session=crash)  # type: ignore[arg-type]
+    assert not (await CodeQueryTool().run({"kind": "callers", "target": "X.y"}, ctx)).ok
+    assert crash.targets == ["X.y"]
+    slow = _Answers({"X.y": ExecResult(exit_code=124, timed_out=True, stderr="symbol not found")})
+    ctx = ToolContext(mission_id="m", session=slow)  # type: ignore[arg-type]
+    assert not (await CodeQueryTool().run({"kind": "callers", "target": "X.y"}, ctx)).ok
+    assert slow.targets == ["X.y"]
+
+
+@pytest.mark.skipif(shutil.which("ripwire") is None, reason="needs ripwire on PATH")
+async def test_real_ripwire_answers_a_dotted_method(tmp_path: Path) -> None:
+    (tmp_path / "lib.py").write_text(
+        "class Box:\n    def size(self):\n        return 1\n\n\n"
+        "def measure(b: Box):\n    return b.size()\n"
+    )
+    for args in (["init", "-q", "-b", "main"], ["add", "-A"]):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init"],
+        cwd=tmp_path,
+        check=True,
+    )
+    session = await LocalSandbox().open(workdir=str(tmp_path))
+    ctx = ToolContext(mission_id="m", session=session)
+    found = await CodeQueryTool().run({"kind": "definition", "target": "Box.size"}, ctx)
+    assert found.ok and "answered for 'Box::size'" in found.content and "return 1" in found.content
