@@ -138,23 +138,27 @@ func parseIPv6(s string) (ipAddr, error) {
 		}
 		partsHi, partsLo = len(parts), 0
 	}
-	var hextets []uint64
+	// A fixed array filled through a counter (partsHi + skipped + partsLo == hextetCount by
+	// construction): a loop that cannot end runs off the array and panics instead of appending
+	// until memory runs out.
+	var hextets [hextetCount]uint64
+	n := 0
 	for i := 0; i < partsHi; i++ {
 		h, err := parseHextet(parts[i])
 		if err != nil {
 			return ipAddr{}, err
 		}
-		hextets = append(hextets, h)
+		hextets[n] = h
+		n++
 	}
-	for i := 0; i < skipped; i++ {
-		hextets = append(hextets, 0)
-	}
+	n += skipped // the "::" gap: already zero
 	for i := len(parts) - partsLo; i < len(parts); i++ {
 		h, err := parseHextet(parts[i])
 		if err != nil {
 			return ipAddr{}, err
 		}
-		hextets = append(hextets, h)
+		hextets[n] = h
+		n++
 	}
 	var a ipAddr
 	a.v6 = true
@@ -173,12 +177,16 @@ func hex16(v uint32) string {
 	if v == 0 {
 		return "0"
 	}
-	var b []byte
+	// A fixed buffer filled from the end: a loop that cannot end (a mutated condition) runs
+	// off the buffer and panics instead of re-allocating a growing slice until memory runs out.
+	var buf [8]byte
+	i := len(buf)
 	for v > 0 {
-		b = append([]byte{digits[v&0xF]}, b...)
+		i--
+		buf[i] = digits[v&0xF]
 		v >>= 4
 	}
-	return string(b)
+	return string(buf[i:])
 }
 
 func parseHextet(s string) (uint64, error) {

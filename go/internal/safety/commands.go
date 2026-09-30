@@ -822,14 +822,18 @@ func redirectIntoProtected(tokens []string, scope Scope) string {
 
 // findExecCommands: the commands a find runs via -exec / -execdir / -ok / -okdir.
 func findExecCommands(args []string) [][]string {
-	var commands [][]string
+	// Every group starts at its own -exec argument, so there are at most len(args) groups: the
+	// slice is sized for that and grown by reslicing, which panics past the cap instead of
+	// appending until memory runs out should the loop stop advancing.
+	commands := make([][]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
 		if findExec.has(args[i]) {
 			end := i + 1
 			for end < len(args) && args[end] != ";" && args[end] != "+" && args[end] != "\\;" {
 				end++
 			}
-			commands = append(commands, append([]string{}, args[i+1:end]...))
+			commands = commands[:len(commands)+1]
+			commands[len(commands)-1] = append([]string{}, args[i+1:end]...)
 			i = end
 		}
 	}

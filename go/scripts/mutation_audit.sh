@@ -11,6 +11,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 gremlins=${GREMLINS:-gremlins}
 out=$(mktemp)
+# A mutant that turns a loop into an allocating spin can eat a CI runner's memory before its test
+# fails; cap each test binary's address space on Linux so it dies alone (macOS ignores -v).
+if [ "$(uname)" = Linux ]; then
+  ulimit -v "${MUTATION_ULIMIT_KB:-12582912}"
+fi
 # package -> exclude regexp (every file of the package, or below it, except its safety rules)
 audit() {
   local pkg=$1 exclude=$2
