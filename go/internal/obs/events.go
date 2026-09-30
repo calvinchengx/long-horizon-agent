@@ -147,12 +147,18 @@ func (e TraceEvent) MarshalJSON() ([]byte, error) {
 	return marshalNoHTMLEscape(a)
 }
 
-// TraceRecorder collects TraceEvents and mirrors them to a structured logger. It is safe for
-// concurrent use.
+// MaxTraceEvents is how many events a TraceRecorder keeps (python: MAX_TRACE_EVENTS): a long local
+// mission records events for weeks, and every one is also logged as it happens, so only the
+// newest are kept.
+var MaxTraceEvents = 10_000
+
+// TraceRecorder collects the newest MaxTraceEvents TraceEvents and mirrors every one to a
+// structured logger. It is safe for concurrent use.
 type TraceRecorder struct {
-	log    *slog.Logger
-	mu     sync.Mutex
-	events []TraceEvent
+	log     *slog.Logger
+	mu      sync.Mutex
+	events  []TraceEvent
+	dropped int
 }
 
 // NewTraceRecorder returns a recorder logging to logger (Logger("lha") when nil).
@@ -170,6 +176,11 @@ func (r *TraceRecorder) Record(kind, missionID, cycleID string, data ...Field) T
 	event := TraceEvent{Kind: kind, MissionID: missionID, CycleID: cycleID, Data: safe}
 	r.mu.Lock()
 	r.events = append(r.events, event)
+	if limit := MaxTraceEvents; len(r.events) > limit+limit/10 { // trim in batches, not per event
+		excess := len(r.events) - limit
+		r.events = append([]TraceEvent(nil), r.events[excess:]...)
+		r.dropped += excess
+	}
 	logger := r.log
 	r.mu.Unlock()
 	if logger == nil {
@@ -197,6 +208,13 @@ func redactFields(data []Field) Fields {
 		out = append(out, Field{f.Key, v})
 	}
 	return out
+}
+
+// Dropped is how many events are no longer kept.
+func (r *TraceRecorder) Dropped() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.dropped
 }
 
 // Events returns a copy of the collected events.

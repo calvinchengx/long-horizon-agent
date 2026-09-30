@@ -39,10 +39,21 @@ func (e *CostEntry) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// CostLedger is the append-only ledger of spend for one mission. It is safe for concurrent use.
+// MaxLedgerEntries is how many entries a CostLedger keeps (the newest; python:
+// MAX_LEDGER_ENTRIES). The totals cover every entry ever added; the rows themselves are in the
+// mission store's cost_ledger (lha costs).
+var MaxLedgerEntries = 5_000
+
+// CostLedger is the ledger of spend for one mission: running totals over every entry, and the
+// newest MaxLedgerEntries entries. It is safe for concurrent use.
 type CostLedger struct {
-	mu      sync.Mutex
-	entries []CostEntry
+	mu           sync.Mutex
+	entries      []CostEntry
+	usd          float64
+	unknown      int
+	inputTokens  int
+	outputTokens int
+	perCycle     map[string]float64
 }
 
 // NewCostLedger returns an empty ledger.
@@ -64,12 +75,36 @@ func (l *CostLedger) Record(cycleID string, usage contracts.Usage, usd *float64,
 		entry.USD = *usd
 	}
 	l.mu.Lock()
-	l.entries = append(l.entries, entry)
+	l.addLocked(entry)
 	l.mu.Unlock()
 	return entry
 }
 
-// Entries returns a copy of the recorded entries, in order.
+// Add adds one entry to the totals and the window of newest entries (python: CostLedger.add).
+func (l *CostLedger) Add(entry CostEntry) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.addLocked(entry)
+}
+
+func (l *CostLedger) addLocked(entry CostEntry) {
+	l.usd += entry.USD
+	if !entry.CostKnown {
+		l.unknown++
+	}
+	l.inputTokens += entry.InputTokens
+	l.outputTokens += entry.OutputTokens
+	if l.perCycle == nil {
+		l.perCycle = map[string]float64{}
+	}
+	l.perCycle[entry.CycleID] += entry.USD
+	l.entries = append(l.entries, entry)
+	if limit := MaxLedgerEntries; len(l.entries) > limit+limit/10 {
+		l.entries = append([]CostEntry(nil), l.entries[len(l.entries)-limit:]...)
+	}
+}
+
+// Entries returns a copy of the kept (newest) entries, in order.
 func (l *CostLedger) Entries() []CostEntry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -92,8 +127,11 @@ func (l *CostLedger) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	l.mu.Lock()
-	l.entries = v.Entries
-	l.mu.Unlock()
+	defer l.mu.Unlock()
+	l.entries, l.usd, l.unknown, l.inputTokens, l.outputTokens, l.perCycle = nil, 0, 0, 0, 0, nil
+	for _, e := range v.Entries {
+		l.addLocked(e)
+	}
 	return nil
 }
 
@@ -101,83 +139,47 @@ func (l *CostLedger) UnmarshalJSON(data []byte) error {
 func (l *CostLedger) TotalUSD() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.totalUSDLocked()
-}
-
-func (l *CostLedger) totalUSDLocked() float64 {
-	total := 0.0
-	for _, e := range l.entries {
-		total += e.USD
-	}
-	return total
+	return l.usd
 }
 
 // UnknownCostEntries counts entries whose cost could not be priced.
 func (l *CostLedger) UnknownCostEntries() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	n := 0
-	for _, e := range l.entries {
-		if !e.CostKnown {
-			n++
-		}
-	}
-	return n
+	return l.unknown
 }
 
 // TotalInputTokens sums input tokens.
 func (l *CostLedger) TotalInputTokens() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	n := 0
-	for _, e := range l.entries {
-		n += e.InputTokens
-	}
-	return n
+	return l.inputTokens
 }
 
 // TotalOutputTokens sums output tokens.
 func (l *CostLedger) TotalOutputTokens() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	n := 0
-	for _, e := range l.entries {
-		n += e.OutputTokens
-	}
-	return n
+	return l.outputTokens
 }
 
 // MeanUSDPerCycle is known spend divided by the number of distinct cycles (0 when empty).
 func (l *CostLedger) MeanUSDPerCycle() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	cycles := map[string]bool{}
-	for _, e := range l.entries {
-		cycles[e.CycleID] = true
-	}
-	if len(cycles) == 0 {
+	if len(l.perCycle) == 0 {
 		return 0
 	}
-	return l.totalUSDLocked() / float64(len(cycles))
+	return l.usd / float64(len(l.perCycle))
 }
 
 // MaxUSDPerCycle is the most expensive cycle so far (a conservative next-cycle projection).
 func (l *CostLedger) MaxUSDPerCycle() float64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	perCycle := map[string]float64{}
-	order := []string{}
-	for _, e := range l.entries {
-		if _, ok := perCycle[e.CycleID]; !ok {
-			order = append(order, e.CycleID)
-		}
-		perCycle[e.CycleID] += e.USD
-	}
 	best := 0.0
-	for i, id := range order {
-		if i == 0 || perCycle[id] > best {
-			best = perCycle[id]
-		}
+	for _, usd := range l.perCycle {
+		best = max(best, usd)
 	}
 	return best
 }

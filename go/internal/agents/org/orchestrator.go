@@ -461,7 +461,7 @@ func (r *missionRun) restoreRunState(ctx context.Context, title, description str
 		}
 	}
 	r.record("resumed", obs.F("run", r.runNumber), obs.F("cycle_offset", r.cycleOffset),
-		obs.F("board", len(r.board.Read())))
+		obs.F("board", r.board.Posted()))
 	if spec == nil {
 		return title, description, nil
 	}

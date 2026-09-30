@@ -13,18 +13,38 @@ type BoardEntry struct {
 	Content string
 }
 
+// MaxBoardEntries is how many main-board entries a Blackboard keeps (the newest; python:
+// MAX_BOARD_ENTRIES); the orchestrator shows later rounds only the last few.
+var MaxBoardEntries = 256
+
 // Blackboard is the main board plus this round's response board (safe for concurrent use).
 type Blackboard struct {
 	mu        sync.Mutex
 	main      []BoardEntry
 	responses []BoardEntry
+	posted    int
 }
 
-// Post appends to the durable main board.
+// Post appends to the main board (its newest MaxBoardEntries are kept).
 func (b *Blackboard) Post(author, content string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.main = append(b.main, BoardEntry{author, content})
+	b.posted++
+	b.trimLocked()
+}
+
+func (b *Blackboard) trimLocked() {
+	if len(b.main) > MaxBoardEntries {
+		b.main = append([]BoardEntry(nil), b.main[len(b.main)-MaxBoardEntries:]...)
+	}
+}
+
+// Posted is every entry ever promoted to the main board, kept or not.
+func (b *Blackboard) Posted() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.posted
 }
 
 // Respond writes to the per-round response board (not yet visible on the main board).
@@ -53,5 +73,7 @@ func (b *Blackboard) CommitRound() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.main = append(b.main, b.responses...)
+	b.posted += len(b.responses)
 	b.responses = nil
+	b.trimLocked()
 }

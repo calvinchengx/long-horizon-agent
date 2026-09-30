@@ -61,7 +61,9 @@ Model spend is recorded by the metering wrapper, not by `llm_turn` events.
 
 The local runners return the collected trace as `MissionSummary.trace_jsonl`, but the CLI does not
 print or save it; it is available when calling `run_mission_local`, `plan_and_run_local` or
-`Orchestrator.run_mission` from Python.
+`Orchestrator.run_mission` from Python. A recorder keeps the newest 10,000 events
+(`MAX_TRACE_EVENTS`), so a mission that runs for weeks does not hold every event in memory; every
+event is still logged as it happens.
 
 The durable activity constructs `AgentLoop` without a recorder, so a mission on Temporal emits no
 `TraceEvent`s. Its record is the Temporal history, the git anchor and the mission store.

@@ -443,7 +443,7 @@ class _MissionRun:
             mission_id=self.mission_id,
             run=self.run_number,
             cycle_offset=self.cycle_offset,
-            board=len(self.board.read()),
+            board=self.board.posted,
         )
         if spec is None:
             return title, description

@@ -9,7 +9,7 @@ the unknown spend conservatively instead of assuming ``$0``.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 
 from lha.contracts.model import Usage
 
@@ -28,10 +28,38 @@ class CostEntry(BaseModel):
     role: str = ""
 
 
+#: Entries a ``CostLedger`` keeps (the newest). The totals cover every entry ever added; the rows
+#: themselves are in the mission store's ``cost_ledger`` (``lha costs``).
+MAX_LEDGER_ENTRIES = 5_000
+
+
 class CostLedger(BaseModel):
-    """Append-only ledger of spend for one mission."""
+    """Ledger of spend for one mission: running totals over every entry, and the newest
+    ``MAX_LEDGER_ENTRIES`` entries. Add entries with ``record`` / ``add``, never to ``entries``."""
 
     entries: list[CostEntry] = Field(default_factory=list)
+    _usd: float = PrivateAttr(default=0.0)
+    _unknown: int = PrivateAttr(default=0)
+    _input_tokens: int = PrivateAttr(default=0)
+    _output_tokens: int = PrivateAttr(default=0)
+    _per_cycle: dict[str, float] = PrivateAttr(default_factory=dict)
+
+    def model_post_init(self, context: object, /) -> None:
+        entries, self.entries = self.entries, []
+        for entry in entries:
+            self.add(entry)
+
+    def add(self, entry: CostEntry) -> CostEntry:
+        """Add one entry to the totals and the window of newest entries."""
+        self._usd += entry.usd
+        self._unknown += 0 if entry.cost_known else 1
+        self._input_tokens += entry.input_tokens
+        self._output_tokens += entry.output_tokens
+        self._per_cycle[entry.cycle_id] = self._per_cycle.get(entry.cycle_id, 0.0) + entry.usd
+        self.entries.append(entry)
+        if len(self.entries) > MAX_LEDGER_ENTRIES + MAX_LEDGER_ENTRIES // 10:
+            del self.entries[: len(self.entries) - MAX_LEDGER_ENTRIES]
+        return entry
 
     def record(
         self, *, cycle_id: str, usage: Usage, usd: float | None, role: str = ""
@@ -48,33 +76,28 @@ class CostLedger(BaseModel):
             cost_known=usd is not None,
             role=role,
         )
-        self.entries.append(entry)
-        return entry
+        return self.add(entry)
 
     @property
     def total_usd(self) -> float:
         """Known spend only; check ``unknown_cost_entries`` before trusting it as complete."""
-        return sum(e.usd for e in self.entries)
+        return self._usd
 
     @property
     def unknown_cost_entries(self) -> int:
-        return sum(1 for e in self.entries if not e.cost_known)
+        return self._unknown
 
     @property
     def total_input_tokens(self) -> int:
-        return sum(e.input_tokens for e in self.entries)
+        return self._input_tokens
 
     @property
     def total_output_tokens(self) -> int:
-        return sum(e.output_tokens for e in self.entries)
+        return self._output_tokens
 
     def mean_usd_per_cycle(self) -> float:
-        cycles = {e.cycle_id for e in self.entries}
-        return self.total_usd / len(cycles) if cycles else 0.0
+        return self._usd / len(self._per_cycle) if self._per_cycle else 0.0
 
     def max_usd_per_cycle(self) -> float:
         """The most expensive cycle so far (a conservative next-cycle projection)."""
-        per_cycle: dict[str, float] = {}
-        for e in self.entries:
-            per_cycle[e.cycle_id] = per_cycle.get(e.cycle_id, 0.0) + e.usd
-        return max(per_cycle.values(), default=0.0)
+        return max(self._per_cycle.values(), default=0.0)

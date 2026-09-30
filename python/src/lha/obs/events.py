@@ -49,12 +49,19 @@ class TraceEvent(BaseModel):
     data: dict[str, object] = Field(default_factory=dict)
 
 
-class TraceRecorder:
-    """Collects ``TraceEvent``s and mirrors them to structlog."""
+#: Events a ``TraceRecorder`` keeps in memory: a long local mission records events for weeks, and
+#: every one is also logged (structlog) as it happens, so only the newest are kept.
+MAX_TRACE_EVENTS = 10_000
 
-    def __init__(self, *, logger_name: str = "lha") -> None:
+
+class TraceRecorder:
+    """Collects the newest ``max_events`` ``TraceEvent``s and mirrors every one to structlog."""
+
+    def __init__(self, *, logger_name: str = "lha", max_events: int = MAX_TRACE_EVENTS) -> None:
         self._log = structlog.get_logger(logger_name)
+        self._max = max_events
         self.events: list[TraceEvent] = []
+        self.dropped = 0  # events no longer in ``events``
 
     def record(
         self, kind: str, *, mission_id: str, cycle_id: str = "", **data: object
@@ -62,6 +69,10 @@ class TraceRecorder:
         safe = redact_mapping(data)
         event = TraceEvent(kind=kind, mission_id=mission_id, cycle_id=cycle_id, data=safe)
         self.events.append(event)
+        if len(self.events) > self._max + self._max // 10:  # trim in batches, not per event
+            excess = len(self.events) - self._max
+            del self.events[:excess]
+            self.dropped += excess
         self._log.info(kind, mission_id=mission_id, cycle_id=cycle_id, **safe)
         return event
 

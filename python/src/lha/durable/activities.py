@@ -202,7 +202,7 @@ def build_cycle_meter(settings: Settings, inp: CycleInput) -> CostMeter:
     ledger = CostLedger()
     prior_usd, prior_unknown = read_prior_spend(inp.workdir)
     if prior_usd:
-        ledger.entries.append(
+        ledger.add(
             CostEntry(
                 cycle_id=_PRIOR_CYCLE,
                 model="(prior)",
@@ -212,7 +212,7 @@ def build_cycle_meter(settings: Settings, inp: CycleInput) -> CostMeter:
             )
         )
     for _ in range(prior_unknown):
-        ledger.entries.append(
+        ledger.add(
             CostEntry(
                 cycle_id=_PRIOR_CYCLE,
                 model="(prior)",

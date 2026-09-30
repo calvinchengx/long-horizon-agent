@@ -432,7 +432,11 @@ type MissionMemory struct {
 	embedderOwned contracts.Embedder
 	errors        int
 	dense         map[string]contracts.SemanticIndex
-	vectors       map[string][]float64
+	// vectors by text hash, kept only for the texts the latest Recall used (touched): Recall
+	// re-chunks the checkout every cycle, so an edited file's old chunks are never asked for
+	// again, and keeping them grows memory with every cycle.
+	vectors map[string][]float64
+	touched map[string]bool
 }
 
 var _ CycleMemory = (*MissionMemory)(nil)
@@ -456,7 +460,7 @@ func New(o Options) *MissionMemory {
 	m := &MissionMemory{
 		Store: o.Store, Workdir: workdir, Config: o.Config, Reranker: o.Reranker, Model: o.Model,
 		Recorder: o.Recorder, Namespace: o.Namespace, mode: o.Mode, embedderOwned: o.Embedder,
-		dense: map[string]contracts.SemanticIndex{}, vectors: map[string][]float64{},
+		dense: map[string]contracts.SemanticIndex{}, vectors: map[string][]float64{}, touched: map[string]bool{},
 	}
 	if o.Mode.Dense {
 		m.embedder = o.Embedder
@@ -668,6 +672,7 @@ func (m *MissionMemory) embed(ctx context.Context, texts []string, query bool) (
 	for i, t := range texts {
 		sum := sha1.Sum([]byte(t))
 		keys[i] = prefix + hex.EncodeToString(sum[:])
+		m.touched[keys[i]] = true
 		if _, ok := m.vectors[keys[i]]; !ok {
 			missing = append(missing, i)
 		}
@@ -761,6 +766,18 @@ func (m *MissionMemory) storeRecords(ctx context.Context, missionID string, reco
 
 // Recall is the bounded memory block for this cycle's prompt ("" if nothing relevant).
 func (m *MissionMemory) Recall(ctx context.Context, missionID, cycleID string, item contracts.ChecklistItem, snapshot contracts.SituationSnapshot) string {
+	m.mu.Lock()
+	m.touched = map[string]bool{}
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		for key := range m.vectors {
+			if !m.touched[key] {
+				delete(m.vectors, key)
+			}
+		}
+	}()
 	type fetch struct {
 		title string
 		fn    func() ([]string, error)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -921,5 +922,44 @@ func TestReembedStopsWhenTheStoreDoesNotRestamp(t *testing.T) {
 	mem.SetDenseIndex("m1", deafIndex{})
 	if _, err := mem.Reembed(bg, "m1", 0, ""); err == nil || err.Error() != "re-embedded rows are still stale: a" {
 		t.Fatal(err)
+	}
+}
+
+// Ported from python/tests/unit/test_bounded_memory.py: the embedding cache keeps only what the
+// latest Recall used, so edits replace cached chunks instead of adding to them.
+func TestTheEmbeddingCacheKeepsOnlyWhatTheLatestRecallUsed(t *testing.T) {
+	files := map[string][]string{}
+	initial := map[string]string{}
+	for i := 0; i < 5; i++ {
+		name := fmt.Sprintf("mod%d.py", i)
+		for j := 0; j < 120; j++ {
+			files[name] = append(files[name], fmt.Sprintf("def f%d_%d(): return %d\n", i, j, j))
+		}
+		initial[name] = strings.Join(files[name], "")
+	}
+	ws := repo(t, initial)
+	mem := newMemory(t, ws, nil, nil)
+	sizes := []int{}
+	for cycle := 0; cycle < 6; cycle++ {
+		name := fmt.Sprintf("mod%d.py", cycle%5)
+		files[name] = append([]string{fmt.Sprintf("# edit %d\n", cycle)}, files[name]...)
+		if err := os.WriteFile(filepath.Join(ws, name), []byte(strings.Join(files[name], "")), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := state.CommitAll(bg, ws, fmt.Sprintf("e%d", cycle)); err != nil {
+			t.Fatal(err)
+		}
+		mem.Recall(bg, "m1", fmt.Sprintf("c%d", cycle), item("01", "edit the modules"), contracts.SituationSnapshot{})
+		mem.mu.Lock()
+		for key := range mem.vectors {
+			if !mem.touched[key] {
+				t.Fatalf("cycle %d: cached a vector the latest recall did not use", cycle)
+			}
+		}
+		sizes = append(sizes, len(mem.vectors))
+		mem.mu.Unlock()
+	}
+	if sizes[4] != sizes[5] { // each file grows from 3 chunks to 4 once; later edits replace chunks
+		t.Fatal(sizes)
 	}
 }

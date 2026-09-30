@@ -351,7 +351,11 @@ class MissionMemory:
         self.namespace = namespace or str(self.workdir)
         self.errors = 0
         self._dense: dict[str, SemanticIndex] = {}
+        # Vectors by text hash. Kept only for the texts the latest recall used (``_touched``):
+        # recall re-chunks the checkout every cycle, so an edited file's old chunks are never
+        # asked for again, and keeping them grows memory with every cycle.
         self._vectors: dict[str, list[float]] = {}
+        self._touched: set[str] = set()
 
     # --- events -------------------------------------------------------------------------
     def _emit(self, kind: str, mission_id: str, cycle_id: str = "", **data: object) -> None:
@@ -402,6 +406,7 @@ class MissionMemory:
         assert self.embedder is not None
         prefix = "q:" if query else ""
         keys = [prefix + hashlib.sha1(t.encode("utf-8")).hexdigest() for t in texts]
+        self._touched.update(keys)
         missing = [i for i, key in enumerate(keys) if key not in self._vectors]
         if missing:
             batch = [texts[i] for i in missing]
@@ -496,6 +501,17 @@ class MissionMemory:
         self, *, mission_id: str, cycle_id: str, item: ChecklistItem, snapshot: SituationSnapshot
     ) -> str:
         """The bounded memory block for this cycle's prompt ('' if nothing relevant)."""
+        self._touched = set()
+        try:
+            return await self._recall(
+                mission_id=mission_id, cycle_id=cycle_id, item=item, snapshot=snapshot
+            )
+        finally:
+            self._vectors = {k: v for k, v in self._vectors.items() if k in self._touched}
+
+    async def _recall(
+        self, *, mission_id: str, cycle_id: str, item: ChecklistItem, snapshot: SituationSnapshot
+    ) -> str:
         sections: list[tuple[str, list[str]]] = []
         for title, fetch in (
             ("Earlier attempts and outcomes", self._episodic_lines),
