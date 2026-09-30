@@ -209,13 +209,16 @@ python/scripts/mutation_audit.sh   # about 4 minutes with 8 workers (MUTATION_WO
 go/scripts/mutation_audit.sh       # needs gremlins on PATH
 ```
 
-Both scripts fail on any survivor, timeout or uncovered mutant that is not a proven-equivalent
-mutant: one that changes the code but not what it does, so no test can fail on it. Python marks
-those lines `# pragma: no mutate (<why>)`. gremlins has no such comment, so the Go script reads
+Both scripts fail on any survivor, timeout or uncovered mutant that is not a reviewed exception.
+Most exceptions are proven-equivalent mutants: they change the code but not what it does, so no
+test can fail on them. Python marks those lines `# pragma: no mutate (<why>)` (or the line is
+rewritten so the redundancy is gone). gremlins has no such comment, so the Go script reads
 [`go/scripts/mutation_equivalents.txt`](../go/scripts/mutation_equivalents.txt), which names each
 by mutator, file, column and the line's text (so edits elsewhere do not break the list) with the
-reason. The Go spec cases run in `internal/spec`, not in the mutated packages, so Go survivors are
-killed by package-level tests.
+reason. It also lists, in their own sections, the mutants a named test kills but gremlins cannot
+run (it reports `switch` cases as not covered), two that do not compile and one that hangs package
+initialisation. The Go spec cases run in `internal/spec`, not in the mutated packages, so the
+safety packages also run them as package-level tables.
 
 The [`mutation.yml`](../.github/workflows/mutation.yml) workflow runs both nightly and on demand;
 a mutation run re-runs the tests once per mutant, which is too slow for every push. A red run
