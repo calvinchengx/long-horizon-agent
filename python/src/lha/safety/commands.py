@@ -522,6 +522,9 @@ def _unwrap(argv: list[str], depth: int = 0) -> list[list[str]]:
             continue
         if head == "watch" and command:  # run as ``sh -c "<args joined>"`` (unless ``-x``)
             out.append(["sh", "-c", " ".join(command)])  # pragma: no mutate (_base lowercases)
+        if head == "env":  # env reads NAME=value operands after ``--`` too, then runs the rest
+            while command and _is_assignment(command[0]):
+                command = command[1:]
         out.extend(_unwrap(command, depth + 1))
         if len(out) > _MAX_CANDIDATES:
             raise _Ambiguous("too many ways to read the launcher options")
@@ -712,7 +715,7 @@ def _classify_httpie(args: list[str]) -> str | None:
             continue
         if arg.upper() in _WRITE_METHODS:
             return f"httpie {arg.upper()} request"
-        if "://" not in arg and _HTTPIE_DATA_ITEM.match(arg):
+        if _HTTPIE_DATA_ITEM.match(arg):
             return f"httpie request with a body ({arg.split('=')[0]})"
     return None
 
@@ -899,6 +902,10 @@ def _is_assignment(token: str) -> bool:
     return bool(eq) and word.isalnum() and not name[:1].isdigit()
 
 
+# Inside backticks the shell strips the backslash from \`, \\ and \$ before running the body.
+_BACKTICK_ESCAPE = re.compile(r"\\([`\\$])")
+
+
 def _substitutions(script: str) -> list[str]:
     """Bodies of command substitutions (backticks, ``$(...)``, ``<(...)``/``>(...)``).
 
@@ -924,7 +931,7 @@ def _substitutions(script: str) -> list[str]:
             if end >= n:
                 # equivalent: the message is never shown (unparseable shell script)
                 raise ValueError("unterminated backtick substitution")  # pragma: no mutate
-            bodies.append(script[i + 1 : end])
+            bodies.append(_BACKTICK_ESCAPE.sub(r"\1", script[i + 1 : end]))
             i = end
         elif not in_single and ch in "$<>" and script[i + 1 : i + 2] == "(":
             depth, end = 1, i + 2
@@ -939,13 +946,15 @@ def _substitutions(script: str) -> list[str]:
                 raise ValueError("unterminated $( substitution")  # pragma: no mutate
             body = script[i + 2 : end - 1]
             if ch == "$" and body.startswith("(") and body.endswith(")"):
-                body = ""  # pragma: no mutate ($(( arithmetic )): any body without a command)
-            if body:
+                # $(( arithmetic )): not a command, but a substitution inside it still runs
+                bodies.extend(_substitutions(body[1:-1]))
+            else:
                 bodies.append(body)
             i = end
             continue
         i += 1
-    if in_single or in_double:
+    # equivalent: shlex raises on the same unterminated quote first (both mean unparseable)
+    if in_single or in_double:  # pragma: no mutate
         raise ValueError("unterminated quote")  # pragma: no mutate (message unused)
     return bodies
 
@@ -959,6 +968,9 @@ def _classify_script(script: str, depth: int, scope: _Scope) -> str | None:
         lexer = shlex.shlex(script, posix=True, punctuation_chars=";&|()\n")
         lexer.whitespace = " \t\r"
         lexer.whitespace_split = True
+        # shlex would end a word at any ``#`` and drop the rest of the line (``echo a#b; git
+        # push``); a comment's words are classified like any others instead (fail closed).
+        lexer.commenters = ""
         tokens = list(lexer)
     except ValueError:
         return "unparseable shell script"
@@ -1005,7 +1017,13 @@ def _classify_script(script: str, depth: int, scope: _Scope) -> str | None:
 
 def _has_command(segment: list[str]) -> bool:
     """True once ``segment`` holds a command word (after reserved words and assignments)."""
-    return any(t not in _RESERVED_PREFIX and not _is_assignment(t) for t in segment)
+
+    def real(t: str) -> bool:
+        # equivalent: the `$` token stays in the segment either way, and _classify_segment gates
+        # a segment whose command comes from an expansion whether or not its group was skipped
+        return t not in _RESERVED_PREFIX and not _is_assignment(t)  # pragma: no mutate
+
+    return any(real(t) for t in segment)
 
 
 def _skip_group(tokens: list[str], start: int) -> int:

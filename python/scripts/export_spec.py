@@ -109,7 +109,7 @@ def _command_corpus() -> list[list[str]]:
     paths = importlib.import_module("tests.unit.test_safety_command_paths")
     corpus += [argv for argv, _ in paths.CASES]
     bypasses = importlib.import_module("tests.unit.test_safety_bypasses")
-    corpus += bypasses.GATED + bypasses.ALLOWED
+    corpus += bypasses.GATED + bypasses.ALLOWED + bypasses.FORMER_GAPS + bypasses.STILL_ALLOWED
     for func in (
         "test_launcher_option_values_do_not_hide_the_command",
         "test_http_upload_spellings_are_gated",

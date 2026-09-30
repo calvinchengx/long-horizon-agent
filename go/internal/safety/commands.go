@@ -438,6 +438,11 @@ func unwrap(argv []string, depth int) ([][]string, error) {
 		if head == "watch" && len(command) > 0 { // run as sh -c "<args joined>"
 			out = append(out, []string{"sh", "-c", strings.Join(command, " ")})
 		}
+		if head == "env" { // env reads NAME=value operands after `--` too, then runs the rest
+			for len(command) > 0 && isAssignment(command[0]) {
+				command = command[1:]
+			}
+		}
 		inner, err := unwrap(command, depth+1)
 		if err != nil {
 			return nil, err
@@ -864,7 +869,7 @@ func classifyHTTPie(args []string) string {
 		if up := pystr.Upper(arg); writeMethods.has(up) {
 			return fmt.Sprintf("httpie %s request", up)
 		}
-		if !strings.Contains(arg, "://") && httpieDataItem(arg) {
+		if httpieDataItem(arg) { // a data item whose value is a URL still sends a body
 			name, _, _ := partition(arg, "=")
 			return fmt.Sprintf("httpie request with a body (%s)", name)
 		}
@@ -1138,6 +1143,8 @@ var (
 // substitutions returns the bodies of command substitutions (backticks, $(...), <(...) / >(...)).
 // It honours single quotes and backslash escapes (substitutions still run inside double quotes)
 // and fails if a substitution or quote is unterminated.
+var backtickEscape = regexp.MustCompile("\\\\([`\\\\$])")
+
 func substitutions(script string) ([]string, error) {
 	var bodies []string
 	s := []rune(script)
@@ -1167,7 +1174,8 @@ func substitutions(script string) ([]string, error) {
 			if end >= n {
 				return nil, errUnterminatedBacktick
 			}
-			bodies = append(bodies, string(s[i+1:end]))
+			// Inside backticks the shell strips the backslash from \`, \\ and \$ first.
+			bodies = append(bodies, backtickEscape.ReplaceAllString(string(s[i+1:end]), "$1"))
 			i = end
 		case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':
 			depth, end := 1, i+2
@@ -1189,9 +1197,13 @@ func substitutions(script string) ([]string, error) {
 			}
 			body := string(s[i+2 : end-1])
 			if ch == '$' && strings.HasPrefix(body, "(") && strings.HasSuffix(body, ")") {
-				body = "" // $(( arithmetic ))
-			}
-			if body != "" {
+				// $(( arithmetic )): not a command, but a substitution inside it still runs
+				inner, err := substitutions(body[1 : len(body)-1])
+				if err != nil {
+					return nil, err
+				}
+				bodies = append(bodies, inner...)
+			} else {
 				bodies = append(bodies, body)
 			}
 			i = end

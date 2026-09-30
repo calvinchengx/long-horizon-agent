@@ -16,29 +16,30 @@ audit() {
   local pkg=$1 exclude=$2
   echo "== $pkg"
   "$gremlins" unleash "$pkg" -E "$exclude" --workers "${MUTATION_WORKERS:-4}" \
-    --timeout-coefficient "${MUTATION_TIMEOUT_COEFFICIENT:-20}" -S ltc | tee -a "$out"
+    --timeout-coefficient "${MUTATION_TIMEOUT_COEFFICIENT:-20}" -S ltc | tee /dev/stderr |
+    sed "s|^|$pkg |" >> "$out"
 }
 audit ./internal/safety 'pystr/|idna|pinnedhttp|shlex|doc\.go'
-audit ./internal/obs 'tracing/|events\.go'
+audit ./internal/obs 'tracing/|events\.go|procmem'
 audit ./internal/execution '/|dispatcher|docker|factory|open_|proc|sandbox'
 audit ./internal/execution/egressproxy 'embed|events|proxy|urlsplit'
 
 # "   LIVED CONDITIONALS_BOUNDARY at egress.go:83:11" -> "CONDITIONALS_BOUNDARY <path> <line text>"
 known=$(sed -e '/^#/d' -e 's/[[:space:]]\{2,\}#.*$//' -e '/^[[:space:]]*$/d' scripts/mutation_equivalents.txt)
 unexplained=0
-while read -r status mutator _at location; do
+while read -r pkg status mutator _at location; do
   file=${location%%:*}
   rest=${location#*:}
   line=${rest%%:*}
   col=${rest#*:}
-  path=$(find internal -path "*/$file" -not -path "*/testdata/*" | head -1)
+  path="${pkg#./}/$file" # gremlins reports the file relative to the audited package
   text=$(sed -n "${line}p" "$path" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
   key="$mutator $path:$col $text"
   if ! grep -qxF "$key" <<< "$known"; then
     echo "unexplained $status: $key  ($path:$line)"
     unexplained=$((unexplained + 1))
   fi
-done < <(grep -E '^[[:space:]]*(LIVED|TIMED OUT|NOT COVERED) ' "$out" | sed 's/TIMED OUT/TIMED_OUT/; s/NOT COVERED/NOT_COVERED/')
+done < <(grep -E '^\S+[[:space:]]+(LIVED|TIMED OUT|NOT COVERED) ' "$out" | sed 's/TIMED OUT/TIMED_OUT/; s/NOT COVERED/NOT_COVERED/')
 if [ "$unexplained" -gt 0 ]; then
   echo "$unexplained surviving mutants: add a test that kills each, or list a reviewed exception in scripts/mutation_equivalents.txt" >&2
   exit 1

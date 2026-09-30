@@ -12,7 +12,7 @@ import (
 //	lexer.whitespace_split = True
 //	tokens = list(lexer)
 //
-// It is a transliteration of shlex.read_token for that configuration (commenters "#", quotes
+// It is a transliteration of shlex.read_token for that configuration (no commenters, quotes
 // "'\"", escape "\\", escapedquotes "\""), including its quirks: a "#" anywhere outside quotes
 // starts a comment that also swallows the terminating newline, runs of punctuation characters form
 // one token ("&&", ";;", "|&"...), and an empty quoted string yields an empty token. The two
@@ -94,9 +94,6 @@ func (l *lexer) readToken() (string, bool, error) {
 					goto emit
 				}
 				continue
-			case ch == '#':
-				l.readLine()
-				continue
 			case ch == '\\':
 				escapedState = 'a'
 				l.state = ch
@@ -145,13 +142,6 @@ func (l *lexer) readToken() (string, bool, error) {
 			case !have:
 				l.state = stateEOF
 			case in(lexWhitespace, ch):
-				l.state = ' '
-				if token.Len() > 0 || quoted {
-					goto emit
-				}
-				continue
-			case ch == '#':
-				l.readLine()
 				l.state = ' '
 				if token.Len() > 0 || quoted {
 					goto emit

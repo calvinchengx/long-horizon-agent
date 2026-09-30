@@ -234,7 +234,8 @@ CASES: list[tuple[list[str], bool]] = [
     (["sh", "-c", "echo ``"], A),
     (["sh", "-c", "echo `pwd`"], A),
     (["sh", "-c", "echo `printf \\n`"], A),
-    (["sh", "-c", "echo `printf \\``"], A),  # an escaped backtick does not end the body
+    # an escaped backtick is a backtick in the body, which then has no closing one (as in sh)
+    (["sh", "-c", "echo `printf \\``"], True),
     (["sh", "-c", 'echo "X(git push)"'], A),  # only `$(`, `<(`, `>(` open a substitution
     # the quote scan does not know comments: an odd quote there still fails closed
     (["sh", "-c", "echo hi # it's"], G),
