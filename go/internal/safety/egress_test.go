@@ -3,6 +3,7 @@ package safety
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -320,6 +321,31 @@ func TestRuleOfTwo(t *testing.T) {
 	}
 }
 
+// The messages of spec/execution/sandbox_egress.json's rule_of_two cases.
+func TestRunRefusal(t *testing.T) {
+	const why = "LHA_PRIVATE_DATA=true declares the workspace holds secrets or customer data"
+	const tail = ", which brings untrusted content and external comms, and " + why + ". session would " +
+		"hold untrusted content + private data + external comms (the lethal trifecta); split " +
+		"capabilities across sessions. Use a docker/e2b sandbox without private data, or clear the allow-list ("
+	const sandbox = "LHA_SANDBOX_EGRESS / LHA_SANDBOX_EGRESS_EXTRA_HOSTS / LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS"
+	for _, c := range []struct {
+		web, egress []string
+		want        string
+	}{
+		{nil, []string{"github.com", "gitlab.com"}, "refusing to start: the sandbox can reach the network " +
+			"(sandbox egress: github.com, gitlab.com)" + tail + sandbox + ")."},
+		{[]string{"a.test", "b.test"}, []string{"pypi.org"}, "refusing to start: web tools are enabled " +
+			"(egress allow-list: a.test, b.test) and the sandbox can reach the network (sandbox egress: " +
+			"pypi.org)" + tail + "LHA_WEB_ALLOW_HOSTS / --allow-host; " + sandbox + ")."},
+		{[]string{"docs.test"}, nil, "refusing to start: web tools are enabled (egress allow-list: " +
+			"docs.test)" + tail + "LHA_WEB_ALLOW_HOSTS / --allow-host)."},
+	} {
+		if got := RunRefusal(c.web, c.egress, why, ErrRuleOfTwoViolation); got != c.want {
+			t.Errorf("RunRefusal(%v, %v):\n got %s\nwant %s", c.web, c.egress, got, c.want)
+		}
+	}
+}
+
 func TestPunycode(t *testing.T) {
 	for in, want := range map[string]string{
 		"bücher": "bcher-kva", "straße": "strae-oqa", "ü": "tda", "☃": "n3h", "ab": "ab-",
@@ -335,6 +361,93 @@ func TestPunycode(t *testing.T) {
 	for _, bad := range []string{"-", "a-!", "99999999999999999", "zzzzzzzzzzzzzzzzzzzzzzzz", "a-b"} {
 		if _, ok := punycodeDecode(bad); ok && bad != "-" {
 			t.Errorf("punycodeDecode(%q) succeeded", bad)
+		}
+	}
+}
+
+// urllib.parse.urlsplit's answers (CPython 3.12.13): which prefixes are schemes, where the netloc
+// ends, and which bracketed hosts are rejected.
+func TestURLSplit(t *testing.T) {
+	for _, c := range []struct {
+		in, scheme, netloc string
+		fails              bool
+	}{
+		{"a://h", "a", "h", false},
+		{"z://h", "z", "h", false},
+		{"A://h", "a", "h", false},
+		{"Z://h", "z", "h", false},
+		{"@b://h", "", "", false},
+		{"[b://h", "", "", false},
+		{"`b://h", "", "", false},
+		{"{b://h", "", "", false},
+		{"xa://h", "xa", "h", false},
+		{"xz://h", "xz", "h", false},
+		{"xA://h", "xa", "h", false},
+		{"xZ://h", "xz", "h", false},
+		{"x0://h", "x0", "h", false},
+		{"x9://h", "x9", "h", false},
+		{"x+://h", "x+", "h", false},
+		{"x-://h", "x-", "h", false},
+		{"x.://h", "x.", "h", false},
+		{"x@://h", "", "", false},
+		{"x[://h", "", "", false},
+		{"x`://h", "", "", false},
+		{"x{://h", "", "", false},
+		{"x/://h", "", "", false},
+		{"x:://h", "x", "", false},
+		{"x,://h", "", "", false},
+		{"x*://h", "", "", false},
+		{":x://h", "", "", false},
+		{"//h/x?y#z", "", "h", false},
+		{"//h?x/y", "", "h", false},
+		{"//h#x?y/z", "", "h", false},
+		{"//h/x#y", "", "h", false},
+		{"//h/x?y", "", "h", false},
+		{"//[v0.x]", "", "[v0.x]", false},
+		{"//[v9.x]", "", "[v9.x]", false},
+		{"//[va.x]", "", "[va.x]", false},
+		{"//[vf.x]", "", "[vf.x]", false},
+		{"//[vA.x]", "", "[vA.x]", false},
+		{"//[vF.x]", "", "[vF.x]", false},
+		{"//[v/.x]", "", "", true}, // Invalid IPv6 URL
+		{"//[v:.x]", "", "", true}, // IPvFuture address is invalid
+		{"//[v`.x]", "", "", true}, // IPvFuture address is invalid
+		{"//[vg.x]", "", "", true}, // IPvFuture address is invalid
+		{"//[v@.x]", "", "", true}, // '.x]' does not appear to be an IPv4 or IPv6 address
+		{"//[vG.x]", "", "", true}, // IPvFuture address is invalid
+		{"//[v1]", "", "", true},   // IPvFuture address is invalid
+		{"//[v1.]", "", "", true},  // IPvFuture address is invalid
+		{"//[v]", "", "", true},    // IPvFuture address is invalid
+		{"//[v.x]", "", "", true},  // IPvFuture address is invalid
+	} {
+		got, err := urlSplit(c.in)
+		switch {
+		case c.fails && err == nil:
+			t.Errorf("urlSplit(%q) = %+v, want an error", c.in, got)
+		case !c.fails && (err != nil || got != splitURL{c.scheme, c.netloc}):
+			t.Errorf("urlSplit(%q) = %+v, %v; want %q %q", c.in, got, err, c.scheme, c.netloc)
+		}
+	}
+}
+
+// parse_url's answers (python/src/lha/safety/egress.py).
+func TestParseURLEdges(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"http://h:65535", "http h 65535"},
+		{"http://h:0065535", "http h 65535"},
+		{"http://h:65536", "malformed url: 'http://h:65536'"},
+		{"http://h:100000", "malformed url: 'http://h:100000'"},
+		{"https://example.com/a?b", "https example.com 443"},
+		{"http://u@[::1]/", "credentials in the url are not allowed"},
+		{"http://@[::1]/", "credentials in the url are not allowed"},
+	} {
+		got, err := ParseURL(c.in)
+		text := fmt.Sprintf("%s %s %d", got.Scheme, got.Host, got.Port)
+		if err != nil {
+			text = err.Error()
+		}
+		if text != c.want {
+			t.Errorf("ParseURL(%q) = %s, want %s", c.in, text, c.want)
 		}
 	}
 }

@@ -404,6 +404,83 @@ func TestReasons(t *testing.T) {
 	}
 }
 
+// Edge cases found by the mutation audit: arguments that end right after an option, character
+// class bounds, and the exact nesting / candidate limits. Reasons are the Python reference's.
+func TestClassifierEdges(t *testing.T) {
+	for _, c := range []struct {
+		argv   []string
+		reason string
+	}{
+		{[]string{"/sudo", "ls"}, "privilege escalation (sudo)"},
+		{[]string{"env", "--split-string"}, ""},
+		{[]string{"npx", "--call"}, ""},
+		{[]string{"env", "-iu", "FOO", "git", "push"}, "git push (outward-facing / rewrites history)"},
+		{[]string{"npx", "-c"}, ""},
+		{[]string{"uv"}, ""},
+		{[]string{"python3", "-m", "ssh"}, "ssh is an outward-facing / destructive tool"},
+		{[]string{"flock", "f"}, ""},
+		{[]string{"watch"}, ""},
+		{[]string{"git", "remote"}, ""},
+		{[]string{"git", "reflog"}, ""},
+		{[]string{"git", "rebase", "--root"}, "git rebase rewrites history"},
+		{[]string{"find", "-exec", "rm", "-rf", "/", ";"}, "recursive delete outside the workspace: '/'"},
+		{[]string{"find", ".", "-exec", "rm", "-rf", "/"}, "recursive delete outside the workspace: '/'"},
+		{[]string{"http", "u", "A=1"}, "httpie request with a body (A)"},
+		{[]string{"http", "u", "Z=1"}, "httpie request with a body (Z)"},
+		{[]string{"http", "u", "a=1"}, "httpie request with a body (a)"},
+		{[]string{"http", "u", "z=1"}, "httpie request with a body (z)"},
+		{[]string{"http", "u", "0=1"}, "httpie request with a body (0)"},
+		{[]string{"http", "u", "9=1"}, "httpie request with a body (9)"},
+		{[]string{"http", "u", "@x=1"}, ""},
+		{[]string{"http", "u", "`x=1"}, ""},
+		{[]string{"http", "u", "{x=1"}, ""},
+		{[]string{"http", "u", "/x=1"}, ""},
+		{[]string{"http", "u", ":x=1"}, ""},
+		{[]string{"curl", "-o", "f", "u"}, ""},
+		{[]string{"bash", "-x", "-c", "git push"}, "git push (outward-facing / rewrites history)"},
+		{[]string{"eval", "eval", "eval", "eval", "ls"}, "deeply nested shell invocation"},
+		{[]string{"eval", "eval", "eval", "ls"}, ""},
+		{[]string{"pnpm", "run", "deploy"}, "pnpm run deploy (publish / deploy script)"},
+		{[]string{"yarn", "run", "deploy"}, "yarn run deploy (publish / deploy script)"},
+		{[]string{"npm", "run", "deploy"}, "npm run deploy (publish / deploy script)"},
+		{[]string{"npm", "run"}, ""},
+		{[]string{"sh", "-c", "echo $(echo $(echo hi))"}, ""},
+		{[]string{"sh", "-c", "echo >x; echo >|.git/y"}, "redirection writes a harness-owned path ('.git/y')"},
+		{[]string{"sh", "-c", "echo x$ '(' y"}, ""},
+		{[]string{"nice", "-Zx", "git", "push"}, "git push (outward-facing / rewrites history)"},
+		{[]string{"git_config_parameters=x"}, "git config injected via the environment (git_config_parameters)"},
+		{[]string{"GIT_CONFIG_KEY_1"}, ""},
+		// The option parser's candidate count peaks at exactly 64 here, so the first reading
+		// (nine nested launchers) is classified; one more unknown option and it is not.
+		{[]string{"env", "--u", "--u", "--u", "--u", "--u", "x=1", "--u", "--u", "--u", "nice", "nice", "nice",
+			"nice", "nice", "nice", "nice", "nice", "nice", "ls"}, "ambiguous command line (too many nested launchers)"},
+		{[]string{"env", "--u", "--u", "--u", "--u", "--u", "x=1", "--u", "--u", "--u", "--u", "nice", "nice",
+			"nice", "nice", "nice", "nice", "nice", "nice", "nice", "ls"},
+			"ambiguous command line (too many ways to read the launcher options)"},
+		{[]string{"git", "-c"}, ""},
+		{[]string{"git", "--config-env"}, ""},
+		{[]string{"sh", "-c", "echo $"}, ""},
+		{[]string{"sh", "-c", "echo x >"}, ""},
+		{[]string{"sh", "-c", "cat <"}, ""},
+		{append(repeat("nice", 8), "ls"), ""},
+		{append(repeat("nice", 9), "ls"), "ambiguous command line (too many nested launchers)"},
+		{append(repeat2("python3", "-m", 8), "ls"), ""},
+		{append(repeat2("python3", "-m", 9), "ls"), "ambiguous command line (too many nested launchers)"},
+		{many("env", 7, "--o", "ls"), ""},
+		{many("env", 8, "--o", "ls"), ""},
+		{many("env", 9, "--o", "ls"), "ambiguous command line (too many ways to read the launcher options)"},
+		{many("watch", 7, "--o"), ""},
+		{many("watch", 8, "--o"), ""},
+		{many("watch", 9, "--o"), "ambiguous command line (too many ways to read the launcher options)"},
+		{append([]string{"env"}, repeat2("-S", "ls", 63)...), ""},
+		{append([]string{"env"}, repeat2("-S", "ls", 64)...), "ambiguous command line (too many ways to read the launcher options)"},
+	} {
+		if got, _ := ClassifyCommand(c.argv); got != c.reason {
+			t.Errorf("ClassifyCommand(%q) = %q, want %q", c.argv, got, c.reason)
+		}
+	}
+}
+
 func many(head string, n int, prefix string, tailArgs ...string) []string {
 	out := []string{head}
 	for i := 0; i < n; i++ {
@@ -416,6 +493,14 @@ func repeat(s string, n int) []string {
 	out := make([]string, n)
 	for i := range out {
 		out[i] = s
+	}
+	return out
+}
+
+func repeat2(a, b string, n int) []string {
+	out := make([]string, 0, 2*n)
+	for i := 0; i < n; i++ {
+		out = append(out, a, b)
 	}
 	return out
 }
@@ -483,6 +568,8 @@ func TestSubstitutions(t *testing.T) {
 		{"echo `a", nil, true},
 		{`echo "a`, nil, true},
 		{`echo $(\`, nil, true},
+		{"echo $", nil, false},
+		{"echo >", nil, false},
 	}
 	for _, c := range cases {
 		got, err := substitutions(c.in)
@@ -515,6 +602,7 @@ func TestGitConfigEnvMatch(t *testing.T) {
 		"GIT_CONFIG_SYSTEM=x": true, "GIT_CONFIG_PARAMETERS=x": true, "GIT_CONFIGX=1": false,
 		"GIT_CONFIG": false, "XGIT_CONFIG=1": false, "GIT_CONFIG_NOSYSTEM=1": false,
 		"G\u0130T_CONFIG=1": true, "GIT_CON\ufb00IG=1": false,
+		"git_config_parameters=x": true, "git_config_value_1=x": true, "GIT_CONFIG_KEY_1": false,
 	} {
 		if got := gitConfigEnvMatch(token); got != want {
 			t.Errorf("gitConfigEnvMatch(%q) = %v, want %v", token, got, want)
@@ -526,6 +614,7 @@ func TestRedirectEnd(t *testing.T) {
 	for token, want := range map[string]int{
 		">x": 1, ">>x": 2, ">|x": 2, ">>|x": 3, "&>x": 2, "2>x": 2, "<>x": 2, "a>b": 2,
 		"x": -1, "<x": -1, "12>>x": 4, "&x": -1,
+		"<": -1, "a>>x": 3, "<>>x": 2, "<>|x": 2, "&a>x": 3,
 	} {
 		if got := redirectEnd([]rune(token)); got != want {
 			t.Errorf("redirectEnd(%q) = %d, want %d", token, got, want)

@@ -1,3 +1,70 @@
 # Proven-equivalent mutants of the Go mutation audit (scripts/mutation_audit.sh): each changes the
 # code but not its behaviour, so no test can kill it. One per line:
 #   <MUTATOR> <path>:<column> <the mutated line's text, trimmed>  # why it is equivalent (two spaces before #)
+
+# Equivalent: no input distinguishes the mutant.
+CONDITIONALS_BOUNDARY internal/safety/commands.go:7 if i >= len(xs) {  # at i == len(xs) both return an empty slice (xs[i:] vs []string{}); no caller appends to it
+ARITHMETIC_BASE internal/safety/commands.go:20 if len(readings)+len(stack) > maxCandidates {  # every stack frame and the path in progress each yield a reading, so readings+stack > 64 iff the final count R >= 66, and then readings-stack > 64 too when the last path starts (stack empty, readings >= 65): both fail on the same inputs with the same message
+CONDITIONALS_BOUNDARY internal/safety/commands.go:21 if c >= 'A' && c <= 'Z' {  # no GIT_CONFIG pattern literal contains 'Z'
+CONDITIONALS_BOUNDARY internal/safety/commands.go:16 for p := 0; p <= len(rs); p++ {  # at p == len(rs) op(len(rs)) is -1 and the & branch is guarded by p < len(rs): the last iteration never returns
+CONDITIONALS_BOUNDARY internal/safety/commands.go:24 if end := op(d); end >= 0 {  # op returns -1 or an index past an operator (>= 1), never 0
+CONDITIONALS_NEGATION internal/safety/commands.go:27 if p < len(rs) && rs[p] == '&' {  # op(p+1) succeeding means rs[p+1] is > or <, which the next iteration (d = p+1, not a digit) returns with the same end; the & branch only returns earlier what the next iteration returns
+CONDITIONALS_BOUNDARY internal/safety/commands.go:29 if end := op(p + 1); end >= 0 {  # op(p+1) returns -1 or >= p+2, never 0
+CONDITIONALS_BOUNDARY internal/safety/commands.go:10 if end < 0 {  # redirectEnd returns -1 or an index past an operator (>= 1), never 0
+CONDITIONALS_BOUNDARY internal/safety/commands.go:53 } else if strings.HasPrefix(arg, "-") && len(arg) > 1 {  # for "-" (len 1) the short-option loop starts at pos 1 of 1 rune and does nothing
+ARITHMETIC_BASE internal/safety/commands.go:57 if skipArguments && strings.HasSuffix(token, "$") && i+1 < len(tokens) &&  # tokens ends with the appended ";", so a token ending in "$" is never last and i+1 < len(tokens) (and i-1 < len) always hold
+CONDITIONALS_BOUNDARY internal/safety/commands.go:60 if skipArguments && strings.HasSuffix(token, "$") && i+1 < len(tokens) &&  # tokens ends with the appended ";", so a token ending in "$" is never last: i+1 < len(tokens) always holds
+CONDITIONALS_BOUNDARY internal/safety/egress.go:41 if i := strings.IndexByte(url, ':'); i > 0 {  # i == 0 means url[0] == ':', which fails the letter check below
+CONDITIONALS_BOUNDARY internal/safety/egress.go:57 if w := strings.IndexRune(url[2:], c); w >= 0 && w+2 < delim {  # w+2 == delim would put two different delimiters at one index (or index len(url))
+ARITHMETIC_BASE internal/safety/egress.go:25 for _, r := range rs[i+1:] {  # rs[i-1] is a hex digit and rs[i] is '.', neither is '\n'
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:12 if skip >= 0 {  # skip is -1 or an index i >= 1, never 0
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:10 if skip >= 0 {  # skip is -1 or an index i >= 1, never 0
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:14 case n.bits <= 64:  # for a /64 the default branch compares hi exactly and masks lo with ^0 << 64 == 0: the same answer
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:35 unspecified := a.hi == 0 && a.lo == 0  # every address with hi == 0 is in ::/8 (reserved), so unspecified never decides the answer
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:32 loopback := a.hi == 0 && a.lo == 1  # every address with hi == 0 is in ::/8 (reserved), so loopback never decides the answer
+CONDITIONALS_BOUNDARY internal/obs/redact.go:16 for i := 0; i <= len(rs); i++ {  # at i == len(rs) no word literal fits, atEnd(rs, 0) is only tried at i == 0 and the [_-] check needs i < len(rs)
+CONDITIONALS_NEGATION internal/obs/redact.go:8 if i == 0 && atEnd(rs, 0) {  # atEnd(rs, 0) does not depend on i and every key it matches has at least 4 runes, so i != 0 matches it at i == 1 instead of i == 0
+
+# Killed, but gremlins cannot see it: it reports a switch case expression as NOT COVERED (go
+# cover has no block for it). Each was applied by hand and fails the named test.
+CONDITIONALS_NEGATION internal/safety/commands.go:13 case (opt == "-c" || opt == "--config-env") && len(args) > 1:  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:28 case (opt == "-c" || opt == "--config-env") && len(args) > 1:  # killed by TestSpecClassifyCommand
+CONDITIONALS_BOUNDARY internal/safety/commands.go:60 case (opt == "-c" || opt == "--config-env") && len(args) > 1:  # killed by TestClassifierEdges
+CONDITIONALS_NEGATION internal/safety/commands.go:60 case (opt == "-c" || opt == "--config-env") && len(args) > 1:  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:11 case ch == '\'' && !inDouble:  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:11 case ch == '"' && !inSingle:  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:24 case !inSingle && ch == '`':  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:25 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:38 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestSubstitutions
+CONDITIONALS_NEGATION internal/safety/commands.go:51 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestSubstitutions
+ARITHMETIC_BASE internal/safety/commands.go:63 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestClassifierEdges
+CONDITIONALS_BOUNDARY internal/safety/commands.go:66 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestClassifierEdges
+CONDITIONALS_NEGATION internal/safety/commands.go:66 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestSpecClassifyCommand
+ARITHMETIC_BASE internal/safety/commands.go:76 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestSpecClassifyCommand
+CONDITIONALS_NEGATION internal/safety/commands.go:80 case !inSingle && (ch == '$' || ch == '<' || ch == '>') && i+1 < n && s[i+1] == '(':  # killed by TestSpecClassifyCommand
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:10 case c >= '0' && c <= '9':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:10 case c >= '0' && c <= '9':  # killed by TestParseIPAddress
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:22 case c >= '0' && c <= '9':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:22 case c >= '0' && c <= '9':  # killed by TestParseIPAddress
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:10 case c >= 'a' && c <= 'f':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:10 case c >= 'a' && c <= 'f':  # killed by TestParseIPAddress
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:22 case c >= 'a' && c <= 'f':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:22 case c >= 'a' && c <= 'f':  # killed by TestParseIPAddress
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:10 case c >= 'A' && c <= 'F':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:10 case c >= 'A' && c <= 'F':  # killed by TestParseIPAddress
+CONDITIONALS_BOUNDARY internal/safety/ipaddr.go:22 case c >= 'A' && c <= 'F':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:22 case c >= 'A' && c <= 'F':  # killed by TestParseIPAddress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:14 case n.bits <= 64:  # killed by TestSpecEgress
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:12 case a.hi == 0 && a.lo>>32 == 0xFFFF: // ipv4_mapped  # killed by TestNonPublicAddresses
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:29 case a.hi == 0 && a.lo>>32 == 0xFFFF: // ipv4_mapped  # killed by TestNonPublicAddresses
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:16 case a.hi>>48 == 0x2002: // sixtofour  # killed by TestNonPublicAddresses
+CONDITIONALS_NEGATION internal/safety/ipaddr.go:16 case a.hi>>32 == 0x20010000: // teredo: (server, client); the client is ~ip & 0xFFFFFFFF  # killed by TestSpecEgress
+CONDITIONALS_NEGATION internal/execution/paths.go:9 case a == "" || strings.HasSuffix(a, "/"):  # killed by TestSpecPaths
+
+# Not a runnable mutant: "-" on a string constant does not compile (gremlins reports it NOT COVERED).
+ARITHMETIC_BASE internal/safety/egress.go:93 const whatwgC0ControlOrSpace = "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f" +  # string constant
+ARITHMETIC_BASE internal/safety/rule_of_two.go:74 "session would hold untrusted content + private data + external comms " +  # string constant
+
+# The mutant hangs package initialisation (mustV6("::1/128") loops forever), so every test run
+# times out: detected, but gremlins reports TIMED OUT.
+INCREMENT_DECREMENT internal/safety/ipaddr.go:28 for i := 0; i < skipped; i++ {  # hangs init

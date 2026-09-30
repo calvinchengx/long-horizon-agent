@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 )
 
 // Ported from python/tests/unit/test_obs_redact.py, plus the CPython regex semantics the
@@ -89,6 +91,88 @@ func TestRedactTextEdgeCases(t *testing.T) {
 	}
 }
 
+// Matches that end exactly at the end of the text, and the bounds of each character class
+// (mutation audit). Expected values are the Python reference's output.
+func TestRedactTextBoundaries(t *testing.T) {
+	for in, want := range map[string]string{
+		"gh":                   "gh",
+		"AKIAABCDEFGHIJKLMNOP": "***",
+		"AKIA0123":             "AKIA0123",
+		"AKIAabcdefghijklmnop": "AKIAabcdefghijklmnop",
+		"AKIA0000000000000000 AKIA9999999999999999 AKIAZZZZZZZZZZZZZZZZ":                      "*** *** ***",
+		"AKIA/AAAAAAAAAAAAAAA AKIA:AAAAAAAAAAAAAAA AKIA@AAAAAAAAAAAAAAA AKIA[AAAAAAAAAAAAAAA": "AKIA/AAAAAAAAAAAAAAA AKIA:AAAAAAAAAAAAAAA AKIA@AAAAAAAAAAAAAAA AKIA[AAAAAAAAAAAAAAA",
+		"Zsk-abcdefghijklmnopq 9sk-abcdefghijklmnopq zsk-abcdefghijklmnopq":                   "Zsk-abcdefghijklmnopq 9sk-abcdefghijklmnopq zsk-abcdefghijklmnopq",
+		"authorization":            "authorization",
+		"authorization: ":          "authorization: ",
+		"Authorization: Bearer  ;": "Authorization: ***  ;",
+		"z://u:p@h":                "z://u:***@h",
+		"h2://u:p@h":               "h2://u:***@h",
+		"az://u:p@h":               "az://u:***@h",
+		"ba://u:p@h":               "ba://u:***@h",
+		"h9://u:p@h":               "h9://u:***@h",
+		"h0://u:p@h":               "h0://u:***@h",
+		"a://user":                 "a://user",
+		"a://u:@h":                 "a://u:***@h",
+	} {
+		if got := RedactText(in); got != want {
+			t.Errorf("RedactText(%+q) = %+q, want %+q", in, got, want)
+		}
+	}
+	for _, r := range "09AZ" {
+		if !classDigitUpper(r) {
+			t.Errorf("classDigitUpper(%q) = false", r)
+		}
+	}
+	for _, r := range "/:@[a" {
+		if classDigitUpper(r) {
+			t.Errorf("classDigitUpper(%q) = true", r)
+		}
+	}
+	for _, r := range "09azAZ" {
+		if !isASCIIAlnum(r) {
+			t.Errorf("isASCIIAlnum(%q) = false", r)
+		}
+	}
+	for _, r := range "/:`{@[" {
+		if isASCIIAlnum(r) {
+			t.Errorf("isASCIIAlnum(%q) = true", r)
+		}
+	}
+}
+
+func TestRedactOrderedMap(t *testing.T) {
+	m := contracts.NewOrderedMap("api_key", "k", "note", "use sk-abcdefghijklmnopqrstu", "n", 1)
+	out, ok := RedactValue(m).(*contracts.OrderedMap)
+	if !ok || out == m {
+		t.Fatalf("RedactValue(OrderedMap) = %#v", out)
+	}
+	var keys []string
+	out.Range(func(k string, _ any) bool { keys = append(keys, k); return true })
+	if !reflect.DeepEqual(keys, []string{"api_key", "note", "n"}) || out.Value("api_key") != Redacted ||
+		out.Value("note") != "use ***" || out.Value("n") != 1 {
+		t.Errorf("RedactValue(OrderedMap) = %v %v %v %v", keys, out.Value("api_key"), out.Value("note"), out.Value("n"))
+	}
+	if m.Value("api_key") != "k" {
+		t.Error("RedactValue changed its input")
+	}
+	var none *contracts.OrderedMap
+	if got, ok := RedactValue(none).(*contracts.OrderedMap); !ok || got != nil {
+		t.Errorf("RedactValue(nil OrderedMap) = %#v", got)
+	}
+}
+
+func TestCamelBoundary(t *testing.T) {
+	for in, want := range map[string]string{
+		"aAzZ0A9Z":      "a_Az_Z0_A9_Z",
+		"A@A[A`A{A/A:A": "A@A[A`A{A/A:A",
+		"a@a[":          "a@a[",
+	} {
+		if got := camelBoundary(in); got != want {
+			t.Errorf("camelBoundary(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestIsSecretKey(t *testing.T) {
 	for key, want := range map[string]bool{
 		"api-key": true, "APIKEY": true, "passwd": true, "PassWord": true, "pasword": false,
@@ -97,6 +181,10 @@ func TestIsSecretKey(t *testing.T) {
 		"myToken": true, "my2Auth": true, "MYTOKEN": false, "-token": true, "token-x": false,
 		"\u0131d_token": true, "api\u212aey": true, "\u017fecret": true, "": false,
 		"credentials": true, "DSN": true,
+		"api_version": false, "private_note": false, "my_api": false, "apiary": false,
+		"aToken": true, "zToken": true, "0Token": true, "9Token": true, "@Token": false,
+		"[Token": false, "`Token": false, "{Token": false, "/Token": false, ":Token": false,
+		"aAuth": true,
 	} {
 		if got := IsSecretKey(key); got != want {
 			t.Errorf("IsSecretKey(%+q) = %v, want %v", key, got, want)

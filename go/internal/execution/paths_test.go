@@ -177,3 +177,84 @@ func TestReadWriteErrorsMatchPython(t *testing.T) {
 }
 
 func osText(err error) string { return pyval.OSErrorText(err) }
+
+func TestPosixNormpath(t *testing.T) {
+	// Expected values are posixpath.normpath's.
+	for in, want := range map[string]string{
+		"": ".", "/": "/", "//": "//", "///": "/", "a/..": ".", "../a": "../a", "a/../../b": "../b",
+		"/../a": "/a", "//a/../..": "//", "../../a": "../../a", "a/b/../c": "a/c", "a/./b": "a/b",
+		"/a/b/..": "/a", "..": "..", "a/b/../../..": "..", "../a/..": "..", "a/../..": "..",
+	} {
+		if got := posixNormpath(in); got != want {
+			t.Errorf("posixNormpath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestRealpathOfARelativePath(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Skip(err)
+	}
+	if got, want := Realpath("no-such-entry/x"), posixNormpath(Realpath(cwd)+"/no-such-entry/x"); got != want {
+		t.Fatalf("Realpath = %q, want %q", got, want)
+	}
+}
+
+func TestWriteTextWithinCreatesParents(t *testing.T) {
+	tmp := Realpath(t.TempDir())
+	got, err := WriteTextWithin(tmp, "a/b/c.txt", "hi")
+	if err != nil || got != tmp+"/a/b/c.txt" {
+		t.Fatal(got, err)
+	}
+	if text, err := ReadTextWithin(tmp, "a/b/c.txt"); err != nil || text != "hi" {
+		t.Fatal(text, err)
+	}
+	// The directory is created, then naming it fails: the error is not swallowed.
+	long := strings.Repeat("x", 300)
+	if err := mkdirParents(tmp + "/missing/" + long); err == nil {
+		t.Fatal("mkdirParents of an over-long name succeeded")
+	}
+}
+
+func TestVerifyFDRejectsAChangedPath(t *testing.T) {
+	tmp := Realpath(t.TempDir())
+	for _, name := range []string{"a", "b"} {
+		if err := os.WriteFile(filepath.Join(tmp, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := os.Open(filepath.Join(tmp, "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	// relpath now names another file than the one opened, or none at all.
+	for _, c := range []struct{ relpath, expected string }{
+		{"b", tmp + "/b"}, {"a", tmp + "/b"}, {"gone", tmp + "/gone"},
+	} {
+		if err := verifyFD(tmp, c.relpath, f, c.expected); !isEscape(err) ||
+			err.Error() != "path changed during open: '"+c.relpath+"'" {
+			t.Errorf("verifyFD(%q, %q) = %v", c.relpath, c.expected, err)
+		}
+	}
+	if err := verifyFD(tmp, "a", f, tmp+"/a"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestContainedPosixKeepsADoubleSlashRoot(t *testing.T) {
+	// str(PurePosixPath("//w/./x/") / "a"): POSIX leaves a leading "//" implementation-defined.
+	if got, err := ContainedPosix("//w/./x/", "a"); err != nil || got != "//w/x/a" {
+		t.Fatal(got, err)
+	}
+}
+
+func TestContainedPosixRelativeWorkdir(t *testing.T) {
+	// str(PurePosixPath(workdir) / "a").
+	for workdir, want := range map[string]string{"x/./y/": "x/y/a", "x": "x/a"} {
+		if got, err := ContainedPosix(workdir, "a"); err != nil || got != want {
+			t.Errorf("ContainedPosix(%q, a) = %q, %v; want %q", workdir, got, err, want)
+		}
+	}
+}
