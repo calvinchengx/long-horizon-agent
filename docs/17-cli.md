@@ -9,7 +9,8 @@ when one is configured ([16-observability.md](16-observability.md)).
 The Go implementation mirrors this surface: the same command names, options, settings, output
 and exit codes. `go/cmd/lha` implements every command: `version`, `config`, `run-local`,
 `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate` (Go
-needs no extra for `db migrate`: the Postgres driver is built in), `worker`, `mission-start`
+needs no extra for `db migrate`: the Postgres driver is built in), `objects prune`,
+`memory reembed`, `worker`, `mission-start`
 (including the organization options `--research`, `--review` and `--max-parallel`),
 `mission-status`, `mission-approve`, `mission-snooze` and `mission-abort`. It installs the trace
 exporter at start like Python; see [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
@@ -21,6 +22,8 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`version`](#lha-version) | print the version | nothing |
 | [`config`](#lha-config) | print resolved settings, secrets masked | nothing |
 | [`db migrate`](#lha-db-migrate) | apply SQL migrations | Postgres, `postgres` extra |
+| [`objects prune`](#lha-objects-prune) | delete old payloads from the ClaimCheck object store | nothing |
+| [`memory reembed`](#lha-memory-reembed) | re-embed stored memory with the configured embedder | the mission store, an embedder |
 | [`vendor`](#lha-vendor) | snapshot reference pages into the workspace | network access to the URLs |
 | [`run-local`](#lha-run-local) | run a given or imported checklist locally | a sandbox |
 | [`mission`](#lha-mission) | plan a task (or import a checklist), then run it locally | a sandbox |
@@ -285,8 +288,8 @@ Prints `no missions recorded` when the store is empty.
 The store is Postgres when `LHA_POSTGRES_DSN` is set, otherwise the SQLite file at
 `LHA_SQLITE_PATH`; unset, that is a per-user file every process shares: `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` on macOS or `~/.local/share/lha/lha.sqlite3` on Linux, so `mission-start`, the worker and this command
 meet in the same store wherever they run from (`lha config` prints the resolved location as
-`mission store = ...`). A relative `LHA_SQLITE_PATH` resolves against the current directory and
-logs a warning. A run whose SQLite path would fall inside its own workspace keeps its database in
+`mission store = ...`). A relative `LHA_SQLITE_PATH` resolves against the current directory;
+Python logs a warning, Go does not. A run whose SQLite path would fall inside its own workspace keeps its database in
 `<workdir>/.git/lha/` instead, which this command does not read unless `LHA_SQLITE_PATH` points
 there. If Postgres is configured but unusable, it warns on stderr and reads SQLite (or exits `2`
 with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`).

@@ -53,7 +53,9 @@ An item becomes `done` only when the deterministic verifier returns a `passed` v
 least one gating check (an argv such as `uv run pytest -q`) ran in the sandbox and every gating
 check exited 0. An item can also name its own acceptance checks (`witnesses`, such as
 `go:TestLivy`), which must pass too. A model saying "done" only ends its turn loop. Zero gating
-checks is `unverified`, never a pass. Pre-existing tests and test configuration (plus any paths
+checks is `unverified`, never a pass. With the opt-in mutation gate (`LHA_MUTATION_CHECK`), a
+green verdict must also survive a mutation run on the changed files: surviving mutants keep the
+item red. Pre-existing tests and test configuration (plus any paths
 the operator protects) are hashed at cycle start so the agent cannot pass the gate by weakening
 it. See [verification](07-verification.md).
 
@@ -114,7 +116,10 @@ The project is early and under active development.
 | Web tools (`fetch_url`, `web_search`) with egress policy, credential broker, untrusted-content fencing and the Rule of Two preflight | Implemented and wired when `LHA_WEB_ALLOW_HOSTS` or `--allow-host` is non-empty. Connections go only to the addresses that were checked (no DNS-rebinding window) |
 | Fallback model chain (`LHA_FALLBACK_MODELS`) and a real model health probe for parked missions | Implemented and wired. Fallbacks of one backend share its endpoint (for example `LHA_OPENAI_BASE_URL`) |
 | Persistence (SQLite by default, Postgres with `LHA_POSTGRES_DSN`): mission rows, the cost ledger and human gates (`lha missions`, `lha costs`, `lha gates`) | Implemented and wired into every run path |
-| Tiered memory (episodic, semantic, skills) in the lead's prompt, with degradation to BM25 and `git grep` | Implemented and wired into every run path. The default `hash` embedder is not semantic; `LHA_MEMORY_EMBEDDER=ollama` uses a local Ollama for semantic embeddings at $0 |
+| Tiered memory (episodic, semantic, skills) in the lead's prompt, with degradation to BM25 and `git grep` | Implemented and wired into every run path. The default `hash` embedder is not semantic; `LHA_MEMORY_EMBEDDER=ollama` uses a local Ollama for semantic embeddings at $0, and `voyage` the paid Voyage AI API ([12](12-memory.md#embedders)). `lha memory reembed` re-embeds stale memory and `lha objects prune` deletes ClaimCheck objects older than N days ([17](17-cli.md#lha-objects-prune)) |
+| Lead tools: `edit_file` (exact string replacement) beside `write_file`; the read-only `code_query` tool (`LHA_CODE_QUERY=true`) and a cycle-start code map (`LHA_CODE_MAP=ripwire`) | Implemented and wired in Python and Go. `code_query` and the code map are off by default; the code map measured no gain so far ([24](24-large-missions.md#optional-a-code-map-each-cycle)) |
+| Mutation gate (`LHA_MUTATION_CHECK`): a green verdict must also kill the mutants of the changed code | Implemented in Python and Go, off by default ([07](07-verification.md#mutation-gate)) |
+| Worker build pinning (`LHA_WORKER_DEPLOYMENT`, `LHA_WORKER_BUILD_ID`, `LHA_WORKER_PROMOTE`) | Implemented in the Python and Go workers, off unless both are set ([14](14-running-on-temporal.md#versioned-deploys-worker-build-ids)) |
 | Hash-chained decision log (`record_decision`, `lha decisions --verify`) | Implemented and wired; a broken chain stops the run |
 | File ownership with lease granting, tickets, parallel implementer waves in git worktrees merged by the `BranchIntegrator` | Wired into `lha orchestrate` and into durable missions started with `--max-parallel`; the blackboard and reflection only in `orchestrate` |
 | Flaky-check quarantine in the verifier; OTLP trace export (a collector or Langfuse) | Implemented and wired into every Python run path (the Lead's cycle, parallel implementers and branch integration alike); export is off until an endpoint or the Langfuse keys are set and needs the `observability` extra |

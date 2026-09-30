@@ -179,7 +179,7 @@ primary view. Per workflow `mission:<mission_id>` it shows:
   `integrate_branch` and `review_cycle` activities and its researcher child workflows
   (`subagent:<mission_id>:researcher:<id>`);
 - durable timers and `check_mission_health` results while parked;
-- signals received (`human_decision_v1`, `steer_v1`) and Continue-As-New boundaries;
+- signals received (`human_decision_v1`, `snooze_v1`, `steer_v1`) and Continue-As-New boundaries;
 - query results, including `status_v1`, `cycles_done`, `last_item`, `park_reason`.
 
 Payloads larger than 32 KiB are stored in the object store and appear as ClaimCheck pointers; the

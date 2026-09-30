@@ -74,8 +74,9 @@ again. Each attempt is made safe to repeat:
 
 The lead is assembled by [`agent/assembly.py`](../python/src/lha/agent/assembly.py), the same
 code the local runners use. Model, sandbox kind and image, sandbox egress, the web allow-list and web settings,
-trusted checks, protected harness paths, replanning limits and budget ceiling come from the
-worker's settings (`get_settings()` is cached per process), except `check_commands` and
+trusted checks, flaky-check retries, the mutation gate (`LHA_MUTATION_CHECK`,
+`LHA_MUTATION_TIMEOUT_S`), protected harness paths, replanning limits and budget ceiling come
+from the worker's settings (`get_settings()` is cached per process), except `check_commands` and
 `budget_usd`, which come from `MissionInput`. A missing API key, a refused sandbox or malformed
 `LHA_TRUSTED_CHECKS` raises a non-retryable `MissionConfigError`. Trusted checks run on the
 worker host.
@@ -488,6 +489,12 @@ The only store is `LocalFileObjectStore`
 
 Blobs are stored in plaintext. The module docstring mentions an S3 adapter, but none exists.
 Workers on different hosts need a shared filesystem at the store root.
+
+The store grows as durable missions run, and nothing deletes an object on its own.
+`lha objects prune --older-than-days N [--dry-run]` deletes objects not modified for `N` days
+([CLI](17-cli.md#lha-objects-prune)). Choose `N` longer than your longest mission plus the
+Temporal namespace's history retention, so no live history still refers to a deleted object
+([Operations runbook](15-operations-runbook.md#memory-and-disk-over-a-long-mission)).
 
 ## Replay safety net
 

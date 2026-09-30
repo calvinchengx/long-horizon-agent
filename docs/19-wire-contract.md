@@ -235,6 +235,30 @@ start as `temporal server start-dev`); CI runs it against a dev server. The Pyth
 [`tests/durability/test_worker_guard.py`](../python/tests/durability/test_worker_guard.py), runs
 the guard against the same kind of server.
 
+### Worker versioning
+
+With `LHA_WORKER_DEPLOYMENT` and `LHA_WORKER_BUILD_ID` set, the worker polls as one build of a
+Temporal Worker Deployment, `WorkerDeploymentVersion(deployment_name, build_id)`, with worker
+versioning on. Both implementations must agree on:
+
+- **Settings.** The pair is set together or not at all; the deployment name has no `.`;
+  `LHA_WORKER_PROMOTE` needs the pair (Python `Settings.worker_deployment_version`, Go
+  `Settings.WorkerDeploymentVersion`). A half-set pair makes `lha worker` exit 2.
+- **Default behaviour.** `LHA_WORKER_VERSIONING_BEHAVIOR` maps `pinned` to `PINNED` (the default)
+  and `auto_upgrade` to `AUTO_UPGRADE` as the worker's default versioning behaviour (Python
+  `deployment_config`, Go `durable.DeploymentOptions`).
+- **Promotion.** `LHA_WORKER_PROMOTE` calls `DescribeWorkerDeployment`, then
+  `SetWorkerDeploymentCurrentVersion` with the returned conflict token and the worker identity,
+  unless the build is already current. It retries `NOT_FOUND`, `FAILED_PRECONDITION`,
+  `RESOURCE_EXHAUSTED` and `UNAVAILABLE` for up to 60 seconds, then fails with the
+  `temporal worker deployment set-current-version` command to run by hand (Python
+  `promote_build`, Go `durable.PromoteBuild`).
+
+[`tests/durability/test_worker_versioning.py`](../python/tests/durability/test_worker_versioning.py)
+and `go/cmd/lha/versioning_e2e_test.go` check against a real Temporal server that a mission stays
+on the build that started it after a newer build becomes current. Operations are in
+[14-running-on-temporal.md](14-running-on-temporal.md#versioned-deploys-worker-build-ids).
+
 ## Mission anchor (`.lha/`)
 
 The anchor is a directory in the mission's git repository, committed with the agent's work in one

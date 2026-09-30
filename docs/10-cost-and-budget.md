@@ -89,9 +89,11 @@ The governor refuses to spend an unknown amount:
 `CostMeter` ([metering.py](../python/src/lha/governor/metering.py)) holds one ledger, one governor
 and a running total of in-flight reservations. Every provider a mission uses is wrapped with
 `meter.wrap(provider, role=…)`, which returns a `MeteredModel`. The planner, lead, researchers,
-reviewer and reflection models are all wrapped. The replanner uses the lead's metered model, so
-the call that splits a blocked item is authorized against the budget and recorded under role
-`lead` in the same cycle. For each `complete()` call:
+reviewer and reflection models are all wrapped. A `claude_code` lead engine session is metered
+through the lead's model (`run_external`): authorized with `LHA_CLAUDE_CODE_MAX_BUDGET_USD` as its
+worst case, then charged the cost it reports, or that worst case when it reports none. The
+replanner uses the lead's metered model, so the call that splits a blocked item is authorized
+against the budget and recorded under role `lead` in the same cycle. For each `complete()` call:
 
 1. **Worst case.** The input-token estimate is deliberately high: characters / 2, plus the size
    of tool-call arguments and tool schemas, plus 8 tokens per message. Output is assumed to be
@@ -186,7 +188,7 @@ skipped; it never stops the run.
 
 | Store | Where | Unknown cost |
 |---|---|---|
-| `CostLedger` | [governor/cost.py](../python/src/lha/governor/cost.py), in memory, one per mission run; what the governor reads | `cost_known=False`, `usd=0.0` |
+| `CostLedger` | [governor/cost.py](../python/src/lha/governor/cost.py), in memory, one per mission run; what the governor reads. Keeps only the newest `MAX_LEDGER_ENTRIES` (5,000) entries; its totals cover every entry, and the full record is in `cost_ledger` | `cost_known=False`, `usd=0.0` |
 | Spend journal | `.git/lha/spend.ndjson`, durable path only; seeds the next attempt's governor | `unknown` count per attempt |
 | Persistent `cost_ledger` | the mission store: SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), see below | `usd = NULL`, `cost_known = false` |
 

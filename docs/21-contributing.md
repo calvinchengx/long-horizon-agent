@@ -54,6 +54,12 @@ CI runs the Python checks (as two pytest steps plus the coverage report), the Go
 Postgres and Docker. Details, including how to run the integration tests yourself, are in
 [20-testing.md](20-testing.md).
 
+A separate nightly workflow, [`mutation.yml`](../.github/workflows/mutation.yml), runs a
+mutation audit of the safety code (mutmut for Python, gremlins for Go) and fails when a mutant
+survives. If you change that code, run the audit locally before a pull request:
+`python/scripts/mutation_audit.sh` and `go/scripts/mutation_audit.sh` (needs gremlins on `PATH`).
+See [20-testing.md](20-testing.md#mutation-audit).
+
 ## Conventions
 
 - **Typed.** `src/` passes `ty check` with warnings as errors. Public functions are fully annotated.

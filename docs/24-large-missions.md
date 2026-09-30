@@ -5,9 +5,9 @@ built over roughly 1,000 commits) needs more than a task description and a unit-
 guide shows how to set LHA up for that kind of work. Every step uses a feature that is implemented
 and tested. The end-to-end test
 [`test_large_mission_e2e.py`](../python/tests/integration/test_large_mission_e2e.py) runs the first
-eight rows of the table below together in one local mission on real Docker (the approval goes
-to a simulated approver, not the durable gate); the durable gates, the escalation ladder, the
-webhook and the mission store have their own tests.
+seven rows of the table below and an approval together in one local mission on real Docker (the
+approval goes to a simulated approver, not the durable gate); the other rows, including the
+durable gates, the escalation ladder, the webhook and the mission store, have their own tests.
 
 | What a large project needs | LHA feature | Where it is set |
 |---|---|---|
@@ -20,6 +20,8 @@ webhook and the mission store have their own tests.
 | Coarse items that turn out too big | Replanning | `LHA_MAX_REPLANS`, `LHA_MAX_SPLIT_DEPTH` |
 | Stalled items noticed before the failure limit (optional) | System One triage | `LHA_SYSTEM_ONE_BACKEND` |
 | A map of the code before the first turn (optional) | ripwire code map | `LHA_CODE_MAP=ripwire` |
+| Answers about the code only when the model asks (optional) | ripwire `code_query` tool | `LHA_CODE_QUERY=true` |
+| Tests that would notice a bug, not just run the code (optional) | Mutation gate | `LHA_MUTATION_CHECK` |
 | Pushes and releases stay a human decision | Durable approvals | `lha mission-approve` |
 | Someone notices when a gate is waiting | Escalation ladder and webhook | `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL` |
 | Spend and status you can query after the fact | Mission store | `lha missions`, `lha costs` |
@@ -201,6 +203,15 @@ lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decis
   `retry` (unblock and continue), `abort`, or `impossible` (a final checkpoint records the mission
   as impossible). Unanswered, it applies `--deadlock-default` (`LHA_DEADLOCK_GATE_DEFAULT`,
   default `abort`).
+- **Redeploys.** A mission that runs for weeks outlives several worker deploys. Set
+  `LHA_WORKER_DEPLOYMENT` and `LHA_WORKER_BUILD_ID` on the workers, and each mission stays on the
+  build that started it (`LHA_WORKER_VERSIONING_BEHAVIOR`, default `pinned`);
+  `LHA_WORKER_PROMOTE=true` makes a new build current for new missions. See
+  [versioned deploys](14-running-on-temporal.md#versioned-deploys-worker-build-ids).
+- **Disk.** Durable cycles write large payloads to the ClaimCheck object store
+  (`LHA_OBJECT_STORE_ROOT`), and nothing removes them on its own. Run
+  `lha objects prune --older-than-days N --dry-run`, then without `--dry-run`, with `N` longer
+  than your longest mission plus the Temporal namespace's history retention.
 
 ## Optional: a code map each cycle
 

@@ -89,12 +89,17 @@ The semantic section ranks these candidates for the query (the item description)
 - in lexical-only mode, `git grep -i -F` hits for the query's terms (one record per file, most
   matches first, top 10 files).
 
+These `git` calls (and `git diff --name-only` for episodes) run through the hardened harness git
+(`git_ops.run_git_bytes`) with a 20 s timeout. A refusal or timeout yields no candidates from that
+source; the cycle does not fail.
+
 Rankings are fused with reciprocal rank fusion (`reciprocal_rank_fusion`, score = sum of
 `1/(60 + rank)`):
 
 - lexical: `BM25Index` over all candidates;
 - dense (hybrid mode only): cosine between the embedder's vectors for the query and the repo
-  chunks and decisions (computed in process, cached per run), and the store's dense index for the
+  chunks and decisions (computed in process; the cache keeps only the vectors the latest recall
+  used), and the store's dense index for the
   persisted records — `SqliteSemanticIndex` (vectors stored as JSON, exact cosine) on SQLite,
   `PgSemanticIndex` (pgvector, scoped to the mission) on Postgres;
 - `git grep` (lexical-only mode only).
@@ -135,7 +140,8 @@ to every process that runs cycles (the worker, or the machine running `lha missi
 When the memory plane opens (once per run, and once per cycle in the durable activity),
 `OllamaEmbedder.connect` checks `GET /api/tags` for the model, takes its digest into the version
 and embeds a probe text to learn `dim`. Each call embeds up to 64 texts. The repository chunks
-are embedded again each time the plane opens (vectors are cached only for the run), so on a
+are embedded again each time the plane opens (the in-process cache keeps only the vectors the
+latest recall used, so an edited file's old chunks are dropped). On a
 large checkout expect each durable cycle to spend time embedding with a local model.
 
 ### Voyage

@@ -147,7 +147,9 @@ Pending Activities: 1
 down`). Status is a query that a worker answers, and there is no worker. Start one again with
 the same `uv run lha worker`. Within the 2-minute heartbeat timeout Temporal gives the cycle to
 the new worker as attempt 2. The attempt resets the checkout to the last commit first, so the
-crashed attempt's partial files are discarded rather than committed. In the recorded run the
+crashed attempt's partial files are discarded rather than committed. The killed worker's Docker
+sandbox, egress proxy and network stay up until then: when the new worker opens a sandbox, it
+first removes those whose `lha.owner` process has exited. In the recorded run the
 cycle restarted 100 seconds after the kill and was verified 42 seconds later. The history has
 exactly one commit for it.
 

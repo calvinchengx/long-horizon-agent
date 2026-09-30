@@ -191,7 +191,9 @@ and `LHA_MAX_CYCLES` apply to each invocation.
 ## Roles
 
 `ROLES` in [roles.py](../python/src/lha/agents/roles.py) is the org chart as data: model tier,
-system prompt, `allow_mutating`, `allow_egress` and `max_turns` (8). With the `claude` backend,
+system prompt, `allow_mutating`, `allow_egress` and `max_turns` (8, the turn budget of a
+`SubAgent` role such as the researcher or reviewer; the Lead and implementers use
+`LHA_MAX_TURNS_PER_CYCLE`, default 20). With the `claude` backend,
 `model_for_role()` ([router.py](../python/src/lha/agents/router.py)) maps opus to
 `claude-opus-4-8`, sonnet to `claude-sonnet-4-6` and haiku to `claude-haiku-4-5-20251001`. Every
 other backend uses the single configured model for all roles.

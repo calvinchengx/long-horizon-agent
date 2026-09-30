@@ -136,6 +136,11 @@ exhausted or `max_cycles` is reached.
   signal; `0` wakes the mission).
 - **Bounded history.** Continue-As-New every 200 cycles (`cycles_before_can`) or when Temporal
   suggests it; carried state rides in `MissionInput.state`.
+- **Worker builds.** With `LHA_WORKER_DEPLOYMENT` and `LHA_WORKER_BUILD_ID` set, the worker polls
+  as one build of a Temporal Worker Deployment, and by default a mission stays on the build that
+  started it, so a deploy does not replay it on changed workflow code (`LHA_WORKER_PROMOTE` makes
+  the new build current). See
+  [versioned deploys](14-running-on-temporal.md#versioned-deploys-worker-build-ids).
 - **Humans.** A `human_decision_v1` signal resolves a gate, `steer_v1` appends an operator
   note to every following cycle's prompt, the `status_v1` query distinguishes `RUNNING`,
   `SLEEPING`, `DEGRADED_PARK` and `WAITING_ON_HUMAN`, and the `gate_v1` and `gate_log_v1`
@@ -180,8 +185,9 @@ the same services through `open_run_services`
   block of episodic, procedural (skills) and semantic memory into the prompt; after the
   checkpoint it records the outcome and periodically consolidates. Semantic retrieval fuses BM25
   and an embedder's cosine ranking. The default embedder (`LHA_MEMORY_EMBEDDER=hash`) is a
-  deterministic lexical hash, not a semantic model; `ollama` (a local Ollama, no extra, $0) and
-  `sentence_transformers` are semantic. When Postgres, pgvector or the embedder is unavailable, the
+  deterministic lexical hash, not a semantic model; `ollama` (a local Ollama, no extra, $0),
+  `voyage` (the paid Voyage AI API, `LHA_VOYAGE_API_KEY`) and `sentence_transformers` are
+  semantic. When Postgres, pgvector or the embedder is unavailable, the
   dense channel is dropped and retrieval runs on BM25 and `git grep`; memory errors never fail a
   cycle.
 
@@ -193,7 +199,9 @@ See [memory](12-memory.md).
   runner, the durable cycle activity and `lha orchestrate` build the lead the same way from
   settings: sandbox image and egress allow-list, tools, human gate, a verifier that sends
   `trusted:` checks to the trusted runner and re-runs failing checks to quarantine proven
-  flakes, protected harness paths and the replanner.
+  flakes, protected harness paths and the replanner. With `LHA_MUTATION_CHECK` set, a green
+  verdict must also pass the opt-in mutation gate
+  ([mutation gate](07-verification.md#mutation-gate)).
 - **Sandboxes** ([`execution/factory.py`](../python/src/lha/execution/factory.py)): `docker`
   (default; image `LHA_SANDBOX_IMAGE`, no network unless the `LHA_SANDBOX_EGRESS*` settings list hosts,
   dropped capabilities, read-only root and read-only `.git/` and `.lha/` mounts), `e2b`, and
@@ -316,11 +324,12 @@ flowchart TD
     B -- no --> C["Pick next actionable item<br/>mark in_progress"]
     C --> D["Hash pre-existing test harness files<br/>+ LHA_HARNESS_PATHS"]
     D --> M["Recall memory<br/>(if enabled)"]
-    M --> E["Agent turn loop, up to max_turns<br/>tool calls through the dispatcher"]
+    M --> CM["Code map<br/>(if LHA_CODE_MAP=ripwire)"]
+    CM --> E["Agent turn loop, up to max_turns<br/>tool calls through the dispatcher"]
     E -- "model signals done" --> F["Run gating checks<br/>+ the item's witnesses"]
     F -- failed, turns left --> E
     F -- "passed / unverified / no turns left" --> G
-    E -- "turns exhausted" --> G["Verify (if workspace changed)<br/>+ harness integrity check"]
+    E -- "turns exhausted" --> G["Verify (if not yet verified<br/>or workspace changed since)<br/>+ harness integrity check"]
     G --> H{"passed?"}
     H -- yes --> I["record_success: done, verified_by"]
     H -- no --> J["record_failure: in_progress,<br/>blocked after 3 in a row<br/>(or earlier by System One triage)"]
@@ -338,8 +347,11 @@ flowchart TD
 2. **Pick an item.** An `in_progress` item first, otherwise the first `todo` item whose
    dependencies are all `done`.
 3. **Agent loop.** The prompt recites the immutable mission spec (including its list of vendored
-   references), then gives the item, its witnesses, its last verification failure, the last 10
-   commits, the recalled memory block (when memory is enabled) and the tool list. The model replies with one JSON
+   references), then gives the item, its witnesses (each with the command that runs it, when it
+   runs in the sandbox), its last verification failure, the last 10 commits, the recalled memory
+   block (when memory is enabled), the cycle-start code map (when `LHA_CODE_MAP=ripwire`; see
+   [a code map each cycle](24-large-missions.md#optional-a-code-map-each-cycle)) and the tool
+   list. The model replies with one JSON
    action (or native tool calls). Invalid or truncated replies get a corrective turn and never
    count as done.
 4. **Verify.** When the model signals done, the mission checks and the item's witnesses run
@@ -351,12 +363,17 @@ flowchart TD
    changed.
 5. **Replan.** If the failure just blocked the item and the replan budget allows, the replanner
    asks the model to split it into 2 to 6 child items; the parent becomes `split`.
-6. **Checkpoint.** One git commit containing the code changes and the rewritten anchor
-   (including any decisions recorded with `record_decision`), with the message
-   `lha: complete|attempt|block|split <id> (<description>)`.
+6. **Checkpoint.** One git commit containing the rewritten anchor (including any decisions
+   recorded with `record_decision`) and, when the item passed, the code changes, with the message
+   `lha: complete|attempt|block|split <id> (<description>)`. When verification failed, the
+   attempt's changes are saved under `refs/lha/attempts/<mission>/<cycle>` and discarded, so that
+   checkpoint holds only the anchor.
 7. **Observe.** With memory enabled, the outcome is recorded as an episodic event and a progress
    note, a verified item's approach is admitted as a skill, and consolidation runs every
    `LHA_MEMORY_CONSOLIDATE_EVERY` outcomes.
 
-Local runners repeat cycles until the checklist is complete, deadlocked, over budget, or a loop
-is detected; the durable workflow does the same across activities.
+Local runners repeat cycles until the checklist is complete, deadlocked, over budget, a loop is
+detected, the decision log fails verification, the model stays unavailable after its retries and
+fallbacks (`model unavailable: <error> after <n> attempts`; see
+[models](13-models.md#retries-and-failover)) or `max_cycles` is reached; the durable workflow does
+the same across activities, but parks on an unavailable model instead of stopping.

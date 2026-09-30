@@ -8,8 +8,8 @@ Code: [`python/src/lha/contracts/verify.py`](../python/src/lha/contracts/verify.
 verdict rules, check naming) and [`python/src/lha/verify/`](../python/src/lha/verify/)
 (`DeterministicVerifier`, witnesses, trusted checks, harness integrity, flaky-check quarantine).
 Go mirror: [`go/internal/verify/`](../go/internal/verify/), which has the verifier, witnesses,
-trusted checks (with the same minimal environment), harness integrity and the quarantine's
-evidence bookkeeping and `Partition` (not the re-running verifier).
+trusted checks (with the same minimal environment), harness integrity, the flaky-check quarantine
+(`FlakyRetryVerifier`) and the mutation gate.
 
 ## Checks
 

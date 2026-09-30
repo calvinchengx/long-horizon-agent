@@ -144,7 +144,8 @@ and [leases](11-multi-agent-organization.md#leases).
 `EventRecord`: `kind`, `cycle_id`, `payload` (object), `payload_ref` (object-store key for large
 payloads, or `null`). Every cycle checkpoint appends a `cycle` event whose payload records the
 item, the verdict, the resulting status, the tool-call count, `split_into` (child ids, empty
-unless the item was split) and each check's name, pass/fail, gating flag, exit code and
+unless the item was split), `rolled_back` (the files a failed attempt changed, saved under
+`refs/lha/attempts/<mission>/<cycle>` and discarded; empty otherwise) and each check's name, pass/fail, gating flag, exit code and
 duration. An integration checkpoint of a parallel wave adds `writer` and `branch` to its `cycle`
 event and appends a `ticket` event (the ticket's id, item, role, write set, branch, status,
 status history, ownership violations and leases). The multi-agent organization adds `research`,
@@ -158,7 +159,12 @@ When the verifier quarantines a flaky check during the cycle, a `check_quarantin
 (`check`, `revision`, `passes`, `fails`) goes in with the checkpoint, and a quarantined check that
 failed every attempt adds a `quarantined_check_failed` event. The verifier reads the committed
 `check_quarantined` events back at `HEAD` to know which checks are quarantined
-([07-verification.md](07-verification.md#flaky-check-quarantine)).
+([07-verification.md](07-verification.md#flaky-check-quarantine)). With System One triage on, a
+triaged failure adds a `system_one` event (`use`, `item_id`, `model`, `answer`, `confidence`,
+`probabilities`, `threshold`, `action`, `error`; see [System One](25-system-one.md#the-record)).
+A Docker sandbox with an egress allow-list adds `sandbox_egress` events for the proxy's requests
+that cycle, one per decision, method, host and port (`decision` `allow`, `deny` or `fail`,
+`method`, `host`, `port`, `detail`, `count`).
 
 On Temporal, human gates also commit to the anchor. Each gate event (opened, reminder, resolved,
 defaulted) is its own checkpoint with one event of kind `gate_opened`, `gate_reminder`,
@@ -176,7 +182,7 @@ stateDiagram-v2
     todo --> in_progress: picked (dependencies done)
     in_progress --> done: verdict passed
     in_progress --> in_progress: verdict failed or unverified
-    in_progress --> blocked: 3rd consecutive failure
+    in_progress --> blocked: 3rd consecutive failure (or earlier by System One triage)
     blocked --> todo: unblock
     blocked --> split: replanner splits it
     split --> [*]: children id.1 .. id.n replace it
@@ -191,7 +197,9 @@ stateDiagram-v2
   `consecutive_failures` and `last_failure`. It refuses an empty `verified_by`.
 - **Failure.** `record_failure` increments `attempts` and `consecutive_failures` and stores the
   report in `last_failure`. When `consecutive_failures` reaches `max_consecutive_failures` the
-  item becomes `blocked`. The `AgentLoop` uses 3; this is not an `LHA_*` setting.
+  item becomes `blocked`. The `AgentLoop` uses 3; this is not an `LHA_*` setting. With System
+  One triage on, an item can be blocked (an environment problem) or split (too big) before the
+  third failure ([System One](25-system-one.md)).
 - **Split.** When a failure blocks an item and a replanner is configured, the model is asked to
   break it into 2 to 6 smaller steps ([`agents/replanner.py`](../python/src/lha/agents/replanner.py)).
   `Checklist.split` adds children `<id>.1` .. `<id>.n` at the end of the checklist, behind every
@@ -227,7 +235,9 @@ checkpoint). See [Running on Temporal](14-running-on-temporal.md#5-gates-sleep-a
 
 ## Checkpoints
 
-A checkpoint is one commit containing both the code changes and the updated anchor.
+A checkpoint is one commit containing the updated anchor and the cycle's code changes. When
+verification failed, the attempt's changes were already saved under
+`refs/lha/attempts/<mission>/<cycle>` and discarded, so that checkpoint holds only the anchor.
 `commit_checkpoint`:
 
 1. Verifies the committed decision chain (raises `DecisionChainError` if it fails).

@@ -122,6 +122,9 @@ quality with real models.
 | Cycle-start code map (`LHA_CODE_MAP=ripwire`) | done: every run path, Python and Go, off by default; one measurement showed no gain ([24](24-large-missions.md#optional-a-code-map-each-cycle)) |
 | Worker Build IDs / versioned deploys | done: Python and Go, off by default (`LHA_WORKER_DEPLOYMENT`, `LHA_WORKER_BUILD_ID`; [14](14-running-on-temporal.md#versioned-deploys-worker-build-ids)) |
 | Re-embedding after an embedding-model change | done: Python and Go, 64 stale rows per recall and `lha memory reembed` ([12-memory.md](12-memory.md#re-embedding)) |
+| Bounded memory over a long mission: capped embedding cache, trace events, cost ledger and blackboard; `lha objects prune` for the ClaimCheck store | done: Python and Go ([15](15-operations-runbook.md#memory-and-disk-over-a-long-mission)) |
+| Orphan-sandbox sweep: Docker sandboxes, egress proxies and networks carry an `lha.owner` label, and each open removes those whose owning process has exited | done: Python and Go ([09](09-safety-model.md)) |
+| Nightly mutation audit of the safety code (mutmut, gremlins) | done: `mutation.yml` fails on a surviving mutant ([20](20-testing.md#mutation-audit)) |
 
 ### Known limitations of built features
 
@@ -147,6 +150,8 @@ These limitations are in the current code:
   `sentence_transformers` needs the `embeddings` extra.
 - Every `openai_compat` model, primary or fallback, uses the one endpoint in
   `LHA_OPENAI_BASE_URL`.
+- The ClaimCheck object store (`LHA_OBJECT_STORE_ROOT`) grows with every durable cycle, and
+  nothing removes an object unless an operator runs `lha objects prune --older-than-days N`.
 
 ## Go port
 
@@ -171,7 +176,7 @@ extras
 | Checklist import, `vendor` | `internal/checklistimport`, `internal/state/vendor` | present |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
 | Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` lead engine with its MCP bridge |
-| CLI | `cmd/lha` | present: every command (`version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `worker` and `mission-*`); the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python), including `mission-start`'s durable organization options |
+| CLI | `cmd/lha` | present: every command (`version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `memory reembed`, `objects prune`, `worker` and `mission-*`); the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python), including `mission-start`'s durable organization options |
 
 `go test ./...` passes for the present packages; the `go` CI job runs it with the race detector,
 plus `gofmt`, `go vet` and a Windows `go vet`.

@@ -31,10 +31,13 @@ workflow's writes are best effort; `lha mission-status` is the live source.
 
 Local runs (`run-local`, `mission`, `orchestrate`) have no status query. They print a summary and
 exit: `stopped_reason` is `complete`, `deadlocked: <reason>`, `governor: <reason>`,
-`loop on item <id>`, `model unavailable: <error> after <n> attempts` (the model kept failing
-after its retries and fallbacks; raise `LHA_MODEL_TIMEOUT_S` for a slow local model, or add
-`LHA_FALLBACK_MODELS`) or `max_cycles`. They write the mission row too: `DONE` for `complete`,
-`IMPOSSIBLE` for a deadlock, `ABORTED` for anything else.
+`decision log failed verification: <error>` (the committed `.lha/decisions.ndjson` chain was
+altered), `loop on item <id>` or `max_cycles`. `run-local` and `mission` also stop with
+`model unavailable: <error> after <n> attempts` (the model kept failing after its retries and
+fallbacks; raise `LHA_MODEL_TIMEOUT_S` for a slow local model, or add `LHA_FALLBACK_MODELS`).
+`orchestrate` has no such stop: any other error ends its mission row as `error: <Type>` and is
+raised. They write the mission row too: `DONE` for `complete`, `IMPOSSIBLE` for a deadlock,
+`ABORTED` for anything else.
 
 ## Observe a mission
 
@@ -75,7 +78,7 @@ after its retries and fallbacks; raise `LHA_MODEL_TIMEOUT_S` for a slow local mo
 | `aborted` | `ABORTED` | "abort" at the deadlock gate (human or the default) |
 | `budget_exhausted` | `ABORTED` | the governor refused a model call (`BudgetExceeded`, non-retryable) |
 | `max_cycles` | `ABORTED` | `cycles_done >= max_cycles` (`--max-cycles`, default `LHA_MAX_CYCLES`, 1000) |
-| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, a `.lha/decisions.ndjson` that fails verification, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, malformed `LHA_TRUSTED_CHECKS`, `LHA_SANDBOX_EGRESS` or web settings (`LHA_WEB_CREDENTIALS`, `LHA_WEB_ALLOW_PORTS`, `LHA_WEB_SEARCH_ENDPOINT`), or a Rule-of-Two violation (web tools with `LHA_SANDBOX=local` or `LHA_PRIVATE_DATA=true`) |
+| workflow failure | `ABORTED` | an activity raised a non-retryable `MissionConfigError`: empty check list, bad model config, sandbox refused, a `.lha/decisions.ndjson` that fails verification, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, malformed `LHA_TRUSTED_CHECKS`, `LHA_SANDBOX_EGRESS` or web settings (`LHA_WEB_CREDENTIALS`, `LHA_WEB_ALLOW_PORTS`, `LHA_WEB_SEARCH_ENDPOINT`), an invalid `LHA_RESET_KEEP` (raised by every cycle; a worker started with one fails at startup), or a Rule-of-Two violation (web tools with `LHA_SANDBOX=local` or `LHA_PRIVATE_DATA=true`) |
 
 An unpriced `openai_compat` model without `LHA_ALLOW_UNPRICED_MODELS=true` is refused by the
 governor on the first call, so the mission ends as `budget_exhausted`. Invalid `MissionInput`
@@ -161,10 +164,12 @@ to every cycle.
 
 **Egress incidents.** A check that fails with a download error (`403` from the proxy, `CONNECT
 tunnel failed`, a name that does not resolve) usually means a missing host. While the session is
-open, `docker logs lha-egress-proxy-<id>` shows one allowed/denied line per request; the
-containers and networks are labelled `lha.egress`. Add the host and restart the worker. If a
-worker died without closing its session, remove leftovers with
-`docker ps -a --filter label=lha.egress` and `docker network ls --filter label=lha.egress`. If
+open, `docker logs lha-egress-proxy-<id>` shows one allowed/denied line per request; the proxy
+and network are labelled `lha.egress`. Add the host and restart the worker. Every sandbox
+container, egress proxy and network also carries an `lha.owner` label (`host:pid`), and every
+sandbox open removes the ones whose owner process on that host has died. Only on a host that will not open
+another sandbox, remove leftovers by hand with `docker ps -a --filter label=lha.owner` and
+`docker network ls --filter label=lha.owner`. If
 the agent reached something it should not have, remove the host from the allow-list; the proxy
 never allows IP literals or hosts that resolve to private, loopback or link-local addresses.
 
@@ -197,14 +202,16 @@ While parked, the workflow sleeps 60 s, doubling to at most 3600 s, and after ea
 - `git`: the workdir is a repository with at least one commit;
 - `model`: the provider is built and contacted with a cheap, token-free request under
   `LHA_MODEL_PROBE_TIMEOUT_S` (Ollama `/api/tags` with the model pulled, OpenAI-compatible
-  `/models`, Claude `/v1/models/<model>`; with a fallback chain, any healthy member counts). See
+  `/models`, Claude `/v1/models/<model>`, `claude_code` `claude --version` then
+  `claude auth status`; with a fallback chain, any healthy member counts). See
   [13-models.md](13-models.md#health-probe);
 - `sandbox`: a sandbox session can be opened and closed.
 
 The mission resumes when no critical dependency is DOWN. A model outage, a revoked key (401/403)
 or an unpulled Ollama model keeps the probe DOWN, so the mission stays parked and keeps backing
-off; the reason is in the `park_reason` query. The probe never reports the optional dependencies,
-so the optional rows of the table have no runtime effect.
+off; the reason is in the `park_reason` query. A logged-out `claude_code` CLI (without
+`ANTHROPIC_API_KEY`) is DOWN too: run `claude auth login` as the worker's user. The probe never
+reports the optional dependencies, so the optional rows of the table have no runtime effect.
 
 Memory degrades on its own: when the dense channel (pgvector with Postgres, or the SQLite vector
 index) fails, the memory service drops it for the rest of the run and retrieves lexically (BM25
@@ -318,7 +325,9 @@ What does grow, on disk, and how to bound it:
 
 **Worker or host crash.** Restart `lha worker` (any worker polling `LHA_TASK_QUEUE` works). Temporal
 replays the history: completed cycles are not re-run; the in-flight attempt times out on its
-heartbeat (2 minutes) and is retried from a clean checkout. A commit made just before the crash
+heartbeat (2 minutes) and is retried from a clean checkout; ignored caches and tool directories
+are wiped unless listed in `LHA_RESET_KEEP`
+([14-running-on-temporal.md](14-running-on-temporal.md#how-a-cycle-runs)). A commit made just before the crash
 is detected and not repeated. The worker needs the same `LHA_OBJECT_STORE_ROOT` contents as
 before, or offloaded payloads cannot be decoded.
 

@@ -35,7 +35,8 @@ What happens:
 2. The workdir is initialized as a git repository with a `.lha/` mission anchor and an initial
    commit.
 3. Each cycle gives the model up to `LHA_MAX_TURNS_PER_CYCLE` (default 20) turns. The stub
-   replies with a fixed acknowledgement that is not a valid action, so it writes no files.
+   replies with a fixed acknowledgement that is not a valid action, so it writes no files. Each
+   invalid reply gets a corrective turn, so every cycle uses all 20 turns.
 4. At the end of the cycle the verifier runs the default checks (`uv run ruff check .`,
    `uv run ty check`, `uv run pytest -q`). With no tests in the workspace the pytest check
    fails (exit 5, "no tests ran"; a check whose tool is not installed also fails), so the
@@ -44,8 +45,8 @@ What happens:
    model to split it into smaller items; the stub's reply is not a usable split, so the item
    stays blocked. Nothing else is actionable, so the mission stops as deadlocked.
 
-Structured log lines (`cycle_started`, `llm_turn`, `invalid_reply`, `checkpoint`) are printed
-as it runs. The run ends with a summary like this (the mission id and commit sha differ per
+Structured log lines are printed as it runs: per cycle `memory_recall`, `cycle_started`, 20
+`llm_turn` / `invalid_reply` pairs, `turns_exhausted` and `checkpoint`. The run ends with a summary like this (the mission id and commit sha differ per
 run), and the command exits with status 1:
 
 ```text
@@ -125,7 +126,8 @@ The default image (`LHA_SANDBOX_IMAGE`) is `ghcr.io/astral-sh/uv:python3.12-book
 which has Python 3.12 and uv but no ruff, ty or pytest. With no network, `uv run --with pytest`
 cannot download pytest, so either allow the package index
 (`LHA_SANDBOX_EGRESS=pypi.org,files.pythonhosted.org`) or use an image that already has the
-tools; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds one with Go, uv and Node/pnpm. See
+tools; [`sandbox/Dockerfile`](../sandbox/Dockerfile) builds one with Go, uv, Node/pnpm, gcc
+(for `go test -race`) and ripwire (for `LHA_CODE_MAP` and `LHA_CODE_QUERY`). See
 [installation](03-installation.md#sandbox-image-and-egress). Without the extra, a docker run
 stops with `error: python module 'docker' is not installed; install the 'sandbox' extra (lha[sandbox])`.
 

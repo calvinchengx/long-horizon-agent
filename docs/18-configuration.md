@@ -24,8 +24,9 @@ by `lha` in that case. Copy or symlink it, or export the variables.
 picks up changes only after a restart.
 
 List settings (`LHA_WEB_ALLOW_HOSTS`, `LHA_WEB_ALLOW_PORTS`, `LHA_FALLBACK_MODELS`,
-`LHA_SANDBOX_EGRESS`, `LHA_HARNESS_PATHS`) are comma-separated strings, not JSON; blank items are
-dropped. The exception is `LHA_GATE_ESCALATION_SECONDS`, a JSON list (`[900, 2700]`).
+`LHA_SANDBOX_EGRESS`, `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`,
+`LHA_HARNESS_PATHS`, `LHA_TRUSTED_CHECK_ENV`, `LHA_RESET_KEEP`) are comma-separated strings, not
+JSON; blank items are dropped. The exception is `LHA_GATE_ESCALATION_SECONDS`, a JSON list (`[900, 2700]`).
 
 Invalid values fail at startup with a pydantic validation error: an unknown `LHA_MODEL_BACKEND` or
 `LHA_SANDBOX`, a non-numeric number, or a boolean other than `1/0`, `true/false`, `yes/no`,
@@ -78,7 +79,7 @@ See [13-models.md](13-models.md).
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
 | `LHA_POSTGRES_DSN` | secret | unset | Postgres DSN for `lha db migrate` and the mission store; unset: the SQLite store |
-| `LHA_SQLITE_PATH` | string | unset | the SQLite mission store (WAL mode). Unset: one per-user file every process shares, `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` (macOS) or `~/.local/share/lha/lha.sqlite3`. A relative path resolves against the working directory, with a warning. If it would fall inside a mission's checkout it is moved to `<checkout>/.git/lha/`. `lha config` prints the resolved path |
+| `LHA_SQLITE_PATH` | string | unset | the SQLite mission store (WAL mode). Unset: one per-user file every process shares, `$XDG_DATA_HOME/lha/lha.sqlite3`, else `~/Library/Application Support/lha/lha.sqlite3` (macOS) or `~/.local/share/lha/lha.sqlite3`. A relative path resolves against the working directory (Python logs a warning, Go does not). If it would fall inside a mission's checkout it is moved to `<checkout>/.git/lha/`. `lha config` prints the resolved path |
 | `LHA_POSTGRES_FALLBACK_TO_SQLITE` | bool | `true` | if `LHA_POSTGRES_DSN` is set but unusable (unreachable, not migrated, `psycopg` missing): `true` warns and uses SQLite, `false` fails the run |
 | `LHA_WORKSPACE_ROOT` | string | `.lha/workspaces` | declared but not read by any code; each command's `--workdir` default is hard-coded |
 | `LHA_OBJECT_STORE_ROOT` | string | `.lha/objects` | ClaimCheck blob directory (resolved to an absolute path); client, workers and replay must share it |
@@ -285,20 +286,24 @@ so they are fixed per mission. `LHA_GATE_WEBHOOK_URL` and its timeout are read b
 ## Go port coverage
 
 [`go/internal/config/config.go`](../go/internal/config/config.go) defines every Python setting,
-with the same names, defaults and validation (`lha config` prints the same output). The Go CLI
-uses the model, governor, sandbox, web-tool, trusted-check, harness and human-gate settings
-(`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`, `LHA_GATE_WEBHOOK_URL`,
-`LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`), the mission store (`LHA_SQLITE_PATH`, `LHA_POSTGRES_DSN`,
-`LHA_POSTGRES_FALLBACK_TO_SQLITE`), the `LHA_MEMORY_*` settings, and for its durable commands the
-Temporal and durable-gate settings (`LHA_TEMPORAL_*`, `LHA_TASK_QUEUE`,
-`LHA_WORKER_GUARD_INTERVAL_S`, the `LHA_WORKER_*` versioning settings, `LHA_OBJECT_STORE_ROOT`, `LHA_APPROVAL_TIMEOUT_S`,
-`LHA_DEADLOCK_GATE_DEFAULT`, `LHA_IMPOSSIBLE_AFTER_FAILURES`, `LHA_CYCLE_PAUSE_SECONDS`,
-`LHA_MODEL_PROBE_TIMEOUT_S`). Two memory values name Python-only
-extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs lexical-only retrieval and
-`LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python does when the `embeddings`
-extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` or `voyage` are the Go choices for real
-embeddings, and `LHA_MEMORY_RERANK=system_one` for reranking). Go also reads the
-`LHA_SYSTEM_ONE_*` settings.
+with the same names, defaults and validation (`lha config` prints the same output); the one
+difference is that Python logs a warning for a relative `LHA_SQLITE_PATH` and Go does not. The Go
+CLI uses the model settings (including `LHA_LEAD_ENGINE` and `LHA_CLAUDE_CODE_*`), the governor,
+sandbox, trusted-check and harness settings, `LHA_RESET_KEEP`, the verification settings
+(`LHA_MUTATION_CHECK`, `LHA_MUTATION_TIMEOUT_S`, `LHA_FLAKY_RETRIES`), the web-tool settings,
+the code map settings (`LHA_CODE_MAP*`, `LHA_CODE_QUERY*`), `LHA_MAX_PARALLEL_IMPLEMENTERS`, the
+observability settings (`LHA_OTEL_*`, `LHA_LANGFUSE_*`), the `LHA_SYSTEM_ONE_*` settings, the
+human-gate settings (`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`,
+`LHA_GATE_WEBHOOK_URL`, `LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`), the mission store
+(`LHA_SQLITE_PATH`, `LHA_POSTGRES_DSN`, `LHA_POSTGRES_FALLBACK_TO_SQLITE`), the `LHA_MEMORY_*`
+settings, and for its durable commands the Temporal and durable-gate settings (`LHA_TEMPORAL_*`,
+`LHA_TASK_QUEUE`, `LHA_WORKER_GUARD_INTERVAL_S`, the `LHA_WORKER_*` versioning settings,
+`LHA_OBJECT_STORE_ROOT`, `LHA_APPROVAL_TIMEOUT_S`, `LHA_DEADLOCK_GATE_DEFAULT`,
+`LHA_IMPOSSIBLE_AFTER_FAILURES`, `LHA_CYCLE_PAUSE_SECONDS`, `LHA_MODEL_PROBE_TIMEOUT_S`). Two
+memory values name Python-only extras: `LHA_MEMORY_EMBEDDER=sentence_transformers` runs
+lexical-only retrieval and `LHA_MEMORY_RERANK=cross_encoder` keeps fusion order in Go, as Python
+does when the `embeddings` extra is not installed (`LHA_MEMORY_EMBEDDER=ollama` or `voyage` are
+the Go choices for real embeddings, and `LHA_MEMORY_RERANK=system_one` for reranking).
 The one Python-only feature a setting selects is the E2B sandbox: `LHA_SANDBOX=e2b` is refused.
 (The durable organization is chosen by `mission-start` options, not settings; Go runs it too.)
 See

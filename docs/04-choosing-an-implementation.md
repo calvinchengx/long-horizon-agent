@@ -76,7 +76,7 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `obs` | `lha.obs` (events, redaction, OpenTelemetry) | Committed, including OTLP/HTTP trace export (`obs/tracing`: the same settings, span names and redacted attributes) |
 | `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, the ownership map (`.lha/ownership.json`: read, staged, written at initialization), anchor-only commits (`CommitAnchorUpdate`, for lease decisions) and `ReadEvents`; `state/vendor` is `lha vendor` (same layout and `MANIFEST.json` bytes) |
 | `checklistimport` | `lha.state.checklist_import` | Committed (`.json` and `.md` checklists) |
-| `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`); no mutation testing or trust bootstrap |
+| `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner, mutation gate) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`) and the opt-in mutation gate (`LHA_MUTATION_CHECK`, [07](07-verification.md#mutation-gate)) |
 | `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed, including `RunExternal` (a `claude_code` session metered by its reported cost) and the `CostHook` every recorded call, external ones included, is handed to (python `on_record`) |
 | `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local` with the mission row, the persistent cost ledger and tiered memory in the lead prompt (recalled before the first turn, recorded after the checkpoint, for the turn loop and the `claude_code` engine alike); the `claude_code` lead engine and its MCP bridge (`agent/mcpbridge`: the same MCP config, tools and results as `lha.agent.mcp_bridge`) |
 | `agents` | `lha.agents.planner`, `replanner`, `roles`, `router`, `reviewer` (verdict parsing), `reflection` | Committed: Planner with file ownership, Replanner, the role chart, per-role model routing, review parsing, reflection |
@@ -93,7 +93,10 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 What the Go CLI can do today:
 
 - `cd go && go build -o lha ./cmd/lha` builds it. `lha run-local` and `lha mission` run a mission
-  to completion, deadlock, budget refusal or loop detection in the `local` sandbox (with
+  to completion, deadlock, budget refusal, loop detection, a decision log that fails
+  verification, a model that stays unavailable after its retries and fallbacks
+  (`model unavailable: <error> after <n> attempts`; see [models](13-models.md#retries-and-failover))
+  or `max_cycles`, in the `local` sandbox (with
   `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) or the `docker` sandbox (`LHA_SANDBOX_IMAGE`,
   `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible, Claude or Claude Code
   (`claude_code`) backend, and with the built-in turn loop or the `claude_code` lead engine
@@ -143,7 +146,10 @@ What the Go worker runs:
   exactly-once checkpoint check as Python make a retried attempt safe. The activities write the
   mission row, `hitl_gates` and every metered call's ledger row (keyed `<cycle>@<attempt>#<n>`)
   to the mission store, and each cycle's lead gets tiered memory and, when the mission has an
-  ownership map, the ownership guard, as in Python.
+  ownership map, the ownership guard, as in Python. With `LHA_WORKER_DEPLOYMENT` and
+  `LHA_WORKER_BUILD_ID` set, the worker polls as that build of a Temporal Worker Deployment and a
+  mission stays on the build that started it (`LHA_WORKER_PROMOTE` makes the build current); see
+  [versioned deploys](14-running-on-temporal.md#versioned-deploys-worker-build-ids).
 - The durable organization, when a mission opts in (`--research N`, `--review`,
   `--max-parallel N`): researcher child workflows (`SubAgentWorkflow` running the real
   `run_subagent`) before each round, a serial Lead cycle or a parallel wave of implementers in

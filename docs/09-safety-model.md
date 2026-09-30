@@ -164,7 +164,15 @@ To find the real command, it unwraps:
 - `sh`/`bash`/`zsh`/`dash`/`ksh`/`fish -c` and `eval` scripts, split on `; && || | & ( )` and
   newlines, including `$(…)`, backticks and process substitution. A `$(…)` used as an argument
   (`echo $(date) $(cat f)`, `for i in $(seq 3)`) is classified by its body and then skipped, unless
-  the script contains a backslash.
+  the script contains a backslash. A substitution inside `$(( … ))` arithmetic is found and
+  classified too. Escaped backticks, `$` and backslashes inside backticks are unescaped before the
+  body is classified, as the shell does. A `#` does not end the parse: a comment's words are
+  classified like any others (fail closed).
+
+`env` also reads `NAME=value` operands after `--` (`env -- FOO=1 git push` is `git push`). An
+httpie data item whose value is a URL (`next=https://…`) still counts as a request body. These
+rules close six gaps found by the nightly mutation audit of the safety code
+([Testing](20-testing.md#mutation-audit)).
 
 It fails closed in these cases:
 
@@ -177,7 +185,7 @@ It fails closed in these cases:
   position (`$(echo rm) -rf /`).
 
 The pinned behaviour is [`spec/safety/classify_command.json`](../spec/safety/classify_command.json).
-It has 224 cases of argv mapped to an exact reason, 70 of which are allowed (`null`), plus 16
+It has 373 cases of argv mapped to an exact reason, 118 of which are allowed (`null`), plus 17
 `scoped_cases` classified with a workspace path and a private `/tmp`. Both
 `python/tests/unit/test_spec_conformance.py` and `go/internal/spec/conformance_safety_test.go`
 run it. The Python code is the reference. To change behaviour, change Python, regenerate with

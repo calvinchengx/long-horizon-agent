@@ -101,7 +101,7 @@ The `docker` sandbox runs agent commands and checks in `LHA_SANDBOX_IMAGE`, defa
 `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` (Python 3.12 and uv). The image must contain
 every tool your checks and witnesses call. For Go or Node projects, build the reference polyglot
 image in [`sandbox/`](../sandbox/) (Go, uv with Python 3.12, Node.js with npm/corepack and pnpm,
-git, make):
+git, make, gcc for `go test -race`, and ripwire for `LHA_CODE_MAP` and `LHA_CODE_QUERY`):
 
 ```bash
 docker build -t lha-sandbox:latest sandbox/     # from the repository root
@@ -123,7 +123,10 @@ Each sandbox session then gets its own `--internal` Docker network (no route out
 container (`python:3.12-alpine`, running
 [`egress_proxy.py`](../python/src/lha/execution/egress_proxy.py)) that is the only way out and
 forwards only to the listed hosts. The first run pulls that image. Both are removed when the
-session closes. `LHA_SANDBOX_EGRESS` takes package-registry download hosts only; any other host
+session closes. Every sandbox container and network carries an `lha.owner` label (`host:pid`),
+and each new session first removes those whose owning process on this host has died, so a killed
+worker's sandboxes do not keep running. Sandbox containers run with an init process that reaps
+the orphans of timed-out commands. `LHA_SANDBOX_EGRESS` takes package-registry download hosts only; any other host
 goes in `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, and a host that accepts pushes or uploads (such as
 `github.com`) in `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS`, because code in the sandbox can send
 data to every host it can reach. See [safety model](09-safety-model.md#sandbox-network).

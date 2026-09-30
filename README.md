@@ -53,8 +53,9 @@ The `lha` CLI and worker are implemented in [Python](python/). The [Go](go/) por
 binary that runs missions locally (`lha run-local`, `lha mission`, and the multi-agent
 `lha orchestrate`) with the same tools, gates, `.lha/` anchor, mission store and tiered memory,
 and missions durably on its own Temporal worker (`lha worker`, `lha mission-*`), the durable
-organization's research / review / parallel rounds included. Only the E2B sandbox is
-Python-only, and a Go and a Python worker must use different task queues. The two share
+organization's research / review / parallel rounds included. Only the E2B sandbox, the
+`sentence_transformers` embedder and the `cross_encoder` reranker are Python-only, and a Go and a
+Python worker must use different task queues. The two share
 `LHA_*` settings, the `.lha/` anchor format (including the decision-log hash chain), the Postgres
 schema and the Temporal workflow and activity names, and both run the language-neutral cases in
 [`spec/`](spec/); see [choosing an implementation](docs/04-choosing-an-implementation.md).
