@@ -1,6 +1,8 @@
-# Proven-equivalent mutants of the Go mutation audit (scripts/mutation_audit.sh): each changes the
-# code but not its behaviour, so no test can kill it. One per line:
-#   <MUTATOR> <path>:<column> <the mutated line's text, trimmed>  # why it is equivalent (two spaces before #)
+# Reviewed exceptions of the Go mutation audit (scripts/mutation_audit.sh): survivors that are not
+# test gaps. Each section says why: a proven-equivalent mutant (no input tells it apart), a mutant
+# a named test kills but gremlins cannot run (it reports switch cases NOT COVERED), one that does
+# not compile, or one that hangs package initialisation. One per line:
+#   <MUTATOR> <path>:<column> <the mutated line's text, trimmed>  # why (two spaces before #)
 
 # Equivalent: no input distinguishes the mutant.
 CONDITIONALS_BOUNDARY internal/safety/commands.go:7 if i >= len(xs) {  # at i == len(xs) both return an empty slice (xs[i:] vs []string{}); no caller appends to it

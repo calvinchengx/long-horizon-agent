@@ -2,7 +2,8 @@
 # Mutation audit of the Go safety code (docs/20-testing.md#mutation-audit): gremlins mutates the
 # files below one change at a time and runs their package's tests; a mutant that LIVED (or timed
 # out) is a behaviour no test pins. Exits 1 on a survivor that scripts/mutation_equivalents.txt
-# does not list as a proven-equivalent mutant.
+# does not list as a reviewed exception (a proven-equivalent mutant, or one a named test kills but
+# gremlins cannot run).
 #
 # gremlins has no ignore comment, so the equivalents file names a mutant by what does not move
 # when code is edited: "<MUTATOR> <path>:<column> <the mutated line's text, trimmed>", then "  # <why>" (two spaces).
@@ -39,6 +40,6 @@ while read -r status mutator _at location; do
   fi
 done < <(grep -E '^[[:space:]]*(LIVED|TIMED OUT|NOT COVERED) ' "$out" | sed 's/TIMED OUT/TIMED_OUT/; s/NOT COVERED/NOT_COVERED/')
 if [ "$unexplained" -gt 0 ]; then
-  echo "$unexplained surviving mutants: add a test that kills each, or list a proven-equivalent one in scripts/mutation_equivalents.txt" >&2
+  echo "$unexplained surviving mutants: add a test that kills each, or list a reviewed exception in scripts/mutation_equivalents.txt" >&2
   exit 1
 fi
