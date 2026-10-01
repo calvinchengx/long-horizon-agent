@@ -275,8 +275,26 @@ kept using `grep` and `read_file`. Missions with the tool cost $2.77 and $2.90 i
 reported cost; missions without it cost $2.81 and $3.29. That difference is within the noise of
 two runs per arm. A second round on 30 September, after the fixes in the next section, gave the
 same answer: Sonnet called `code_query` once per mission, and missions with it cost $1.03 and
-$0.84 against $1.09 and $1.33 without it. One call cannot account for that gap. Leave it off
-unless you measure a gain on your own missions.
+$0.84 against $1.09 and $1.33 without it. One call cannot account for that gap.
+
+Both rounds ran on LHA's Python package alone. On the whole repository (Python, Go, `spec/` and
+the docs), the "sorted blocked ids" change got harder to find: a search for `deadlock` returns
+512 matches there against 207 in `python/`, more than one `grep` result holds, and one mission
+without the tool spent two full cycles searching. So on 1 October that change alone ran eight
+times on the whole repository, alternating four missions without the tool and four with it (Sonnet
+lead, 20 turns, after the `Class.method` retry above):
+
+| | Cost per mission | Model calls | `grep` calls | Time |
+|---|---|---|---|---|
+| without `code_query` | $0.84–1.34 (mean $1.03) | 15–20 (mean 18) | 7–11 | 85–128 s |
+| with `code_query` | $0.61–0.80 (mean $0.72) | 14–18 (mean 15.5) | 5–9 | 74–93 s |
+
+Every mission finished the change on its first attempt in one cycle. Sonnet called `code_query`
+once or twice per mission and every call succeeded. Every mission with the tool cost less than
+every mission without it (a rank test on the eight costs gives p ≈ 0.03), about 30% less on
+average. That is one change in one repository: the tool helped where the code was hard to find
+by searching, and made no measurable difference where it was easy. It stays off by default;
+turn it on for a large repository, and measure it on your own missions.
 
 ## Give a strong model room: turns per cycle
 
