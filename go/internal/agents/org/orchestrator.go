@@ -758,6 +758,15 @@ func (r *missionRun) review(ctx context.Context, item contracts.ChecklistItem, c
 		return "", err
 	}
 	r.record("review", obs.F("item", item.ID), obs.F("blocking", review.Blocking), obs.F("verdict", review.Verdict))
+	// Committed with the next checkpoint (the durable path commits the same event with its review
+	// cycle), so the verdict outlives the process: lha labels export reads it.
+	if err := r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: agents.ReviewEvent, CycleID: cycleID, Payload: contracts.Payload(
+		"item_id", item.ID, "verdict", review.Verdict, "blocking", review.Blocking,
+		"blocking_issues", CapList(review.BlockingIssues, 20), "advisory", CapList(review.Advisory, 20),
+		"reopened", review.Blocking, "blocked", false, "base", base, "head", head,
+	)}); err != nil {
+		return "", err
+	}
 	if !review.Blocking {
 		r.loopDetector.Observe(item.ID+":review_blocked", false)
 		return "approved", nil

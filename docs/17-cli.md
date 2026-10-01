@@ -32,6 +32,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`missions`](#lha-missions) | list persisted missions with status and recorded spend | the mission store |
 | [`costs`](#lha-costs) | print a mission's persisted cost ledger | the mission store |
 | [`gates`](#lha-gates) | list recorded human gates: question, options, reminders, decision, who and when | the mission store |
+| [`labels export`](#lha-labels-export) | export a mission's gate answers, tool approvals, verifier and review verdicts as JSON Lines labels | a mission workspace and/or the mission store |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
@@ -353,6 +354,46 @@ terminal approver's. One row per gate: an event repeated by a retried activity c
 reminders only raise the count of an open gate, and a closed gate stays closed. The anchor's
 `gate_*` events and the workflow history remain the complete record. It reads the same store as
 [`missions`](#lha-missions).
+
+## `lha labels export`
+
+```
+lha labels export [MISSION_ID] [--workdir DIR] [--out FILE] [--diffs]
+```
+
+Writes the mission's own judgments as JSON Lines, one object per line, for fitting the System One
+thresholds that are still to be measured ([25-system-one.md](25-system-one.md#labels)). Four
+sources, in this order: every `tool_approval`, `cycle` (with a verdict) and `review` event in the
+anchor's committed `.lha/events.ndjson` at `--workdir`, then the mission's closed gates
+(`RESOLVED` or `DEFAULTED`) from the mission store, oldest opening first. A `tool_approval` whose
+fingerprint a gate row also carries is the same decision recorded twice, so only the gate row is
+kept. Every object has the same keys:
+
+```json
+{"at":"2026-01-01T01:05:00+00:00","by":"terminal:calvin","cycle_id":"","input":{"kind":"tool_call","options":["approve","reject"],"question":"Allow `git push`?","request":{"fingerprint":"fp1","tool":"run_command"},"risk":"high"},"item_id":"","label":"approve","mission_id":"m1","schema":1,"source":"gate"}
+```
+
+| Key | Meaning |
+|---|---|
+| `schema` | `1`; bumped when a row's shape changes |
+| `source` | `gate` (a human or the default answered a gate), `tool_approval` (the dispatcher's record of a gated call), `verifier` (a cycle's verdict), `review` (the reviewer's verdict on a verified diff) |
+| `label` | the judgment: `approve` / `reject`, `passed` / `failed` (or another verifier verdict), `approve` / `block` / `unparsed` |
+| `by` | who judged: the gate's `resolved_by`, `default` when the default applied, `verifier`, `reviewer` |
+| `mission_id`, `cycle_id`, `item_id`, `at` | where the judgment comes from; empty when the source does not record it (an event has no timestamp, a gate no cycle) |
+| `input` | what was judged, secrets redacted: the gate's question, options, risk and request; the approval's tool, arguments, reason and fingerprint; the cycle's status, tool calls, rolled-back files, split and per-check `name`, `passed`, `gating`, `exit_code` (no timings); the review's commit range, blocking issues and advisory notes, plus `diff` with `--diffs` |
+
+| Option | Default | Meaning |
+|---|---|---|
+| `MISSION_ID` | the one the anchor's latest `orchestrate` event names | whose gates to read from the store; required when there is no anchor, in which case only the gates are exported |
+| `--workdir DIR` | `.` | the mission workspace; without a `.lha/` directory only the store is read |
+| `--out FILE` | `-` (stdout) | where to write |
+| `--diffs` | off | add each reviewed `git diff base..head` (harness files excluded) to the review rows, cut to 20,000 characters |
+
+Prints `<n> labels (<n> gate, <n> tool_approval, <n> verifier, <n> review)` on stderr, so stdout is
+only the JSON Lines. Keys are sorted and separators compact, so both implementations write the
+same bytes (`spec/systemone/labels.json`). A workspace whose events name no mission (a `run-local`
+or `mission` run, which record no `orchestrate` event) exports its events with an empty
+`mission_id` and no gates unless `MISSION_ID` is given.
 
 ## `lha worker`
 

@@ -33,6 +33,8 @@ memory_app = typer.Typer(help="Tiered memory maintenance.", no_args_is_help=True
 app.add_typer(memory_app, name="memory")
 objects_app = typer.Typer(help="ClaimCheck object store maintenance.", no_args_is_help=True)
 app.add_typer(objects_app, name="objects")
+labels_app = typer.Typer(help="Labels for fitting System One thresholds.", no_args_is_help=True)
+app.add_typer(labels_app, name="labels")
 
 
 @app.callback()
@@ -482,6 +484,60 @@ def prune(
     typer.echo(
         f"{result.count} objects {verb} ({result.bytes / 2**20:.1f} MiB), {result.kept} kept"
     )
+
+
+@labels_app.command()
+def export(
+    mission_id: str | None = typer.Argument(
+        None, help="Mission whose gates to include (default: the one the anchor names)."
+    ),
+    workdir: str = typer.Option(".", help="The mission workspace (the git repo holding .lha/)."),
+    out: str = typer.Option("-", help="Where to write the JSON Lines ('-' = stdout)."),
+    diffs: bool = typer.Option(
+        False, "--diffs", help="Include each reviewed diff (git diff base..head, capped)."
+    ),
+) -> None:
+    """Export the mission's judgments as JSON Lines labels: one object per human gate answer,
+    tool approval, verifier verdict and review verdict, secrets redacted.
+
+    Reads the anchor's committed events at WORKDIR and the mission's closed gates from the
+    mission store. Without an anchor, MISSION_ID is required and only the gates are exported.
+    """
+    from pathlib import Path
+
+    from lha.agents.waves import diff_since
+    from lha.state.mission_anchor import ANCHOR_DIR, GitMissionAnchor
+    from lha.systemone.labels import SOURCES, label_rows, mission_id_of, to_jsonl
+
+    root = Path(workdir)
+    has_anchor = (root / ANCHOR_DIR).is_dir()
+    if not has_anchor and not mission_id:
+        _fail(
+            f"no mission anchor at {workdir!r} (expected a {ANCHOR_DIR}/ directory); "
+            "pass MISSION_ID to export a mission's gates alone"
+        )
+    events = _run(GitMissionAnchor(workdir).read_events()) if has_anchor else []
+    mission = mission_id or mission_id_of(events)
+
+    async def _gates(store: MissionStore) -> list[GateRow]:
+        return await store.list_gates(mission, limit=100_000)
+
+    gates = _run(_with_store(_gates)) if mission else []
+    if not mission:
+        typer.echo("warning: the anchor names no mission; gates are not exported", err=True)
+    rows = label_rows(
+        events,
+        gates,
+        mission_id=mission,
+        diffs=(lambda base, head: diff_since(workdir, base, head)) if diffs else None,
+    )
+    text = to_jsonl(rows)
+    if out == "-":
+        typer.echo(text, nl=False)
+    else:
+        Path(out).write_text(text, encoding="utf-8")
+    counts = ", ".join(f"{sum(1 for r in rows if r.source == s)} {s}" for s in SOURCES)
+    typer.echo(f"{len(rows)} labels ({counts})", err=True)
 
 
 @app.command(name="run-local")

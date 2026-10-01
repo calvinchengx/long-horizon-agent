@@ -175,11 +175,12 @@ func snapshot(t *testing.T, workdir string) workspace {
 	return w
 }
 
-// durationRE matches a check's measured duration in an event line (the only run-to-run noise).
+// durationRE matches a check's measured duration in an event line; with the commit shas a review
+// event names (its base..head range), the only run-to-run noise.
 var durationRE = regexp.MustCompile(`"duration_s":-?[0-9][0-9.e+-]*`)
 
 // normalizeNDJSON is the log's raw bytes (not parsed: key order, float formatting and escaping
-// are compared) with blank lines dropped and measured durations masked.
+// are compared) with blank lines dropped and measured durations and commit shas masked.
 func normalizeNDJSON(t *testing.T, body string) string {
 	t.Helper()
 	var lines []string
@@ -190,7 +191,8 @@ func normalizeNDJSON(t *testing.T, body string) string {
 		if !json.Valid([]byte(line)) {
 			t.Fatalf("bad ndjson line %q", line)
 		}
-		lines = append(lines, durationRE.ReplaceAllString(line, `"duration_s":0.0`))
+		line = durationRE.ReplaceAllString(line, `"duration_s":0.0`)
+		lines = append(lines, shaRE.ReplaceAllString(line, "SHA"))
 	}
 	return strings.Join(lines, "\n")
 }

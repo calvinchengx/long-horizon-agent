@@ -5,14 +5,19 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents/org"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/durable"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 // The mission-store commands (python: lha.cli.main missions / costs / gates / db migrate): they
@@ -428,4 +433,86 @@ func isFlagSet(fs *flag.FlagSet, name string) bool {
 	set := false
 	fs.Visit(func(f *flag.Flag) { set = set || f.Name == name })
 	return set
+}
+
+const labelsHelp = "Labels for fitting System One thresholds."
+
+const exportHelp = "Export the mission's judgments as JSON Lines labels: one object per human gate answer,\n" +
+	"tool approval, verifier verdict and review verdict, secrets redacted.\n\n" +
+	"Reads the anchor's committed events at WORKDIR and the mission's closed gates from the\n" +
+	"mission store. Without an anchor, MISSION_ID is required and only the gates are exported."
+
+// labelsCmd is python's `lha labels export` (lha.systemone.labels).
+func (c *cli) labelsCmd(args []string) error {
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		fmt.Fprintf(c.stdout, "Usage: lha labels [OPTIONS] COMMAND [ARGS]...\n\n%s\n\nCommands:\n  %-12s %s\n", labelsHelp, "export", exportHelp)
+		if len(args) == 0 {
+			return &exitError{code: 2} // typer's no_args_is_help
+		}
+		return nil
+	}
+	if args[0] != "export" {
+		return &exitError{code: 2, message: "Usage: lha labels [OPTIONS] COMMAND [ARGS]...\nTry 'lha labels --help' for help.\n\n" +
+			"Error: No such command " + pyQuote(args[0]) + "."}
+	}
+	fs := c.newFlags("labels export", exportHelp)
+	workdir := fs.String("workdir", ".", "The mission workspace (the git repo holding .lha/).")
+	out := fs.String("out", "-", "Where to write the JSON Lines ('-' = stdout).")
+	diffs := fs.Bool("diffs", false, "Include each reviewed diff (git diff base..head, capped).")
+	positional, err := c.parseInterleaved(fs, args[1:], 1)
+	if err != nil {
+		return err
+	}
+	missionID := ""
+	if len(positional) > 0 {
+		missionID = positional[0]
+	}
+	info, statErr := os.Stat(filepath.Join(*workdir, state.AnchorDir))
+	hasAnchor := statErr == nil && info.IsDir()
+	if !hasAnchor && missionID == "" {
+		return fail(2, "no mission anchor at %s (expected a %s/ directory); pass MISSION_ID to export a mission's gates alone",
+			contracts.PyRepr(*workdir), state.AnchorDir)
+	}
+	events := []contracts.EventRecord{}
+	if hasAnchor {
+		if events, err = state.NewGitMissionAnchor(*workdir).ReadEvents(c.ctx); err != nil {
+			return err
+		}
+	}
+	mission := missionID
+	if mission == "" {
+		mission = systemone.MissionIDOf(events)
+	}
+	gates := []persistence.GateRow{}
+	if mission == "" {
+		fmt.Fprintln(c.stderr, "warning: the anchor names no mission; gates are not exported")
+	} else if err := c.withStore(func(store persistence.Store) error {
+		gates, err = store.ListGates(c.ctx, mission, 100_000)
+		return err
+	}); err != nil {
+		return err
+	}
+	var supplier func(base, head string) string
+	if *diffs {
+		supplier = func(base, head string) string { return org.DiffSince(c.ctx, *workdir, base, head) }
+	}
+	rows := systemone.LabelRows(events, gates, mission, supplier)
+	text := systemone.ToJSONL(rows)
+	if *out == "-" {
+		fmt.Fprint(c.stdout, text)
+	} else if err := os.WriteFile(*out, []byte(text), 0o644); err != nil {
+		return err
+	}
+	counts := []string{}
+	for _, source := range systemone.Sources {
+		n := 0
+		for _, row := range rows {
+			if row.Source == source {
+				n++
+			}
+		}
+		counts = append(counts, fmt.Sprintf("%d %s", n, source))
+	}
+	fmt.Fprintf(c.stderr, "%d labels (%s)\n", len(rows), strings.Join(counts, ", "))
+	return nil
 }
