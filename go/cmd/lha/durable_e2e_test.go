@@ -466,7 +466,7 @@ func TestWorkersRefuseMixedTaskQueues(t *testing.T) {
 	cleanEnv(t, pyEnv...)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var out, errOut strings.Builder
+	var out, errOut syncBuffer // the SDK's pollers may still log after run returns
 	code := (&cli{stdout: &out, stderr: &errOut, ctx: ctx}).run([]string{"worker"})
 	r = result{out.String(), errOut.String(), code}
 	if r.code != 2 || !strings.Contains(r.stderr, "is already polled by a Python lha worker") ||
@@ -530,7 +530,7 @@ func TestWorkersStartedTogetherLeaveAtMostOneRunning(t *testing.T) {
 		<-pyDone
 		done <- exited{"python", result{"", pyErr.String(), py.ProcessState.ExitCode()}}
 	}()
-	var goOut, goErr strings.Builder
+	var goOut, goErr syncBuffer // the SDK's pollers may still log after run returns
 	goDone := make(chan struct{})
 	go func() {
 		defer close(goDone)
