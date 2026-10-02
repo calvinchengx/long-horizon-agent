@@ -106,7 +106,10 @@ event. This check only records: no other writer is active in a serial round, so 
 cannot conflict. On failure (item neither blocked nor split), `reflect_on_failure` writes a
 post-mortem for
 the next attempt. On success the Reviewer reviews `git diff base..head` (excluding `.lha`,
-capped at 20,000 chars, then 8,000 inside the reviewer). A blocking verdict reopens the item:
+capped at 20,000 chars, then 8,000 inside the reviewer), where `base` is the commit before the
+item's first attempt in its current streak (`review_base`): a reopened item's next attempt may
+change nothing more, and a diff of only the last cycle would be empty and blocked again. A
+blocking verdict reopens the item:
 status `todo`, `verified_by` cleared, the review notes attached, and a checkpoint committed.
 
 **Parallel wave.** For each item, concurrently:

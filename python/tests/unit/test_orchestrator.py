@@ -153,6 +153,13 @@ async def test_blocking_review_reopens_the_item(tmp_path: Path) -> None:
     assert len(reopened) == 1
     log = git_ops.log_oneline(tmp_path, 100)
     assert any("lha: review reopened 01" in line for line in log)
+    # The second review of 01 diffs from the same base as the first (the item's first attempt),
+    # and records the reviewer's reply.
+    reviews = [e for e in _committed_events(tmp_path, "review") if e["payload"]["item_id"] == "01"]
+    assert [r["payload"]["verdict"] for r in reviews] == ["block", "approve"]
+    assert reviews[0]["payload"]["base"] == reviews[1]["payload"]["base"]
+    assert reviews[1]["payload"]["head"] != reviews[0]["payload"]["head"]
+    assert "verdict" in reviews[0]["payload"]["brief"] and reviews[0]["payload"]["tool_calls"] == 0
 
 
 class _Pricey:

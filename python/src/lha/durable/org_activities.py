@@ -62,6 +62,7 @@ from lha.agents.waves import (
     reflection_event,
     reflection_for,
     reopen_for_review,
+    review_base,
 )
 from lha.config import Settings, get_settings
 from lha.contracts.model import ModelProvider
@@ -103,6 +104,7 @@ from lha.execution.tools.toolset import build_run_dispatcher
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.hitl.approvals import DeferredApprovalGate
 from lha.ids import idempotency_key
+from lha.obs.redact import redact_text
 from lha.persistence.store import MissionStore, StoreUnavailableError, open_store
 from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
@@ -727,7 +729,9 @@ async def _review_cycle(
             return _result_from_snapshot(
                 snapshot, item_id=inp.item_id, advanced=False, note="item not done: no review"
             )
-        base = inp.base_sha or f"{inp.head_sha}^1"
+        base = review_base(
+            await anchor.read_events(), inp.item_id, inp.base_sha or f"{inp.head_sha}^1"
+        )
         diff = await asyncio.to_thread(diff_since, inp.workdir, base, inp.head_sha)
         findings = screen_diff(diff)  # weakened tests go to the reviewer as criteria
         meter = await asyncio.to_thread(
@@ -814,6 +818,8 @@ async def _review_cycle(
                             "blocked": blocked,
                             "base": base,
                             "head": inp.head_sha,
+                            "tool_calls": review.tool_calls,
+                            "brief": redact_text(review.brief)[:2_000],
                         },
                     ),
                 ],

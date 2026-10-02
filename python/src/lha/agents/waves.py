@@ -196,6 +196,25 @@ def reflection_for(events: Sequence[EventRecord], item_id: str) -> str:
     return ""
 
 
+def review_base(events: Sequence[EventRecord], item_id: str, fallback: str) -> str:
+    """The commit a review of ``item_id`` should diff from.
+
+    A reopened item's next attempt may change nothing more (the work landed in the first), so
+    reviewing only the last cycle shows an empty diff and the reviewer blocks again. The review
+    therefore covers everything since the item's FIRST attempt in its current streak: the base
+    the first blocking review recorded, until a review approves; ``fallback`` otherwise.
+    """
+    tracked = ""
+    for event in events:
+        if event.kind != "review" or str(event.payload.get("item_id", "")) != item_id:
+            continue
+        if event.payload.get("blocking"):
+            tracked = tracked or str(event.payload.get("base") or "")
+        else:
+            tracked = ""
+    return tracked or fallback
+
+
 def implementer_objective(
     run: ImplementerRun,
     *,

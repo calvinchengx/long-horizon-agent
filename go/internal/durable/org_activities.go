@@ -22,6 +22,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
@@ -917,6 +918,11 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 	if base == "" {
 		base = inp.HeadSHA + "^1"
 	}
+	priorEvents, err := anchor.ReadEvents(ctx)
+	if err != nil {
+		return CycleResult{}, err
+	}
+	base = org.ReviewBase(priorEvents, inp.ItemID, base)
 	diff := org.DiffSince(ctx, inp.Workdir, base, inp.HeadSHA)
 	findings := verify.ScreenDiff(diff) // weakened tests go to the reviewer as criteria
 	criteria = verify.ScreenCriteria(findings, criteria)
@@ -992,6 +998,7 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 			"item_id", inp.ItemID, "verdict", review.Verdict, "blocking", review.Blocking,
 			"blocking_issues", org.CapList(review.BlockingIssues, 20), "advisory", org.CapList(review.Advisory, 20),
 			"reopened", review.Blocking && !blocked, "blocked", blocked, "base", base, "head", inp.HeadSHA,
+			"tool_calls", review.ToolCalls, "brief", pyfmt.Head(obs.RedactText(review.Brief), 2_000),
 		)}),
 		CommitMessage: fmt.Sprintf("lha: review %s %s", outcome, inp.ItemID),
 	}); err != nil {

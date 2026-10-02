@@ -84,6 +84,7 @@ from lha.agents.waves import (
     new_implementer_run,
     parallel_batch,
     reopen_for_review,
+    review_base,
 )
 from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
@@ -109,6 +110,7 @@ from lha.hitl.approvals import bind_gate_store
 from lha.ids import new_id
 from lha.obs.events import TraceRecorder, configure_logging
 from lha.obs.otel import agent_span, span
+from lha.obs.redact import redact_text
 from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, MISSION_FILE, GitMissionAnchor
@@ -684,6 +686,7 @@ class _MissionRun:
         Returns ``"approved"``, ``"reopened"`` (a blocking verdict put the item back to
         ``todo``) or ``"looping"`` (the review keeps blocking; ``stopped`` is set).
         """
+        base = review_base(await self.anchor.read_events(), item.id, base)
         diff = await asyncio.to_thread(diff_since, self.workdir, base, head)
         # The deterministic screen runs first: its findings go to the reviewer as criteria, and
         # they force the review when the organization would have skipped it (--no-review). It
@@ -730,6 +733,8 @@ class _MissionRun:
                     "blocked": False,
                     "base": base,
                     "head": head,
+                    "tool_calls": review.tool_calls,
+                    "brief": redact_text(review.brief)[:2_000],
                 },
             )
         )

@@ -329,6 +329,10 @@ func TestSerialRoundResearchFailuresSurfaceAndReviewReopens(t *testing.T) {
 	if len(reviews) != 2 || reviews[0].Payload.Plain()["reopened"] != true || reviews[1].Payload.Plain()["reopened"] != false {
 		t.Fatalf("reviews %v", reviews)
 	}
+	// The second review diffs from the first attempt's base, so the reviewer sees the whole change.
+	if reviews[0].Payload.Plain()["base"] != reviews[1].Payload.Plain()["base"] || reviews[0].Payload.Plain()["head"] == reviews[1].Payload.Plain()["head"] {
+		t.Fatalf("review bases %v", reviews)
+	}
 	// The blocking verdict was posted to the board, and the second round's Lead saw the board
 	// in its prompt.
 	board := eventsOf(t, inp.Workdir, "blackboard")

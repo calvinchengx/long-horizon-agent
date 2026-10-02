@@ -203,6 +203,40 @@ func TestBlockingReviewReopensTheItem(t *testing.T) {
 	if len(reflections) != 1 || reflections[0].Payload["text"] != "\nReview verdict: block\n- BLOCKING: no error handling\n" {
 		t.Fatalf("%+v", reflections)
 	}
+	// The second review of 01 diffs from the same base as the first (the item's first attempt).
+	reviews := []anchorEvent{}
+	for _, e := range committedEvents(t, dir, agents.ReviewEvent) {
+		if e.Payload["item_id"] == "01" {
+			reviews = append(reviews, e)
+		}
+	}
+	if len(reviews) != 2 || reviews[0].Payload["verdict"] != "block" || reviews[1].Payload["verdict"] != "approve" ||
+		reviews[0].Payload["base"] != reviews[1].Payload["base"] || reviews[0].Payload["head"] == reviews[1].Payload["head"] ||
+		reviews[0].Payload["tool_calls"] != float64(0) || !strings.Contains(reviews[0].Payload["brief"].(string), "verdict") {
+		t.Fatalf("%+v", reviews)
+	}
+}
+
+func TestReviewBaseTracksTheFirstBlockingReviewUntilAnApproval(t *testing.T) {
+	review := func(item string, blocking bool, base, cycle string) contracts.EventRecord {
+		return contracts.EventRecord{Kind: "review", CycleID: cycle, Payload: contracts.Payload("item_id", item, "blocking", blocking, "base", base)}
+	}
+	events := []contracts.EventRecord{}
+	if ReviewBase(events, "01", "fb") != "fb" {
+		t.Fatal("empty")
+	}
+	events = append(events, review("01", true, "b1", "c1"))
+	if ReviewBase(events, "01", "fb") != "b1" {
+		t.Fatal("first")
+	}
+	events = append(events, review("01", true, "b2", "c2"))
+	if ReviewBase(events, "01", "fb") != "b1" {
+		t.Fatal("still first")
+	}
+	events = append(events, review("01", false, "b1", "c3"), review("02", true, "x", "c4"))
+	if ReviewBase(events, "01", "fb") != "fb" || ReviewBase(events, "02", "fb") != "x" {
+		t.Fatal("after approval")
+	}
 }
 
 // pricey costs $1 per call (worst case == actual) and always says done / approve.
