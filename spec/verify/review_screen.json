@@ -114,6 +114,18 @@
    "criteria": "do the thing"
   },
   {
+   "diff": "--- /dev/null\n+++ b/tests/unit/conftest.py\n@@\n+import pytest\n+def pytest_collectstart(c):\n+    pass\n",
+   "findings": [
+    "added harness file tests/unit/conftest.py"
+   ],
+   "criteria": "Pre-review screen: this diff weakens or removes tests. Each of these is BLOCKING unless the item itself requires it:\n- added harness file tests/unit/conftest.py\n\ndo the thing"
+  },
+  {
+   "diff": "--- a/conftest.py\n+++ b/conftest.py\n@@\n-x = 1\n+x = 2\n",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
    "diff": "--- a/tests/test_m.py\n+++ b/tests/test_m.py\n@@\n-    assert a\n+    assert a  # moved\n",
    "findings": [],
    "criteria": "do the thing"

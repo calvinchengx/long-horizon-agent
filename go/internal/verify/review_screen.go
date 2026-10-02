@@ -86,6 +86,9 @@ func (f *screenedFile) findings() []string {
 	if f.old != "" && f.new == "" && IsTestPath(f.old) {
 		return []string{"deleted test file " + f.old}
 	}
+	if f.old == "" && f.new != "" && IsHarnessConfig(f.new) {
+		out = append(out, "added harness file "+f.new)
+	}
 	if IsTestPath(f.path()) {
 		for _, name := range f.removedTests {
 			if !f.addedTests[name] {

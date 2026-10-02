@@ -113,8 +113,17 @@ def snapshot_harness(workdir: str | Path, extra_globs: tuple[str, ...] = ()) -> 
     return snapshot
 
 
+def is_harness_config(rel: str) -> bool:
+    """Whether ``rel`` configures how the tests run (``conftest.py``, ``pytest.ini``, ...), as
+    opposed to being a test file. A NEW one is a violation: a ``conftest.py`` can rewrite what
+    an existing test module collects without touching it."""
+    parts = rel.split("/")
+    return rel in HARNESS_ROOT_FILES or parts[-1] in HARNESS_ANYWHERE_FILES
+
+
 def harness_violations(before: HarnessSnapshot, after: HarnessSnapshot) -> list[str]:
-    """Pre-existing harness files that were modified or deleted (new files are allowed)."""
+    """Pre-existing harness files that were modified or deleted, and harness configuration
+    files that were added (new test files are allowed: adding tests is the work)."""
     violations: list[str] = []
     for rel, digest in sorted(before.items()):
         now = after.get(rel)
@@ -122,6 +131,9 @@ def harness_violations(before: HarnessSnapshot, after: HarnessSnapshot) -> list[
             violations.append(f"deleted: {rel}")
         elif now != digest:
             violations.append(f"modified: {rel}")
+    for rel in sorted(after):
+        if rel not in before and is_harness_config(rel):
+            violations.append(f"added: {rel}")
     return violations
 
 

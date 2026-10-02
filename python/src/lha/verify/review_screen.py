@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 
 from lha.contracts.state import EventRecord
+from lha.verify.harness_integrity import is_harness_config
 
 #: The anchor event each screened diff is recorded as (``lha labels export`` joins it to the
 #: review verdict).
@@ -73,6 +74,8 @@ class _File:
         out: list[str] = []
         if self.old and not self.new and is_test_path(self.old):
             return [f"deleted test file {self.old}"]
+        if not self.old and self.new and is_harness_config(self.new):
+            out.append(f"added harness file {self.new}")
         if is_test_path(self.path):
             for name in self.removed_tests:
                 if name not in self.added_tests:

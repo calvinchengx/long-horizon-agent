@@ -185,6 +185,16 @@ def test_decision_chain() -> None:
         ), case["name"]
 
 
+def test_harness_violations() -> None:
+    from lha.verify.harness_integrity import harness_violations, is_harness_config
+
+    spec = _load("verify/harness_files.json")
+    for case in spec["cases"]:
+        assert is_harness_config(case["path"]) == case["config"], case["path"]
+    for case in spec["violations"]:
+        assert harness_violations(case["before"], case["after"]) == case["violations"], case["name"]
+
+
 def test_shared_paths_and_harness_files() -> None:
     for case in _load("coordination/shared_paths.json")["cases"]:
         assert is_shared(case["path"]) == case["shared"], case
