@@ -231,6 +231,7 @@ def test_fallback_models() -> None:
             continue
         spec = parse_fallback_entry(case["entry"])
         assert (spec.backend, spec.model) == (case["backend"], case["model"]), case
+        assert spec.base_url == case["base_url"], case
         price = case["price"]
         assert (spec.price is None) == (price is None), case
         if spec.price is not None:

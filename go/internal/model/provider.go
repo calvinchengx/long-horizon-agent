@@ -58,13 +58,13 @@ func BuildProvider(settings *config.Settings, name string, client *http.Client) 
 	if err != nil {
 		return nil, err
 	}
-	primary, err := buildBackend(settings, settings.ModelBackend, name, client, price, retries)
+	primary, err := buildBackend(settings, settings.ModelBackend, name, client, price, retries, "")
 	if err != nil || len(fallbacks) == 0 {
 		return primary, err
 	}
 	chain := []contracts.ModelProvider{primary}
 	for _, spec := range fallbacks {
-		p, err := buildBackend(settings, spec.Backend, spec.Model, client, spec.Price, retries)
+		p, err := buildBackend(settings, spec.Backend, spec.Model, client, spec.Price, retries, spec.BaseURL)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +102,9 @@ func primaryPrice(settings *config.Settings, backend, name string) (explicitPric
 
 // buildBackend builds one concrete backend. price (explicit) wins over the table / settings
 // prices; maxRetries is its per-call retry budget.
-func buildBackend(settings *config.Settings, backend, name string, client *http.Client, price explicitPrice, maxRetries int) (contracts.ModelProvider, error) {
+// buildBackend is one concrete backend; baseURL (an entry's own endpoint) wins over
+// LHA_OPENAI_BASE_URL.
+func buildBackend(settings *config.Settings, backend, name string, client *http.Client, price explicitPrice, maxRetries int, baseURL string) (contracts.ModelProvider, error) {
 	switch backend {
 	case "stub":
 		return NewStubNamed(name, nil), nil
@@ -123,7 +125,11 @@ func buildBackend(settings *config.Settings, backend, name string, client *http.
 		}))
 
 	case "openai_compat":
-		if settings.OpenAIBaseURL == nil || *settings.OpenAIBaseURL == "" {
+		endpoint := baseURL
+		if endpoint == "" && settings.OpenAIBaseURL != nil {
+			endpoint = *settings.OpenAIBaseURL
+		}
+		if endpoint == "" {
 			return nil, errors.New("LHA_OPENAI_BASE_URL is required for the 'openai_compat' backend.")
 		}
 		// Prices are optional; unset => cost is UNKNOWN (never silently $0).
@@ -132,7 +138,7 @@ func buildBackend(settings *config.Settings, backend, name string, client *http.
 			in, out = Float(price.InputPerMTok), Float(price.OutputPerMTok)
 		}
 		return asProvider(NewOpenAICompat(OpenAICompatOptions{
-			BaseURL:         *settings.OpenAIBaseURL,
+			BaseURL:         endpoint,
 			ModelName:       name,
 			APIKey:          SecretValue(settings.OpenAIAPIKey),
 			PriceInPerMTok:  in,

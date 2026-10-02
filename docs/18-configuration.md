@@ -49,7 +49,7 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 | `LHA_CLAUDE_PRICE_IN_PER_MTOK` | float | unset | overrides the built-in price for `LHA_MODEL_NAME` (both must be set) |
 | `LHA_CLAUDE_PRICE_OUT_PER_MTOK` | float | unset | as above |
 | `LHA_ALLOW_UNPRICED_MODELS` | bool | `false` | let the governor run calls whose cost cannot be computed |
-| `LHA_FALLBACK_MODELS` | comma-separated list | empty | ordered fallback chain of `backend:model[@in/out]` entries; non-empty makes `build_provider` return a `FailoverModel` |
+| `LHA_FALLBACK_MODELS` | comma-separated list | empty | ordered fallback chain of `backend:model[@in/out][|endpoint]` entries (`|endpoint`: an `openai_compat` entry's own base URL); non-empty makes `build_provider` return a `FailoverModel` |
 | `LHA_FALLBACK_MAX_ROUNDS` | int (>= 1) | `2` | rounds over the whole chain before the last transient error is raised |
 | `LHA_MODEL_TIMEOUT_S` | float (> 0) | `120.0` | client timeout of one Ollama / OpenAI-compatible model call, in seconds. Raise it when a loaded machine makes local models slow; each timed-out call is retried (see [13-models.md](13-models.md#retries-and-failover)) |
 | `LHA_MODEL_PROBE_TIMEOUT_S` | float (> 0) | `10.0` | timeout of the model health probe a parked durable mission runs |

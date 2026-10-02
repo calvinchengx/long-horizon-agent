@@ -114,6 +114,27 @@ func TestFallbacksBuildAFailoverChainInOrder(t *testing.T) {
 	}
 }
 
+// TestAFallbackEntryCanNameItsOwnEndpoint is python's test_a_fallback_entry_can_name_its_own_endpoint.
+func TestAFallbackEntryCanNameItsOwnEndpoint(t *testing.T) {
+	s := settingsFrom(t, "LHA_MODEL_BACKEND=openai_compat", "LHA_MODEL_NAME=primary", "LHA_OPENAI_BASE_URL=https://api.groq.test/openai/v1",
+		"LHA_FALLBACK_MODELS=openai_compat:second|https://other.test/v1/, openai_compat:third")
+	p, err := BuildProvider(s, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := p.(*FailoverModel)
+	want := []string{"https://api.groq.test/openai/v1", "https://other.test/v1", "https://api.groq.test/openai/v1"}
+	for i, m := range f.providers {
+		if got := m.(*OpenAICompatModel).baseURL; got != want[i] {
+			t.Fatalf("member %d base url %q, want %q", i, got, want[i])
+		}
+	}
+	// With its own endpoint, an entry needs no shared LHA_OPENAI_BASE_URL.
+	if _, err := BuildProvider(settingsFrom(t, "LHA_FALLBACK_MODELS=openai_compat:second|https://other.test/v1"), "", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFallbackConfigErrorsSurfaceAtBuild(t *testing.T) {
 	for _, c := range []struct {
 		env  []string

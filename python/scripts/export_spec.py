@@ -714,6 +714,12 @@ def export_fallback_models() -> None:
         "openai_compat:@1/2",
         "  ollama : qwen3 ",
         "ollama:'quoted'é",
+        "openai_compat:llama-3.3-70b|https://api.groq.com/openai/v1",
+        " openai_compat:m@1/2 | http://localhost:8000/v1 ",
+        "openai_compat:m|ftp://x/v1",
+        "openai_compat:m|",
+        "claude:claude-haiku-4-5|https://x.test/v1",
+        "openai_compat:a|b|https://x.test/v1",
     ]
     cases: list[dict[str, Any]] = []
     for entry in entries:
@@ -728,6 +734,7 @@ def export_fallback_models() -> None:
                 "entry": entry,
                 "backend": spec.backend,
                 "model": spec.model,
+                "base_url": spec.base_url,
                 "price": None
                 if price is None
                 else {

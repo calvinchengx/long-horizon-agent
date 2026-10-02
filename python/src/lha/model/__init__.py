@@ -47,22 +47,40 @@ CHAIN_MEMBER_RETRIES = 1
 
 @dataclass(frozen=True)
 class FallbackSpec:
-    """One ``LHA_FALLBACK_MODELS`` entry: ``backend:model[@in/out]`` (USD per 1M tokens)."""
+    """One ``LHA_FALLBACK_MODELS`` entry: ``backend:model[@in/out][|endpoint]`` (USD per 1M
+    tokens; the endpoint is an ``openai_compat`` entry's own base URL)."""
 
     backend: str
     model: str
     price: ModelPrice | None = None
+    base_url: str = ""  # "" = the shared LHA_OPENAI_BASE_URL
 
 
 def parse_fallback_entry(entry: str) -> FallbackSpec:
-    """Parse ``backend:model[@in/out]``; the model part may itself contain ``:`` (``qwen3:8b``)."""
-    backend, sep, rest = entry.strip().partition(":")
+    """Parse ``backend:model[@in/out][|endpoint]``; the model part may itself contain ``:``
+    (``qwen3:8b``). ``|endpoint`` gives an ``openai_compat`` entry its own base URL."""
+    body, bar, endpoint = entry.strip().rpartition("|")
+    if not bar:
+        body, endpoint = endpoint, ""
+    endpoint = endpoint.strip()
+    backend, sep, rest = body.strip().partition(":")
     backend = backend.strip().lower()
     if not sep or backend not in _BACKENDS:
         raise ValueError(
             f"invalid LHA_FALLBACK_MODELS entry {entry!r}: expected 'backend:model[@in/out]' "
             f"with backend one of {', '.join(_BACKENDS)}"
         )
+    if bar:
+        if not endpoint.startswith(("http://", "https://")):
+            raise ValueError(
+                f"invalid endpoint in LHA_FALLBACK_MODELS entry {entry!r}: expected "
+                "'|http(s)://host/v1'"
+            )
+        if backend != "openai_compat":
+            raise ValueError(
+                f"invalid LHA_FALLBACK_MODELS entry {entry!r}: only openai_compat entries take "
+                "an endpoint"
+            )
     model, at, price_text = rest.rpartition("@") if "@" in rest else (rest, "", "")
     price: ModelPrice | None = None
     if at:
@@ -79,7 +97,7 @@ def parse_fallback_entry(entry: str) -> FallbackSpec:
     model = model.strip()
     if not model:
         raise ValueError(f"invalid LHA_FALLBACK_MODELS entry {entry!r}: empty model name")
-    return FallbackSpec(backend=backend, model=model, price=price)
+    return FallbackSpec(backend=backend, model=model, price=price, base_url=endpoint)
 
 
 def _build_backend(
@@ -90,8 +108,10 @@ def _build_backend(
     client: httpx.AsyncClient | None,
     price: ModelPrice | None,
     max_retries: int,
+    base_url: str = "",
 ) -> ModelProvider:
-    """One concrete backend. ``price`` (explicit) wins over table / settings prices."""
+    """One concrete backend. ``price`` (explicit) wins over table / settings prices;
+    ``base_url`` (an entry's own endpoint) wins over ``LHA_OPENAI_BASE_URL``."""
     if backend == "stub":
         return StubModel(model_name=name)
 
@@ -110,11 +130,12 @@ def _build_backend(
         )
 
     if backend == "openai_compat":
-        if not settings.openai_base_url:
+        endpoint = base_url or settings.openai_base_url
+        if not endpoint:
             raise ValueError("LHA_OPENAI_BASE_URL is required for the 'openai_compat' backend.")
         # Prices are optional; unset => cost is UNKNOWN (never silently $0).
         return OpenAICompatModel(
-            base_url=settings.openai_base_url,
+            base_url=endpoint,
             model_name=name,
             api_key=secret_value(settings.openai_api_key),
             price_in_per_mtok=price.input_per_mtok if price else None,
@@ -201,6 +222,7 @@ def build_provider(
                 client=client,
                 price=spec.price,
                 max_retries=retries,
+                base_url=spec.base_url,
             )
         )
     return FailoverModel(chain, max_rounds=settings.fallback_max_rounds)

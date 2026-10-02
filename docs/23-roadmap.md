@@ -155,8 +155,8 @@ These limitations are in the current code:
 - The default memory embedder stays `hash` (lexical): `ollama` is semantic but needs a running
   Ollama server with the model pulled (without one, retrieval is lexical-only), and
   `sentence_transformers` needs the `embeddings` extra.
-- Every `openai_compat` model, primary or fallback, uses the one endpoint in
-  `LHA_OPENAI_BASE_URL`.
+- Every `openai_compat` model, primary or fallback, authenticates with the one key in
+  `LHA_OPENAI_API_KEY`, even when a fallback entry names its own `|endpoint`.
 - The ClaimCheck object store (`LHA_OBJECT_STORE_ROOT`) grows with every durable cycle; it shrinks
   only when a worker starts with `LHA_OBJECT_RETENTION_DAYS` set or an operator runs
   `lha objects prune --older-than-days N`.
