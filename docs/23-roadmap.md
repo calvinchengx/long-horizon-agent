@@ -143,9 +143,9 @@ These limitations are in the current code:
   only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
 - Temporal histories do not replay across the two languages, so each implementation's workers
   need their own task queue (see [Go phase 2](#go-phase-2-temporal-done)).
-- `lha orchestrate --resume` rebuilds the blackboard and reflections from committed events, so
-  posts made after the interrupted run's last checkpoint are lost; the budget and cycle ceilings
-  apply per invocation.
+- `lha orchestrate --resume` rebuilds the blackboard and reflections from committed events; a
+  run that ends commits its pending records first, so only a run killed mid-wave loses the posts
+  made since its last checkpoint; the budget and cycle ceilings apply per invocation.
 - The default memory embedder stays `hash` (lexical): `ollama` is semantic but needs a running
   Ollama server with the model pulled (without one, retrieval is lexical-only), and
   `sentence_transformers` needs the `embeddings` extra.

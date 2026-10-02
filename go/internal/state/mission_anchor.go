@@ -285,6 +285,13 @@ func (a *GitMissionAnchor) RecordDecision(record contracts.DecisionRecord) int {
 	return len(a.pendingDecisions)
 }
 
+// HasPendingRecords reports whether events, decisions or an ownership map await the next commit.
+func (a *GitMissionAnchor) HasPendingRecords() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return len(a.pendingEvents) > 0 || len(a.pendingDecisions) > 0 || a.pendingOwnership != nil
+}
+
 // PendingDecisions returns a copy of the decisions queued since the last checkpoint.
 func (a *GitMissionAnchor) PendingDecisions() []contracts.DecisionRecord {
 	a.mu.Lock()

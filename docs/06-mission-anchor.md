@@ -135,8 +135,8 @@ its single writer (`implementer-<item id>`). Unlisted files belong to the lead.
 re-initialization without a map deletes a stale one), and `read_ownership()` returns an empty
 map. Changes are staged with `stage_ownership()`; the next checkpoint writes them, after the
 `.lha/` restore, so agent edits to this file are discarded like any other anchor edit. A granted
-lease is written by a commit of its own that holds only `.lha/` files
-(`commit_anchor_update()`). See [file ownership](11-multi-agent-organization.md#file-ownership)
+lease, an approved review and the records still pending when a run ends are each written by a
+commit of their own that holds only `.lha/` files (`commit_anchor_update()`). See [file ownership](11-multi-agent-organization.md#file-ownership)
 and [leases](11-multi-agent-organization.md#leases).
 
 ### `events.ndjson`

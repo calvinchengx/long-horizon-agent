@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from pathlib import Path
 
@@ -533,3 +534,38 @@ async def test_tracker_records_transitions(store: SqliteStore) -> None:
         "mission:m1",
         "T",
     )
+
+
+def test_concurrent_first_opens_succeed(tmp_path: Path) -> None:
+    """Several stores open and write one fresh file at once (two processes starting on a shared
+    store): the WAL conversion and schema creation race is retried, not failed."""
+    import threading
+
+    path = tmp_path / "shared" / "lha.sqlite3"
+    errors: list[BaseException] = []
+    go = threading.Barrier(12)
+
+    def worker(i: int) -> None:
+        try:
+            go.wait()
+            s = SqliteStore(path)
+            s._open_sync()
+            try:
+                asyncio.run(s.upsert_mission(mission_id=f"m{i}", title="t", status="RUNNING"))
+            finally:
+                asyncio.run(s.close())
+        except BaseException as exc:  # collected and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(12)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    s = SqliteStore(path)
+    s._open_sync()
+    try:
+        assert len(asyncio.run(s.list_missions(limit=50))) == 12
+    finally:
+        asyncio.run(s.close())

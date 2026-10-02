@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -32,8 +33,11 @@ var (
 
 func settingsFor(t *testing.T, env ...string) *config.Settings {
 	t.Helper()
+	// Each test gets its own mission store: the parallel tests of this package must not contend
+	// for one file (and never touch the developer's per-user store).
 	base := []string{"LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_MODEL_BACKEND=stub",
-		"LHA_BUDGET_USD_CEILING=100", "LHA_MAX_CYCLES=20"}
+		"LHA_BUDGET_USD_CEILING=100", "LHA_MAX_CYCLES=20",
+		"LHA_SQLITE_PATH=" + filepath.Join(t.TempDir(), "store", "lha.sqlite3")}
 	s, err := config.LoadFrom(append(base, env...), "")
 	if err != nil {
 		t.Fatal(err)

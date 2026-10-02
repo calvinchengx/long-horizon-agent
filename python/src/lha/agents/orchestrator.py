@@ -389,6 +389,7 @@ class _MissionRun:
                 await asyncio.to_thread(prune_worktrees, self.workdir)
 
             final = await self.anchor.read_checklist()
+            await self._flush_anchor(final)
             await self.services.finish(self.stopped, head_sha=self.last_head)
         return MissionSummary(
             mission_id=self.mission_id,
@@ -403,6 +404,23 @@ class _MissionRun:
         )
 
     # --- resume ---------------------------------------------------------------------------
+    async def _flush_anchor(self, checklist: Checklist) -> None:
+        """Commit records appended since the last checkpoint (board posts, reflections) when a
+        run ends, so a later ``--resume`` does not discard them with the rest of the work tree.
+
+        Not after a decision-chain stop: an altered history is never extended.
+        """
+        if not self.anchor.has_pending_records or self.stopped.startswith(DECISION_CHAIN_STOP):
+            return
+        self.last_head = await self.anchor.commit_anchor_update(
+            Checkpoint(
+                cycle_id=self._cycle_id(self.cycles),
+                progress_summary="",
+                checklist=checklist,
+                commit_message="lha: anchor records at run end",
+            )
+        )
+
     def _recover_workspace(self) -> None:
         """Discard what an interrupted run left uncommitted (never anything committed)."""
         if (git_ops.git_dir(self.workdir) / "MERGE_HEAD").exists():
@@ -697,6 +715,16 @@ class _MissionRun:
         )
         if not review.blocking:
             self.loop_detector.observe(f"{item.id}:review_blocked", failed=False)
+            # Nothing else commits after the last item is approved, so the verdict is committed
+            # by itself (anchor files only), as a lease decision is.
+            self.last_head = await self.anchor.commit_anchor_update(
+                Checkpoint(
+                    cycle_id=cycle_id,
+                    progress_summary="",
+                    checklist=await self.anchor.read_checklist(),
+                    commit_message=f"lha: review approved {item.id}",
+                )
+            )
             return "approved"
         await self._set_reflection(item.id, f"\n{review.notes()}\n")
         await self._post(f"reviewer:{item.id}", review.notes())

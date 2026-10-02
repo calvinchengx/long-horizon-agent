@@ -361,8 +361,10 @@ in the question's option order), `threshold`, `action` (`continue` \| `split` \|
 Commit messages: `lha: initialize mission anchor`,
 `lha: complete|attempt|block|split <id> (<description>)` (orchestrate appends
 ` [merged <branch>]` to an integration commit, which is a two-parent merge commit),
-`lha: review reopened <id>` (`orchestrate`), `lha: review approved|reopened|blocked <id>`
-(`review_cycle`), `lha: lease granted|refused: <path> (<writer>)`,
+`lha: review approved|reopened <id>` (`orchestrate`; the approval commit holds only `.lha/`
+files), `lha: review approved|reopened|blocked <id>` (`review_cycle`),
+`lha: anchor records at run end` (`orchestrate`, when a run ends with records appended since its
+last checkpoint), `lha: lease granted|refused: <path> (<writer>)`,
 `lha: unblock <ids> (human retry)`,
 `lha: gate <event> (<kind> <gate id>)`, `lha: mission declared impossible`.
 
