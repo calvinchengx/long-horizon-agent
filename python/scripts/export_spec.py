@@ -573,6 +573,73 @@ def export_harness_files() -> None:
     )
 
 
+_SCREEN_DIFFS = [
+    # a removed test, a new skip and two removed assertions in one test file
+    "diff --git a/tests/test_a.py b/tests/test_a.py\n--- a/tests/test_a.py\n+++ b/tests/test_a.py\n"
+    '@@ -1,5 +1,4 @@\n-def test_one():\n-    assert f() == 1\n+@pytest.mark.skip(reason="flaky")\n'
+    "+def test_two():\n+    pass\n-    assert g()\n",
+    # a deleted test file (git's /dev/null)
+    "diff --git a/tests/old_test.py b/tests/old_test.py\n--- a/tests/old_test.py\n+++ /dev/null\n"
+    "@@ -1 +0,0 @@\n-def test_gone(): pass\n",
+    # a lowered coverage floor (not a test file: the floor rule applies anywhere)
+    "--- a/pyproject.toml\n+++ b/pyproject.toml\n@@\n-fail_under = 90\n+fail_under = 70\n",
+    # a raised floor is fine
+    "--- a/pyproject.toml\n+++ b/pyproject.toml\n@@\n-fail_under = 80\n+fail_under = 90\n",
+    # Go: a skipped test and a removed fatal, plus a test moved (renamed) within the file
+    '--- a/pkg/x_test.go\n+++ b/pkg/x_test.go\n@@\n-func TestX(t *testing.T) {\n-\tt.Fatal("x")\n'
+    '+func TestX(t *testing.T) {\n+\tt.Skip("later")\n-func TestMoved(t *testing.T) {\n'
+    "+func TestMoved(t *testing.T) {\n",
+    # JS: an xit and a removed expect in a spec file
+    "--- a/src/a.spec.ts\n+++ b/src/a.spec.ts\n@@\n-  it('works', () => {\n-    expect(a).toBe(1)\n"
+    "+  xit('works', () => {\n",
+    # non-test code: removed asserts and a skip-looking string do not count
+    "--- a/src/x.py\n+++ b/src/x.py\n@@\n-assert x\n-assert y\n+return 2  # pytest.skip( in a comment\n",
+    # a test added with its assertions: nothing weakened
+    "--- /dev/null\n+++ b/tests/test_new.py\n@@\n+def test_new():\n+    assert 1\n",
+    # assertions moved, not removed (net zero)
+    "--- a/tests/test_m.py\n+++ b/tests/test_m.py\n@@\n-    assert a\n+    assert a  # moved\n",
+    # a directory-named test file with a timestamp suffix in the header
+    "--- a/testdata/case1.txt\t2026-01-01\n+++ b/testdata/case1.txt\t2026-01-02\n@@\n-x\n+y\n",
+    "",
+    "not a diff at all\n",
+]
+
+
+def export_review_screen() -> None:
+    from lha.verify.review_screen import is_test_path, screen_criteria, screen_diff
+
+    paths = [
+        "tests/test_a.py",
+        "pkg/x_test.go",
+        "src/a.spec.ts",
+        "src/a.test.jsx",
+        "conftest.py",
+        "src/conftest.py",
+        "spec/a.rb",
+        "__tests__/a.js",
+        "testdata/x.txt",
+        "src/x.py",
+        "test.py",
+        "tests",
+        "a/test/b.go",
+        "src/testing.py",
+    ]
+    _write(
+        "verify/review_screen.json",
+        {
+            "paths": [{"path": p, "test": is_test_path(p)} for p in paths],
+            "cases": [
+                {
+                    "diff": d,
+                    "findings": screen_diff(d),
+                    "criteria": screen_criteria(screen_diff(d), "do the thing"),
+                }
+                for d in _SCREEN_DIFFS
+            ],
+        },
+    )
+
+
 def export_flaky_retry() -> None:
     flaky = importlib.import_module("tests.unit.test_flaky_retry_verifier")
     _write(
@@ -2809,6 +2876,18 @@ def export_labels() -> None:
                 cycle("01", "failed", "c1"),
                 no_verdict,
                 other,
+                {
+                    "kind": "review_screen",
+                    "cycle_id": "c2",
+                    "payload": {
+                        "item_id": "01",
+                        "base": "aaa111",
+                        "head": "bbb222",
+                        "findings": ["deleted test file tests/test_a.py"],
+                        "forced": False,
+                    },
+                    "payload_ref": None,
+                },
                 review("01", "block", "c2", "aaa111", "bbb222"),
                 cycle("01", "passed", "c3"),
                 review("01", "approve", "c4", "bbb222", "ccc333"),
@@ -2887,6 +2966,7 @@ def main() -> None:
     export_ownership()
     export_harness_files()
     export_flaky_retry()
+    export_review_screen()
     export_pricing()
     export_fallback_models()
     export_vendor_paths()

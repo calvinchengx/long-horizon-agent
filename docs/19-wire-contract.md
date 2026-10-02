@@ -326,6 +326,7 @@ Events of the multi-agent organization:
 |---|---|---|
 | `research` | durable organization, with the round's checkpoint | `item`, `n` (briefs), `failed`, `failures` (each at most 500 chars) |
 | `review` | `review_cycle`, checkpoint `<cycle id>-review` | `item_id`, `verdict`, `blocking`, `blocking_issues`, `advisory`, `reopened`, `blocked`, `base`, `head` |
+| `review_screen` | `review_cycle` (with the `review` event) and `orchestrate` (before each review) | `item_id`, `base`, `head`, `findings` (at most 20 strings), `forced` |
 | `lease` | `LeaseBroker`, a commit of its own | `writer`, `path`, `reason`, `granted`, `previous_owner`, `why` |
 | `orchestrate` | every `orchestrate` run, with its first checkpoint | `mission_id`, `resumed`, `run` |
 | `blackboard` | `orchestrate`, per board post | `author`, `text` (at most 1500 chars) |

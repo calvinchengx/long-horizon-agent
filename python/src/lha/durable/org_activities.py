@@ -107,6 +107,7 @@ from lha.persistence.store import MissionStore, StoreUnavailableError, open_stor
 from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
+from lha.verify.review_screen import review_screen_event, screen_criteria, screen_diff
 
 REVIEW_EVENT = _REVIEW_EVENT
 _CACHE_DIR = "lha/implementers"
@@ -726,6 +727,7 @@ async def _review_cycle(
             )
         base = inp.base_sha or f"{inp.head_sha}^1"
         diff = await asyncio.to_thread(diff_since, inp.workdir, base, inp.head_sha)
+        findings = screen_diff(diff)  # weakened tests go to the reviewer as criteria
         meter = await asyncio.to_thread(
             build_cycle_meter,
             settings,
@@ -757,7 +759,7 @@ async def _review_cycle(
             review = await _with_heartbeat(
                 Reviewer(model, tools).review(
                     diff=diff[:_REVIEW_DIFF_CAP],
-                    criteria=item.description,
+                    criteria=screen_criteria(findings, item.description),
                     ctx=ToolContext(mission_id=inp.mission_id, session=session),
                 ),
                 review_id,
@@ -789,6 +791,9 @@ async def _review_cycle(
                 progress_summary=f"- {review_id} review of [{inp.item_id}]: {outcome}",
                 checklist=checklist,
                 events=[
+                    review_screen_event(
+                        inp.item_id, base, inp.head_sha, findings, forced=False, cycle_id=review_id
+                    ),
                     *(
                         [board_event(f"reviewer:{inp.item_id}", review.notes(), review_id)]
                         if review.blocking

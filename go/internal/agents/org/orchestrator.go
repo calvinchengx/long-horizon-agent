@@ -770,11 +770,20 @@ func (r *missionRun) setReflection(ctx context.Context, itemID, text string) err
 // "reopened" (a blocking verdict put the item back to todo) or "looping" (the review keeps
 // blocking; stopped is set).
 func (r *missionRun) review(ctx context.Context, item contracts.ChecklistItem, cycleID, base, head string) (string, error) {
-	if !r.org.opts.DoReview {
+	diff := DiffSince(ctx, r.workdir, base, head)
+	// The deterministic screen runs first: its findings go to the reviewer as criteria, and they
+	// force the review when the organization would have skipped it (--no-review). It never
+	// approves anything itself.
+	findings := verify.ScreenDiff(diff)
+	forced := len(findings) > 0 && !r.org.opts.DoReview
+	r.record("review_screen", obs.F("item", item.ID), obs.F("findings", len(findings)), obs.F("forced", forced))
+	if err := r.anchor.AppendEvent(ctx, verify.ReviewScreenEventRecord(item.ID, base, head, findings, forced, cycleID)); err != nil {
+		return "", err
+	}
+	if !r.org.opts.DoReview && len(findings) == 0 {
 		return "approved", nil
 	}
-	diff := DiffSince(ctx, r.workdir, base, head)
-	review, err := r.reviewer.Review(ctx, pyfmt.Head(diff, reviewDiffCap), item.Description, r.tctx)
+	review, err := r.reviewer.Review(ctx, pyfmt.Head(diff, reviewDiffCap), verify.ScreenCriteria(findings, item.Description), r.tctx)
 	if err != nil {
 		return "", err
 	}

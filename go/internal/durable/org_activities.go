@@ -24,6 +24,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
 // Activities of the durable multi-agent organization (python: lha.durable.org_activities;
@@ -917,6 +918,8 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		base = inp.HeadSHA + "^1"
 	}
 	diff := org.DiffSince(ctx, inp.Workdir, base, inp.HeadSHA)
+	findings := verify.ScreenDiff(diff) // weakened tests go to the reviewer as criteria
+	criteria = verify.ScreenCriteria(findings, criteria)
 	meter, err := BuildCycleMeter(ctx, settings, inp.Workdir, reviewID, inp.BudgetUSD, inp.MaxCycles)
 	if err != nil {
 		return CycleResult{}, err
@@ -984,7 +987,8 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		CycleID:         reviewID,
 		ProgressSummary: fmt.Sprintf("- %s review of [%s]: %s", reviewID, inp.ItemID, outcome),
 		Checklist:       checklist,
-		Events: append(reviewBoardPost(inp.ItemID, review, reviewID), contracts.EventRecord{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
+		Events: append(append([]contracts.EventRecord{verify.ReviewScreenEventRecord(inp.ItemID, base, inp.HeadSHA, findings, false, reviewID)},
+			reviewBoardPost(inp.ItemID, review, reviewID)...), contracts.EventRecord{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
 			"item_id", inp.ItemID, "verdict", review.Verdict, "blocking", review.Blocking,
 			"blocking_issues", org.CapList(review.BlockingIssues, 20), "advisory", org.CapList(review.Advisory, 20),
 			"reopened", review.Blocking && !blocked, "blocked", blocked, "base", base, "head", inp.HeadSHA,
