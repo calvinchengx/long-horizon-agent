@@ -671,3 +671,29 @@ func ReflectionFor(events []contracts.EventRecord, itemID string) string {
 	}
 	return ""
 }
+
+// ReviewBase is the commit a review of itemID should diff from (python: review_base). A reopened
+// item's next attempt may change nothing more (the work landed in the first), so reviewing only
+// the last cycle shows an empty diff and the reviewer blocks again. The review therefore covers
+// everything since the item's FIRST attempt in its current streak: the base the first blocking
+// review recorded, until a review approves; fallback otherwise.
+func ReviewBase(events []contracts.EventRecord, itemID, fallback string) string {
+	tracked := ""
+	for _, e := range events {
+		if e.Kind != "review" || payloadStr(e.Payload, "item_id") != itemID {
+			continue
+		}
+		blocking, _ := e.Payload.Value("blocking").(bool)
+		if blocking {
+			if tracked == "" {
+				tracked = payloadStr(e.Payload, "base")
+			}
+		} else {
+			tracked = ""
+		}
+	}
+	if tracked != "" {
+		return tracked
+	}
+	return fallback
+}

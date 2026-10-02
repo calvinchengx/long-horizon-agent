@@ -257,6 +257,9 @@ async def test_serial_round_research_failures_surface_and_review_reopens(tmp_pat
     assert any("BRIEF[Find context relevant to: task 1]" in text for text in seen)
     reviews = _events(work, "review")
     assert [r["payload"]["reopened"] for r in reviews] == [True, False]  # type: ignore[index]
+    # The second review diffs from the first attempt's base, so the reviewer sees the whole change.
+    assert reviews[0]["payload"]["base"] == reviews[1]["payload"]["base"]  # type: ignore[index]
+    assert reviews[0]["payload"]["head"] != reviews[1]["payload"]["head"]  # type: ignore[index]
     # The blocking verdict was posted to the board, and the second round's Lead saw the board
     # (the first round's briefs) in its prompt.
     board = _events(work, "blackboard")
