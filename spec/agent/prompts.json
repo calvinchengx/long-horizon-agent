@@ -2270,6 +2270,75 @@
    "items": [],
    "files": {},
    "owners": {}
+  },
+  {
+   "text": "[{\"description\": \"a\", \"witnesses\": [\"pytest:tests/test_a.py::test_x\", \" go:TestA \", \"cmd:make check\", \"pytest:tests/test_a.py::test_x\"]}, {\"description\": \"b\", \"witnesses\": \"go:TestB@./internal/...\"}, {\"description\": \"c\", \"depends_on\": [\"9\"], \"witnesses\": [\"trusted:e2e\", \"ci:smoke\", \"go:not an identifier\", \"pytest:-rf\", \"cmd:\", \"nope:x\", 7, \"\", null]}, {\"description\": \"d\", \"witnesses\": []}]",
+   "items": [
+    {
+     "id": "01",
+     "description": "a",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "pytest:tests/test_a.py::test_x",
+      "go:TestA",
+      "cmd:make check"
+     ],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "b",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "go:TestB@./internal/..."
+     ],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "03",
+     "description": "c",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "planner dropped invalid depends_on: ['9']; planner dropped invalid witnesses: ['trusted:e2e: only the operator may name a trusted check', 'ci:smoke: only the operator may name a trusted check', \"go:not an identifier: witness 'go:not an identifier': Go test name must be an identifier like TestName or TestName/subtest\", \"pytest:-rf: witness 'pytest:-rf': pytest node id must be a path or node id without whitespace, shell metacharacters or a leading '-'\", \"cmd:: witness 'cmd:': cmd: needs a shell command\", \"nope:x: witness 'nope:x': unknown kind; expected one of go:, pytest:, cmd:, trusted:, ci:\"]",
+     "schema_version": 1
+    },
+    {
+     "id": "04",
+     "description": "d",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    }
+   ],
+   "files": {},
+   "owners": {}
   }
  ],
  "planner_messages": [
@@ -2279,7 +2348,7 @@
   },
   {
    "role": "user",
-   "content": "Mission: T\n\nBuild the thing.\n\nDefinition of done: (use your judgment)\n\nDecompose the mission into 3-15 small, ordered, independently-verifiable steps.\nReply with ONLY a JSON array; each element: {\"description\": \"<imperative step>\", \"depends_on\": [<1-based numbers of EARLIER steps>], \"files\": [<repo-relative paths this step creates or modifies>], \"allow_harness_edits\": <true only if the step must modify EXISTING tests or test config>}.\nSteps whose files do not overlap can be built in parallel, each by its own writer; list every file a step writes, and keep shared files (pyproject.toml, lockfiles, __init__.py, conftest.py, migrations) in as few steps as possible.\nNo prose, no code fences."
+   "content": "Mission: T\n\nBuild the thing.\n\nDefinition of done: (use your judgment)\n\nDecompose the mission into 3-15 small, ordered, independently-verifiable steps.\nReply with ONLY a JSON array; each element: {\"description\": \"<imperative step>\", \"depends_on\": [<1-based numbers of EARLIER steps>], \"files\": [<repo-relative paths this step creates or modifies>], \"allow_harness_edits\": <true only if the step must modify EXISTING tests or test config>, \"witnesses\": [<optional: checks proving THIS step is delivered, each \"pytest:<node id>\", \"go:TestName\" or \"cmd:<shell command that exits 0>\"; they gate the step on top of the mission checks>]}.\nSteps whose files do not overlap can be built in parallel, each by its own writer; list every file a step writes, and keep shared files (pyproject.toml, lockfiles, __init__.py, conftest.py, migrations) in as few steps as possible.\nNo prose, no code fences."
   }
  ],
  "planner_messages_acceptance": [
@@ -2289,7 +2358,7 @@
   },
   {
    "role": "user",
-   "content": "Mission: T\n\nBuild the thing.\n\nDefinition of done: all tests pass\n\nDecompose the mission into 3-15 small, ordered, independently-verifiable steps.\nReply with ONLY a JSON array; each element: {\"description\": \"<imperative step>\", \"depends_on\": [<1-based numbers of EARLIER steps>], \"files\": [<repo-relative paths this step creates or modifies>], \"allow_harness_edits\": <true only if the step must modify EXISTING tests or test config>}.\nSteps whose files do not overlap can be built in parallel, each by its own writer; list every file a step writes, and keep shared files (pyproject.toml, lockfiles, __init__.py, conftest.py, migrations) in as few steps as possible.\nNo prose, no code fences."
+   "content": "Mission: T\n\nBuild the thing.\n\nDefinition of done: all tests pass\n\nDecompose the mission into 3-15 small, ordered, independently-verifiable steps.\nReply with ONLY a JSON array; each element: {\"description\": \"<imperative step>\", \"depends_on\": [<1-based numbers of EARLIER steps>], \"files\": [<repo-relative paths this step creates or modifies>], \"allow_harness_edits\": <true only if the step must modify EXISTING tests or test config>, \"witnesses\": [<optional: checks proving THIS step is delivered, each \"pytest:<node id>\", \"go:TestName\" or \"cmd:<shell command that exits 0>\"; they gate the step on top of the mission checks>]}.\nSteps whose files do not overlap can be built in parallel, each by its own writer; list every file a step writes, and keep shared files (pyproject.toml, lockfiles, __init__.py, conftest.py, migrations) in as few steps as possible.\nNo prose, no code fences."
   }
  ],
  "replanner": {

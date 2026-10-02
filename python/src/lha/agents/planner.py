@@ -29,13 +29,17 @@ from lha.coordination.ownership import (
     is_shared,
     writer_for_item,
 )
+from lha.verify.witnesses import validate_witness
 
 _PLANNER_INSTRUCTIONS = (
     "Decompose the mission into 3-15 small, ordered, independently-verifiable steps.\n"
     "Reply with ONLY a JSON array; each element: "
     '{"description": "<imperative step>", "depends_on": [<1-based numbers of EARLIER steps>], '
     '"files": [<repo-relative paths this step creates or modifies>], '
-    '"allow_harness_edits": <true only if the step must modify EXISTING tests or test config>}.\n'
+    '"allow_harness_edits": <true only if the step must modify EXISTING tests or test config>, '
+    '"witnesses": [<optional: checks proving THIS step is delivered, each "pytest:<node id>", '
+    '"go:TestName" or "cmd:<shell command that exits 0>"; they gate the step on top of the '
+    "mission checks>]}.\n"
     "Steps whose files do not overlap can be built in parallel, each by its own writer; list "
     "every file a step writes, and keep shared files (pyproject.toml, lockfiles, __init__.py, "
     "conftest.py, migrations) in as few steps as possible.\n"
@@ -81,6 +85,34 @@ def _files_of(entry: dict[str, object]) -> list[str]:
     return out
 
 
+def _witnesses_of(entry: dict[str, object]) -> tuple[list[str], list[str]]:
+    """The entry's valid ``witnesses`` and the ones dropped (as ``"<witness>: <why>"``).
+
+    A Planner witness may only ADD a gate the sandbox can run (``pytest:``, ``go:``, ``cmd:``):
+    a ``trusted:`` check runs outside the sandbox and stays the operator's to name.
+    """
+    raw = entry.get("witnesses", [])
+    values = raw if isinstance(raw, list) else [raw]
+    kept: list[str] = []
+    dropped: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        witness = value.strip()
+        scheme = witness.partition(":")[0]
+        if scheme in ("trusted", "ci"):
+            dropped.append(f"{witness}: only the operator may name a trusted check")
+            continue
+        try:
+            validate_witness(witness)
+        except ValueError as exc:
+            dropped.append(f"{witness}: {exc}")
+            continue
+        if witness not in kept:
+            kept.append(witness)
+    return kept, dropped
+
+
 def parse_plan(text: str) -> tuple[list[ChecklistItem], dict[str, list[str]]]:
     """Extract checklist items and each item's declared ``files`` from model output.
 
@@ -100,8 +132,9 @@ def parse_plan(text: str) -> tuple[list[ChecklistItem], dict[str, list[str]]]:
     if not isinstance(parsed, list):
         return [], {}
 
-    # (original 1-based position, description, raw deps, allow_harness_edits, files)
-    entries: list[tuple[int, str, list[object], bool, list[str]]] = []
+    # (original 1-based position, description, raw deps, allow_harness_edits, files, witnesses
+    # kept, witnesses dropped)
+    entries: list[tuple[int, str, list[object], bool, list[str], list[str], list[str]]] = []
     for position, entry in enumerate(parsed, start=1):
         if isinstance(entry, dict):
             description = str(entry.get("description") or entry.get("step") or "").strip()
@@ -109,17 +142,19 @@ def parse_plan(text: str) -> tuple[list[ChecklistItem], dict[str, list[str]]]:
             deps: list[object] = list(raw_deps) if isinstance(raw_deps, list) else [raw_deps]
             allow = entry.get("allow_harness_edits") is True
             files = _files_of(entry)
+            witnesses, bad_witnesses = _witnesses_of(entry)
         else:
             description, deps, allow, files = str(entry).strip(), [], False, []
+            witnesses, bad_witnesses = [], []
         if description:
-            entries.append((position, description, deps, allow, files))
+            entries.append((position, description, deps, allow, files, witnesses, bad_witnesses))
 
     # The model's indices refer to ITS list positions; map them to the ids we assign.
     width = max(2, len(str(len(entries))))
     id_for = {pos: f"{n:0{width}d}" for n, (pos, *_rest) in enumerate(entries, start=1)}
     items: list[ChecklistItem] = []
     files_by_item: dict[str, list[str]] = {}
-    for position, description, raw_deps, allow, files in entries:
+    for position, description, raw_deps, allow, files, witnesses, bad_witnesses in entries:
         kept: list[str] = []
         dropped: list[str] = []
         for raw in raw_deps:
@@ -129,13 +164,19 @@ def parse_plan(text: str) -> tuple[list[ChecklistItem], dict[str, list[str]]]:
                     kept.append(id_for[index])
             elif raw is not None and raw != "":
                 dropped.append(str(raw))
+        notes: list[str] = []
+        if dropped:
+            notes.append(f"planner dropped invalid depends_on: {dropped}")
+        if bad_witnesses:
+            notes.append(f"planner dropped invalid witnesses: {bad_witnesses}")
         items.append(
             ChecklistItem(
                 id=id_for[position],
                 description=description,
                 depends_on=kept,
                 allow_harness_edits=allow,
-                notes=f"planner dropped invalid depends_on: {dropped}" if dropped else "",
+                witnesses=witnesses,
+                notes="; ".join(notes),
             )
         )
         if files:

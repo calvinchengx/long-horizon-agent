@@ -147,8 +147,12 @@ A `trusted:` witness is listed without one, since only the verifier can run it. 
 command, models guessed `python -m pytest`, which fails in an image where pytest is installed only
 in the project's environment.
 
-Witnesses are written in a [checklist file](06-mission-anchor.md#importing-a-checklist); the
-Planner does not produce them.
+Witnesses come from a [checklist file](06-mission-anchor.md#importing-a-checklist) or from the
+Planner: its reply may give each step `witnesses` (`pytest:`, `go:` or `cmd:` only). A witness
+with invalid syntax, or a `trusted:` one (only the operator may name a check that runs outside
+the sandbox), is dropped and recorded in the item's notes. A Planner witness can only add a gate,
+never remove one: the mission's checks still run, so a weak witness leaves the item exactly as
+gated as before.
 
 ## Trusted checks
 

@@ -72,7 +72,8 @@ path (local, durable and `orchestrate`) through [`agent/assembly.py`](../python/
   local (`--approve-interactive`, a terminal prompt that rejects after
   `LHA_CONSOLE_APPROVAL_TIMEOUT_S`, default 3600 s).
 
-Not done: a Planner that writes witnesses; measurements of split
+Done: the Planner proposes `pytest:` / `go:` / `cmd:` witnesses per step
+([07-verification.md](07-verification.md#witnesses)). Not done: measurements of split
 quality with real models.
 
 ### Phase 2: independent reviewer and decision log (done)
