@@ -732,6 +732,15 @@ def orchestrate(
         help="Continue the mission already anchored in --workdir (no planning; its checklist, "
         "ownership map and decisions are kept).",
     ),
+    research: int = typer.Option(
+        2, "--research", min=0, max=4, help="Read-only researchers per item (0 = none)."
+    ),
+    review: bool = typer.Option(
+        True,
+        "--review/--no-review",
+        help="An independent reviewer after every verified item; a blocking review reopens it "
+        "(the pre-review screen still runs, and forces the review when it finds weakened tests).",
+    ),
 ) -> None:
     """Plan, then run the FULL multi-agent org (research, Lead or parallel waves, review) locally."""
     from lha.agent.runner import MissionSummary, aclose_provider, build_meter
@@ -759,14 +768,18 @@ def orchestrate(
     async def _mission() -> MissionSummary:
         meter = build_meter(settings)  # planner + every org role share one budget
         if resume:
-            return await Orchestrator(settings, meter=meter).run_mission(
+            return await Orchestrator(
+                settings, meter=meter, research_per_item=research, do_review=review
+            ).run_mission(
                 workdir=workdir,
                 checks=checks,
                 gate=_gate(approve_interactive, settings),
                 resume=True,
             )
         if imported is not None:  # a checklist of your own: no planning, no ownership map
-            return await Orchestrator(settings, meter=meter).run_mission(
+            return await Orchestrator(
+                settings, meter=meter, research_per_item=research, do_review=review
+            ).run_mission(
                 workdir=workdir,
                 title=title or imported.title or "mission",
                 description=task or imported.description,
@@ -781,7 +794,9 @@ def orchestrate(
             plan = await planner.plan_mission(title=title or "mission", description=task)
         finally:
             await aclose_provider(planner_model)
-        return await Orchestrator(settings, meter=meter).run_mission(
+        return await Orchestrator(
+            settings, meter=meter, research_per_item=research, do_review=review
+        ).run_mission(
             workdir=workdir,
             title=title or "mission",
             description=task,
