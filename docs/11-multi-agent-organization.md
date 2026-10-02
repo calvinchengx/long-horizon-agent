@@ -33,6 +33,9 @@ trusted. The code enforces this split:
 
 - `research_fanout` refuses a role that can mutate.
 - The reviewer's dispatcher is read-only.
+- A sub-agent whose turn budget (8) runs out while it is still calling tools gets one last turn,
+  told that no tool call will be answered, so a reviewer still reading files returns its verdict
+  instead of a dangling tool call (which parsed as `unparsed` and blocked the item).
 - Only the Lead and the implementers get mutating dispatchers. Implementers always write through
   an `OwnershipGuard` in their own git worktree; so does the Lead whenever the mission has an
   ownership map (`orchestrate`, and a durable mission planned with `--max-parallel`).

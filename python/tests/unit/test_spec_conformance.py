@@ -450,6 +450,9 @@ def test_agent_org() -> None:
             agent.run(objective=case["objective"], ctx=None, extra_context=case["extra_context"])  # type: ignore[arg-type]
         )
         assert model.seen == case["messages"], case["role"]
+    from lha.agents.subagent import FINAL_TURN_MESSAGE
+
+    assert spec["subagent_final_turn"] == FINAL_TURN_MESSAGE
     for case in spec["reviewer_messages"]:
         model = _Recording()
         asyncio.run(

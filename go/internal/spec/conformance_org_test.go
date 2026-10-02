@@ -38,7 +38,8 @@ type orgSpec struct {
 		Visible      []string  `json:"visible"`
 		Messages     []message `json:"messages"`
 	} `json:"subagent"`
-	ReviewerMessages []struct {
+	SubagentFinalTurn string `json:"subagent_final_turn"`
+	ReviewerMessages  []struct {
 		Criteria string    `json:"criteria"`
 		Diff     string    `json:"diff"`
 		Messages []message `json:"messages"`
@@ -178,6 +179,9 @@ func TestOrgSubAgentAndReviewerPrompts(t *testing.T) {
 		specs = append(specs, toolSpec(t, raw))
 	}
 	ctx := context.Background()
+	if s.SubagentFinalTurn != org.FinalTurnMessage {
+		t.Errorf("final turn message: %q", s.SubagentFinalTurn)
+	}
 	for _, c := range s.Subagent {
 		rec := newOrgRecording()
 		sa := org.NewSubAgent(agents.Roles[c.Role], rec, specsOnly{specs}, 0)

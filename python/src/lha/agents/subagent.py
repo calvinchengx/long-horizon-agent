@@ -36,6 +36,14 @@ class SubAgentResult:
     error: str | None = None
 
 
+#: The last user turn of a sub-agent whose tool budget ran out while it was still working.
+FINAL_TURN_MESSAGE = (
+    "Your tool budget is spent: no further tool call will be answered. Reply now with your "
+    'final answer as the JSON object described above ({"done": true, ...}), using what you '
+    "have seen so far."
+)
+
+
 class SubAgent:
     """Runs one role as a bounded, read-or-scoped loop returning a condensed artifact."""
 
@@ -125,8 +133,16 @@ class SubAgent:
             )
 
         if not brief:
-            # Turn budget exhausted (or the parser never saw a done signal): keep what we have.
-            brief = final_text
+            # The turn budget ran out while the model was still working. One last turn, told
+            # that no tool call will be answered, asks for the answer it has; a reviewer that
+            # was still reading files returns its verdict instead of a dangling tool call.
+            turns += 1
+            messages.append(ModelMessage(role="assistant", content=final_text))
+            messages.append(ModelMessage(role="user", content=FINAL_TURN_MESSAGE))
+            result = await self._model.complete(messages)
+            final_text = result.text
+            action = parse_action(result.text, [])
+            brief = action.summary or result.text
 
         return SubAgentResult(
             role=self._role.name,
