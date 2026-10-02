@@ -403,6 +403,8 @@ class IntegrateInput:
     max_cycles: int = 1000
     research_briefs: int = 0
     research_failures: list[str] = field(default_factory=list)
+    # The briefs themselves: committed as ``blackboard`` posts with the integration checkpoint.
+    research_brief_texts: list[str] = field(default_factory=list)
 
 
 @dataclass

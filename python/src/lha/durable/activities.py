@@ -28,7 +28,7 @@ import asyncio
 import contextlib
 import json
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -37,6 +37,7 @@ from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from lha.agent.assembly import build_lead_loop, lead_dispatcher, open_lead_sandbox
+from lha.agents.waves import board_context, reflection_for
 from lha.config import Settings, get_settings
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
@@ -287,9 +288,16 @@ def _result_from_snapshot(
     )
 
 
-def _anchor_text(snapshot: SituationSnapshot, inp: CycleInput) -> str:
-    """Extra prompt context: operator steering (the loop recites the mission spec itself)."""
+def _anchor_text(
+    snapshot: SituationSnapshot, inp: CycleInput, events: Sequence[EventRecord] = ()
+) -> str:
+    """Extra prompt context: operator steering, approved actions, the research briefs for the
+    active item, and from the committed ``events`` the item's reflection and the newest board
+    posts (the loop recites the mission spec itself)."""
     parts = [] if snapshot.mission else [f"Mission {inp.mission_id}"]
+    active = snapshot.active_item.id if snapshot.active_item is not None else None
+    if active is not None and (reflection := reflection_for(events, active)):
+        parts.append(reflection.strip())
     if inp.steer_notes:
         notes = "\n".join(f"- {note}" for note in inp.steer_notes)
         parts.append(f"Operator steering (most recent last):\n{notes}")
@@ -299,9 +307,10 @@ def _anchor_text(snapshot: SituationSnapshot, inp: CycleInput) -> str:
             "An operator APPROVED these previously queued actions; each is allowed once, "
             f"exactly as requested:\n{approved}"
         )
-    active = snapshot.active_item.id if snapshot.active_item is not None else None
     if inp.research_briefs and inp.research_item == active:
         parts.append("Research briefs:\n" + "\n---\n".join(inp.research_briefs))
+    if board := board_context(events):
+        parts.append(board)
     return "\n\n".join(parts)
 
 
@@ -442,7 +451,7 @@ async def _execute_cycle(
                         ctx=ToolContext(mission_id=inp.mission_id, session=session),
                         mission_id=inp.mission_id,
                         cycle_id=inp.cycle_id,
-                        anchor_text=_anchor_text(snapshot, inp),
+                        anchor_text=_anchor_text(snapshot, inp, await anchor.read_events()),
                         checks=checks,
                     ),
                     inp.cycle_id,

@@ -212,6 +212,16 @@ func TestParallelWaveWithResearchAndReviewCompletes(t *testing.T) {
 	if len(tickets) != 2 || tickets[0].Payload.Plain()["status"] != "done" || tickets[1].Payload.Plain()["status"] != "done" {
 		t.Fatalf("tickets %v", tickets)
 	}
+	// The round's board posts are committed with the integration checkpoints: each research
+	// brief and each implementer's summary, as `lha orchestrate` posts them.
+	authors := map[string]string{}
+	for _, b := range eventsOf(t, work, "blackboard") {
+		authors[b.Payload.Plain()["author"].(string)] = b.Payload.Plain()["text"].(string)
+	}
+	if len(authors) != 4 || !strings.HasPrefix(authors["researcher:01"], "BRIEF[") || !strings.HasPrefix(authors["researcher:02"], "BRIEF[") ||
+		!strings.HasPrefix(authors["implementer-01"], "[01] ") || !strings.HasPrefix(authors["implementer-02"], "[02] ") {
+		t.Fatalf("board %v", authors)
+	}
 	var history []string
 	for _, h := range tickets[0].Payload.Plain()["history"].([]any) {
 		history = append(history, h.(map[string]any)["status"].(string))
@@ -312,6 +322,15 @@ func TestSerialRoundResearchFailuresSurfaceAndReviewReopens(t *testing.T) {
 	reviews := eventsOf(t, inp.Workdir, "review")
 	if len(reviews) != 2 || reviews[0].Payload.Plain()["reopened"] != true || reviews[1].Payload.Plain()["reopened"] != false {
 		t.Fatalf("reviews %v", reviews)
+	}
+	// The blocking verdict was posted to the board, and the second round's Lead saw the board
+	// in its prompt.
+	board := eventsOf(t, inp.Workdir, "blackboard")
+	if len(board) != 1 || board[0].Payload.Plain()["author"] != "reviewer:01" || !strings.Contains(board[0].Payload.Plain()["text"].(string), "Review verdict: block") {
+		t.Fatalf("board %v", board)
+	}
+	if !anyLine(seen, "Team board (earlier rounds):\n[reviewer:01] Review verdict: block") {
+		t.Fatal("the board never reached the Lead's prompt")
 	}
 	cl, _ := state.NewGitMissionAnchor(inp.Workdir).ReadChecklist(context.Background())
 	if item := cl.Items[0]; item.Status != contracts.StatusDone || strings.Contains(item.LastFailure, "reviewer blocked") {
@@ -622,6 +641,15 @@ func TestFailedImplementerIsRecordedAsAFailedAttempt(t *testing.T) {
 	}
 	if tickets := eventsOf(t, inp.Workdir, "ticket"); len(tickets) != 1 || tickets[0].Payload.Plain()["status"] != "failed" {
 		t.Fatalf("tickets %v", tickets)
+	}
+	// The failed attempt was reflected on, and the lesson committed by itself for the next try.
+	reflections := eventsOf(t, inp.Workdir, "reflection")
+	if len(reflections) != 1 || reflections[0].Payload.Plain()["item"] != "01" ||
+		!strings.HasPrefix(reflections[0].Payload.Plain()["text"].(string), "\nReflection on 01: ") {
+		t.Fatalf("reflections %v", reflections)
+	}
+	if n := commitsWith(t, inp.Workdir, "lha: reflection on 01"); n != 1 {
+		t.Fatalf("%d reflection commits", n)
 	}
 }
 

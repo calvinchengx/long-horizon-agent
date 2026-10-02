@@ -439,18 +439,19 @@ func (w *missionRun) wave(ctx workflow.Context, plan RoundPlan, research map[str
 		briefs, failures := research[item.ItemID].get()
 		var result CycleResult
 		if err := workflow.ExecuteActivity(wctx, ActivityIntegrateBranch, IntegrateInput{
-			MissionID:        inp.MissionID,
-			Workdir:          inp.Workdir,
-			CycleID:          cycleIDs[n],
-			ItemID:           item.ItemID,
-			BaseSHA:          plan.HeadSHA,
-			Output:           output,
-			Error:            errText,
-			CheckCommands:    inp.CheckCommands,
-			BudgetUSD:        inp.BudgetUSD,
-			MaxCycles:        inp.MaxCycles,
-			ResearchBriefs:   len(briefs),
-			ResearchFailures: failures,
+			MissionID:          inp.MissionID,
+			Workdir:            inp.Workdir,
+			CycleID:            cycleIDs[n],
+			ItemID:             item.ItemID,
+			BaseSHA:            plan.HeadSHA,
+			Output:             output,
+			Error:              errText,
+			CheckCommands:      inp.CheckCommands,
+			BudgetUSD:          inp.BudgetUSD,
+			MaxCycles:          inp.MaxCycles,
+			ResearchBriefs:     len(briefs),
+			ResearchFailures:   failures,
+			ResearchBriefTexts: briefs,
 		}).Get(ctx, &result); err != nil {
 			return CycleResult{}, err
 		}

@@ -358,6 +358,7 @@ async def _wave(
                 max_cycles=inp.max_cycles,
                 research_briefs=len(briefs),
                 research_failures=failures,
+                research_brief_texts=briefs,
             ),
             start_to_close_timeout=_WORK_TIMEOUT,
             heartbeat_timeout=_HEARTBEAT,

@@ -14,6 +14,7 @@ import (
 	"go.temporal.io/sdk/temporal"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents/org"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
@@ -233,12 +234,18 @@ func resultFromSnapshot(s contracts.SituationSnapshot, o resultOpts) CycleResult
 	}
 }
 
-// AnchorText is the cycle's extra prompt context: operator steering, approved actions and the
-// research briefs for the active item (the loop recites the mission spec itself).
-func AnchorText(snapshot contracts.SituationSnapshot, inp CycleInput) string {
+// AnchorText is the cycle's extra prompt context: operator steering, approved actions, the
+// research briefs for the active item, and from the committed events the item's reflection and
+// the newest board posts (the loop recites the mission spec itself).
+func AnchorText(snapshot contracts.SituationSnapshot, inp CycleInput, events []contracts.EventRecord) string {
 	var parts []string
 	if snapshot.Mission == nil {
 		parts = append(parts, "Mission "+inp.MissionID)
+	}
+	if snapshot.ActiveItem != nil {
+		if reflection := org.ReflectionFor(events, snapshot.ActiveItem.ID); reflection != "" {
+			parts = append(parts, pyfmt.PyStrip(reflection))
+		}
 	}
 	if len(inp.SteerNotes) > 0 {
 		notes := make([]string, len(inp.SteerNotes))
@@ -261,6 +268,9 @@ func AnchorText(snapshot contracts.SituationSnapshot, inp CycleInput) string {
 	}
 	if len(inp.ResearchBriefs) > 0 && inp.ResearchItem != nil && active != nil && *inp.ResearchItem == *active {
 		parts = append(parts, "Research briefs:\n"+strings.Join(inp.ResearchBriefs, "\n---\n"))
+	}
+	if board := org.BoardContextFromEvents(events); board != "" {
+		parts = append(parts, board)
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -502,7 +512,11 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 		loop.SetTriage(systemone.BuildStallTriage(settings, systemOne))
 		tctx := contracts.ToolContext{MissionID: inp.MissionID, Session: toolbox.Session()}
 		return withHeartbeat(ctx, a.heartbeatEvery(), inp.CycleID, func() (agent.CycleOutcome, error) {
-			return loop.RunCycle(ctx, tctx, inp.MissionID, inp.CycleID, AnchorText(snapshot, inp), checks)
+			events, err := anchor.ReadEvents(ctx)
+			if err != nil {
+				return agent.CycleOutcome{}, err
+			}
+			return loop.RunCycle(ctx, tctx, inp.MissionID, inp.CycleID, AnchorText(snapshot, inp, events), checks)
 		})
 	}()
 	if cycleErr != nil {

@@ -206,6 +206,18 @@ async def test_parallel_wave_with_research_and_review_completes(tmp_path: Path) 
     assert {c.role_name for c in _research_calls} == {"researcher"}
     assert len(_research_calls) == 2 and all(c.budget_usd is None for c in _research_calls)
     assert any("parallel wave 01, 02" in line for line in gate_log)
+    # The round's board posts are committed with the integration checkpoints: each research
+    # brief and each implementer's summary, as `lha orchestrate` posts them.
+    board = _events(work, "blackboard")
+    posts = {(b["payload"]["author"], b["payload"]["text"][:12]) for b in board}  # type: ignore[index]
+    assert {a for a, _ in posts} == {
+        "researcher:01",
+        "researcher:02",
+        "implementer-01",
+        "implementer-02",
+    }
+    assert all(t.startswith("BRIEF[") for a, t in posts if a.startswith("researcher"))
+    assert all(t.startswith(f"[{a[-2:]}] ") for a, t in posts if a.startswith("implementer"))
     # Worktrees and branches are gone; the ownership map was released as items finished.
     assert not [b for b in git_ops.list_branches(work) if b.startswith("lha/")]
     assert (await GitMissionAnchor(work).read_ownership()).owners == {}
@@ -239,6 +251,14 @@ async def test_serial_round_research_failures_surface_and_review_reopens(tmp_pat
     assert any("BRIEF[Find context relevant to: task 1]" in text for text in seen)
     reviews = _events(work, "review")
     assert [r["payload"]["reopened"] for r in reviews] == [True, False]  # type: ignore[index]
+    # The blocking verdict was posted to the board, and the second round's Lead saw the board
+    # (the first round's briefs) in its prompt.
+    board = _events(work, "blackboard")
+    assert [b["payload"]["author"] for b in board] == ["reviewer:01"]  # type: ignore[index]
+    assert "Review verdict: block" in board[0]["payload"]["text"]  # type: ignore[index]
+    assert any(
+        "Team board (earlier rounds):\n[reviewer:01] Review verdict: block" in t for t in seen
+    )
     item = (await GitMissionAnchor(work).read_checklist()).items[0]
     assert item.status == "done" and "reviewer blocked" not in item.last_failure
 
@@ -470,6 +490,11 @@ async def test_failed_implementer_is_recorded_as_a_failed_attempt(tmp_path: Path
     assert item.status == "in_progress" and "cannot open the sandbox" in item.last_failure
     [ticket] = _events(work, "ticket")
     assert ticket["payload"]["status"] == "failed"  # type: ignore[index]
+    # The failed attempt was reflected on, and the lesson committed by itself for the next try.
+    [reflection] = _events(work, "reflection")
+    assert reflection["payload"]["item"] == "01"  # type: ignore[index]
+    assert reflection["payload"]["text"].startswith("\nReflection on 01: ")  # type: ignore[index]
+    assert git_ops.log_oneline(work, 1)[0].endswith("lha: reflection on 01")
 
 
 @pytest.mark.asyncio

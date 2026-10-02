@@ -139,7 +139,7 @@ Continue-As-New rides inside `MissionInput.state`.
 | `RoundPlan` | `head_sha: str`, `items: list[RoundItem] ([])` (checklist order), `parallel: bool (false)`, `is_complete: bool (false)`, `is_deadlocked: bool (false)` |
 | `ImplementerInput` | `mission_id`, `workdir`, `cycle_id`, `item_id`, `base_sha: str`, `check_commands`, `budget_usd`, `max_cycles: int (1000)`, `steer_notes`, `approved_actions`, `research_briefs: list[str] ([])`, `research_failures: list[str] ([])` |
 | `ImplementerOutput` | `item_id`, `cycle_id`, `branch: str ("")`, `head: str ("")`, `brief: str ("")` (at most 8000 chars), `tool_calls: int (0)`, `error: str ("")`, `verification_json: str ("")` (`VerificationResult`), `decisions_json: list[str] ([])` (one `DecisionRecord` each), `ticket_json: str ("")` (`Ticket`), `ticket_history: list[{status, note}] ([])`, `leases: list[str] ([])` (one lease decision each, as in the [`lease` event](#mission-anchor-lha)), `spent_usd: float (0.0)`, `pending_approvals`, `used_approvals` |
-| `IntegrateInput` | `mission_id`, `workdir`, `cycle_id`, `item_id`, `base_sha: str`, `output: ImplementerOutput \| null (null)`, `error: str ("")` (the implementer activity failed), `check_commands`, `budget_usd`, `max_cycles: int (1000)`, `research_briefs: int (0)` (a count), `research_failures: list[str] ([])` |
+| `IntegrateInput` | `mission_id`, `workdir`, `cycle_id`, `item_id`, `base_sha: str`, `output: ImplementerOutput \| null (null)`, `error: str ("")` (the implementer activity failed), `check_commands`, `budget_usd`, `max_cycles: int (1000)`, `research_briefs: int (0)` (a count), `research_failures: list[str] ([])`, `research_brief_texts: list[str] ([])` (the briefs, posted to the board with the checkpoint) |
 | `ReviewInput` | `mission_id`, `workdir`, `cycle_id` (of the reviewed cycle), `item_id`, `head_sha: str`, `base_sha: str ("")` (`""` = the head's first parent), `budget_usd`, `max_cycles: int (1000)` |
 
 `check_commands: null` means the default Python checks; an explicit empty list is rejected with
@@ -364,7 +364,8 @@ Commit messages: `lha: initialize mission anchor`,
 `lha: review approved|reopened <id>` (`orchestrate`; the approval commit holds only `.lha/`
 files), `lha: review approved|reopened|blocked <id>` (`review_cycle`),
 `lha: anchor records at run end` (`orchestrate`, when a run ends with records appended since its
-last checkpoint), `lha: lease granted|refused: <path> (<writer>)`,
+last checkpoint), `lha: reflection on <id>` (`integrate_branch`, after a failed integration),
+`lha: lease granted|refused: <path> (<writer>)`,
 `lha: unblock <ids> (human retry)`,
 `lha: gate <event> (<kind> <gate id>)`, `lha: mission declared impossible`.
 

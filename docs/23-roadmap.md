@@ -103,7 +103,7 @@ quality with real models.
 | Replanner (split a blocked item) | done: every run path |
 | Per-role model routing (Claude tiers) | done: `orchestrate` with the `claude` backend |
 | File ownership, tickets, parallel implementers in git worktrees, `BranchIntegrator`, lease granting | done in `lha orchestrate` (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3) and in a durable mission started with `--max-parallel N` (one activity per implementer and per integration) ([11-multi-agent-organization.md](11-multi-agent-organization.md)) |
-| Blackboard, reflection | done in `lha orchestrate` only |
+| Blackboard, reflection | done: `lha orchestrate` and the durable organization (from committed events; [08](08-durable-execution.md#the-multi-agent-organization-opt-in)) |
 | Resuming `lha orchestrate` | done: `--resume` ([11-multi-agent-organization.md](11-multi-agent-organization.md#resuming-lha-orchestrate)) |
 | Memory: episodic, semantic, skills, hybrid BM25 + dense retrieval, consolidation, degradation to lexical-only | done: every run path gives the lead a memory block (`LHA_MEMORY_ENABLED`, default on); semantic embeddings at $0 with `LHA_MEMORY_EMBEDDER=ollama` ([12-memory.md](12-memory.md)) |
 | Persistence: mission rows, the idempotent cost ledger and human gates (`hitl_gates`) on SQLite (default) or Postgres (`LHA_POSTGRES_DSN`), `lha missions`, `lha costs`, `lha gates`, `lha db migrate` | done: every run path |
@@ -139,8 +139,8 @@ These limitations are in the current code:
   cannot name the person who answered (the `human_decision_v1` signal carries no identity).
 - Leases: a request for a file another open item owns is refused, not queued, and a lease lasts
   until its writer's item is done.
-- The durable organization has no blackboard or reflection (only `lha orchestrate` has them), and
-  the implementers of one durable wave see each other's spend only after they finish, so the
+- The durable organization's blackboard and reflections live only in committed events (no
+  in-memory round board), and the implementers of one durable wave see each other's spend only after they finish, so the
   budget ceiling can be overshot by up to one wave's spend. A durable mission gets parallel waves
   only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
 - Temporal histories do not replay across the two languages, so each implementation's workers

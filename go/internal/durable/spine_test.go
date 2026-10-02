@@ -3,6 +3,7 @@ package durable
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/temporal"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents/org"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
@@ -318,5 +320,33 @@ func TestCheckMissionHealthProbesTheCriticalDependencies(t *testing.T) {
 	want := "critical dependency down: ['git', 'model'] (git: no usable repo; model: ollama:x: HTTP 503 from http://localhost:11434/api/tags)"
 	if report.Healthy || report.Reason != want {
 		t.Fatalf("%q", report.Reason)
+	}
+}
+
+// TestAnchorTextCarriesTheBoardsNewestPostsAndTheItemsReflection is python's
+// test_anchor_text_carries_the_boards_newest_posts_and_the_items_reflection.
+func TestAnchorTextCarriesTheBoardsNewestPostsAndTheItemsReflection(t *testing.T) {
+	item := contracts.NewChecklistItem("02", "d")
+	snap := contracts.SituationSnapshot{HeadSHA: "x", ActiveItem: &item}
+	inp := CycleInput{MissionID: "m", Workdir: ".", CycleID: "c3", SteerNotes: []string{"go"}}
+	events := []contracts.EventRecord{org.ReflectionEventRecord("02", "\nReflection on 02: old\n", "")}
+	for n := 1; n <= 8; n++ {
+		events = append(events, org.BoardEventRecord(fmt.Sprintf("researcher:0%d", n), fmt.Sprintf("post %d", n), ""))
+	}
+	events = append(events, org.ReflectionEventRecord("01", "\nReflection on 01: other item\n", ""),
+		org.ReflectionEventRecord("02", "\nReflection on 02: newest\n", ""))
+	text := AnchorText(snap, inp, events)
+	parts := strings.SplitN(text, "\n\n", 3)
+	first, rest := parts[1], parts[2]
+	if parts[0] != "Mission m" || first != "Reflection on 02: newest" || !strings.Contains(rest, "Operator steering (most recent last):\n- go") {
+		t.Fatalf("%q", text)
+	}
+	_, board, _ := strings.Cut(rest, "Team board (earlier rounds):\n")
+	if !strings.HasPrefix(board, "[researcher:03] post 3") || strings.Count(board, "\n---\n") != 5 || strings.Contains(board, "post 2") ||
+		strings.Contains(text, "other item") {
+		t.Fatalf("%q", text)
+	}
+	if got := AnchorText(contracts.SituationSnapshot{HeadSHA: "x"}, inp, events); !strings.HasPrefix(got, "Mission m\n\nOperator steering") {
+		t.Fatalf("%q", got)
 	}
 }
