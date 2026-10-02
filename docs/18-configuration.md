@@ -83,6 +83,7 @@ See [13-models.md](13-models.md).
 | `LHA_POSTGRES_FALLBACK_TO_SQLITE` | bool | `true` | if `LHA_POSTGRES_DSN` is set but unusable (unreachable, not migrated, `psycopg` missing): `true` warns and uses SQLite, `false` fails the run |
 | `LHA_WORKSPACE_ROOT` | string | `.lha/workspaces` | declared but not read by any code; each command's `--workdir` default is hard-coded |
 | `LHA_OBJECT_STORE_ROOT` | string | `.lha/objects` | ClaimCheck blob directory (resolved to an absolute path); client, workers and replay must share it |
+| `LHA_OBJECT_RETENTION_DAYS` | int (>= 0) | `0` | when > 0, `lha worker` deletes objects untouched for this many days as it starts (logged as `objects_pruned`); choose longer than your longest mission plus the namespace's history retention. `0`: only `lha objects prune` deletes |
 
 Every run path persists the mission row (status transitions), every metered model call (the cost
 ledger), human gates (`hitl_gates`), episodic events, semantic memory and skills to the mission

@@ -314,10 +314,11 @@ What does grow, on disk, and how to bound it:
 - **The workspace repository**: one checkpoint commit per cycle; git's auto-gc packs it
   (300 cycles: about 1 MB).
 - **The ClaimCheck object store** (`LHA_OBJECT_STORE_ROOT`): durable missions offload every
-  payload over 32 KiB there and nothing removes an object on its own. Run
-  `lha objects prune --older-than-days N` (`--dry-run` first) with `N` longer than your longest
-  mission plus the Temporal namespace's history retention: an object a live history still refers
-  to must not be deleted ([17-cli.md](17-cli.md#lha-objects-prune)).
+  payload over 32 KiB there. Set `LHA_OBJECT_RETENTION_DAYS=N` and every worker start deletes the
+  objects untouched for `N` days (logged as `objects_pruned`), or run
+  `lha objects prune --older-than-days N` (`--dry-run` first). Either way choose `N` longer than
+  your longest mission plus the Temporal namespace's history retention: an object a live history
+  still refers to must not be deleted ([17-cli.md](17-cli.md#lha-objects-prune)).
 - **The spend journal** (`.git/lha/spend.ndjson`, durable path): one line per attempt, read at
   the start of each cycle.
 

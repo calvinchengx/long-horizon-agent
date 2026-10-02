@@ -11,6 +11,9 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 )
 
 // Content-addressed object store for large-blob spillover (claim-check pattern)
@@ -194,4 +197,21 @@ func PruneObjects(root string, olderThanDays int, dryRun bool) (PruneResult, err
 		}
 	}
 	return out, nil
+}
+
+// SweepObjects deletes ClaimCheck objects untouched for LHA_OBJECT_RETENTION_DAYS (nil when 0).
+// It runs once when a worker starts, so a long-lived deployment's store stops growing without an
+// operator's `lha objects prune`; the result is logged as objects_pruned (python: sweep_objects).
+func SweepObjects(settings *config.Settings) (*PruneResult, error) {
+	days := settings.ObjectRetentionDays
+	if days <= 0 {
+		return nil, nil
+	}
+	result, err := PruneObjects(settings.ObjectStoreRoot, days, false)
+	if err != nil {
+		return nil, err
+	}
+	obs.Logger("lha.durable").Info("objects_pruned", "root", settings.ObjectStoreRoot, "older_than_days", days,
+		"deleted", result.Count, "bytes", result.Bytes, "kept", result.Kept)
+	return &result, nil
 }

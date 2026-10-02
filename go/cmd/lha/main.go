@@ -64,9 +64,10 @@ var commandHelp = []struct{ name, help string }{
 	{"labels", labelsHelp},
 	{"worker", "Run a Temporal worker that serves missions (requires a Temporal server)."},
 	{"mission-start", "Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."},
-	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action) and gate events."},
+	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action), steering notes and gate events."},
 	{"mission-approve", "Resolve an open human gate on a mission with a decision."},
 	{"mission-snooze", "Park a mission on a durable timer (SLEEPING) before its next cycle, or wake it."},
+	{"mission-steer", "Append an operator steering note that every following cycle's prompt includes."},
 	{"mission-abort", "Cancel a running mission workflow."},
 }
 
@@ -176,6 +177,8 @@ func (c *cli) run(args []string) int {
 		err = c.missionApprove(rest)
 	case "mission-snooze":
 		err = c.missionSnooze(rest)
+	case "mission-steer":
+		err = c.missionSteer(rest)
 	case "mission-abort":
 		err = c.missionAbort(rest)
 	case "egress-proxy": // hidden: the Docker sandbox's allow-list egress proxy

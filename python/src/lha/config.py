@@ -115,6 +115,9 @@ class Settings(BaseSettings):
     postgres_dsn: SecretStr | None = None  # DSNs carry credentials
     workspace_root: str = ".lha/workspaces"
     object_store_root: str = ".lha/objects"
+    # Days after which `lha worker` deletes untouched ClaimCheck objects when it starts (0 = never;
+    # choose longer than your longest mission plus the namespace's history retention).
+    object_retention_days: int = Field(default=0, ge=0)
 
     # --- Governor (pre-emptive cost / loop guards) -----------------------------------
     budget_usd_ceiling: float = 10.0

@@ -343,7 +343,16 @@ func TestGoMissionDrivenByThePythonCLI(t *testing.T) {
 		r.stdout != fmt.Sprintf("mission %s: snoozed 7200s\n", id2) {
 		t.Fatalf("python snooze: %+v", r)
 	}
-	if out := sameStatus(t, dir, env, id2); !strings.Contains(out, "sleeping until ") {
+	if r := runPythonLHA(t, dir, processEnv(env...), "mission-steer", id2, "--note", "  Prefer small commits.\nKeep tests green.  "); r.code != 0 ||
+		r.stdout != fmt.Sprintf("mission %s: steering note added (39 chars; the last 20 notes are kept)\n", id2) {
+		t.Fatalf("python steer: %+v", r)
+	}
+	if r := goLHAInProcess(t, dir, env, "mission-steer", id2, "--note", "Second note"); r.code != 0 ||
+		r.stdout != fmt.Sprintf("mission %s: steering note added (11 chars; the last 20 notes are kept)\n", id2) {
+		t.Fatalf("go steer: %+v", r)
+	}
+	if out := sameStatus(t, dir, env, id2); !strings.Contains(out, "sleeping until ") ||
+		!strings.Contains(out, "steering notes (2, latest last):\n  Prefer small commits. Keep tests green.\n  Second note\n") {
 		t.Fatalf("status:\n%s", out)
 	}
 	if r := runPythonLHA(t, dir, processEnv(env...), "mission-abort", id2); r.code != 0 || r.stdout != "cancelled mission "+id2+"\n" {

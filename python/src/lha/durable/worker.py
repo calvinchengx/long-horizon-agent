@@ -64,6 +64,7 @@ from lha.durable.org_activities import (
 from lha.durable.subagent_workflow import SubAgentWorkflow
 from lha.durable.types import MissionInput, MissionResult
 from lha.durable.workflows import MissionWorkflow
+from lha.persistence.object_store import PruneResult, prune_objects
 
 _log = logging.getLogger(__name__)
 
@@ -313,10 +314,32 @@ async def start_mission(client: Client, inp: MissionInput, task_queue: str) -> M
     return await handle.result()
 
 
+def sweep_objects(settings: Settings) -> PruneResult | None:
+    """Delete ClaimCheck objects untouched for ``LHA_OBJECT_RETENTION_DAYS`` (``None`` when 0).
+
+    Runs once when a worker starts, so a long-lived deployment's store stops growing without
+    an operator's ``lha objects prune``; the result is logged as ``objects_pruned``.
+    """
+    days = settings.object_retention_days
+    if days <= 0:
+        return None
+    result = prune_objects(settings.object_store_root, older_than_days=days)
+    _log.info(
+        "objects_pruned root=%s older_than_days=%d deleted=%d bytes=%d kept=%d",
+        settings.object_store_root,
+        days,
+        result.count,
+        result.bytes,
+        result.kept,
+    )
+    return result
+
+
 async def run_worker() -> None:
     """Connect to the configured Temporal server and serve missions until cancelled."""
     settings = get_settings()
     settings.reset_keep_paths()  # a bad LHA_RESET_KEEP fails here, not in every cycle
+    await asyncio.to_thread(sweep_objects, settings)
     client = await connect_client(settings)
     deployment = deployment_config(settings)  # a half-set deployment fails here
     await check_task_queue_pollers(client, settings.task_queue)

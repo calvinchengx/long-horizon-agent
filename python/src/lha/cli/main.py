@@ -1058,11 +1058,12 @@ async def _query_gate(handle: Any) -> GateView | None:
 
 @app.command(name="mission-status")
 def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) -> None:
-    """Query a mission's status, cycles, sleep, open gate (+ pending action) and gate events."""
+    """Query a mission's status, cycles, sleep, open gate (+ pending action), steering notes and
+    gate events."""
     from datetime import UTC, datetime
 
     from lha.config import get_settings
-    from lha.durable.signals import QUERY_CYCLES, QUERY_GATE_LOG, QUERY_STATUS
+    from lha.durable.signals import QUERY_CYCLES, QUERY_GATE_LOG, QUERY_STATUS, QUERY_STEER_NOTES
     from lha.durable.worker import connect_client
 
     async def _run() -> list[str]:
@@ -1081,6 +1082,10 @@ def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) ->
         resume_at = await _optional_query(handle.query("resume_at"))
         if resume_at:
             lines.append(f"sleeping until {datetime.fromtimestamp(resume_at, UTC).isoformat()}")
+        notes = await _optional_query(handle.query(QUERY_STEER_NOTES)) or []
+        if notes:
+            lines.append(f"steering notes ({len(notes)}, latest last):")
+            lines += [f"  {_one_line(n, 120)}" for n in notes[-3:]]
         log = await _optional_query(handle.query(QUERY_GATE_LOG)) or []
         if log:
             lines.append("recent gate events:")
@@ -1089,6 +1094,12 @@ def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) ->
 
     for line in _run_cli(_run()):
         typer.echo(line)
+
+
+def _one_line(text: str, limit: int) -> str:
+    """``text`` on one line, cut to ``limit`` characters with an ellipsis."""
+    flat = " ".join(text.split())
+    return flat if len(flat) <= limit else flat[: limit - 3] + "..."
 
 
 @app.command(name="mission-approve")
@@ -1147,6 +1158,37 @@ def mission_snooze(
 
     _run_cli(_run())
     typer.echo(f"mission {mission_id}: " + (f"snoozed {seconds}s" if seconds else "woken"))
+
+
+@app.command(name="mission-steer")
+def mission_steer(
+    mission_id: str = typer.Argument(..., help="Mission id."),
+    note: str = typer.Option(
+        ..., help="The note (at most 2000 characters); every following cycle's prompt includes it."
+    ),
+) -> None:
+    """Append an operator steering note that every following cycle's prompt includes."""
+
+    from lha.config import get_settings
+    from lha.durable.signals import MAX_STEER_CHARS, MAX_STEER_NOTES, SIGNAL_STEER
+    from lha.durable.worker import connect_client
+
+    text = note.strip()
+    if not text:
+        _fail("--note must not be empty")
+    if len(text) > MAX_STEER_CHARS:
+        _fail(f"--note is {len(text)} characters; at most {MAX_STEER_CHARS} are kept")
+
+    async def _run() -> None:
+        client = await connect_client(get_settings())
+        handle = client.get_workflow_handle(f"mission:{mission_id}")
+        await handle.signal(SIGNAL_STEER, text)
+
+    _run_cli(_run())
+    typer.echo(
+        f"mission {mission_id}: steering note added ({len(text)} chars; "
+        f"the last {MAX_STEER_NOTES} notes are kept)"
+    )
 
 
 @app.command(name="mission-abort")

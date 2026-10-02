@@ -216,6 +216,9 @@ func TestDurableCommandsValidateBeforeConnecting(t *testing.T) {
 		{[]string{"mission-approve", "m1"}, "Error: Missing option '--decision'."},
 		{[]string{"mission-approve", "--decision", "approve"}, "Error: Missing argument 'MISSION_ID'."},
 		{[]string{"mission-snooze", "m1", "--seconds", "-5"}, "Error: Invalid value for '--seconds': -5 is not in the range x>=0."},
+		{[]string{"mission-steer", "m1"}, "Error: Missing option '--note'."},
+		{[]string{"mission-steer", "m1", "--note", "   "}, "error: --note must not be empty"},
+		{[]string{"mission-steer", "m1", "--note", strings.Repeat("x", 2001)}, "error: --note is 2001 characters; at most 2000 are kept"},
 		{[]string{"mission-status", "a", "b"}, "Error: Got unexpected extra argument (b)"},
 		{[]string{"mission-abort"}, "Error: Missing argument 'MISSION_ID'."},
 	} {

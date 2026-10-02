@@ -23,7 +23,13 @@ from lha.contracts.state import Checklist, ChecklistItem, EventRecord
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import Check
 from lha.durable.activities import _declare_impossible, _notify_gate, gate_notice_payload
-from lha.durable.signals import GATE_DEADLOCK, GATE_TOOL_CALL, SIGNAL_HUMAN_DECISION, SIGNAL_SNOOZE
+from lha.durable.signals import (
+    GATE_DEADLOCK,
+    GATE_TOOL_CALL,
+    SIGNAL_HUMAN_DECISION,
+    SIGNAL_SNOOZE,
+    SIGNAL_STEER,
+)
 from lha.durable.types import FinalizeInput, GateNotice, GateView, PendingApproval
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.sandbox_local import LocalSandbox
@@ -641,6 +647,9 @@ class _Handle:
             "gate_v1": self.gate,
             "gate_log_v1": ["t tool_call gate approval-fp-push opened (default reject)"],
             "open_question": "legacy question [approve / reject]",
+            "steer_notes": []
+            if self.gate
+            else ["Prefer small commits.\nKeep tests green.", "Second"],
         }[name]
 
     async def signal(self, name: str, payload: Any) -> None:
@@ -681,6 +690,26 @@ def test_mission_status_shows_gate_sleep_and_log(monkeypatch: pytest.MonkeyPatch
     _fake_client(monkeypatch, _Handle(None, old_worker=True))
     old = runner.invoke(cli.app, ["mission-status", "m1"])
     assert old.exit_code == 0 and "waiting on: legacy question" in old.output
+
+
+def test_mission_steer(monkeypatch: pytest.MonkeyPatch) -> None:
+    handle = _Handle(None)
+    _fake_client(monkeypatch, handle)
+    result = runner.invoke(cli.app, ["mission-steer", "m1", "--note", "  Focus on the tests.\n "])
+    assert result.exit_code == 0, result.output
+    assert (
+        result.output == "mission m1: steering note added (19 chars; the last 20 notes are kept)\n"
+    )
+    assert handle.signals == [(SIGNAL_STEER, "Focus on the tests.")]
+    assert runner.invoke(cli.app, ["mission-steer", "m1", "--note", "   "]).exit_code == 2
+    too_long = runner.invoke(cli.app, ["mission-steer", "m1", "--note", "x" * 2001])
+    assert too_long.exit_code == 2 and "at most 2000" in too_long.output
+    assert handle.signals == [(SIGNAL_STEER, "Focus on the tests.")]  # refused before signalling
+    status = runner.invoke(cli.app, ["mission-status", "m1"]).output
+    assert (
+        "steering notes (2, latest last):\n  Prefer small commits. Keep tests green.\n  Second\n"
+        in status
+    )
 
 
 def test_mission_snooze(monkeypatch: pytest.MonkeyPatch) -> None:

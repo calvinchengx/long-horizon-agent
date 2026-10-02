@@ -342,7 +342,8 @@ an update handler for it. The statuses are `RUNNING`, `SLEEPING`, `DEGRADED_PARK
 `WAITING_ON_HUMAN`, `DONE`, `IMPOSSIBLE` and `ABORTED`. The CLI covers `mission-status`
 (status, cycles, open gate, sleep, recent gate events), `mission-approve` (`human_decision_v1`,
 validated against the open gate first), `mission-snooze` (`snooze_v1`) and `mission-abort`
-(workflow cancellation). There is no CLI command for `steer_v1`.
+(workflow cancellation). `lha mission-steer` sends `steer_v1`; `mission-status` reads the
+`steer_notes` query.
 
 ## Continue-As-New
 

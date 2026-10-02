@@ -293,8 +293,8 @@ Workflows started before this behaviour (`workflow.patched("lha-cycle-wait-cance
 old one: they write `ABORTED` without waiting, and only the store's rule protects the row.
 
 The `steer_v1` signal appends an operator note (at most 2000 characters; the last 20 are kept)
-that every following cycle's prompt includes. No CLI command sends it; use `temporal workflow
-signal --name steer_v1`.
+that every following cycle's prompt includes: `lha mission-steer MISSION_ID --note TEXT`
+([17-cli.md](17-cli.md#lha-mission-steer)), or `temporal workflow signal --name steer_v1`.
 
 ## How a cycle runs
 

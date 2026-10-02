@@ -53,3 +53,24 @@ def test_cli_objects_prune(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert runner.invoke(cli.app, ["objects", "prune"]).exit_code == 2
     assert runner.invoke(cli.app, ["objects", "prune", "--older-than-days", "0"]).exit_code == 2
     cli.get_settings.cache_clear()
+
+
+def test_worker_sweeps_the_object_store_at_start(tmp_path: Path) -> None:
+    from lha.config import Settings
+    from lha.durable.worker import sweep_objects
+
+    root = tmp_path / "objects"
+    root.mkdir()
+    old = root / ("a" * 64)
+    old.write_bytes(b"x" * 10)
+    past = time.time() - 10 * 86400
+    os.utime(old, (past, past))
+    (root / ("b" * 64)).write_bytes(b"y")
+
+    off = Settings(_env_file=None, object_store_root=str(root))  # type: ignore[call-arg]
+    assert sweep_objects(off) is None and old.exists()
+    on = Settings(_env_file=None, object_store_root=str(root), object_retention_days=7)  # type: ignore[call-arg]
+    assert sweep_objects(on) == PruneResult(1, 10, 1)
+    assert not old.exists() and (root / ("b" * 64)).exists()
+    with pytest.raises(ValueError):
+        Settings(_env_file=None, object_retention_days=-1)  # type: ignore[call-arg]
