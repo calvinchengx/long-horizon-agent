@@ -567,9 +567,63 @@ _HARNESS_PATHS = [
 
 
 def export_harness_files() -> None:
+    from lha.verify.harness_integrity import harness_violations, is_harness_config
+
+    before = {
+        "tests/test_a.py": "a1",
+        "conftest.py": "c1",
+        "pyproject.toml": "p1",
+        "src/x.py": "x1",
+    }
+    snapshots = [
+        {"name": "unchanged", "before": before, "after": dict(before)},
+        {
+            "name": "modified_and_deleted",
+            "before": before,
+            "after": {"tests/test_a.py": "a2", "pyproject.toml": "p1", "src/x.py": "x1"},
+        },
+        {
+            "name": "new_test_file_is_allowed",
+            "before": before,
+            "after": {**before, "tests/test_b.py": "b1", "pkg/models_test.py": "m1"},
+        },
+        {
+            "name": "new_config_files_are_violations",
+            "before": before,
+            "after": {
+                **before,
+                "tests/unit/conftest.py": "k1",
+                "python/conftest.py": "k2",
+                "pytest.ini": "i1",
+                "setup.cfg": "s1",
+                "tox.ini": "t1",
+                "noxfile.py": "n1",
+                ".coveragerc": "r1",
+                "src/notconftest.py": "z",
+            },
+        },
+        {
+            "name": "everything_at_once",
+            "before": before,
+            "after": {
+                "conftest.py": "c2",
+                "pyproject.toml": "p1",
+                "src/x.py": "x1",
+                "docs/conftest.py": "d1",
+            },
+        },
+    ]
     _write(
         "verify/harness_files.json",
-        {"cases": [{"path": p, "harness": _is_harness_file(p)} for p in _HARNESS_PATHS]},
+        {
+            "cases": [
+                {"path": p, "harness": _is_harness_file(p), "config": is_harness_config(p)}
+                for p in _HARNESS_PATHS
+            ],
+            "violations": [
+                {**c, "violations": harness_violations(c["before"], c["after"])} for c in snapshots
+            ],
+        },
     )
 
 
@@ -596,6 +650,10 @@ _SCREEN_DIFFS = [
     "--- a/src/x.py\n+++ b/src/x.py\n@@\n-assert x\n-assert y\n+return 2  # pytest.skip( in a comment\n",
     # a test added with its assertions: nothing weakened
     "--- /dev/null\n+++ b/tests/test_new.py\n@@\n+def test_new():\n+    assert 1\n",
+    # a NEW conftest.py: it can rewrite what existing test modules collect (a harness violation
+    # and a review finding); editing an existing one is caught by harness integrity instead
+    "--- /dev/null\n+++ b/tests/unit/conftest.py\n@@\n+import pytest\n+def pytest_collectstart(c):\n+    pass\n",
+    "--- a/conftest.py\n+++ b/conftest.py\n@@\n-x = 1\n+x = 2\n",
     # assertions moved, not removed (net zero)
     "--- a/tests/test_m.py\n+++ b/tests/test_m.py\n@@\n-    assert a\n+    assert a  # moved\n",
     # a directory-named test file with a timestamp suffix in the header

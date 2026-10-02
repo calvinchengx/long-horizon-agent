@@ -2,75 +2,199 @@
  "cases": [
   {
    "path": "tests/test_a.py",
-   "harness": true
+   "harness": true,
+   "config": false
   },
   {
    "path": "test/helpers.py",
-   "harness": true
+   "harness": true,
+   "config": false
   },
   {
    "path": "src/pkg/tests/test_a.py",
-   "harness": true
+   "harness": true,
+   "config": false
   },
   {
    "path": "test_app.py",
-   "harness": true
+   "harness": true,
+   "config": false
   },
   {
    "path": "pkg/test_models.py",
-   "harness": true
+   "harness": true,
+   "config": false
   },
   {
    "path": "pkg/models_test.py",
-   "harness": true
+   "harness": true,
+   "config": false
   },
   {
    "path": "conftest.py",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "src/conftest.py",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "pyproject.toml",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "setup.cfg",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": ".coveragerc",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "tox.ini",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "sub/pytest.ini",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "noxfile.py",
-   "harness": true
+   "harness": true,
+   "config": true
   },
   {
    "path": "src/app.py",
-   "harness": false
+   "harness": false,
+   "config": false
   },
   {
    "path": "src/contest.py",
-   "harness": false
+   "harness": false,
+   "config": false
   },
   {
    "path": "docs/tests.md",
-   "harness": false
+   "harness": false,
+   "config": false
   },
   {
    "path": "latest_results.py",
-   "harness": false
+   "harness": false,
+   "config": false
+  }
+ ],
+ "violations": [
+  {
+   "name": "unchanged",
+   "before": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "after": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "violations": []
+  },
+  {
+   "name": "modified_and_deleted",
+   "before": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "after": {
+    "tests/test_a.py": "a2",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "violations": [
+    "deleted: conftest.py",
+    "modified: tests/test_a.py"
+   ]
+  },
+  {
+   "name": "new_test_file_is_allowed",
+   "before": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "after": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1",
+    "tests/test_b.py": "b1",
+    "pkg/models_test.py": "m1"
+   },
+   "violations": []
+  },
+  {
+   "name": "new_config_files_are_violations",
+   "before": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "after": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1",
+    "tests/unit/conftest.py": "k1",
+    "python/conftest.py": "k2",
+    "pytest.ini": "i1",
+    "setup.cfg": "s1",
+    "tox.ini": "t1",
+    "noxfile.py": "n1",
+    ".coveragerc": "r1",
+    "src/notconftest.py": "z"
+   },
+   "violations": [
+    "added: .coveragerc",
+    "added: noxfile.py",
+    "added: pytest.ini",
+    "added: python/conftest.py",
+    "added: setup.cfg",
+    "added: tests/unit/conftest.py",
+    "added: tox.ini"
+   ]
+  },
+  {
+   "name": "everything_at_once",
+   "before": {
+    "tests/test_a.py": "a1",
+    "conftest.py": "c1",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1"
+   },
+   "after": {
+    "conftest.py": "c2",
+    "pyproject.toml": "p1",
+    "src/x.py": "x1",
+    "docs/conftest.py": "d1"
+   },
+   "violations": [
+    "modified: conftest.py",
+    "deleted: tests/test_a.py",
+    "added: docs/conftest.py"
+   ]
   }
  ]
 }

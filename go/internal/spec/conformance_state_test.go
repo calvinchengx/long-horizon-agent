@@ -1,6 +1,7 @@
 package spec
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -14,7 +15,14 @@ func TestHarnessFiles(t *testing.T) {
 		Cases []struct {
 			Path    string `json:"path"`
 			Harness bool   `json:"harness"`
+			Config  bool   `json:"config"`
 		} `json:"cases"`
+		Violations []struct {
+			Name       string            `json:"name"`
+			Before     map[string]string `json:"before"`
+			After      map[string]string `json:"after"`
+			Violations []string          `json:"violations"`
+		} `json:"violations"`
 	}
 	Load(t, "verify/harness_files.json", &s)
 	if len(s.Cases) == 0 {
@@ -23,6 +31,19 @@ func TestHarnessFiles(t *testing.T) {
 	for _, c := range s.Cases {
 		if got := verify.IsHarnessFile(c.Path); got != c.Harness {
 			t.Errorf("IsHarnessFile(%q) = %v, want %v", c.Path, got, c.Harness)
+		}
+	}
+	for _, c := range s.Cases {
+		if verify.IsHarnessConfig(c.Path) != c.Config {
+			t.Errorf("IsHarnessConfig(%q) = %v", c.Path, !c.Config)
+		}
+	}
+	if len(s.Violations) == 0 {
+		t.Fatal("no violation cases")
+	}
+	for _, c := range s.Violations {
+		if got := verify.HarnessViolations(c.Before, c.After); !reflect.DeepEqual(got, c.Violations) {
+			t.Errorf("%s: %q, want %q", c.Name, got, c.Violations)
 		}
 	}
 }

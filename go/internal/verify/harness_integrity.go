@@ -158,8 +158,17 @@ func SnapshotHarnessGlobs(workdir string, extraGlobs []string) HarnessSnapshot {
 	return snapshot
 }
 
-// HarnessViolations lists pre-existing harness files that were modified or deleted (sorted by
-// path; new files are allowed).
+// IsHarnessConfig reports whether rel configures how the tests run (conftest.py, pytest.ini,
+// ...), as opposed to being a test file. A NEW one is a violation: a conftest.py can rewrite
+// what an existing test module collects without touching it (python: is_harness_config).
+func IsHarnessConfig(rel string) bool {
+	parts := strings.Split(rel, "/")
+	return slices.Contains(HarnessRootFiles, rel) || slices.Contains(HarnessAnywhereFiles, parts[len(parts)-1])
+}
+
+// HarnessViolations lists pre-existing harness files that were modified or deleted, and
+// harness configuration files that were added (sorted by path; new test files are allowed:
+// adding tests is the work).
 func HarnessViolations(before, after HarnessSnapshot) []string {
 	keys := make([]string, 0, len(before))
 	for k := range before {
@@ -175,6 +184,16 @@ func HarnessViolations(before, after HarnessSnapshot) []string {
 		case now != before[rel]:
 			violations = append(violations, "modified: "+rel)
 		}
+	}
+	added := make([]string, 0)
+	for rel := range after {
+		if _, ok := before[rel]; !ok && IsHarnessConfig(rel) {
+			added = append(added, rel)
+		}
+	}
+	sort.Strings(added)
+	for _, rel := range added {
+		violations = append(violations, "added: "+rel)
 	}
 	return violations
 }

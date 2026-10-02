@@ -244,6 +244,7 @@ doing the work ([`verify/review_screen.py`](../python/src/lha/verify/review_scre
 | `added skip to <path>: <line>` | a new `@pytest.mark.skip` / `xfail`, `pytest.skip(`, `unittest.skip`, `t.Skip(`, `testing.Short()`, `it.skip(` / `xit(` in a test file |
 | `<n> assertions removed from <path>` | more assertion lines (`assert`, `self.assert*`, `t.Fatal*` / `t.Error*`, `require.` / `assert.`, `expect(`) removed from a test file than added |
 | `lowered fail_under from <a> to <b> in <path>` | a `fail_under` / `fail-under` value that went down, in any file |
+| `added harness file <path>` | a new `conftest.py`, `pytest.ini`, `tox.ini`, `noxfile.py`, root `pyproject.toml`, `setup.cfg` or `.coveragerc` (see [Harness integrity](#harness-integrity)) |
 
 Test files are those under `tests/`, `test/`, `__tests__/`, `spec/` or `testdata/`, or named
 `test_*.py`, `*_test.py`, `*_test.go`, `*.test.*` / `*.spec.*` or `conftest.py`. At most 20
@@ -290,7 +291,12 @@ If a protected file that existed at cycle start was modified or deleted:
 - the files that are tracked at `HEAD` are restored from it, so the change is not committed;
 - the violation stays in effect for the rest of the cycle, even after the restore.
 
-New test files are always allowed. An item whose `allow_harness_edits` is `true` skips this
+New test files are always allowed; a new harness *configuration* file is not: a `conftest.py`
+(anywhere), `pytest.ini`, `tox.ini`, `noxfile.py`, or a root `pyproject.toml`, `setup.cfg` or
+`.coveragerc` that did not exist before is reported as `added: <path>`, because a `conftest.py`
+collection hook can inject a test into a protected module without touching it (a measurement
+mission did exactly that). The [pre-review screen](#pre-review-screen) reports the same file as
+`added harness file <path>`. An item whose `allow_harness_edits` is `true` skips this
 check. The Planner's prompt asks the model to set it only for steps that must modify existing
 tests or test configuration; `lha run-local` never sets it.
 

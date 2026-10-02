@@ -3,6 +3,7 @@ package verify
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -104,5 +105,36 @@ func TestViolationsDeletedSortedAndNewAllowed(t *testing.T) {
 func TestIsHarnessFileTrailingNewlineLikePythonDollar(t *testing.T) {
 	if !IsHarnessFile("test_a.py\n") || IsHarnessFile("test_a.py\n\n") || IsHarnessFile("test\n_a.py") {
 		t.Fatal("regex anchoring differs from Python re.match(...$)")
+	}
+}
+
+// TestANewConftestIsAViolationButANewTestFileIsNot is python's
+// test_a_new_conftest_is_a_violation_but_a_new_test_file_is_not.
+func TestANewConftestIsAViolationButANewTestFileIsNot(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "tests"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, body string) {
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("tests/test_a.py", "def test_a(): pass\n")
+	before := SnapshotHarness(dir)
+	write("tests/test_b.py", "def test_b(): pass\n")
+	if got := HarnessViolations(before, SnapshotHarness(dir)); len(got) != 0 {
+		t.Fatalf("new test file: %q", got)
+	}
+	write("tests/conftest.py", "def pytest_collectstart(c): pass\n")
+	write("pytest.ini", "[pytest]\n")
+	if got := HarnessViolations(before, SnapshotHarness(dir)); !reflect.DeepEqual(got, []string{"added: pytest.ini", "added: tests/conftest.py"}) {
+		t.Fatalf("%q", got)
+	}
+	if !IsHarnessConfig("a/b/conftest.py") || !IsHarnessConfig("pyproject.toml") || IsHarnessConfig("tests/test_a.py") || IsHarnessConfig("pkg/pyproject.toml") {
+		t.Fatal("IsHarnessConfig")
+	}
+	if got := ScreenDiff("--- /dev/null\n+++ b/tests/unit/conftest.py\n@@\n+import pytest\n"); !reflect.DeepEqual(got, []string{"added harness file tests/unit/conftest.py"}) {
+		t.Fatalf("%q", got)
 	}
 }
