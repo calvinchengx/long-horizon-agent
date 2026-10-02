@@ -9,6 +9,8 @@ from __future__ import annotations
 
 # Signals / queries / updates (versioned).
 SIGNAL_HUMAN_DECISION = "human_decision_v1"
+#: The same decision with who made it: ``{"decision": str, "by": str}`` (``mission-approve --as``).
+SIGNAL_HUMAN_DECISION_V2 = "human_decision_v2"
 SIGNAL_STEER = "steer_v1"
 #: Steering notes kept per mission and the length of one note (``lha mission-steer``).
 MAX_STEER_NOTES = 20

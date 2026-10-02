@@ -730,7 +730,7 @@ func GateEventFromNotice(n GateNotice, payload hitl.Payload) GateEvent {
 	if at == "" {
 		at = isoSeconds(time.Now())
 	}
-	resolvedBy := map[string]string{"resolved": ResolvedBySignal, "defaulted": ResolvedByTimeout}[n.Event]
+	resolvedBy := ResolvedByFor(n)
 	risk := n.Kind
 	if n.Request != nil {
 		risk = "irreversible"
@@ -926,4 +926,19 @@ func (a *Activities) RunSubAgent(ctx context.Context, inp SubAgentInput) (SubAge
 		return a.SubAgent(ctx, inp)
 	}
 	return a.runSubAgent(ctx, inp)
+}
+
+// ResolvedByFor is hitl_gates.resolved_by for a notice: the decider when human_decision_v2
+// named one, else how the gate closed (python: resolved_by_for).
+func ResolvedByFor(n GateNotice) string {
+	switch n.Event {
+	case "resolved":
+		if n.By != "" {
+			return n.By + " (human_decision signal)"
+		}
+		return ResolvedBySignal
+	case "defaulted":
+		return ResolvedByTimeout
+	}
+	return ""
 }

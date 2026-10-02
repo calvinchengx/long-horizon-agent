@@ -322,8 +322,8 @@ func TestGoMissionDrivenByThePythonCLI(t *testing.T) {
 		!strings.Contains(r.stderr, "for the open tool_call gate; expected approve, reject") {
 		t.Fatalf("python approve retry: %+v", r)
 	}
-	if r := runPythonLHA(t, dir, processEnv(env...), "mission-approve", id, "--decision", "approve"); r.code != 0 ||
-		!strings.Contains(r.stdout, "sent decision 'approve' to mission "+id) {
+	if r := runPythonLHA(t, dir, processEnv(env...), "mission-approve", id, "--decision", "approve", "--as", "calvin"); r.code != 0 ||
+		!strings.Contains(r.stdout, "sent decision 'approve' to mission "+id+" as calvin") {
 		t.Fatalf("python approve: %+v", r)
 	}
 	// Item 02's cycle runs the approved action (the same call: the same fingerprint) once.
@@ -394,8 +394,8 @@ func TestPythonMissionDrivenByTheGoCLI(t *testing.T) {
 		!strings.Contains(r.stderr, "error: unknown --decision 'impossible' for the open tool_call gate; expected approve, reject") {
 		t.Fatalf("go approve impossible: %+v", r)
 	}
-	if r := goLHAInProcess(t, dir, env, "mission-approve", id, "--decision", "approve"); r.code != 0 ||
-		r.stdout != "sent decision 'approve' to mission "+id+"\n" {
+	if r := goLHAInProcess(t, dir, env, "mission-approve", id, "--decision", "approve", "--as", "ops-bot"); r.code != 0 ||
+		r.stdout != "sent decision 'approve' to mission "+id+" as ops-bot\n" {
 		t.Fatalf("go approve: %+v", r)
 	}
 	res, err := missionResult(t, cl, id)
