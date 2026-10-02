@@ -67,6 +67,7 @@ var commandHelp = []struct{ name, help string }{
 	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action), steering notes and gate events."},
 	{"mission-approve", "Resolve an open human gate on a mission with a decision."},
 	{"mission-snooze", "Park a mission on a durable timer (SLEEPING) before its next cycle, or wake it."},
+	{"mission-report", "One page about a mission: items, verdicts, reviews, gates, spend and commits, from the anchor and the store."},
 	{"mission-steer", "Append an operator steering note that every following cycle's prompt includes."},
 	{"mission-abort", "Cancel a running mission workflow."},
 }
@@ -177,6 +178,8 @@ func (c *cli) run(args []string) int {
 		err = c.missionApprove(rest)
 	case "mission-snooze":
 		err = c.missionSnooze(rest)
+	case "mission-report":
+		err = c.missionReport(rest)
 	case "mission-steer":
 		err = c.missionSteer(rest)
 	case "mission-abort":

@@ -32,6 +32,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`missions`](#lha-missions) | list persisted missions with status and recorded spend | the mission store |
 | [`costs`](#lha-costs) | print a mission's persisted cost ledger | the mission store |
 | [`gates`](#lha-gates) | list recorded human gates: question, options, reminders, decision, who and when | the mission store |
+| [`mission-report`](#lha-mission-report) | one page about a mission: items, verdicts, reviews, gates, spend, commits | a mission workspace and/or the mission store |
 | [`labels export`](#lha-labels-export) | export a mission's gate answers, tool approvals, verifier and review verdicts as JSON Lines labels | a mission workspace and/or the mission store |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
@@ -356,6 +357,37 @@ terminal approver's. One row per gate: an event repeated by a retried activity c
 reminders only raise the count of an open gate, and a closed gate stays closed. The anchor's
 `gate_*` events and the workflow history remain the complete record. It reads the same store as
 [`missions`](#lha-missions).
+
+## `lha mission-report`
+
+```
+lha mission-report [MISSION_ID] [--workdir DIR]
+```
+
+One page about a mission, after the fact or while it runs, from the anchor at `--workdir` and the
+mission store: the mission and its definition of done; the store's status, the head commit and
+the commit count; every item with its status, attempts, witnesses and (while not done) the first
+line of its last failure, with the checklist's own verdict (complete, or deadlocked and why); the
+cycles' verdicts, the review verdicts, how many screened diffs the pre-review screen flagged and
+how many reflections were written; the mission's gates as [`lha gates`](#lha-gates) prints them;
+and the [`lha costs`](#lha-costs) total. `MISSION_ID` defaults to the mission the anchor's latest
+`orchestrate` event names; without an anchor it is required and only the store is read. A
+`run-local` or `mission` workspace names no mission, so its store sections say so. Both
+implementations render the same bytes from the same inputs (`spec/state/report.json`).
+
+```
+# Mission: Fabric emulator
+Build the spine.
+Definition of done: all witnesses pass
+mission m1  status RUNNING  head abcdef123456  commits 7
+
+## Items (1/3 done, deadlocked: ...)
+01  done        attempts  1  do thing one
+      witnesses: pytest:tests/test_a.py::test_x
+02  blocked     attempts  3  do thing two
+      last failure: exit 1
+...
+```
 
 ## `lha labels export`
 

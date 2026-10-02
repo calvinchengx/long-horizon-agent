@@ -2950,6 +2950,281 @@ def export_labels() -> None:
     _write("systemone/labels.json", {"cases": cases})
 
 
+# --- state/report ----------------------------------------------------------------------------
+def export_report() -> None:
+    """spec/state/report.json: the text ``lha mission-report`` renders from an anchor and the
+    store (``lha.ops.report.render_report``), byte for byte."""
+    from lha.contracts.state import Checklist, ChecklistItem, EventRecord, MissionSpec
+    from lha.ops.report import ReportInput, render_report
+    from lha.persistence.store import CostSummary, GateRow, MissionRow
+
+    def gate(fp: str, status: str, decision: str | None, by: str | None) -> dict:
+        return {
+            "mission_id": "m1",
+            "gate_id": f"m1:tool:{fp}",
+            "kind": "tool_call",
+            "status": status,
+            "question": f"Allow `git push`? ({fp})",
+            "options": ["approve", "reject"],
+            "default_action": "reject",
+            "risk": "high",
+            "deadline": "2026-01-01T02:00:00+00:00",
+            "decision": decision,
+            "resolved_by": by,
+            "reminders": 1 if status == "ESCALATED" else 0,
+            "request": {"fingerprint": fp, "tool": "run_command", "argv": '["git", "push"]'},
+            "opened_at": f"2026-01-01T0{fp[-1]}:00:00+00:00",
+            "resolved_at": f"2026-01-01T0{fp[-1]}:05:00+00:00" if decision else "",
+            "updated_at": f"2026-01-01T0{fp[-1]}:05:00+00:00",
+        }
+
+    full = {
+        "name": "full_mission",
+        "mission_id": "m1",
+        "spec": {
+            "title": "Fabric emulator",
+            "description": "Build the spine.\n\nTwo phases.",
+            "acceptance": "all witnesses pass",
+            "references": ["docs/api.md"],
+        },
+        "checklist": {
+            "items": [
+                {
+                    "id": "01",
+                    "description": "do thing one",
+                    "status": "done",
+                    "attempts": 1,
+                    "witnesses": ["pytest:tests/test_a.py::test_x"],
+                },
+                {
+                    "id": "02",
+                    "description": "do thing two",
+                    "status": "blocked",
+                    "attempts": 3,
+                    "last_failure": "exit 1\n--- stderr ---\nboom " + "x" * 120,
+                },
+                {
+                    "id": "03",
+                    "description": "do thing three",
+                    "status": "todo",
+                    "depends_on": ["02"],
+                },
+            ]
+        },
+        "events": [
+            {
+                "kind": "orchestrate",
+                "cycle_id": "",
+                "payload": {"mission_id": "m1", "resumed": False, "run": 1},
+                "payload_ref": None,
+            },
+            {
+                "kind": "cycle",
+                "cycle_id": "c1",
+                "payload": {"item_id": "01", "verdict": "passed"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "review_screen",
+                "cycle_id": "c1",
+                "payload": {
+                    "item_id": "01",
+                    "base": "a",
+                    "head": "b",
+                    "findings": [],
+                    "forced": False,
+                },
+                "payload_ref": None,
+            },
+            {
+                "kind": "review",
+                "cycle_id": "c1",
+                "payload": {"item_id": "01", "verdict": "approve"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "cycle",
+                "cycle_id": "c2",
+                "payload": {"item_id": "02", "verdict": "failed"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "reflection",
+                "cycle_id": "c2",
+                "payload": {"item": "02", "text": "x"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "cycle",
+                "cycle_id": "c3",
+                "payload": {"item_id": "02", "verdict": "failed"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "cycle",
+                "cycle_id": "c4",
+                "payload": {"item_id": "02", "verdict": "harness_integrity_violation"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "review_screen",
+                "cycle_id": "c4",
+                "payload": {
+                    "item_id": "02",
+                    "base": "b",
+                    "head": "c",
+                    "findings": ["deleted test file tests/test_b.py"],
+                    "forced": True,
+                },
+                "payload_ref": None,
+            },
+            {
+                "kind": "review",
+                "cycle_id": "c4",
+                "payload": {"item_id": "02", "verdict": "block"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "review",
+                "cycle_id": "c5",
+                "payload": {"item_id": "02", "verdict": "unparsed"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "cycle",
+                "cycle_id": "c9",
+                "payload": {"outcome": "impossible"},
+                "payload_ref": None,
+            },
+            {
+                "kind": "blackboard",
+                "cycle_id": "",
+                "payload": {"author": "x", "text": "y"},
+                "payload_ref": None,
+            },
+        ],
+        "row": {
+            "mission_id": "m1",
+            "title": "Fabric emulator",
+            "status": "RUNNING",
+            "description": "",
+            "head_sha": "abcdef1234567890",
+            "workflow_id": "mission:m1",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "updated_at": "2026-01-02T00:00:00+00:00",
+        },
+        "gates": [
+            gate("fp1", "RESOLVED", "approve", "terminal:calvin"),
+            gate("fp2", "ESCALATED", None, None),
+            gate("fp3", "DEFAULTED", "reject", "default (timeout)"),
+        ],
+        "cost": {
+            "mission_id": "m1",
+            "calls": 12,
+            "known_usd": 1.23456,
+            "unknown_cost_calls": 2,
+            "input_tokens": 12345,
+            "output_tokens": 678,
+        },
+        "commits": 7,
+        "head_sha": "abcdef1234567890abcdef",
+    }
+    bare = {
+        "name": "anchor_only_no_mission_id",
+        "mission_id": "",
+        "spec": {"title": "T", "description": "", "acceptance": "", "references": []},
+        "checklist": {"items": [{"id": "01", "description": "x", "status": "done", "attempts": 1}]},
+        "events": [
+            {
+                "kind": "cycle",
+                "cycle_id": "c1",
+                "payload": {"item_id": "01", "verdict": "passed"},
+                "payload_ref": None,
+            }
+        ],
+        "row": None,
+        "gates": [],
+        "cost": None,
+        "commits": 2,
+        "head_sha": "0123456789ab",
+    }
+    store_only = {
+        "name": "store_only_no_anchor",
+        "mission_id": "m7",
+        "spec": None,
+        "checklist": {"items": []},
+        "events": [],
+        "row": {
+            "mission_id": "m7",
+            "title": "From the store",
+            "status": "ABORTED",
+            "description": "d",
+            "head_sha": None,
+            "workflow_id": None,
+            "created_at": "",
+            "updated_at": "",
+        },
+        "gates": [],
+        "cost": {
+            "mission_id": "m7",
+            "calls": 0,
+            "known_usd": 0.0,
+            "unknown_cost_calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+        },
+        "commits": 0,
+        "head_sha": "",
+    }
+    deadlocked = {
+        "name": "deadlocked_no_cycles",
+        "mission_id": "m2",
+        "spec": {"title": "D", "description": "desc", "acceptance": "", "references": []},
+        "checklist": {
+            "items": [
+                {
+                    "id": "01",
+                    "description": "a",
+                    "status": "blocked",
+                    "attempts": 3,
+                    "last_failure": "nope",
+                },
+                {"id": "02", "description": "b", "status": "todo", "depends_on": ["01"]},
+            ]
+        },
+        "events": [],
+        "row": None,
+        "gates": [],
+        "cost": {
+            "mission_id": "m2",
+            "calls": 1,
+            "known_usd": 0.5,
+            "unknown_cost_calls": 0,
+            "input_tokens": 10,
+            "output_tokens": 5,
+        },
+        "commits": 1,
+        "head_sha": "ffffffffffff",
+    }
+    cases = []
+    for case in (full, bare, store_only, deadlocked):
+        inp = ReportInput(
+            mission_id=case["mission_id"],
+            spec=MissionSpec.model_validate(case["spec"]) if case["spec"] is not None else None,
+            checklist=Checklist(
+                items=[ChecklistItem.model_validate(i) for i in case["checklist"]["items"]]
+            ),
+            events=[EventRecord.model_validate(e) for e in case["events"]],
+            row=MissionRow(**case["row"]) if case["row"] is not None else None,
+            gates=[GateRow(**g) for g in case["gates"]],
+            cost=CostSummary(**case["cost"]) if case["cost"] is not None else None,
+            commits=case["commits"],
+            head_sha=case["head_sha"],
+        )
+        cases.append({**case, "expected": render_report(inp)})
+    _write("state/report.json", {"cases": cases})
+
+
 def main() -> None:
     export_wire_bytes()
     export_memory()
@@ -2975,6 +3250,7 @@ def main() -> None:
     export_system_one()
     export_system_one_authority()
     export_labels()
+    export_report()
     export_code_query()
     export_edit_file()
 

@@ -420,3 +420,66 @@ func TestLabelsExport(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// TestMissionReport is python's test_cli_renders_the_anchor_and_the_store, with Python's page on
+// the same anchor and store.
+func TestMissionReport(t *testing.T) {
+	dir := cleanEnv(t)
+	sqlitePath := filepath.Join(dir, "lha.sqlite3") // where pythonEnv points the Python CLI too
+	t.Setenv("LHA_SQLITE_PATH", sqlitePath)
+	ws := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	anchor := state.NewGitMissionAnchor(ws)
+	items := contracts.Checklist{SchemaVersion: 1, Items: []contracts.ChecklistItem{contracts.NewChecklistItem("01", "do it"), contracts.NewChecklistItem("02", "then this")}}
+	if _, err := anchor.Initialize(ctx, "Report test", "two items", items); err != nil {
+		t.Fatal(err)
+	}
+	items.Items[0].Status, items.Items[0].Attempts = contracts.StatusDone, 1
+	if _, err := anchor.CommitCheckpoint(ctx, contracts.Checkpoint{CycleID: "c1", ProgressSummary: "- c1", Checklist: items, Decisions: []contracts.DecisionRecord{},
+		Events: []contracts.EventRecord{
+			{Kind: "orchestrate", Payload: contracts.Payload("mission_id", "m1", "run", 1)},
+			{Kind: "cycle", CycleID: "c1", Payload: contracts.Payload("item_id", "01", "verdict", "passed")},
+			{Kind: "review", CycleID: "c1", Payload: contracts.Payload("item_id", "01", "verdict", "approve")},
+		}}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := persistence.OpenSQLite(ctx, sqlitePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertMission(ctx, persistence.MissionUpsert{MissionID: "m1", Title: "Report test", Status: "RUNNING", HeadSHA: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordGateEvent(ctx, persistence.GateEvent{MissionID: "m1", GateID: "m1:tool:fp1", Kind: "tool_call", Event: "opened",
+		At: "2026-01-01T01:00:00+00:00", Question: "Allow `git push`?", Options: []string{"approve", "reject"}, DefaultAction: "reject", Risk: "high",
+		Request: map[string]string{"fingerprint": "fp1", "tool": "run_command", "argv": `["git", "push"]`}}); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+
+	r := runCLI(t, nil, "mission-report", "--workdir", ws)
+	if r.code != 0 || !strings.HasPrefix(r.stdout, "# Mission: Report test\ntwo items\nmission m1  status RUNNING  head ") ||
+		!strings.Contains(r.stdout, "  commits 2\n") ||
+		!strings.Contains(r.stdout, "## Items (1/2 done)\n01  done        attempts  1  do it\n02  todo        attempts  0  then this\n") ||
+		!strings.Contains(r.stdout, "## Cycles (1)\nverdicts: passed 1, failed 0, other 0\nreviews: approve 1, block 0, unparsed 0\n") ||
+		!strings.Contains(r.stdout, "## Gates (1)\n2026-01-01T01:00:00  m1  m1:tool:fp1  tool_call OPEN      reminders 0  open, default reject at -\n") ||
+		!strings.HasSuffix(r.stdout, "## Cost\nno cost ledger rows\n") {
+		t.Fatalf("%+v", r)
+	}
+	if pythonAvailable(t) {
+		py := runPythonLHA(t, dir, []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}, "mission-report", "--workdir", ws)
+		if py.code != 0 || py.stdout != r.stdout {
+			t.Fatalf("python: %+v\ngo: %q", py, r.stdout)
+		}
+	}
+	if r := runCLI(t, nil, "mission-report", "m1", "--workdir", filepath.Join(dir, "none")); r.code != 0 ||
+		!strings.HasPrefix(r.stdout, "# Mission: Report test\nmission m1  status RUNNING  head -  commits 0\n\n## Items (0/0 done)\n(no items)\n") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "mission-report", "--workdir", filepath.Join(dir, "none")); r.code != 2 || !strings.HasPrefix(r.stderr, "error: no mission anchor at ") {
+		t.Fatalf("%+v", r)
+	}
+}
