@@ -184,9 +184,12 @@ no anchor is refused too. A resumed run
 - continues the cycle ids after the highest committed `c<N>`.
 
 Every run records an `orchestrate` event (`mission_id`, `resumed`, `run`). Board posts and
-reflections are recorded as events when they are made and committed with the next checkpoint, so
-a post made after the last checkpoint of an interrupted run is lost with it. The budget ceiling
-and `LHA_MAX_CYCLES` apply to each invocation.
+reflections are recorded as events when they are made and committed with the next checkpoint; a
+run that ends (complete, deadlocked, over budget, at the cycle limit) commits whatever is still
+pending in one last anchor-only commit (`lha: anchor records at run end`), and an approved
+review is committed by itself (`lha: review approved <id>`). Only a run killed mid-wave loses the
+posts and reflections made since its last checkpoint. The budget ceiling and `LHA_MAX_CYCLES`
+apply to each invocation.
 
 ## Roles
 

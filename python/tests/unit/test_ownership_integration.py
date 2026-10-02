@@ -350,8 +350,12 @@ async def test_parallel_wave_merges_verified_branches(tmp_path: Path) -> None:
     log = git_ops.log_oneline(tmp_path, 20)
     merges = [line for line in log if "[merged lha/implementer-" in line]
     assert len(merges) == 2 and all("lha: complete" in line for line in merges)
-    parents = git_ops.run_git(tmp_path, "log", "-1", "--pretty=%P").split()
-    assert len(parents) == 2  # the checkpoint IS the merge commit
+    # The checkpoint IS the merge commit (the approved review's anchor commit follows it).
+    parents = git_ops.run_git(
+        tmp_path, "log", "-1", "--pretty=%P", "--grep=lha: complete 02"
+    ).split()
+    assert len(parents) == 2
+    assert log[0].endswith("lha: review approved 02")
 
     events = _events(tmp_path)
     tickets = [e for e in events if e["kind"] == "ticket"]

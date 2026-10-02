@@ -371,6 +371,9 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	if err != nil {
 		return agent.MissionSummary{}, err
 	}
+	if err := r.flushAnchor(ctx, final); err != nil {
+		return agent.MissionSummary{}, err
+	}
 	if err := services.Finish(ctx, r.stopped, r.lastHead); err != nil {
 		return agent.MissionSummary{}, err
 	}
@@ -392,6 +395,24 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 }
 
 // --- resume ------------------------------------------------------------------------------------
+
+// flushAnchor commits records appended since the last checkpoint (board posts, reflections)
+// when a run ends, so a later --resume does not discard them with the rest of the work tree.
+// Not after a decision-chain stop: an altered history is never extended.
+func (r *missionRun) flushAnchor(ctx context.Context, checklist contracts.Checklist) error {
+	if !r.anchor.HasPendingRecords() || strings.HasPrefix(r.stopped, agent.DecisionChainStop) {
+		return nil
+	}
+	sha, err := r.anchor.CommitAnchorUpdate(ctx, contracts.Checkpoint{
+		CycleID: r.cycleID(r.cycles), Checklist: checklist, Decisions: []contracts.DecisionRecord{},
+		CommitMessage: "lha: anchor records at run end",
+	})
+	if err != nil {
+		return err
+	}
+	r.lastHead = sha
+	return nil
+}
 
 // recoverWorkspace discards what an interrupted run left uncommitted (never anything committed).
 func (r *missionRun) recoverWorkspace(ctx context.Context) error {
@@ -769,6 +790,20 @@ func (r *missionRun) review(ctx context.Context, item contracts.ChecklistItem, c
 	}
 	if !review.Blocking {
 		r.loopDetector.Observe(item.ID+":review_blocked", false)
+		// Nothing else commits after the last item is approved, so the verdict is committed by
+		// itself (anchor files only), as a lease decision is.
+		checklist, err := r.anchor.ReadChecklist(ctx)
+		if err != nil {
+			return "", err
+		}
+		sha, err := r.anchor.CommitAnchorUpdate(ctx, contracts.Checkpoint{
+			CycleID: cycleID, Checklist: checklist, Decisions: []contracts.DecisionRecord{},
+			CommitMessage: "lha: review approved " + item.ID,
+		})
+		if err != nil {
+			return "", err
+		}
+		r.lastHead = sha
 		return "approved", nil
 	}
 	notes := review.Notes()

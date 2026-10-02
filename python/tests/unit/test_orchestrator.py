@@ -65,8 +65,58 @@ async def test_orchestrator_completes_mission_with_org(tmp_path: Path) -> None:
     assert summary.items_done == 2
     assert summary.completed
     assert summary.stopped_reason == "complete"
-    completed = sum(1 for line in git_ops.log_oneline(tmp_path, 100) if "lha: complete" in line)
+    log = git_ops.log_oneline(tmp_path, 100)
+    completed = sum(1 for line in log if "lha: complete" in line)
     assert completed == 2
+    # Each approval is committed by itself, so the last verdict is not lost with the run.
+    assert "lha: review approved 02" in log[0] and "lha: review approved 01" in " ".join(log)
+    reviews = _committed_events(tmp_path, "review")
+    assert [(e["cycle_id"], e["payload"]["item_id"], e["payload"]["verdict"]) for e in reviews] == [
+        ("c1", "01", "approve"),
+        ("c2", "02", "approve"),
+    ]
+    assert all(e["payload"]["base"] and e["payload"]["head"] for e in reviews)
+
+
+@pytest.mark.asyncio
+async def test_records_appended_after_the_last_checkpoint_are_committed_at_run_end(
+    tmp_path: Path,
+) -> None:
+    """A failed attempt's reflection is appended after its checkpoint; a run that then ends
+    (here: the cycle limit) commits it, so a resume keeps it."""
+    settings = Settings(
+        sandbox="local",
+        allow_unsafe_local=True,
+        model_backend="stub",
+        budget_usd_ceiling=100.0,
+        max_cycles=1,
+    )
+    orchestrator = Orchestrator(
+        settings,
+        research_per_item=0,
+        do_review=False,
+        models={"lead": _stub(_DONE), "researcher": _stub(_DONE), "reviewer": _stub(_APPROVE)},
+    )
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path),
+        title="Flush test",
+        description="one failing attempt",
+        checklist=_checklist(),
+        checks=[Check(name="always_red", command=[sys.executable, "-c", "raise SystemExit(1)"])],
+    )
+    assert not summary.completed and summary.cycles == 1
+    log = git_ops.log_oneline(tmp_path, 10)
+    assert "lha: anchor records at run end" in log[0]
+    reflections = _committed_events(tmp_path, "reflection")
+    assert [e["payload"]["item"] for e in reflections] == ["01"]
+    assert summary.head_sha == git_ops.head_sha(tmp_path)
+    assert not git_ops.run_git(tmp_path, "status", "--porcelain").strip()
+
+
+def _committed_events(workdir: Path, kind: str) -> list[dict[str, object]]:
+    raw = git_ops.show_at_head(workdir, ".lha/events.ndjson")
+    rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    return [r for r in rows if r["kind"] == kind]
 
 
 @pytest.mark.asyncio

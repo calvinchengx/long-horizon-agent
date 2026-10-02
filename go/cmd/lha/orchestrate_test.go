@@ -214,7 +214,8 @@ func TestE2EOrchestrateScriptedParallelMatchesPython(t *testing.T) {
 		!strings.Contains(log, "lha: complete 02 (write b) [merged lha/implementer-02/c2]") {
 		t.Fatal(log)
 	}
-	if owners := git(t, workdir, "show", "HEAD~3:.lha/ownership.json"); !strings.Contains(owners, `"a.py": "implementer-01"`) {
+	initial := git(t, workdir, "log", "-1", "--format=%H", "--grep=lha: initialize mission anchor")
+	if owners := git(t, workdir, "show", initial+":.lha/ownership.json"); !strings.Contains(owners, `"a.py": "implementer-01"`) {
 		t.Fatalf("the planned ownership never reached the anchor: %s", owners)
 	}
 	goWS := orgWorkspace(t, workdir, true)

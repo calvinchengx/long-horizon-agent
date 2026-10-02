@@ -136,6 +136,50 @@ func TestOrchestratorCompletesMissionWithOrg(t *testing.T) {
 	if len(boards) != 2 || boards[0].Payload["author"] != "researcher:01" || boards[0].Payload["text"] != "done" {
 		t.Fatalf("%+v", boards)
 	}
+	// Each approval is committed by itself, so the last verdict is not lost with the run.
+	log := strings.Split(git(t, dir, "log", "--format=%s"), "\n")
+	if log[0] != "lha: review approved 02" || !strings.Contains(strings.Join(log, "\n"), "lha: review approved 01") {
+		t.Fatalf("%v", log)
+	}
+	reviews := committedEvents(t, dir, agents.ReviewEvent)
+	if len(reviews) != 2 || reviews[0].CycleID != "c1" || reviews[0].Payload["item_id"] != "01" || reviews[0].Payload["verdict"] != "approve" ||
+		reviews[1].CycleID != "c2" || reviews[1].Payload["item_id"] != "02" || reviews[1].Payload["verdict"] != "approve" {
+		t.Fatalf("%+v", reviews)
+	}
+	for _, r := range reviews {
+		if r.Payload["base"] == "" || r.Payload["head"] == "" {
+			t.Fatalf("%+v", r)
+		}
+	}
+}
+
+// TestRecordsAppendedAfterTheLastCheckpointAreCommittedAtRunEnd is python's
+// test_records_appended_after_the_last_checkpoint_are_committed_at_run_end: a failed attempt's
+// reflection is appended after its checkpoint; a run that then ends (the cycle limit) commits it.
+func TestRecordsAppendedAfterTheLastCheckpointAreCommittedAtRunEnd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	red := contracts.Check{Name: "always_red", Command: []string{"false"}, Gating: true, Where: "sandbox"}
+	summary := run(t, []string{"LHA_MAX_CYCLES=1"}, OrchestratorOptions{ResearchPerItem: 0, DoReview: false, Models: map[string]contracts.ModelProvider{
+		"lead": stub(doneTurn), "researcher": stub(doneTurn), "reviewer": stub(approve),
+	}}, MissionOptions{Workdir: dir, Title: "Flush test", Description: "one failing attempt", Checklist: checklist2(),
+		Checks: []contracts.Check{red}})
+	if summary.Completed || summary.Cycles != 1 {
+		t.Fatalf("%+v", summary)
+	}
+	if log := strings.Split(git(t, dir, "log", "--format=%s"), "\n"); log[0] != "lha: anchor records at run end" {
+		t.Fatalf("%v", log)
+	}
+	reflections := committedEvents(t, dir, ReflectionEvent)
+	if len(reflections) != 1 || reflections[0].Payload["item"] != "01" {
+		t.Fatalf("%+v", reflections)
+	}
+	if summary.HeadSHA != git(t, dir, "rev-parse", "HEAD") {
+		t.Fatal("head")
+	}
+	if status := git(t, dir, "status", "--porcelain"); strings.TrimSpace(status) != "" {
+		t.Fatalf("dirty: %q", status)
+	}
 }
 
 func TestBlockingReviewReopensTheItem(t *testing.T) {
@@ -306,8 +350,12 @@ func TestParallelWaveMergesVerifiedBranches(t *testing.T) {
 		"lha: complete 02 (write b) [merged lha/implementer-02/c2]"}) {
 		t.Fatalf("%q", merges)
 	}
-	if parents := strings.Fields(git(t, dir, "log", "-1", "--pretty=%P")); len(parents) != 2 {
+	// The checkpoint IS the merge commit (the approved review's anchor commit follows it).
+	if parents := strings.Fields(git(t, dir, "log", "-1", "--pretty=%P", "--grep=lha: complete 02")); len(parents) != 2 {
 		t.Fatal("the checkpoint IS the merge commit")
+	}
+	if log := strings.Split(git(t, dir, "log", "--format=%s"), "\n"); log[0] != "lha: review approved 02" {
+		t.Fatalf("%v", log)
 	}
 	tickets := committedEvents(t, dir, "ticket")
 	if len(tickets) != 2 || tickets[0].Payload["status"] != "done" || tickets[1].Payload["status"] != "done" {

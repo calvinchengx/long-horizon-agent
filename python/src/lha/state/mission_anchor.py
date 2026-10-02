@@ -170,6 +170,13 @@ class GitMissionAnchor:
         return len(self._pending_decisions)
 
     @property
+    def has_pending_records(self) -> bool:
+        """Whether events, decisions or an ownership map await the next commit."""
+        return bool(self._pending_events or self._pending_decisions) or (
+            self._pending_ownership is not None
+        )
+
+    @property
     def pending_decisions(self) -> list[DecisionRecord]:
         return list(self._pending_decisions)
 
