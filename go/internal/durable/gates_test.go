@@ -351,3 +351,20 @@ func TestACycleThatCompletesTheMissionOpensNoGate(t *testing.T) {
 		t.Fatalf("result %+v cycles %d gate notifications %d", res, cycles, notified)
 	}
 }
+
+// TestResolvedByNamesTheDecider is python's named-decider case: a resolved notice carrying who
+// decided (human_decision_v2) names them in hitl_gates.resolved_by.
+func TestResolvedByNamesTheDecider(t *testing.T) {
+	if got := ResolvedByFor(GateNotice{Event: "resolved", By: "calvin"}); got != "calvin (human_decision signal)" {
+		t.Fatal(got)
+	}
+	if got := ResolvedByFor(GateNotice{Event: "resolved"}); got != ResolvedBySignal {
+		t.Fatal(got)
+	}
+	if got := ResolvedByFor(GateNotice{Event: "defaulted", By: "calvin"}); got != ResolvedByTimeout {
+		t.Fatal(got)
+	}
+	if got := ResolvedByFor(GateNotice{Event: "opened", By: "calvin"}); got != "" {
+		t.Fatal(got)
+	}
+}

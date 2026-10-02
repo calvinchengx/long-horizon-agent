@@ -85,6 +85,7 @@ class GateNotice:
     step: int = 0
     deadline: str = ""
     request: PendingApproval | None = None
+    by: str = ""  # who decided (a ``resolved`` event from ``human_decision_v2``)
     # When the event happened, in workflow time (ISO-8601 UTC); "" from workflows built before
     # it existed (the activity then uses its own clock).
     at: str = ""
@@ -131,6 +132,7 @@ class MissionState:
     last_item: str | None = None
     # Human-in-the-loop: a decision signalled but not yet consumed by a gate.
     pending_decision: str | None = None
+    pending_decision_by: str = ""  # who sent it (``human_decision_v2``); "" = unknown
     # Operator steering notes (``steer`` signal); every following cycle's prompt includes them.
     steer_notes: list[str] = field(default_factory=list)
     # How many times the mission parked on a degraded dependency (observability).

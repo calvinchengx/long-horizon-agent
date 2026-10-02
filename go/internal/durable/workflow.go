@@ -120,9 +120,11 @@ type missionRun struct {
 	gate              *GateView
 	children          int // sub-agent children started by this run (their ids)
 
-	decisionCh workflow.ReceiveChannel
-	steerCh    workflow.ReceiveChannel
-	snoozeCh   workflow.ReceiveChannel
+	decisionCh   workflow.ReceiveChannel
+	decisionV2Ch workflow.ReceiveChannel
+	decisionBy   string // who sent the decision takeDecision last consumed
+	steerCh      workflow.ReceiveChannel
+	snoozeCh     workflow.ReceiveChannel
 }
 
 func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
@@ -132,6 +134,7 @@ func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
 	w := &missionRun{inp: inp, state: &early}
 	w.registerQueries(ctx)
 	w.decisionCh = workflow.GetSignalChannel(ctx, SignalHumanDecision)
+	w.decisionV2Ch = workflow.GetSignalChannel(ctx, SignalHumanDecisionV2)
 	w.steerCh = workflow.GetSignalChannel(ctx, SignalSteer)
 	w.snoozeCh = workflow.GetSignalChannel(ctx, SignalSnooze)
 	w.drainSignals(ctx)
@@ -142,6 +145,7 @@ func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
 	}
 	if early.PendingDecision != nil {
 		st.PendingDecision = early.PendingDecision
+		st.PendingDecisionBy = early.PendingDecisionBy
 	}
 	st.SteerNotes = lastN(append(append([]string{}, st.SteerNotes...), early.SteerNotes...), MaxSteerNotes)
 	if inp.State == nil {
@@ -184,6 +188,11 @@ func (w *missionRun) addSignalHandlers(ctx workflow.Context, sel workflow.Select
 		c.Receive(ctx, &v)
 		w.onHumanDecision(v)
 	})
+	sel.AddReceive(w.decisionV2Ch, func(c workflow.ReceiveChannel, _ bool) {
+		var v any
+		c.Receive(ctx, &v)
+		w.onHumanDecisionV2(v)
+	})
 	sel.AddReceive(w.steerCh, func(c workflow.ReceiveChannel, _ bool) {
 		var v any
 		c.Receive(ctx, &v)
@@ -204,6 +213,8 @@ func (w *missionRun) drainSignals(ctx workflow.Context) {
 		switch {
 		case w.decisionCh.ReceiveAsync(&v):
 			w.onHumanDecision(v)
+		case w.decisionV2Ch.ReceiveAsync(&v):
+			w.onHumanDecisionV2(v)
 		case w.steerCh.ReceiveAsync(&v):
 			w.onSteer(v)
 		case w.snoozeCh.ReceiveAsync(&v):
@@ -224,6 +235,26 @@ func (w *missionRun) onHumanDecision(v any) {
 	}
 	d := pyfmt.PyStrip(s)
 	w.state.PendingDecision = &d
+	w.state.PendingDecisionBy = ""
+}
+
+// onHumanDecisionV2 is onHumanDecision with who made it ({"decision", "by"}; lha mission-approve
+// --as): the gate's resolved_by names them.
+func (w *missionRun) onHumanDecisionV2(v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	d := pyfmt.PyStrip(fmt.Sprint(m["decision"]))
+	if m["decision"] == nil {
+		d = ""
+	}
+	by := ""
+	if m["by"] != nil {
+		by = pyfmt.Head(pyfmt.PyStrip(fmt.Sprint(m["by"])), 200)
+	}
+	w.state.PendingDecision = &d
+	w.state.PendingDecisionBy = by
 }
 
 // onSteer appends an operator steering note; every following cycle's prompt includes it.
@@ -621,6 +652,11 @@ func (w *missionRun) sleepUntilResume(ctx workflow.Context) error {
 
 // notify records a gate event in the anchor + webhook (an activity); never fails the gate.
 func (w *missionRun) notify(ctx workflow.Context, view *GateView, event, decision string, step int) error {
+	return w.notifyBy(ctx, view, event, decision, step, "")
+}
+
+// notifyBy is notify with who decided (a resolved event from human_decision_v2).
+func (w *missionRun) notifyBy(ctx workflow.Context, view *GateView, event, decision string, step int, by string) error {
 	nctx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: notifyTimeout,
 		RetryPolicy:         shortRetry,
@@ -637,6 +673,7 @@ func (w *missionRun) notify(ctx workflow.Context, view *GateView, event, decisio
 		DefaultAction: view.DefaultAction,
 		Decision:      decision,
 		Step:          step,
+		By:            by,
 		Deadline:      view.Deadline,
 		Request:       view.Request,
 		At:            isoSeconds(workflow.Now(ctx)),
@@ -659,7 +696,9 @@ func (w *missionRun) takeDecision(options []string) (string, bool) {
 	st := w.state
 	for st.PendingDecision != nil {
 		pending := *st.PendingDecision
+		w.decisionBy = st.PendingDecisionBy
 		st.PendingDecision = nil // consumed
+		st.PendingDecisionBy = ""
 		if choice, ok := allowed[strings.ToLower(pyfmt.PyStrip(pending))]; ok {
 			return choice, true
 		}
@@ -706,8 +745,12 @@ func (w *missionRun) runGate(ctx workflow.Context, view *GateView, timeoutSecond
 	sent := 0
 	for {
 		if choice, ok := w.takeDecision(view.Options); ok {
-			w.log(ctx, fmt.Sprintf("%s gate %s resolved: %s", view.Kind, view.GateID, choice))
-			if err := w.notify(ctx, view, "resolved", choice, 0); err != nil {
+			suffix := ""
+			if w.decisionBy != "" {
+				suffix = " by " + w.decisionBy
+			}
+			w.log(ctx, fmt.Sprintf("%s gate %s resolved: %s%s", view.Kind, view.GateID, choice, suffix))
+			if err := w.notifyBy(ctx, view, "resolved", choice, 0, w.decisionBy); err != nil {
 				return "", false, err
 			}
 			return choice, false, nil

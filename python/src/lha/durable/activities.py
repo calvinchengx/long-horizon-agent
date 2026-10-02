@@ -673,6 +673,16 @@ RESOLVED_BY_SIGNAL = "human (human_decision signal)"
 RESOLVED_BY_TIMEOUT = "default (timeout)"
 
 
+def resolved_by_for(notice: GateNotice) -> str:
+    """``hitl_gates.resolved_by`` for a notice: the decider when ``human_decision_v2`` named one,
+    else how the gate closed."""
+    if notice.event == "resolved":
+        return f"{notice.by} (human_decision signal)" if notice.by else RESOLVED_BY_SIGNAL
+    if notice.event == "defaulted":
+        return RESOLVED_BY_TIMEOUT
+    return ""
+
+
 def gate_event_from_notice(notice: GateNotice, payload: dict[str, object]) -> GateEvent:
     """The ``hitl_gates`` event for a durable gate notice (question/arguments redacted)."""
     request = payload.get("request")
@@ -687,9 +697,7 @@ def gate_event_from_notice(notice: GateNotice, payload: dict[str, object]) -> Ga
         default_action=notice.default_action,
         deadline=notice.deadline,
         decision=notice.decision,
-        resolved_by={"resolved": RESOLVED_BY_SIGNAL, "defaulted": RESOLVED_BY_TIMEOUT}.get(
-            notice.event, ""
-        ),
+        resolved_by=resolved_by_for(notice),
         step=notice.step,
         risk="irreversible" if notice.request is not None else notice.kind,
         request={str(k): str(v) for k, v in request.items()} if isinstance(request, dict) else None,

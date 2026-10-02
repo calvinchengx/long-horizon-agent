@@ -501,13 +501,14 @@ lha mission-approve MISSION_ID --decision TEXT
 | Option | Default | Meaning |
 |---|---|---|
 | `--decision TEXT` | required | `approve` or `reject` (a queued irreversible action); `retry`, `abort` or `impossible` (the deadlock gate) |
+| `--as TEXT` | unset | who decides (at most 200 characters); recorded as the gate's `resolved_by`, `<who> (human_decision signal)`, in [`lha gates`](#lha-gates) and the gate log |
 
 It queries the open gate first and checks the decision against that gate's options, so a decision
 the gate does not offer (for example `approve` at the deadlock gate) is refused with exit `2`; the
 gate is printed on stderr and nothing is sent. With no gate open, any of the five decisions is
 sent and held until the next gate. The value is lower-cased; a word outside those five exits `2`
-before contacting Temporal. On success it sends signal `human_decision_v1` and prints
-`sent decision '<decision>' to mission <id>`. See
+before contacting Temporal. On success it sends signal `human_decision_v1` (or `human_decision_v2`
+with `--as`) and prints `sent decision '<decision>' to mission <id>` (`... as <who>`). See
 [14-running-on-temporal.md](14-running-on-temporal.md#5-gates-sleep-and-abort) and
 [15-operations-runbook.md](15-operations-runbook.md).
 

@@ -192,7 +192,9 @@ The workflow opens a human gate in two places: for an irreversible tool call a c
   `gate_v1`);
 - the wait is a durable timer, so it survives worker restarts. On timeout the default is applied.
 
-Decisions arrive on the `human_decision_v1` signal as a string. A decision is held until a gate
+Decisions arrive on the `human_decision_v1` signal as a string, or on `human_decision_v2` as
+`{"decision", "by"}` when `lha mission-approve --as <who>` names the decider (the gate's
+`resolved_by` then reads `<who> (human_decision signal)`). A decision is held until a gate
 consumes it, so a decision sent before the gate opened is honoured, and it survives
 Continue-As-New. Matching is case-insensitive; a decision that is not one of the open gate's
 options is recorded in `rejected_decisions` and the gate keeps waiting. `lha mission-approve`
@@ -325,6 +327,7 @@ The `resume_at` query returns the wake-up time (0 when not sleeping).
 | Name (wire) | Kind | Payload / result |
 |---|---|---|
 | `human_decision_v1` | signal | decision string, held until a gate consumes it |
+| `human_decision_v2` | signal | `{"decision", "by"}`: the same, naming who decided (`mission-approve --as`) |
 | `snooze_v1` | signal | seconds to sleep before the next cycle (`0` wakes) |
 | `steer_v1` | signal | note appended to `steer_notes` (max 20 notes, 2000 chars each); every following cycle's prompt includes them |
 | `status_v1` | query | current status string |

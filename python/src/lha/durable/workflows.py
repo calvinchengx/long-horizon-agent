@@ -103,6 +103,7 @@ from lha.durable.signals import (
     QUERY_STATUS,
     QUERY_STEER_NOTES,
     SIGNAL_HUMAN_DECISION,
+    SIGNAL_HUMAN_DECISION_V2,
     SIGNAL_SNOOZE,
     SIGNAL_STEER,
     STATUS_ABORTED,
@@ -210,6 +211,7 @@ class MissionWorkflow:
         self._state = MissionState()
         self._park_reason = ""
         self._rejected_decisions: list[str] = []
+        self._decision_by = ""
         self._open_question = ""
         self._gate: GateView | None = None
 
@@ -235,6 +237,7 @@ class MissionWorkflow:
         state = dataclasses.replace(inp.state) if inp.state is not None else MissionState()
         if early.pending_decision is not None:
             state.pending_decision = early.pending_decision
+            state.pending_decision_by = early.pending_decision_by
         state.steer_notes = [*state.steer_notes, *early.steer_notes][-MAX_STEER_NOTES:]
         if inp.state is None:
             state.resume_at = max(inp.resume_at, early.resume_at)
@@ -467,7 +470,14 @@ class MissionWorkflow:
         self._log("woke up")
 
     async def _notify(
-        self, inp: MissionInput, view: GateView, event: str, *, decision: str = "", step: int = 0
+        self,
+        inp: MissionInput,
+        view: GateView,
+        event: str,
+        *,
+        decision: str = "",
+        step: int = 0,
+        by: str = "",
     ) -> None:
         """Record a gate event in the anchor + webhook (an activity); never fails the gate."""
         try:
@@ -486,6 +496,7 @@ class MissionWorkflow:
                     step=step,
                     deadline=view.deadline,
                     request=view.request,
+                    by=by,
                     at=_iso(workflow.now()),
                 ),
                 start_to_close_timeout=_NOTIFY_TIMEOUT,
@@ -502,7 +513,9 @@ class MissionWorkflow:
         state = self._state
         while state.pending_decision is not None:
             pending = state.pending_decision
+            self._decision_by = state.pending_decision_by
             state.pending_decision = None  # consumed
+            state.pending_decision_by = ""
             choice = allowed.get(pending.strip().lower())
             if choice is not None:
                 return choice
@@ -537,8 +550,10 @@ class MissionWorkflow:
             while True:
                 choice = self._take_decision(view.options)
                 if choice is not None:
-                    self._log(f"{view.kind} gate {view.gate_id} resolved: {choice}")
-                    await self._notify(inp, view, "resolved", decision=choice)
+                    by = self._decision_by
+                    suffix = f" by {by}" if by else ""
+                    self._log(f"{view.kind} gate {view.gate_id} resolved: {choice}{suffix}")
+                    await self._notify(inp, view, "resolved", decision=choice, by=by)
                     return choice, False
                 elapsed = (workflow.now() - opened).total_seconds()
                 rung = next_rung(elapsed, timeout, schedule, sent)
@@ -767,6 +782,14 @@ class MissionWorkflow:
         """Deliver a human decision. It is held until a gate consumes it (early signals are kept,
         and survive Continue-As-New); a gate only accepts one of the options it offered."""
         self._state.pending_decision = decision.strip()
+        self._state.pending_decision_by = ""
+
+    @workflow.signal(name=SIGNAL_HUMAN_DECISION_V2)
+    def human_decision_v2(self, payload: dict[str, str]) -> None:
+        """``human_decision`` with who made it (``{"decision", "by"}``; ``lha mission-approve
+        --as``): the gate's ``resolved_by`` names them."""
+        self._state.pending_decision = str(payload.get("decision", "")).strip()
+        self._state.pending_decision_by = str(payload.get("by", "")).strip()[:200]
 
     @workflow.signal(name=SIGNAL_SNOOZE)
     def snooze(self, seconds: int) -> None:
@@ -809,6 +832,7 @@ class MissionWorkflow:
                 pending = state.pending_decision
                 if pending is not None:
                     state.pending_decision = None  # consumed
+                    state.pending_decision_by = ""
                     choice = allowed.get(pending.lower())
                     if choice is not None:
                         return choice

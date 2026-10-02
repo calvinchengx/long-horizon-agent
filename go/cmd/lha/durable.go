@@ -581,7 +581,8 @@ func pyValue(v any) string {
 
 func (c *cli) missionApprove(args []string) error {
 	fs := c.newFlags("mission-approve", commandHelpFor("mission-approve"))
-	var decision optional
+	var decision, by optional
+	fs.Var(&by, "as", "Who decides; recorded as the gate's resolved_by (`lha gates`).")
 	fs.Var(&decision, "decision", "approve | reject (an irreversible action), retry | abort | impossible (a deadlock); "+
 		"checked against the open gate - see 'lha mission-status'.")
 	positional, err := c.parseWithArgs(fs, args)
@@ -597,6 +598,10 @@ func (c *cli) missionApprove(args []string) error {
 	}
 	if _, err := checkDecision(nil, decision.value); err != nil {
 		return fail(2, "unknown --decision %s; expected %s", contracts.PyRepr(decision.value), strings.Join(allDecisions, ", "))
+	}
+	who := pyfmt.PyStrip(by.value)
+	if len([]rune(who)) > 200 {
+		return fail(2, "--as is longer than 200 characters")
 	}
 	cl, err := c.connect()
 	if err != nil {
@@ -614,6 +619,13 @@ func (c *cli) missionApprove(args []string) error {
 			fmt.Fprintln(c.stderr, l)
 		}
 		return fail(2, "%s", err)
+	}
+	if who != "" {
+		if err := cl.SignalWorkflow(c.ctx, wid, "", durable.SignalHumanDecisionV2, map[string]any{"decision": choice, "by": who}); err != nil {
+			return err
+		}
+		fmt.Fprintf(c.stdout, "sent decision '%s' to mission %s as %s\n", choice, id, who)
+		return nil
 	}
 	if err := cl.SignalWorkflow(c.ctx, wid, "", durable.SignalHumanDecision, choice); err != nil {
 		return err

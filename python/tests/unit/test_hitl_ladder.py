@@ -438,6 +438,18 @@ async def test_notify_gate_writes_the_hitl_gates_row_idempotently(tmp_path: Path
     )
     assert row.resolved_by == "human (human_decision signal)" and row.risk == "irreversible"
     assert row.opened_at == "2026-01-01T00:00:00+00:00"
+    # A decision that came with who made it (human_decision_v2) names them.
+    named = replace(
+        base,
+        gate_id="g2",
+        event="resolved",
+        decision="approve",
+        by="calvin",
+        at="2026-01-01T00:30:00+00:00",
+    )
+    assert (await _notify_gate(named, settings=settings)).stored
+    rows = {r.gate_id: r for r in await _gates("m")}
+    assert rows["g2"].resolved_by == "calvin (human_decision signal)"
     assert row.resolved_at == "2026-01-01T00:20:00+00:00"
     assert row.request is not None and row.request["fingerprint"] == "fp"
     assert "sk-ant" not in json.dumps(row.request) and "sk-ant" not in row.question
@@ -690,6 +702,30 @@ def test_mission_status_shows_gate_sleep_and_log(monkeypatch: pytest.MonkeyPatch
     _fake_client(monkeypatch, _Handle(None, old_worker=True))
     old = runner.invoke(cli.app, ["mission-status", "m1"])
     assert old.exit_code == 0 and "waiting on: legacy question" in old.output
+
+
+def test_mission_approve_as_names_the_decider(monkeypatch: pytest.MonkeyPatch) -> None:
+    from lha.durable.signals import SIGNAL_HUMAN_DECISION, SIGNAL_HUMAN_DECISION_V2
+
+    handle = _Handle(None)
+    _fake_client(monkeypatch, handle)
+    plain = runner.invoke(cli.app, ["mission-approve", "m1", "--decision", "approve"])
+    assert plain.exit_code == 0 and plain.output == "sent decision 'approve' to mission m1\n"
+    named = runner.invoke(
+        cli.app, ["mission-approve", "m1", "--decision", "reject", "--as", " calvin "]
+    )
+    assert named.exit_code == 0, named.output
+    assert named.output == "sent decision 'reject' to mission m1 as calvin\n"
+    assert handle.signals == [
+        (SIGNAL_HUMAN_DECISION, "approve"),
+        (SIGNAL_HUMAN_DECISION_V2, {"decision": "reject", "by": "calvin"}),
+    ]
+    assert (
+        runner.invoke(
+            cli.app, ["mission-approve", "m1", "--decision", "approve", "--as", "x" * 201]
+        ).exit_code
+        == 2
+    )
 
 
 def test_mission_steer(monkeypatch: pytest.MonkeyPatch) -> None:

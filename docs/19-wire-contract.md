@@ -33,7 +33,7 @@ the two worker implementations ([cross-language workers](#cross-language-workers
 | Activity | `run_implementer`: `ImplementerInput` -> `ImplementerOutput` | same |
 | Activity | `integrate_branch`: `IntegrateInput` -> `CycleResult` | same |
 | Activity | `review_cycle`: `ReviewInput` -> `CycleResult` | same |
-| Signal | `human_decision_v1` (string) | [`durable/signals.py`](../python/src/lha/durable/signals.py) |
+| Signal | `human_decision_v1` (string); `human_decision_v2` (`{"decision": str, "by": str}`) | [`durable/signals.py`](../python/src/lha/durable/signals.py) |
 | Signal | `steer_v1` (string) | same |
 | Signal | `snooze_v1` (int seconds; `0` wakes a sleeping mission) | same |
 | Query | `status_v1` -> string | same |
@@ -484,7 +484,7 @@ What is written, and by whom:
 | Table | Written by |
 |---|---|
 | `missions` | `MissionTracker` ([`persistence/tracking.py`](../python/src/lha/persistence/tracking.py)) and the `record_mission_status` activity, an upsert on `mission_id` (an empty title or description keeps the stored one). The status is monotonic: a row in `DONE`, `IMPOSSIBLE` or `ABORTED` keeps it when a non-terminal status arrives (the other columns still update), unless the caller passes `reopen=True` |
-| `hitl_gates` | `record_gate_event`: the `notify_gate` activity (durable gates; `resolved_by` is `human (human_decision signal)` or `default (timeout)`) and the local `TerminalApprover` (`terminal:<login>`, `timeout`, `end of input`, `non-interactive (stdin is not a TTY)`). An upsert on (`mission_id`, `gate_id`): `opened` (re)opens the row unless it repeats the stored opening time, `reminder` raises `reminders` (never lowers it) on an open row, `resolved` / `defaulted` close an open row and are no-ops on a closed one; an event for a missing row inserts it |
+| `hitl_gates` | `record_gate_event`: the `notify_gate` activity (durable gates; `resolved_by` is `human (human_decision signal)`, `<who> (human_decision signal)` for a `human_decision_v2` decision, or `default (timeout)`) and the local `TerminalApprover` (`terminal:<login>`, `timeout`, `end of input`, `non-interactive (stdin is not a TTY)`). An upsert on (`mission_id`, `gate_id`): `opened` (re)opens the row unless it repeats the stored opening time, `reminder` raises `reminders` (never lowers it) on an open row, `resolved` / `defaulted` close an open row and are no-ops on a closed one; an event for a missing row inserts it |
 | `cost_ledger` | `LedgerSink`, installed as `CostMeter.on_record`: one row per metered model call, keyed by an idempotency key derived from mission id, cycle id and `<key prefix>#<sequence number>`, so a repeated write is a no-op. Key prefixes: `<cycle id>@<attempt>` for a durable cycle (a retried attempt's calls are new rows), `sub:<workflow id>:<activity id>@<attempt>` for a durable sub-agent, `planner` for the Planner's calls in `lha mission-start`; a local runner uses an empty prefix and backfills the calls its meter recorded before the store opened |
 | `episodic_events`, `semantic_memory`, `skills` | the memory plane ([`memory/service.py`](../python/src/lha/memory/service.py)) when `LHA_MEMORY_ENABLED` is true |
 | `checklist_items`, `idempotency_keys`, `snapshots` | nothing; the tables exist in Postgres only |

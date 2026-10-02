@@ -56,9 +56,10 @@ const VersionCompleteSkipsApprovals = "lha-go-complete-skips-approvals-v1"
 
 // Signals and queries (python: lha.durable.signals and the MissionWorkflow query methods).
 const (
-	SignalHumanDecision = "human_decision_v1"
-	SignalSteer         = "steer_v1"
-	SignalSnooze        = "snooze_v1"
+	SignalHumanDecision   = "human_decision_v1"
+	SignalSteer           = "steer_v1"
+	SignalHumanDecisionV2 = "human_decision_v2" // {"decision", "by"}: the decision with who made it
+	SignalSnooze          = "snooze_v1"
 
 	QueryStatus            = "status_v1"
 	QueryCycles            = "cycles_done"

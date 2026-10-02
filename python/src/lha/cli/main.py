@@ -1165,13 +1165,19 @@ def mission_approve(
             "checked against the open gate - see 'lha mission-status'."
         ),
     ),
+    by: str = typer.Option(
+        "", "--as", help="Who decides; recorded as the gate's resolved_by (`lha gates`)."
+    ),
 ) -> None:
     """Resolve an open human gate on a mission with a decision."""
     if decision.strip().lower() not in _ALL_DECISIONS:
         _fail(f"unknown --decision {decision!r}; expected {', '.join(_ALL_DECISIONS)}")
+    by = by.strip()
+    if len(by) > 200:
+        _fail("--as is longer than 200 characters")
 
     from lha.config import get_settings
-    from lha.durable.signals import SIGNAL_HUMAN_DECISION
+    from lha.durable.signals import SIGNAL_HUMAN_DECISION, SIGNAL_HUMAN_DECISION_V2
     from lha.durable.worker import connect_client
 
     async def _run() -> str:
@@ -1184,11 +1190,15 @@ def mission_approve(
             for line in format_gate(gate):
                 typer.echo(line, err=True)
             _fail(str(exc))
-        await handle.signal(SIGNAL_HUMAN_DECISION, choice)
+        if by:
+            await handle.signal(SIGNAL_HUMAN_DECISION_V2, {"decision": choice, "by": by})
+        else:
+            await handle.signal(SIGNAL_HUMAN_DECISION, choice)
         return choice
 
     choice = _run_cli(_run())
-    typer.echo(f"sent decision '{choice}' to mission {mission_id}")
+    suffix = f" as {by}" if by else ""
+    typer.echo(f"sent decision '{choice}' to mission {mission_id}{suffix}")
 
 
 @app.command(name="mission-snooze")

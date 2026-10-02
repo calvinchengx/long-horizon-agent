@@ -138,7 +138,8 @@ These limitations are in the current code:
 - The `missions` row and the `hitl_gates` rows are best-effort copies: when the store is down,
   the workflow goes on and the rows lag until the next write. `lha mission-status` and the
   anchor's `gate_*` events are the live and complete sources. A durable gate's `resolved_by`
-  cannot name the person who answered (the `human_decision_v1` signal carries no identity).
+  names the person who answered only when `lha mission-approve --as` gave a name (the
+  `human_decision_v1` signal carries none).
 - Leases: a request for a file another open item owns is refused, not queued, and a lease lasts
   until its writer's item is done.
 - The durable organization's blackboard and reflections live only in committed events (no

@@ -68,6 +68,7 @@ type GateNotice struct {
 	Step          int              `json:"step"`
 	Deadline      string           `json:"deadline"`
 	Request       *PendingApproval `json:"request"`
+	By            string           `json:"by"` // who decided (a resolved event from human_decision_v2)
 	// At is when the event happened, in workflow time (ISO-8601 UTC); "" = use the activity clock.
 	At string `json:"at"`
 }
@@ -117,20 +118,21 @@ type MissionStatusInput struct {
 
 // MissionState is carried across Continue-As-New (pointers + small counters only).
 type MissionState struct {
-	CyclesDone      int              `json:"cycles_done"`
-	Status          string           `json:"status"`
-	HeadSHA         string           `json:"head_sha"`
-	ItemsDone       int              `json:"items_done"`
-	ItemsTotal      int              `json:"items_total"`
-	LastItem        *string          `json:"last_item"`
-	PendingDecision *string          `json:"pending_decision"`
-	SteerNotes      []string         `json:"steer_notes"`
-	Parks           int              `json:"parks"`
-	DeadlockRetries int              `json:"deadlock_retries"`
-	ApprovedActions []ApprovedAction `json:"approved_actions"`
-	RejectedActions []string         `json:"rejected_actions"`
-	FailItem        *string          `json:"fail_item"`
-	FailStreak      int              `json:"fail_streak"`
+	CyclesDone        int              `json:"cycles_done"`
+	Status            string           `json:"status"`
+	HeadSHA           string           `json:"head_sha"`
+	ItemsDone         int              `json:"items_done"`
+	ItemsTotal        int              `json:"items_total"`
+	LastItem          *string          `json:"last_item"`
+	PendingDecision   *string          `json:"pending_decision"`
+	PendingDecisionBy string           `json:"pending_decision_by"` // who sent it (human_decision_v2); "" = unknown
+	SteerNotes        []string         `json:"steer_notes"`
+	Parks             int              `json:"parks"`
+	DeadlockRetries   int              `json:"deadlock_retries"`
+	ApprovedActions   []ApprovedAction `json:"approved_actions"`
+	RejectedActions   []string         `json:"rejected_actions"`
+	FailItem          *string          `json:"fail_item"`
+	FailStreak        int              `json:"fail_streak"`
 	// ResumeAt: no cycle starts before this epoch time; 0 = none.
 	ResumeAt    float64  `json:"resume_at"`
 	Escalations int      `json:"escalations"`
