@@ -465,10 +465,15 @@ Budget: every implementer, integration (the replanner's split), review and resea
 its ledger from the mission's spend journal and appends its own spend to it, so all of them count
 against `budget_usd`. The implementers of one wave run concurrently, so each sees the others'
 spend only after they finish: the ceiling can be overshot by up to one wave's spend. Their calls
-also go to the persistent cost ledger (`lha costs`). Tiered memory, reflection and the
-blackboard are not part of the durable organization: the Lead's briefs come from the round's
-research, and an implementer's context is the mission spec, the item's last failure, the recent
-decisions, its research briefs and the operator's steering notes.
+also go to the persistent cost ledger (`lha costs`). The blackboard and reflections work from the
+committed log: each round's research briefs, each implementer's summary and each blocking review
+verdict are committed as `blackboard` events with the round's checkpoints, a failed integration
+is reflected on and the lesson committed as a `reflection` event by a commit of its own
+(`lha: reflection on <id>`), and the next Lead cycle or implementer reads the newest six posts
+and its item's latest reflection back from the anchor, exactly as a resumed `lha orchestrate`
+does. An implementer's context is therefore the mission spec, the item's last failure, its
+reflection, the recent decisions, its research briefs, the team board and the operator's
+steering notes. Tiered memory is not part of the durable organization's implementers.
 
 ## ClaimCheck payload codec
 

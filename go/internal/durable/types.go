@@ -513,6 +513,8 @@ type IntegrateInput struct {
 	MaxCycles        int                `json:"max_cycles"`
 	ResearchBriefs   int                `json:"research_briefs"`
 	ResearchFailures []string           `json:"research_failures"`
+	// The briefs themselves: committed as blackboard posts with the integration checkpoint.
+	ResearchBriefTexts []string `json:"research_brief_texts"`
 }
 
 // MarshalJSON never emits null for the lists.
@@ -521,6 +523,7 @@ func (i IntegrateInput) MarshalJSON() ([]byte, error) {
 	a := alias(i)
 	a.CheckCommands = nzCommands(a.CheckCommands)
 	a.ResearchFailures = nz(a.ResearchFailures)
+	a.ResearchBriefTexts = nz(a.ResearchBriefTexts)
 	return json.Marshal(a)
 }
 

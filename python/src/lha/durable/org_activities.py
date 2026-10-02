@@ -42,12 +42,15 @@ from temporalio.exceptions import ApplicationError
 from lha.agent.assembly import lead_verifier, open_lead_sandbox
 from lha.agent.prompt import render_decisions
 from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_worktree
+from lha.agents.reflection import reflect_on_failure
 from lha.agents.reviewer import REVIEW_EVENT as _REVIEW_EVENT
 from lha.agents.reviewer import Reviewer
 from lha.agents.router import model_for_role
 from lha.agents.waves import (
     MAX_CONSECUTIVE_FAILURES,
     ImplementerRun,
+    board_context,
+    board_event,
     diff_since,
     implement_in_worktree,
     implementer_objective,
@@ -56,6 +59,8 @@ from lha.agents.waves import (
     maybe_split,
     new_implementer_run,
     parallel_batch,
+    reflection_event,
+    reflection_for,
     reopen_for_review,
 )
 from lha.config import Settings, get_settings
@@ -301,12 +306,16 @@ async def _run_implementer(
             tool_budget=settings.max_turns_per_cycle,
             acceptance=[c.name for c in checks],
         )
+        # The board and this item's reflection come from the committed log, as a resumed
+        # ``lha orchestrate`` rebuilds them; the operator's notes follow the board.
+        events = await anchor.read_events()
         objective, extra = implementer_objective(
             run,
             mission_text=snapshot.mission.render_anchor() if snapshot.mission else "",
+            reflection=reflection_for(events, item.id),
             decisions_text=render_decisions(snapshot.last_decisions),
             briefs=list(inp.research_briefs),
-            board=_context_notes(inp),
+            board="\n\n".join(p for p in (board_context(events), _context_notes(inp)) if p),
         )
         leases: list[LeaseDecision] = []
         handler = lease_handler(
@@ -513,7 +522,16 @@ async def _integrate_branch(
                 finally:
                     await _close_store(store, meter)
 
-        events: list[EventRecord] = []
+        # What ``lha orchestrate`` posts to its board during a round is committed here with the
+        # integration checkpoint: each research brief and the implementer's summary.
+        events: list[EventRecord] = [
+            board_event(f"researcher:{inp.item_id}", brief, inp.cycle_id)
+            for brief in inp.research_brief_texts
+        ]
+        if inp.output is not None and inp.output.brief:
+            events.append(
+                board_event(run.writer, f"[{inp.item_id}] {inp.output.brief}", inp.cycle_id)
+            )
         if inp.research_briefs or inp.research_failures:
             events.append(
                 EventRecord(
@@ -555,6 +573,8 @@ async def _integrate_branch(
             await session.close()
             await asyncio.to_thread(_abort_merge, inp.workdir)
         await asyncio.to_thread(_delete_branch, inp.workdir, branch)
+        if not report.merged and report.status not in ("blocked", "split"):
+            await _reflect(inp, item, report.reason, settings=settings, factory=factory)
         after = await anchor.read_situational_awareness()
         note = "verified + integrated" if report.merged else f"not integrated: {report.reason}"
         return _result_from_snapshot(
@@ -568,6 +588,79 @@ async def _integrate_branch(
             spent_usd=inp.output.spent_usd if inp.output is not None else 0.0,
             base_sha=report.before,
         )
+
+
+async def _reflect(
+    inp: IntegrateInput,
+    item: ChecklistItem,
+    reason: str,
+    *,
+    settings: Settings,
+    factory: ModelFactory,
+) -> None:
+    """Reflect on a failed attempt and commit the lesson as a ``reflection`` event.
+
+    ``lha orchestrate`` does the same after a failed integration; here the event gets an
+    anchor-only commit of its own, since the integration checkpoint is already made. Best
+    effort: a model failure is logged and the attempt stays recorded as failed.
+    """
+    anchor = GitMissionAnchor(inp.workdir)
+    snapshot = await anchor.read_situational_awareness()
+    meter = await asyncio.to_thread(
+        build_cycle_meter,
+        settings,
+        CycleInput(
+            mission_id=inp.mission_id,
+            workdir=inp.workdir,
+            cycle_id=inp.cycle_id,
+            budget_usd=inp.budget_usd,
+            max_cycles=inp.max_cycles,
+        ),
+    )
+    try:
+        model = meter.wrap(factory(settings, snapshot), role="reflection")
+    except ValueError as exc:
+        activity.logger.warning("reflection skipped: cannot build the model: %s", exc)
+        return
+    try:
+        store = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "reflect")
+    except BaseException:
+        await model.aclose()
+        raise
+    try:
+        text = await reflect_on_failure(
+            model=model,
+            item_description=item.description,
+            failure_summary=f"{item.id} was not integrated: {reason}",
+        )
+    except BudgetExceeded as exc:
+        raise _budget_error(exc) from exc
+    except Exception as exc:  # the lesson is help, not a gate
+        activity.logger.warning("reflection on %s failed: %s", item.id, exc)
+        return
+    finally:
+        try:
+            await model.aclose()
+            await asyncio.to_thread(
+                record_spend,
+                inp.workdir,
+                key=idempotency_key(inp.mission_id, inp.cycle_id, "reflect", _attempt()),
+                cycle_id=inp.cycle_id,
+                ledger=meter.ledger,
+            )
+        finally:
+            await _close_store(store, meter)
+    await anchor.commit_anchor_update(
+        Checkpoint(
+            cycle_id=inp.cycle_id,
+            progress_summary="",
+            checklist=await anchor.read_checklist(),
+            events=[
+                reflection_event(item.id, f"\nReflection on {item.id}: {text}\n", inp.cycle_id)
+            ],
+            commit_message=f"lha: reflection on {item.id}",
+        )
+    )
 
 
 def make_integrate_activity(
@@ -696,6 +789,11 @@ async def _review_cycle(
                 progress_summary=f"- {review_id} review of [{inp.item_id}]: {outcome}",
                 checklist=checklist,
                 events=[
+                    *(
+                        [board_event(f"reviewer:{inp.item_id}", review.notes(), review_id)]
+                        if review.blocking
+                        else []
+                    ),
                     EventRecord(
                         kind=REVIEW_EVENT,
                         cycle_id=review_id,
@@ -710,7 +808,7 @@ async def _review_cycle(
                             "base": base,
                             "head": inp.head_sha,
                         },
-                    )
+                    ),
                 ],
                 commit_message=f"lha: review {outcome} {inp.item_id}",
             )

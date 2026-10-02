@@ -18,7 +18,7 @@ either path:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -137,6 +137,54 @@ def new_implementer_run(
     run = ImplementerRun(item=item, cycle_id=cycle_id, writer=writer, ticket=ticket)
     run.tickets.append({"status": TicketStatus.CREATED.value, "note": ""})
     return run
+
+
+# --- the blackboard and reflections, as committed events -----------------------------------
+# Both run paths record a board post and a reflection as anchor events; ``lha orchestrate``
+# keeps them in memory too, the durable organization reads them back from the committed log.
+BOARD_EVENT = "blackboard"
+REFLECTION_EVENT = "reflection"
+BOARD_ENTRIES = 6  # newest blackboard entries shown to later rounds
+BOARD_ENTRY_CAP = 1_500
+REFLECTION_CAP = 2_000
+
+
+def board_event(author: str, text: str, cycle_id: str = "") -> EventRecord:
+    """A ``blackboard`` event for one post (capped as the board caps its entries)."""
+    return EventRecord(
+        kind=BOARD_EVENT,
+        cycle_id=cycle_id,
+        payload={"author": author, "text": text[:BOARD_ENTRY_CAP]},
+    )
+
+
+def reflection_event(item_id: str, text: str, cycle_id: str = "") -> EventRecord:
+    """A ``reflection`` event: the lesson for ``item_id``'s next attempt."""
+    return EventRecord(
+        kind=REFLECTION_EVENT,
+        cycle_id=cycle_id,
+        payload={"item": item_id, "text": text[:REFLECTION_CAP]},
+    )
+
+
+def board_context(events: Sequence[EventRecord]) -> str:
+    """The newest committed board posts as the "Team board" block a prompt shows (``""`` if none)."""
+    posts = [e for e in events if e.kind == BOARD_EVENT][-BOARD_ENTRIES:]
+    if not posts:
+        return ""
+    lines = [
+        f"[{e.payload.get('author', '')}] {str(e.payload.get('text', ''))[:BOARD_ENTRY_CAP]}"
+        for e in posts
+    ]
+    return "Team board (earlier rounds):\n" + "\n---\n".join(lines)
+
+
+def reflection_for(events: Sequence[EventRecord], item_id: str) -> str:
+    """The latest committed reflection for ``item_id`` (``""`` if none)."""
+    for event in reversed(events):
+        if event.kind == REFLECTION_EVENT and str(event.payload.get("item", "")) == item_id:
+            return str(event.payload.get("text", ""))
+    return ""
 
 
 def implementer_objective(

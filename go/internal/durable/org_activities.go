@@ -461,11 +461,26 @@ func (a *Activities) RunImplementer(ctx context.Context, inp ImplementerInput) (
 	if snapshot.Mission != nil {
 		missionText = snapshot.Mission.RenderAnchor()
 	}
+	// The board and this item's reflection come from the committed log, as a resumed
+	// `lha orchestrate` rebuilds them; the operator's notes follow the board.
+	events, err := anchor.ReadEvents(ctx)
+	if err != nil {
+		closeModel()
+		detach()
+		return ImplementerOutput{}, err
+	}
+	board := []string{}
+	for _, part := range []string{org.BoardContextFromEvents(events), contextNotes(inp)} {
+		if part != "" {
+			board = append(board, part)
+		}
+	}
 	objective, extra := org.ImplementerObjective(run, org.ObjectiveInput{
 		MissionText:   missionText,
+		Reflection:    org.ReflectionFor(events, item.ID),
 		DecisionsText: agent.RenderDecisions(snapshot.LastDecisions),
 		Briefs:        append([]string{}, inp.ResearchBriefs...),
-		Board:         contextNotes(inp),
+		Board:         strings.Join(board, "\n\n"),
 	})
 	lease := coordination.NewLeaseHandler(coordination.NewLeaseBroker(state.NewGitMissionAnchor(inp.Workdir)),
 		run.Writer, inp.CycleID, ownership, run.Leases)
@@ -684,7 +699,15 @@ func (a *Activities) integrateBranch(ctx context.Context, inp IntegrateInput) (C
 		}()
 		return org.MaybeSplit(ctx, list, blocked, settings, meter.Wrap(inner, "replanner"), missionText)
 	}
+	// What `lha orchestrate` posts to its board during a round is committed here with the
+	// integration checkpoint: each research brief and the implementer's summary.
 	var events []contracts.EventRecord
+	for _, brief := range inp.ResearchBriefTexts {
+		events = append(events, org.BoardEventRecord("researcher:"+inp.ItemID, brief, inp.CycleID))
+	}
+	if inp.Output != nil && inp.Output.Brief != "" {
+		events = append(events, org.BoardEventRecord(run.Writer, "["+inp.ItemID+"] "+inp.Output.Brief, inp.CycleID))
+	}
 	if inp.ResearchBriefs > 0 || len(inp.ResearchFailures) > 0 {
 		failures := make([]any, len(inp.ResearchFailures))
 		for i, f := range inp.ResearchFailures {
@@ -725,6 +748,11 @@ func (a *Activities) integrateBranch(ctx context.Context, inp IntegrateInput) (C
 		return CycleResult{}, err
 	}
 	deleteBranch(ctx, inp.Workdir, branch)
+	if !report.Merged && report.Status != contracts.StatusBlocked && report.Status != "split" {
+		if err := a.reflect(ctx, settings, inp, target, report.Reason); err != nil {
+			return CycleResult{}, err
+		}
+	}
 	after, err := anchor.ReadSituationalAwareness(ctx)
 	if err != nil {
 		return CycleResult{}, err
@@ -743,6 +771,61 @@ func (a *Activities) integrateBranch(ctx context.Context, inp IntegrateInput) (C
 	}), nil
 }
 
+// reflect reflects on a failed attempt and commits the lesson as a reflection event.
+// `lha orchestrate` does the same after a failed integration; here the event gets an anchor-only
+// commit of its own, since the integration checkpoint is already made. Best effort: a model
+// failure is logged and the attempt stays recorded as failed (python: _reflect).
+func (a *Activities) reflect(ctx context.Context, settings *config.Settings, inp IntegrateInput, item contracts.ChecklistItem, reason string) error {
+	anchor := state.NewGitMissionAnchor(inp.Workdir)
+	snapshot, err := anchor.ReadSituationalAwareness(ctx)
+	if err != nil {
+		return err
+	}
+	meter, err := BuildCycleMeter(ctx, settings, inp.Workdir, inp.CycleID, inp.BudgetUSD, inp.MaxCycles)
+	if err != nil {
+		return err
+	}
+	inner, err := a.leadModel(settings, snapshot)
+	if err != nil {
+		activityLogger().Warn("reflection skipped: cannot build the model", "error", err.Error())
+		return nil
+	}
+	closeModel := func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
+	detach, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "reflect")
+	if err != nil {
+		closeModel()
+		return err
+	}
+	text, reflectErr := func() (string, error) {
+		defer func() {
+			closeModel()
+			key := IdempotencyKey(inp.MissionID, inp.CycleID, "reflect", strconv.Itoa(attemptOf(ctx)))
+			if err := RecordSpend(context.WithoutCancel(ctx), inp.Workdir, key, inp.CycleID, meter.Ledger); err != nil {
+				activityLogger().Warn("spend_journal_write_failed", "error", err.Error())
+			}
+			detach()
+		}()
+		return agents.ReflectOnFailure(ctx, meter.Wrap(inner, "reflection"), item.Description, item.ID+" was not integrated: "+reason)
+	}()
+	if reflectErr != nil {
+		if budget := asBudget(reflectErr); budget != nil {
+			return budget
+		}
+		activityLogger().Warn("reflection failed", "item", item.ID, "error", reflectErr.Error())
+		return nil // the lesson is help, not a gate
+	}
+	checklist, err := anchor.ReadChecklist(ctx)
+	if err != nil {
+		return err
+	}
+	_, err = anchor.CommitAnchorUpdate(ctx, contracts.Checkpoint{
+		CycleID: inp.CycleID, Checklist: checklist, Decisions: []contracts.DecisionRecord{},
+		Events:        []contracts.EventRecord{org.ReflectionEventRecord(item.ID, "\nReflection on "+item.ID+": "+text+"\n", inp.CycleID)},
+		CommitMessage: "lha: reflection on " + item.ID,
+	})
+	return err
+}
+
 // leadModel is the Lead's model (the replanner of a blocked branch): ModelFactory, else the
 // configured model (python: _default_model_factory).
 func (a *Activities) leadModel(settings *config.Settings, snapshot contracts.SituationSnapshot) (contracts.ModelProvider, error) {
@@ -753,6 +836,15 @@ func (a *Activities) leadModel(settings *config.Settings, snapshot contracts.Sit
 }
 
 // --- review_cycle -----------------------------------------------------------------------------
+
+// reviewBoardPost is the blocking verdict's board post, as `lha orchestrate` posts it (none when
+// the review approved).
+func reviewBoardPost(itemID string, review agents.ReviewResult, cycleID string) []contracts.EventRecord {
+	if !review.Blocking {
+		return []contracts.EventRecord{}
+	}
+	return []contracts.EventRecord{org.BoardEventRecord("reviewer:"+itemID, review.Notes(), cycleID)}
+}
 
 // blockingStreak is the number of blocking reviews of itemID since its last approval.
 func blockingStreak(events []contracts.EventRecord, itemID string) int {
@@ -892,11 +984,11 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		CycleID:         reviewID,
 		ProgressSummary: fmt.Sprintf("- %s review of [%s]: %s", reviewID, inp.ItemID, outcome),
 		Checklist:       checklist,
-		Events: []contracts.EventRecord{{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
+		Events: append(reviewBoardPost(inp.ItemID, review, reviewID), contracts.EventRecord{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
 			"item_id", inp.ItemID, "verdict", review.Verdict, "blocking", review.Blocking,
 			"blocking_issues", org.CapList(review.BlockingIssues, 20), "advisory", org.CapList(review.Advisory, 20),
 			"reopened", review.Blocking && !blocked, "blocked", blocked, "base", base, "head", inp.HeadSHA,
-		)}},
+		)}),
 		CommitMessage: fmt.Sprintf("lha: review %s %s", outcome, inp.ItemID),
 	}); err != nil {
 		return CycleResult{}, err

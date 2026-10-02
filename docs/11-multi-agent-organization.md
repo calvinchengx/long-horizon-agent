@@ -53,9 +53,10 @@ so the Replanner runs, and the `record_decision` tool is available
 ([mission anchor](06-mission-anchor.md#decisionsndjson)), wherever the Lead runs. Both
 organization paths build a wave from the same code
 ([waves.py](../python/src/lha/agents/waves.py): the batch, the ticket, the implementer in its
-worktree, the integration checkpoint), so a wave means the same thing on either path. What only
-`orchestrate` has: reflection after a failure and the blackboard. What only the durable path
-has: every step is a journaled activity
+worktree, the integration checkpoint), so a wave means the same thing on either path, and both
+have the blackboard and reflection after a failure (the durable path keeps them only as
+committed events, which is also how a resumed `orchestrate` sees them). What only the durable
+path has: every step is a journaled activity
 (crash-safe and retried), and researcher and review spend counts against the mission's
 spend journal.
 

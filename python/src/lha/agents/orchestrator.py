@@ -69,7 +69,11 @@ from lha.agents.reviewer import REVIEW_EVENT, Reviewer, ReviewResult
 from lha.agents.router import model_for_role
 from lha.agents.team import research_fanout
 from lha.agents.waves import (
+    BOARD_ENTRIES,
+    BOARD_ENTRY_CAP,
+    BOARD_EVENT,
     MAX_CONSECUTIVE_FAILURES,
+    REFLECTION_EVENT,
     ImplementerRun,
     diff_since,
     implement_in_worktree,
@@ -116,12 +120,10 @@ __all__ = ["MissionResumeError", "Orchestrator", "anchor_exists", "parallel_batc
 _ROLES = ("lead", "researcher", "reviewer", "implementer")
 _REVIEW_DIFF_CAP = 20_000
 _MAX_CONSECUTIVE_FAILURES = MAX_CONSECUTIVE_FAILURES
-_BOARD_ENTRIES = 6  # newest blackboard entries shown to later rounds
-_BOARD_ENTRY_CAP = 1_500
+_BOARD_ENTRIES = BOARD_ENTRIES
+_BOARD_ENTRY_CAP = BOARD_ENTRY_CAP
 # Committed event kinds that let ``--resume`` rebuild the in-memory state of a run.
 RUN_EVENT = "orchestrate"
-BOARD_EVENT = "blackboard"
-REFLECTION_EVENT = "reflection"
 _CYCLE_ID = re.compile(r"^c(\d+)$")
 
 # Kept for callers of the old private names.

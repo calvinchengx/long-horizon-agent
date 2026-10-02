@@ -614,3 +614,58 @@ func CapList(items []string, n int) []any {
 	}
 	return out
 }
+
+// --- the blackboard and reflections, as committed events ---------------------------------
+// Both run paths record a board post and a reflection as anchor events; `lha orchestrate` keeps
+// them in memory too, the durable organization reads them back from the committed log
+// (python: board_event, reflection_event, board_context, reflection_for in agents/waves.py).
+
+// ReflectionCap is how much of a reflection an event keeps.
+const ReflectionCap = 2_000
+
+// BoardEventRecord is a blackboard event for one post (capped as the board caps its entries).
+func BoardEventRecord(author, text, cycleID string) contracts.EventRecord {
+	return contracts.EventRecord{Kind: BoardEvent, CycleID: cycleID, Payload: contracts.Payload(
+		"author", author, "text", pyfmt.Head(text, boardEntryCap),
+	)}
+}
+
+// ReflectionEventRecord is a reflection event: the lesson for itemID's next attempt.
+func ReflectionEventRecord(itemID, text, cycleID string) contracts.EventRecord {
+	return contracts.EventRecord{Kind: ReflectionEvent, CycleID: cycleID, Payload: contracts.Payload(
+		"item", itemID, "text", pyfmt.Head(text, ReflectionCap),
+	)}
+}
+
+// BoardContextFromEvents is the newest committed board posts as the "Team board" block a prompt
+// shows ("" if none).
+func BoardContextFromEvents(events []contracts.EventRecord) string {
+	posts := []contracts.EventRecord{}
+	for _, e := range events {
+		if e.Kind == BoardEvent {
+			posts = append(posts, e)
+		}
+	}
+	if len(posts) > boardEntries {
+		posts = posts[len(posts)-boardEntries:]
+	}
+	if len(posts) == 0 {
+		return ""
+	}
+	lines := make([]string, len(posts))
+	for i, e := range posts {
+		lines[i] = "[" + payloadStr(e.Payload, "author") + "] " + pyfmt.Head(payloadStr(e.Payload, "text"), boardEntryCap)
+	}
+	return "Team board (earlier rounds):\n" + strings.Join(lines, "\n---\n")
+}
+
+// ReflectionFor is the latest committed reflection for itemID ("" if none).
+func ReflectionFor(events []contracts.EventRecord, itemID string) string {
+	for i := len(events) - 1; i >= 0; i-- {
+		e := events[i]
+		if e.Kind == ReflectionEvent && payloadStr(e.Payload, "item") == itemID {
+			return payloadStr(e.Payload, "text")
+		}
+	}
+	return ""
+}

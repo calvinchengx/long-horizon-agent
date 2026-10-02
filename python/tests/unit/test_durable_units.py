@@ -193,6 +193,33 @@ def test_anchor_text_carries_steering_notes() -> None:
     assert "Operator steering" in text and "- prefer sqlite" in text
 
 
+def test_anchor_text_carries_the_boards_newest_posts_and_the_items_reflection() -> None:
+    from lha.agents.waves import BOARD_ENTRIES, board_event, reflection_event
+    from lha.contracts.state import ChecklistItem
+
+    item = ChecklistItem(id="02", description="d")
+    snap = SituationSnapshot(head_sha="x", active_item=item)
+    inp = CycleInput(mission_id="m", workdir=".", cycle_id="c3", steer_notes=["go"])
+    events = [
+        reflection_event("02", "\nReflection on 02: old\n"),
+        *[board_event(f"researcher:0{n}", f"post {n}") for n in range(1, BOARD_ENTRIES + 3)],
+        reflection_event("01", "\nReflection on 01: other item\n"),
+        reflection_event("02", "\nReflection on 02: newest\n"),
+    ]
+    text = acts._anchor_text(snap, inp, events)
+    mission, first, rest = text.split("\n\n", 2)
+    assert mission == "Mission m"  # no mission spec in this snapshot
+    assert first == "Reflection on 02: newest"  # the item's LATEST reflection, stripped, first
+    assert "Operator steering (most recent last):\n- go" in rest
+    board = rest.split("Team board (earlier rounds):\n", 1)[1]
+    assert board.startswith("[researcher:03] post 3")  # only the newest entries
+    assert board.count("\n---\n") == BOARD_ENTRIES - 1 and "post 2" not in board
+    assert "other item" not in text
+    assert acts._anchor_text(SituationSnapshot(head_sha="x"), inp, events).startswith(
+        "Mission m\n\nOperator steering"
+    )  # no active item: no reflection
+
+
 class _Capture(StubModel):
     seen: ClassVar[list[list[ModelMessage]]] = []
 
