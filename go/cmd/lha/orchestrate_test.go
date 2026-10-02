@@ -401,3 +401,35 @@ func TestE2EOrchestrateCrossImplementationResume(t *testing.T) {
 		})
 	}
 }
+
+// TestOrchestrateResearchAndReviewFlags is python's test_orchestrate_passes_research_and_review:
+// --no-review runs no reviewer (no review event), --research 0 asks no researcher, and the
+// range is checked before anything runs.
+func TestOrchestrateResearchAndReviewFlags(t *testing.T) {
+	dir := cleanEnv(t, "LHA_MODEL_BACKEND=stub")
+	roadmap := filepath.Join(dir, "roadmap.md")
+	if err := os.WriteFile(roadmap, []byte("# T\n\n## Build\n\n- [ ] say hello\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	done := contracts.TurnResult{Text: `{"done": true, "summary": "done"}`}
+	block := contracts.TurnResult{Text: `{"done": true, "verdict": "block", "blocking_issues": ["x"]}`}
+	researcher := model.NewStubNamed("researchers", []contracts.TurnResult{done})
+	models := map[string]contracts.ModelProvider{"lead": model.NewStub([]contracts.TurnResult{done, done}),
+		"researcher": researcher, "reviewer": model.NewStub([]contracts.TurnResult{block})}
+	work := filepath.Join(dir, "w")
+	r := runOrg(t, nil, models, append([]string{"orchestrate", "--checklist", roadmap, "--workdir", work, "--no-review", "--research", "0"}, orgBase...)...)
+	m := reportRE.FindStringSubmatch(r.stdout)
+	if r.code != 0 || m == nil || m[2] != "complete" {
+		t.Fatalf("%+v", r)
+	}
+	if reviews := strings.Count(git(t, work, "show", "HEAD:.lha/events.ndjson"), `"kind":"review"`); reviews != 0 {
+		t.Fatalf("%d reviews with --no-review", reviews)
+	}
+	if strings.Contains(git(t, work, "show", "HEAD:.lha/events.ndjson"), `"author":"researcher:`) {
+		t.Fatal("a researcher posted with --research 0")
+	}
+	if r := runOrg(t, nil, models, append([]string{"orchestrate", "--checklist", roadmap, "--workdir", filepath.Join(dir, "x"), "--research", "5"}, orgBase...)...); r.code != 2 ||
+		!strings.Contains(r.stderr, "Invalid value for '--research': 5 is not in the range 0<=x<=4.") {
+		t.Fatalf("%+v", r)
+	}
+}

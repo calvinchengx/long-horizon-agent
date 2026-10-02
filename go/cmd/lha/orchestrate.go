@@ -28,6 +28,10 @@ func (c *cli) orchestrate(args []string) error {
 	task := fs.String("task", "", "The mission / task description (required unless --resume or --checklist).")
 	fs.Var(&f.title, "title", "Mission title (default: the checklist's, else 'mission').")
 	resume := fs.Bool("resume", false, resumeHelp)
+	research := fs.Int("research", 2, "Read-only researchers per item (0 = none).")
+	review := fs.Bool("review", true, "An independent reviewer after every verified item; a blocking review reopens it "+
+		"(the pre-review screen still runs, and forces the review when it finds weakened tests). --no-review turns it off.")
+	noReview := fs.Bool("no-review", false, "Turn the reviewer off (python: --no-review).")
 	if err := c.parse(fs, args); err != nil {
 		return err
 	}
@@ -45,6 +49,9 @@ func (c *cli) orchestrate(args []string) error {
 	}
 	if !*resume && pyfmt.PyStrip(*task) == "" && f.checklist.value == "" {
 		return fail(2, "give --task or --checklist FILE (or --resume to continue an existing mission)")
+	}
+	if *research < 0 || *research > 4 {
+		return rangeError("orchestrate", "research", *research, 0, 4, true)
 	}
 	commands, err := resolveCheckCommands(f.check, f.noDefaultChecks)
 	if err != nil {
@@ -64,6 +71,8 @@ func (c *cli) orchestrate(args []string) error {
 	opts := org.DefaultOrchestratorOptions()
 	opts.Meter = meter
 	opts.Models = c.orgModels
+	opts.ResearchPerItem = *research
+	opts.DoReview = *review && !*noReview
 	orchestrator := org.NewOrchestrator(settings, opts)
 	mission := org.MissionOptions{Workdir: workdir, Checks: checks, Gate: gate, Resume: *resume}
 	if !*resume {

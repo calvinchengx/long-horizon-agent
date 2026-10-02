@@ -239,6 +239,8 @@ role uses its tier's model ([13-models.md](13-models.md#per-role-routing-lha-orc
 | `--checklist FILE` | none | run this checklist instead of planning (no ownership map, so no parallel waves) |
 | `--workdir TEXT` | `.lha/workspaces/org` | workspace |
 | `--resume` | off | continue the mission already anchored in `--workdir` instead of planning a new one |
+| `--research INTEGER` (0-4) | `2` | read-only researchers per item (`0`: none) |
+| `--review/--no-review` | `--review` | the independent reviewer after every verified item; with `--no-review` the [pre-review screen](07-verification.md#pre-review-screen) still runs and forces the review when it finds weakened tests |
 
 Without `--resume` or `--checklist` it plans. `--checklist` cannot be combined with `--resume`
 (exit `2`): a resumed mission keeps its committed checklist. A workdir that
