@@ -16,6 +16,7 @@ import asyncio
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -195,8 +196,29 @@ class SqliteStore:
 
     # --- plumbing -----------------------------------------------------------------------
     def _open_sync(self) -> None:
+        """Open the connection, converting a fresh file to WAL and applying migrations.
+
+        SQLite answers a concurrent first open of one file (two processes converting it to WAL,
+        or creating the schema, at once) with "database is locked" without consulting the busy
+        handler, so a busy open is retried for up to ``BUSY_TIMEOUT_MS``.
+        """
         if self._conn is not None:
             return
+        deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+        wait = 0.02
+        while True:
+            try:
+                self._open_once()
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc) and "busy" not in str(exc).lower():
+                    raise
+                if time.monotonic() > deadline:
+                    raise
+            time.sleep(wait)
+            wait = min(wait * 2, 0.5)
+
+    def _open_once(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(
             self.path, timeout=BUSY_TIMEOUT_MS / 1000, check_same_thread=False, isolation_level=None

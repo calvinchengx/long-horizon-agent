@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -197,10 +198,35 @@ func (s *SQLiteStore) Open(ctx context.Context) error {
 	return s.openLocked(ctx)
 }
 
+// openLocked opens the connection, converting a fresh file to WAL and applying migrations.
+// SQLite answers a concurrent first open of one file (two processes converting it to WAL, or
+// creating the schema, at once) with SQLITE_BUSY without consulting the busy handler, so a busy
+// open is retried for up to BusyTimeoutMS.
 func (s *SQLiteStore) openLocked(ctx context.Context) error {
 	if s.conn != nil {
 		return nil
 	}
+	deadline := time.Now().Add(time.Duration(BusyTimeoutMS) * time.Millisecond)
+	for wait := 20 * time.Millisecond; ; wait = min(wait*2, 500*time.Millisecond) {
+		err := s.openOnce(ctx)
+		if err == nil || !isBusy(err) || time.Now().After(deadline) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(wait):
+		}
+	}
+}
+
+// isBusy reports whether err is SQLite's "database is locked" (SQLITE_BUSY) in any wrapping.
+func isBusy(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "SQLITE_BUSY") || strings.Contains(msg, "database is locked")
+}
+
+func (s *SQLiteStore) openOnce(ctx context.Context) error {
 	if s.Path != ":memory:" {
 		if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 			return err
