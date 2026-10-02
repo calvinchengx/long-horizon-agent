@@ -88,6 +88,8 @@ type Settings struct {
 	PostgresDSN     *Secret `env:"postgres_dsn"`
 	WorkspaceRoot   string  `env:"workspace_root" default:".lha/workspaces"`
 	ObjectStoreRoot string  `env:"object_store_root" default:".lha/objects"`
+	// Days after which `lha worker` deletes untouched ClaimCheck objects when it starts (0 = never).
+	ObjectRetentionDays int `env:"object_retention_days" default:"0" ge:"0"`
 
 	// --- Governor
 	BudgetUSDCeiling float64 `env:"budget_usd_ceiling" default:"10.0"`

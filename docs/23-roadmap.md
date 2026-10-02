@@ -110,6 +110,7 @@ quality with real models.
 | Operator-configurable egress allow-list | done: `LHA_SANDBOX_EGRESS`, `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS` (sandbox, via proxy) and `LHA_WEB_ALLOW_HOSTS` / `--allow-host` (web tools) |
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
 | Deadlock gate with "impossible", escalation ladder, gate webhook, `SLEEPING` | done: durable path |
+| Operator steering from the CLI (`lha mission-steer`, notes in `mission-status`) | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-steer)) |
 | Observability: OTLP trace export (any collector, and Langfuse through its OTLP endpoint) | done: the CLI and worker install an exporter at start when `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` or the Langfuse keys are set; mission, cycle, cycle-activity, model-call and tool-call spans on every run path ([16-observability.md](16-observability.md)) |
 | Offline prompt evolution (evolver, judge, eval harness, promotion gate) | removed: roles' prompts are code constants with no override store to promote into, and the repo has no gold eval set; rebuild it with both when it is needed |
 | Saga compensation, orphan-branch reconciliation, Magentic-One task/progress ledgers | removed: LHA itself pushes nothing, opens no PRs and deploys nothing (irreversible actions go to a human gate), an interrupted wave's worktrees and branches are discarded by `lha orchestrate --resume` and by the durable `plan_round`, and the checklist, tickets and loop detector already cover the ledgers |
@@ -123,7 +124,7 @@ quality with real models.
 | Cycle-start code map (`LHA_CODE_MAP=ripwire`) | done: every run path, Python and Go, off by default; one measurement showed no gain ([24](24-large-missions.md#optional-a-code-map-each-cycle)) |
 | Worker Build IDs / versioned deploys | done: Python and Go, off by default (`LHA_WORKER_DEPLOYMENT`, `LHA_WORKER_BUILD_ID`; [14](14-running-on-temporal.md#versioned-deploys-worker-build-ids)) |
 | Re-embedding after an embedding-model change | done: Python and Go, 64 stale rows per recall and `lha memory reembed` ([12-memory.md](12-memory.md#re-embedding)) |
-| Bounded memory over a long mission: capped embedding cache, trace events, cost ledger and blackboard; `lha objects prune` for the ClaimCheck store | done: Python and Go ([15](15-operations-runbook.md#memory-and-disk-over-a-long-mission)) |
+| Bounded memory over a long mission: capped embedding cache, trace events, cost ledger and blackboard; `lha objects prune` and the worker's `LHA_OBJECT_RETENTION_DAYS` sweep for the ClaimCheck store | done: Python and Go ([15](15-operations-runbook.md#memory-and-disk-over-a-long-mission)) |
 | Orphan-sandbox sweep: Docker sandboxes, egress proxies and networks carry an `lha.owner` label, and each open removes those whose owning process has exited | done: Python and Go ([09](09-safety-model.md)) |
 | Nightly mutation audit of the safety code (mutmut, gremlins) | done: `mutation.yml` fails on a surviving mutant ([20](20-testing.md#mutation-audit)) |
 
@@ -151,8 +152,9 @@ These limitations are in the current code:
   `sentence_transformers` needs the `embeddings` extra.
 - Every `openai_compat` model, primary or fallback, uses the one endpoint in
   `LHA_OPENAI_BASE_URL`.
-- The ClaimCheck object store (`LHA_OBJECT_STORE_ROOT`) grows with every durable cycle, and
-  nothing removes an object unless an operator runs `lha objects prune --older-than-days N`.
+- The ClaimCheck object store (`LHA_OBJECT_STORE_ROOT`) grows with every durable cycle; it shrinks
+  only when a worker starts with `LHA_OBJECT_RETENTION_DAYS` set or an operator runs
+  `lha objects prune --older-than-days N`.
 
 ## Go port
 
