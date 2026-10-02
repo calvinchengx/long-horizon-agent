@@ -901,3 +901,37 @@ func TestDiffSinceReturnsThePatchDespiteHardening(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// TestSubAgentGetsOneFinalTurnWhenItsBudgetRunsOut is python's
+// test_subagent_gets_one_final_turn_when_its_budget_runs_out.
+func TestSubAgentGetsOneFinalTurnWhenItsBudgetRunsOut(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "README.md"), []byte("hello repo"), 0o644)
+	d, tctx := localTools(t, dir)
+	read := actText("read_file", map[string]any{"path": "README.md"})
+	var seen []string
+	recording := &lastPromptRecorder{inner: stub(read, read, contracts.TurnResult{Text: `{"done": true, "summary": "verdict: it reads hello"}`}), seen: &seen}
+	result, err := NewSubAgent(agents.Roles["reviewer"], recording, d, 2).Run(context.Background(), "review it", tctx, "")
+	if err != nil || result.ToolCalls != 2 || result.Turns != 3 || result.Brief != "verdict: it reads hello" {
+		t.Fatalf("%+v %v", result, err)
+	}
+	if len(seen) == 0 || !strings.HasSuffix(seen[len(seen)-1], FinalTurnMessage) {
+		t.Fatalf("last prompt %q", seen)
+	}
+}
+
+// lastPromptRecorder records the last message of every prompt it answers.
+type lastPromptRecorder struct {
+	inner contracts.ModelProvider
+	seen  *[]string
+}
+
+func (r *lastPromptRecorder) Name() string { return r.inner.Name() }
+func (r *lastPromptRecorder) Complete(ctx context.Context, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int) (contracts.TurnResult, error) {
+	*r.seen = append(*r.seen, messages[len(messages)-1].Content)
+	return r.inner.Complete(ctx, messages, tools, maxTokens)
+}
+func (r *lastPromptRecorder) EstimateCostUSD(u contracts.Usage) (float64, error) {
+	return r.inner.EstimateCostUSD(u)
+}

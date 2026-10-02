@@ -32,6 +32,12 @@ const (
 	subAgentBriefCap       = 8000
 )
 
+// FinalTurnMessage is the last user turn of a sub-agent whose tool budget ran out while it was
+// still working (python: FINAL_TURN_MESSAGE).
+const FinalTurnMessage = "Your tool budget is spent: no further tool call will be answered. Reply now with your " +
+	`final answer as the JSON object described above ({"done": true, ...}), using what you ` +
+	"have seen so far."
+
 // SubAgentResult is what a sub-agent returns.
 type SubAgentResult struct {
 	Role      string
@@ -155,8 +161,23 @@ func (s *SubAgent) Run(ctx context.Context, objective string, tctx contracts.Too
 			contracts.ModelMessage{Role: "user", Content: "OBSERVATION (" + action.Tool + "): " + observation})
 	}
 	if brief == "" {
-		// Turn budget exhausted (or the parser never saw a done signal): keep what we have.
-		brief = finalText
+		// The turn budget ran out while the model was still working. One last turn, told that
+		// no tool call will be answered, asks for the answer it has; a reviewer that was still
+		// reading files returns its verdict instead of a dangling tool call.
+		turns++
+		messages = append(messages,
+			contracts.ModelMessage{Role: "assistant", Content: finalText},
+			contracts.ModelMessage{Role: "user", Content: FinalTurnMessage})
+		result, err := s.model.Complete(ctx, messages, nil, 0)
+		if err != nil {
+			return SubAgentResult{}, err
+		}
+		finalText = result.Text
+		action := agent.ParseAction(result.Text, nil, nil)
+		brief = action.Summary
+		if brief == "" {
+			brief = result.Text
+		}
 	}
 	return SubAgentResult{
 		Role:      s.role.Name,

@@ -36,7 +36,7 @@ from lha.agents.reflection import reflect_on_failure  # noqa: E402
 from lha.agents.replanner import Replanner  # noqa: E402
 from lha.agents.reviewer import Reviewer, ReviewResult, parse_review  # noqa: E402
 from lha.agents.roles import ROLES, claude_model_for  # noqa: E402
-from lha.agents.subagent import SubAgent  # noqa: E402
+from lha.agents.subagent import FINAL_TURN_MESSAGE, SubAgent  # noqa: E402
 from lha.agents.waves import implementer_objective, new_implementer_run  # noqa: E402
 from lha.contracts.model import ModelMessage, TurnResult, Usage  # noqa: E402
 from lha.contracts.state import (  # noqa: E402
@@ -1439,6 +1439,7 @@ def export_agent_org() -> None:
             "specs": [s.model_dump(mode="json") for s in _org_specs()],
             "rendered_specs": render_tools(_org_specs()),
             "subagent": _subagent_cases(),
+            "subagent_final_turn": FINAL_TURN_MESSAGE,
             "reviewer_messages": [
                 {
                     "criteria": criteria,

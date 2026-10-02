@@ -375,6 +375,7 @@
    ]
   }
  ],
+ "subagent_final_turn": "Your tool budget is spent: no further tool call will be answered. Reply now with your final answer as the JSON object described above ({\"done\": true, ...}), using what you have seen so far.",
  "reviewer_messages": [
   {
    "criteria": "Add the model",
