@@ -112,6 +112,7 @@ quality with real models.
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
 | Deadlock gate with "impossible", escalation ladder, gate webhook, `SLEEPING` | done: durable path |
 | Operator steering from the CLI (`lha mission-steer`, notes in `mission-status`) | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-steer)) |
+| `lha mission-report`: one page per mission from the anchor and the store | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-report)) |
 | Observability: OTLP trace export (any collector, and Langfuse through its OTLP endpoint) | done: the CLI and worker install an exporter at start when `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` or the Langfuse keys are set; mission, cycle, cycle-activity, model-call and tool-call spans on every run path ([16-observability.md](16-observability.md)) |
 | Offline prompt evolution (evolver, judge, eval harness, promotion gate) | removed: roles' prompts are code constants with no override store to promote into, and the repo has no gold eval set; rebuild it with both when it is needed |
 | Saga compensation, orphan-branch reconciliation, Magentic-One task/progress ledgers | removed: LHA itself pushes nothing, opens no PRs and deploys nothing (irreversible actions go to a human gate), an interrupted wave's worktrees and branches are discarded by `lha orchestrate --resume` and by the durable `plan_round`, and the checklist, tickets and loop detector already cover the ledgers |

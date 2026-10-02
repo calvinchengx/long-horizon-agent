@@ -361,30 +361,16 @@ def costs(
             f"{row.ts[:19]}  {row.cycle_id:<12} {row.role or '-':<11} {row.model:<24} "
             f"in {row.input_tokens:>7}  out {row.output_tokens:>6}  {_usd(row.usd)}"
         )
-    typer.echo(
-        f"total: {summary.calls} calls  known {_usd(summary.known_usd)}  "
-        f"unknown-cost calls {summary.unknown_cost_calls}  "
-        f"tokens in {summary.input_tokens} out {summary.output_tokens}"
-    )
+    from lha.ops.report import format_cost_total
+
+    typer.echo(format_cost_total(summary))
 
 
 def format_gate_row(row: GateRow) -> list[str]:
     """Human-readable lines for one recorded gate (``lha gates``)."""
-    decided = (
-        f"{row.decision} by {row.resolved_by or '-'} at {row.resolved_at[:19]}"
-        if row.status in ("RESOLVED", "DEFAULTED")
-        else f"open, default {row.default_action or '-'} at {row.deadline[:19] or '-'}"
-    )
-    lines = [
-        f"{row.opened_at[:19]}  {row.mission_id}  {row.gate_id}  {row.kind:<9} "
-        f"{row.status:<9} reminders {row.reminders}  {decided}",
-        f"  question: {row.question}",
-        f"  options: {' | '.join(row.options)}",
-    ]
-    if row.request:
-        what = row.request.get("argv") or row.request.get("arguments") or ""
-        lines.append(f"  request: {row.request.get('tool', '')} {what}".rstrip())
-    return lines
+    from lha.ops.report import format_gate_row as _format
+
+    return _format(row)
 
 
 @app.command()
@@ -538,6 +524,73 @@ def export(
         Path(out).write_text(text, encoding="utf-8")
     counts = ", ".join(f"{sum(1 for r in rows if r.source == s)} {s}" for s in SOURCES)
     typer.echo(f"{len(rows)} labels ({counts})", err=True)
+
+
+@app.command(name="mission-report")
+def mission_report(
+    mission_id: str | None = typer.Argument(
+        None, help="Mission whose store rows to include (default: the one the anchor names)."
+    ),
+    workdir: str = typer.Option(".", help="The mission workspace (the git repo holding .lha/)."),
+) -> None:
+    """One page about a mission: items and their status, the cycles' verdicts, reviews and
+    screens, the human gates, the spend and the commits, from the anchor and the mission store.
+
+    Reads the anchor at WORKDIR and, for the mission it names (or MISSION_ID), the store's
+    mission row, gates and cost ledger. Without an anchor, MISSION_ID is required.
+    """
+    from pathlib import Path
+
+    from lha.ops.report import ReportInput, render_report
+    from lha.state import git_ops
+    from lha.state.mission_anchor import ANCHOR_DIR, GitMissionAnchor
+    from lha.systemone.labels import mission_id_of
+
+    root = Path(workdir)
+    has_anchor = (root / ANCHOR_DIR).is_dir()
+    if not has_anchor and not mission_id:
+        _fail(
+            f"no mission anchor at {workdir!r} (expected a {ANCHOR_DIR}/ directory); "
+            "pass MISSION_ID to report from the store alone"
+        )
+    spec = checklist = None
+    events: list[Any] = []
+    commits, head = 0, ""
+    if has_anchor:
+        anchor = GitMissionAnchor(workdir)
+        spec = _run(anchor.read_mission())
+        checklist = _run(anchor.read_checklist())
+        events = _run(anchor.read_events())
+        head = git_ops.head_sha(workdir)
+        commits = int(git_ops.run_git(workdir, "rev-list", "--count", "HEAD").strip() or 0)
+    mission = mission_id or mission_id_of(events)
+
+    async def _store(store: MissionStore) -> tuple[Any, list[GateRow], Any]:
+        return (
+            await store.get_mission(mission),
+            await store.list_gates(mission, limit=100_000),
+            await store.cost_summary(mission),
+        )
+
+    row, gates, cost = _run(_with_store(_store)) if mission else (None, [], None)
+    from lha.contracts.state import Checklist
+
+    typer.echo(
+        render_report(
+            ReportInput(
+                mission_id=mission,
+                spec=spec,
+                checklist=checklist if checklist is not None else Checklist(items=[]),
+                events=events,
+                row=row,
+                gates=sorted(gates, key=lambda g: (g.opened_at, g.gate_id)),
+                cost=cost,
+                commits=commits,
+                head_sha=head,
+            )
+        ),
+        nl=False,
+    )
 
 
 @app.command(name="run-local")

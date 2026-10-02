@@ -14,6 +14,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/durable"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
@@ -179,44 +180,13 @@ func (c *cli) costs(args []string) error {
 			fmt.Fprintf(c.stdout, "%s  %-12s %-11s %-24s in %7d  out %6d  %s\n", pyfmt.Head(row.TS, 19), row.CycleID,
 				orDash(row.Role), row.Model, row.InputTokens, row.OutputTokens, usd(row.USD))
 		}
-		known := summary.KnownUSD
-		fmt.Fprintf(c.stdout, "total: %d calls  known %s  unknown-cost calls %d  tokens in %d out %d\n",
-			summary.Calls, usd(&known), summary.UnknownCostCalls, summary.InputTokens, summary.OutputTokens)
+		fmt.Fprintln(c.stdout, ops.FormatCostTotal(summary))
 		return nil
 	})
 }
 
 // FormatGateRow is the human-readable lines for one recorded gate (python: format_gate_row).
-func FormatGateRow(row persistence.GateRow) []string {
-	var decided string
-	if row.Status == persistence.GateResolved || row.Status == persistence.GateDefaulted {
-		decision := "None"
-		if row.Decision != nil {
-			decision = *row.Decision
-		}
-		by := "-"
-		if row.ResolvedBy != nil && *row.ResolvedBy != "" {
-			by = *row.ResolvedBy
-		}
-		decided = fmt.Sprintf("%s by %s at %s", decision, by, pyfmt.Head(row.ResolvedAt, 19))
-	} else {
-		decided = fmt.Sprintf("open, default %s at %s", orDash(row.DefaultAction), orDash(pyfmt.Head(row.Deadline, 19)))
-	}
-	lines := []string{
-		fmt.Sprintf("%s  %s  %s  %-9s %-9s reminders %d  %s", pyfmt.Head(row.OpenedAt, 19), row.MissionID, row.GateID,
-			row.Kind, row.Status, row.Reminders, decided),
-		"  question: " + row.Question,
-		"  options: " + strings.Join(row.Options, " | "),
-	}
-	if len(row.Request) > 0 {
-		what := row.Request["argv"]
-		if what == "" {
-			what = row.Request["arguments"]
-		}
-		lines = append(lines, strings.TrimRightFunc("  request: "+row.Request["tool"]+" "+what, isPySpace))
-	}
-	return lines
-}
+func FormatGateRow(row persistence.GateRow) []string { return ops.FormatGateRow(row) }
 
 func isPySpace(r rune) bool {
 	return r == ' ' || (r >= '\t' && r <= '\r') || (r >= 0x1c && r <= 0x1f) || r == 0x85 || r == 0xa0 ||
@@ -514,5 +484,81 @@ func (c *cli) labelsCmd(args []string) error {
 		counts = append(counts, fmt.Sprintf("%d %s", n, source))
 	}
 	fmt.Fprintf(c.stderr, "%d labels (%s)\n", len(rows), strings.Join(counts, ", "))
+	return nil
+}
+
+const missionReportHelp = "One page about a mission: items and their status, the cycles' verdicts, reviews and\n" +
+	"screens, the human gates, the spend and the commits, from the anchor and the mission store.\n\n" +
+	"Reads the anchor at WORKDIR and, for the mission it names (or MISSION_ID), the store's\n" +
+	"mission row, gates and cost ledger. Without an anchor, MISSION_ID is required."
+
+// missionReport is python's mission-report (lha.ops.report).
+func (c *cli) missionReport(args []string) error {
+	fs := c.newFlags("mission-report", missionReportHelp)
+	workdir := fs.String("workdir", ".", "The mission workspace (the git repo holding .lha/).")
+	positional, err := c.parseInterleaved(fs, args, 1)
+	if err != nil {
+		return err
+	}
+	missionID := ""
+	if len(positional) > 0 {
+		missionID = positional[0]
+	}
+	info, statErr := os.Stat(filepath.Join(*workdir, state.AnchorDir))
+	hasAnchor := statErr == nil && info.IsDir()
+	if !hasAnchor && missionID == "" {
+		return fail(2, "no mission anchor at %s (expected a %s/ directory); pass MISSION_ID to report from the store alone",
+			contracts.PyRepr(*workdir), state.AnchorDir)
+	}
+	inp := ops.ReportInput{Checklist: contracts.Checklist{SchemaVersion: 1, Items: []contracts.ChecklistItem{}}, Events: []contracts.EventRecord{}}
+	if hasAnchor {
+		anchor := state.NewGitMissionAnchor(*workdir)
+		if inp.Spec, err = anchor.ReadMission(c.ctx); err != nil {
+			return err
+		}
+		if inp.Checklist, err = anchor.ReadChecklist(c.ctx); err != nil {
+			return err
+		}
+		if inp.Events, err = anchor.ReadEvents(c.ctx); err != nil {
+			return err
+		}
+		if inp.HeadSHA, err = state.HeadSHA(c.ctx, *workdir); err != nil {
+			return err
+		}
+		count, err := state.RunGit(c.ctx, *workdir, "rev-list", "--count", "HEAD")
+		if err != nil {
+			return err
+		}
+		fmt.Sscanf(strings.TrimSpace(count), "%d", &inp.Commits)
+	}
+	inp.MissionID = missionID
+	if inp.MissionID == "" {
+		inp.MissionID = systemone.MissionIDOf(inp.Events)
+	}
+	if inp.MissionID != "" {
+		if err := c.withStore(func(store persistence.Store) error {
+			if inp.Row, err = store.GetMission(c.ctx, inp.MissionID); err != nil {
+				return err
+			}
+			if inp.Gates, err = store.ListGates(c.ctx, inp.MissionID, 100_000); err != nil {
+				return err
+			}
+			sort.SliceStable(inp.Gates, func(i, j int) bool {
+				if inp.Gates[i].OpenedAt != inp.Gates[j].OpenedAt {
+					return inp.Gates[i].OpenedAt < inp.Gates[j].OpenedAt
+				}
+				return inp.Gates[i].GateID < inp.Gates[j].GateID
+			})
+			cost, err := store.CostSummary(c.ctx, inp.MissionID)
+			if err != nil {
+				return err
+			}
+			inp.Cost = &cost
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	fmt.Fprint(c.stdout, ops.RenderReport(inp))
 	return nil
 }

@@ -798,6 +798,28 @@ def test_system_one_labels() -> None:
         assert to_jsonl(rows) == case["jsonl"], case["name"]
 
 
+def test_mission_report() -> None:
+    from lha.contracts.state import Checklist, ChecklistItem, EventRecord, MissionSpec
+    from lha.ops.report import ReportInput, render_report
+    from lha.persistence.store import CostSummary, GateRow, MissionRow
+
+    for case in _load("state/report.json")["cases"]:
+        inp = ReportInput(
+            mission_id=case["mission_id"],
+            spec=MissionSpec.model_validate(case["spec"]) if case["spec"] is not None else None,
+            checklist=Checklist(
+                items=[ChecklistItem.model_validate(i) for i in case["checklist"]["items"]]
+            ),
+            events=[EventRecord.model_validate(e) for e in case["events"]],
+            row=MissionRow(**case["row"]) if case["row"] is not None else None,
+            gates=[GateRow(**g) for g in case["gates"]],
+            cost=CostSummary(**case["cost"]) if case["cost"] is not None else None,
+            commits=case["commits"],
+            head_sha=case["head_sha"],
+        )
+        assert render_report(inp) == case["expected"], case["name"]
+
+
 def test_execution_code_query() -> None:
     from lha.execution.tools.code_query import (
         KINDS,
