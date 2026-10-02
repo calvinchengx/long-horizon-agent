@@ -48,7 +48,7 @@ from lha.obs.otel import agent_span
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.verify.harness_integrity import harness_violations, integrity_result, snapshot_harness
-from lha.verify.witnesses import parse_witness
+from lha.verify.witnesses import parse_witness, witness_paths
 
 MAX_CONSECUTIVE_FAILURES = 3  # same threshold as the Lead's AgentLoop
 
@@ -308,7 +308,9 @@ async def implement_in_worktree(
     run.ticket = run.ticket.model_copy(update={"branch": run.branch})
     run.advance(TicketStatus.IN_PROGRESS)
     worktree = run.worktree
-    globs = tuple(settings.harness_globs())
+    # The item's witness scripts are protected like harness files: a witness the agent can
+    # rewrite proves nothing.
+    globs = (*settings.harness_globs(), *witness_paths(run.item.witnesses))
     trusted = settings.trusted_check_commands()
     session = await open_lead_sandbox(settings, str(worktree))
     try:

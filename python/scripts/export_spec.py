@@ -568,6 +568,7 @@ _HARNESS_PATHS = [
 
 def export_harness_files() -> None:
     from lha.verify.harness_integrity import harness_violations, is_harness_config
+    from lha.verify.witnesses import witness_paths
 
     before = {
         "tests/test_a.py": "a1",
@@ -622,6 +623,17 @@ def export_harness_files() -> None:
             ],
             "violations": [
                 {**c, "violations": harness_violations(c["before"], c["after"])} for c in snapshots
+            ],
+            "witness_paths": [
+                {"witnesses": w, "paths": list(witness_paths(w))}
+                for w in (
+                    ["cmd:sh measure/check_01.sh"],
+                    ["cmd:./scripts/run.sh --fast -v out/x", "pytest:tests/unit/test_a.py::test_x"],
+                    ["go:TestX", "cmd:make test", 'cmd:python -c "print(1)"', "trusted:e2e"],
+                    ["cmd:bash -c 'cd python && sh measure/check.sh'", "cmd:sh measure/check.sh"],
+                    ["cmd:sh 'unterminated", "nope:x", "pytest:  tests/test_b.py "],
+                    [],
+                )
             ],
         },
     )

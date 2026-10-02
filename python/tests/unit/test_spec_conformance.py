@@ -193,6 +193,10 @@ def test_harness_violations() -> None:
         assert is_harness_config(case["path"]) == case["config"], case["path"]
     for case in spec["violations"]:
         assert harness_violations(case["before"], case["after"]) == case["violations"], case["name"]
+    from lha.verify.witnesses import witness_paths
+
+    for case in spec["witness_paths"]:
+        assert list(witness_paths(case["witnesses"])) == case["paths"], case["witnesses"]
 
 
 def test_shared_paths_and_harness_files() -> None:

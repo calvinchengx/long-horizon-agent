@@ -138,3 +138,31 @@ func TestANewConftestIsAViolationButANewTestFileIsNot(t *testing.T) {
 		t.Fatalf("%q", got)
 	}
 }
+
+// TestWitnessScriptsAreProtectedLikeHarnessFiles is python's
+// test_witness_scripts_are_protected_like_harness_files.
+func TestWitnessScriptsAreProtectedLikeHarnessFiles(t *testing.T) {
+	if got := WitnessPaths([]string{"cmd:sh measure/check.sh", "pytest:tests/unit/test_a.py::test_x"}); !reflect.DeepEqual(got, []string{"measure/check.sh", "tests/unit/test_a.py"}) {
+		t.Fatalf("%q", got)
+	}
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "measure"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "measure", "check.sh")
+	if err := os.WriteFile(script, []byte("exit 0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	globs := WitnessPaths([]string{"cmd:sh measure/check.sh"})
+	before, plainBefore := SnapshotHarnessGlobs(dir, globs), SnapshotHarnessGlobs(dir, nil)
+	if err := os.WriteFile(script, []byte("exit 0  # weakened\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := HarnessViolations(before, SnapshotHarnessGlobs(dir, globs)); !reflect.DeepEqual(got, []string{"modified: measure/check.sh"}) {
+		t.Fatalf("%q", got)
+	}
+	// Without the witness glob the script is not a harness file at all.
+	if got := HarnessViolations(plainBefore, SnapshotHarnessGlobs(dir, nil)); len(got) != 0 {
+		t.Fatalf("unprotected: %q", got)
+	}
+}

@@ -196,5 +196,58 @@
     "added: docs/conftest.py"
    ]
   }
+ ],
+ "witness_paths": [
+  {
+   "witnesses": [
+    "cmd:sh measure/check_01.sh"
+   ],
+   "paths": [
+    "measure/check_01.sh"
+   ]
+  },
+  {
+   "witnesses": [
+    "cmd:./scripts/run.sh --fast -v out/x",
+    "pytest:tests/unit/test_a.py::test_x"
+   ],
+   "paths": [
+    "scripts/run.sh",
+    "out/x",
+    "tests/unit/test_a.py"
+   ]
+  },
+  {
+   "witnesses": [
+    "go:TestX",
+    "cmd:make test",
+    "cmd:python -c \"print(1)\"",
+    "trusted:e2e"
+   ],
+   "paths": []
+  },
+  {
+   "witnesses": [
+    "cmd:bash -c 'cd python && sh measure/check.sh'",
+    "cmd:sh measure/check.sh"
+   ],
+   "paths": [
+    "measure/check.sh"
+   ]
+  },
+  {
+   "witnesses": [
+    "cmd:sh 'unterminated",
+    "nope:x",
+    "pytest:  tests/test_b.py "
+   ],
+   "paths": [
+    "tests/test_b.py"
+   ]
+  },
+  {
+   "witnesses": [],
+   "paths": []
+  }
  ]
 }

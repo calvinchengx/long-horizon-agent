@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import re
 import shlex
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from lha.contracts.state import ChecklistItem
 from lha.contracts.verify import Check, ensure_unique_check_names
@@ -168,3 +168,44 @@ def parse_witness(witness: str, trusted: Mapping[str, list[str]]) -> Check:
 def item_checks(item: ChecklistItem, trusted: Mapping[str, list[str]]) -> list[Check]:
     """The item's witnesses as uniquely-named ``Check``s, in declaration order."""
     return ensure_unique_check_names(parse_witness(w, trusted) for w in item.witnesses)
+
+
+_PATH_TOKEN_RE = re.compile(r"^[A-Za-z0-9_.][A-Za-z0-9_./-]*$")
+_SCRIPT_SUFFIXES = (".sh", ".bash", ".py", ".js", ".ts", ".mjs", ".cjs", ".rb", ".pl", ".ps1")
+
+
+def witness_paths(witnesses: Sequence[str]) -> tuple[str, ...]:
+    """Repository-relative files an item's witnesses run, to protect like harness files.
+
+    A ``cmd:`` witness that runs a committed script (``cmd:sh measure/check.sh``) or a
+    ``pytest:`` node id's file proves the item only while the agent cannot rewrite it: a
+    measurement mission edited its witness scripts to point at tests it chose. Tokens of a
+    ``cmd:`` command that look like relative paths (a ``/`` or a script suffix, no option dash,
+    no shell metacharacter) and the file part of a ``pytest:`` node id are returned as globs
+    for ``snapshot_harness``; whether they exist is the snapshot's business.
+    """
+    out: list[str] = []
+    for witness in witnesses:
+        try:
+            scheme, rest = _split(witness)
+        except ValueError:
+            continue
+        if scheme == "pytest":
+            path = rest.split("::", 1)[0].strip()
+            if path and path not in out:
+                out.append(path)
+        elif scheme == "cmd":
+            try:
+                tokens = shlex.split(rest, posix=True)
+            except ValueError:
+                continue
+            for token in tokens:
+                token = token.removeprefix("./")
+                if (
+                    _PATH_TOKEN_RE.match(token)
+                    and ("/" in token or token.endswith(_SCRIPT_SUFFIXES))
+                    and not token.startswith("-")
+                    and token not in out
+                ):
+                    out.append(token)
+    return tuple(out)

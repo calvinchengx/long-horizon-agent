@@ -62,7 +62,7 @@ from lha.verify.harness_integrity import (
     violated_paths,
 )
 from lha.verify.trusted import candidate_commit
-from lha.verify.witnesses import parse_witness
+from lha.verify.witnesses import parse_witness, witness_paths
 
 if TYPE_CHECKING:
     from lha.agent.claude_code_engine import ClaudeCodeEngine
@@ -224,6 +224,7 @@ class AgentLoop:
         self._verify_on_done = verify_on_done
         self._trusted = dict(trusted_checks or {})
         self._harness_globs = harness_globs
+        self._cycle_globs: tuple[str, ...] = tuple(harness_globs)  # plus the item's witness paths
         self._replanner = replanner
         self._max_replans = max_replans
         self._max_split_depth = max_split_depth
@@ -292,8 +293,11 @@ class AgentLoop:
         workdir = str(self._anchor.workdir)  # the host checkout (in Docker, not /workspace)
         harness_before: HarnessSnapshot | None = None
         tampered: list[str] = []  # sticky for the whole cycle, even after files are reverted
+        # The item's witness scripts are protected like harness files: a witness the agent can
+        # rewrite proves nothing.
+        self._cycle_globs = (*self._harness_globs, *witness_paths(item.witnesses))
         if not item.allow_harness_edits:
-            harness_before = await asyncio.to_thread(snapshot_harness, workdir, self._harness_globs)
+            harness_before = await asyncio.to_thread(snapshot_harness, workdir, self._cycle_globs)
 
         memory_text = ""
         if self._memory is not None:
@@ -638,7 +642,7 @@ class AgentLoop:
         if harness_before is None:
             return verification
         after = await asyncio.to_thread(
-            snapshot_harness, str(self._anchor.workdir), self._harness_globs
+            snapshot_harness, str(self._anchor.workdir), self._cycle_globs
         )
         violations = harness_violations(harness_before, after)
         if violations:

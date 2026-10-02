@@ -144,6 +144,7 @@ type cycleState struct {
 	witnessErrors []contracts.CheckResult
 	harness       verify.HarnessSnapshot // nil when harness edits are allowed
 	tampered      []string               // sticky for the whole cycle, even after reverting
+	harnessGlobs  []string               // the operator's globs plus the item's witness paths
 }
 
 // SetMemory installs (or, with nil, removes) the loop's tiered memory (python:
@@ -210,8 +211,11 @@ func (l *AgentLoop) runCycle(ctx context.Context, tctx contracts.ToolContext, mi
 		gate:          contracts.EnsureUniqueCheckNames(append(append([]contracts.Check{}, checks...), witnessChecks...)),
 		witnessErrors: witnessErrors,
 	}
+	// The item's witness scripts are protected like harness files: a witness the agent can
+	// rewrite proves nothing.
+	cs.harnessGlobs = append(append([]string{}, l.opts.HarnessGlobs...), verify.WitnessPaths(item.Witnesses)...)
 	if !item.AllowHarnessEdits {
-		cs.harness = verify.SnapshotHarnessGlobs(anchor.Workdir(), l.opts.HarnessGlobs)
+		cs.harness = verify.SnapshotHarnessGlobs(anchor.Workdir(), cs.harnessGlobs)
 	}
 	missionText := snapshot.AnchorText()
 	if mission != nil {
@@ -520,7 +524,7 @@ func (l *AgentLoop) withIntegrity(ctx context.Context, v contracts.VerificationR
 	if cs.harness == nil {
 		return v, nil
 	}
-	after := verify.SnapshotHarnessGlobs(l.opts.Anchor.Workdir(), l.opts.HarnessGlobs)
+	after := verify.SnapshotHarnessGlobs(l.opts.Anchor.Workdir(), cs.harnessGlobs)
 	violations := verify.HarnessViolations(cs.harness, after)
 	if len(violations) > 0 {
 		// Revert the tampering so it is never committed (nor the next cycle's baseline).

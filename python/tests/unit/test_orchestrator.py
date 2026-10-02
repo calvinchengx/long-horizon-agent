@@ -113,6 +113,45 @@ async def test_records_appended_after_the_last_checkpoint_are_committed_at_run_e
     assert not git_ops.run_git(tmp_path, "status", "--porcelain").strip()
 
 
+@pytest.mark.asyncio
+async def test_an_item_cannot_rewrite_its_own_witness_script(tmp_path: Path) -> None:
+    """The lead edits the script its `cmd:` witness runs: harness integrity reverts it and the
+    attempt fails, even though every check (including the rewritten witness) would pass."""
+    (tmp_path / "measure").mkdir()
+    (tmp_path / "measure" / "check.sh").write_text("exit 1\n", encoding="utf-8")
+    rewrite = TurnResult(
+        text='{"tool": "write_file", "arguments": {"path": "measure/check.sh", "content": "exit 0\\n"}}'
+    )
+    orchestrator = Orchestrator(
+        Settings(sandbox="local", allow_unsafe_local=True, model_backend="stub", max_cycles=1),
+        research_per_item=0,
+        do_review=False,
+        models={
+            "lead": _stub(rewrite, _DONE),
+            "researcher": _stub(_DONE),
+            "reviewer": _stub(_APPROVE),
+        },
+    )
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path),
+        title="Witness test",
+        description="the witness is the gate",
+        checklist=Checklist(
+            items=[
+                ChecklistItem(
+                    id="01", description="pass the check", witnesses=["cmd:sh measure/check.sh"]
+                )
+            ]
+        ),
+        checks=[_PASSING_CHECK],
+    )
+    assert summary.items_done == 0
+    [cycle] = _committed_events(tmp_path, "cycle")
+    failed = {c["name"] for c in cycle["payload"]["checks"] if not c["passed"]}
+    assert "harness_integrity" in failed
+    assert (tmp_path / "measure" / "check.sh").read_text(encoding="utf-8") == "exit 1\n"  # reverted
+
+
 def _committed_events(workdir: Path, kind: str) -> list[dict[str, object]]:
     raw = git_ops.show_at_head(workdir, ".lha/events.ndjson")
     rows = [json.loads(line) for line in raw.splitlines() if line.strip()]
