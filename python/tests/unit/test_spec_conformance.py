@@ -192,6 +192,18 @@ def test_shared_paths_and_harness_files() -> None:
         assert _is_harness_file(case["path"]) == case["harness"], case
 
 
+def test_review_screen() -> None:
+    from lha.verify.review_screen import is_test_path, screen_criteria, screen_diff
+
+    spec = _load("verify/review_screen.json")
+    for case in spec["paths"]:
+        assert is_test_path(case["path"]) == case["test"], case["path"]
+    for case in spec["cases"]:
+        findings = screen_diff(case["diff"])
+        assert findings == case["findings"], case["diff"]
+        assert screen_criteria(findings, "do the thing") == case["criteria"], case["diff"]
+
+
 def test_flaky_retry() -> None:
     from tests.unit.test_flaky_retry_verifier import SPEC_REVISION, run_flaky_scenario
 

@@ -1,0 +1,137 @@
+{
+ "paths": [
+  {
+   "path": "tests/test_a.py",
+   "test": true
+  },
+  {
+   "path": "pkg/x_test.go",
+   "test": true
+  },
+  {
+   "path": "src/a.spec.ts",
+   "test": true
+  },
+  {
+   "path": "src/a.test.jsx",
+   "test": true
+  },
+  {
+   "path": "conftest.py",
+   "test": true
+  },
+  {
+   "path": "src/conftest.py",
+   "test": true
+  },
+  {
+   "path": "spec/a.rb",
+   "test": true
+  },
+  {
+   "path": "__tests__/a.js",
+   "test": true
+  },
+  {
+   "path": "testdata/x.txt",
+   "test": true
+  },
+  {
+   "path": "src/x.py",
+   "test": false
+  },
+  {
+   "path": "test.py",
+   "test": false
+  },
+  {
+   "path": "tests",
+   "test": false
+  },
+  {
+   "path": "a/test/b.go",
+   "test": true
+  },
+  {
+   "path": "src/testing.py",
+   "test": false
+  }
+ ],
+ "cases": [
+  {
+   "diff": "diff --git a/tests/test_a.py b/tests/test_a.py\n--- a/tests/test_a.py\n+++ b/tests/test_a.py\n@@ -1,5 +1,4 @@\n-def test_one():\n-    assert f() == 1\n+@pytest.mark.skip(reason=\"flaky\")\n+def test_two():\n+    pass\n-    assert g()\n",
+   "findings": [
+    "removed test test_one from tests/test_a.py",
+    "added skip to tests/test_a.py: @pytest.mark.skip(reason=\"flaky\")",
+    "2 assertions removed from tests/test_a.py"
+   ],
+   "criteria": "Pre-review screen: this diff weakens or removes tests. Each of these is BLOCKING unless the item itself requires it:\n- removed test test_one from tests/test_a.py\n- added skip to tests/test_a.py: @pytest.mark.skip(reason=\"flaky\")\n- 2 assertions removed from tests/test_a.py\n\ndo the thing"
+  },
+  {
+   "diff": "diff --git a/tests/old_test.py b/tests/old_test.py\n--- a/tests/old_test.py\n+++ /dev/null\n@@ -1 +0,0 @@\n-def test_gone(): pass\n",
+   "findings": [
+    "deleted test file tests/old_test.py"
+   ],
+   "criteria": "Pre-review screen: this diff weakens or removes tests. Each of these is BLOCKING unless the item itself requires it:\n- deleted test file tests/old_test.py\n\ndo the thing"
+  },
+  {
+   "diff": "--- a/pyproject.toml\n+++ b/pyproject.toml\n@@\n-fail_under = 90\n+fail_under = 70\n",
+   "findings": [
+    "lowered fail_under from 90 to 70 in pyproject.toml"
+   ],
+   "criteria": "Pre-review screen: this diff weakens or removes tests. Each of these is BLOCKING unless the item itself requires it:\n- lowered fail_under from 90 to 70 in pyproject.toml\n\ndo the thing"
+  },
+  {
+   "diff": "--- a/pyproject.toml\n+++ b/pyproject.toml\n@@\n-fail_under = 80\n+fail_under = 90\n",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
+   "diff": "--- a/pkg/x_test.go\n+++ b/pkg/x_test.go\n@@\n-func TestX(t *testing.T) {\n-\tt.Fatal(\"x\")\n+func TestX(t *testing.T) {\n+\tt.Skip(\"later\")\n-func TestMoved(t *testing.T) {\n+func TestMoved(t *testing.T) {\n",
+   "findings": [
+    "added skip to pkg/x_test.go: t.Skip(\"later\")",
+    "1 assertion removed from pkg/x_test.go"
+   ],
+   "criteria": "Pre-review screen: this diff weakens or removes tests. Each of these is BLOCKING unless the item itself requires it:\n- added skip to pkg/x_test.go: t.Skip(\"later\")\n- 1 assertion removed from pkg/x_test.go\n\ndo the thing"
+  },
+  {
+   "diff": "--- a/src/a.spec.ts\n+++ b/src/a.spec.ts\n@@\n-  it('works', () => {\n-    expect(a).toBe(1)\n+  xit('works', () => {\n",
+   "findings": [
+    "removed test works from src/a.spec.ts",
+    "added skip to src/a.spec.ts: xit('works', () => {",
+    "1 assertion removed from src/a.spec.ts"
+   ],
+   "criteria": "Pre-review screen: this diff weakens or removes tests. Each of these is BLOCKING unless the item itself requires it:\n- removed test works from src/a.spec.ts\n- added skip to src/a.spec.ts: xit('works', () => {\n- 1 assertion removed from src/a.spec.ts\n\ndo the thing"
+  },
+  {
+   "diff": "--- a/src/x.py\n+++ b/src/x.py\n@@\n-assert x\n-assert y\n+return 2  # pytest.skip( in a comment\n",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
+   "diff": "--- /dev/null\n+++ b/tests/test_new.py\n@@\n+def test_new():\n+    assert 1\n",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
+   "diff": "--- a/tests/test_m.py\n+++ b/tests/test_m.py\n@@\n-    assert a\n+    assert a  # moved\n",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
+   "diff": "--- a/testdata/case1.txt\t2026-01-01\n+++ b/testdata/case1.txt\t2026-01-02\n@@\n-x\n+y\n",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
+   "diff": "",
+   "findings": [],
+   "criteria": "do the thing"
+  },
+  {
+   "diff": "not a diff at all\n",
+   "findings": [],
+   "criteria": "do the thing"
+  }
+ ]
+}

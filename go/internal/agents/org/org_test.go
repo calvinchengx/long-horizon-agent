@@ -801,3 +801,69 @@ func TestReviewParsingAndReopen(t *testing.T) {
 		t.Fatal("diff")
 	}
 }
+
+// TestFindingsForceTheReviewWhenReviewIsOff is python's
+// test_findings_force_the_review_when_review_is_off (which stubs the diff): item 01 adds a skipped test, item 02 is
+// clean; with DoReview off only the flagged item is reviewed, and both screens are committed.
+func TestFindingsForceTheReviewWhenReviewIsOff(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	// A Go test file: a test path for the screen, and not a harness file the lead may not write.
+	skipped := actText("write_file", map[string]any{"path": "pkg/x_test.go",
+		"content": "package pkg\n\nfunc TestX(t *testing.T) {\n\tt.Skip(\"later\")\n}\n"})
+	summary := run(t, nil, OrchestratorOptions{ResearchPerItem: 0, DoReview: false, Models: map[string]contracts.ModelProvider{
+		"lead": stub(skipped, doneTurn, doneTurn), "researcher": stub(doneTurn), "reviewer": stub(approve),
+	}}, MissionOptions{Workdir: dir, Title: "Screen test", Description: "review is off", Checklist: checklist2(),
+		Checks: []contracts.Check{pass}})
+	if !summary.Completed {
+		t.Fatalf("%+v", summary)
+	}
+	screens := kinds(traceOf(t, summary), "review_screen")
+	if len(screens) != 2 || screens[0].Data["item"] != "01" || screens[0].Data["findings"] != float64(1) || screens[0].Data["forced"] != true ||
+		screens[1].Data["item"] != "02" || screens[1].Data["findings"] != float64(0) || screens[1].Data["forced"] != false {
+		t.Fatalf("%+v", screens)
+	}
+	if n := len(kinds(traceOf(t, summary), "review")); n != 1 { // only the flagged item was reviewed
+		t.Fatalf("%d reviews", n)
+	}
+	committed := committedEvents(t, dir, "review_screen")
+	if len(committed) != 2 || committed[0].Payload["forced"] != true || committed[1].Payload["forced"] != false ||
+		len(committed[0].Payload["findings"].([]any)) != 1 || committed[0].Payload["findings"].([]any)[0] != "added skip to pkg/x_test.go: t.Skip(\"later\")" {
+		t.Fatalf("%+v", committed)
+	}
+	reviews := committedEvents(t, dir, agents.ReviewEvent)
+	if len(reviews) != 1 || reviews[0].Payload["item_id"] != "01" || reviews[0].Payload["verdict"] != "approve" {
+		t.Fatalf("%+v", reviews)
+	}
+}
+
+// TestDiffSinceReturnsThePatchDespiteHardening is python's
+// test_diff_since_returns_the_patch_despite_hardening: the hardening config's empty diff.external
+// must not empty the reviewer's diff.
+func TestDiffSinceReturnsThePatchDespiteHardening(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	git(t, dir, "init", "-q")
+	git(t, dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "init")
+	if err := os.MkdirAll(filepath.Join(dir, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pkg", "x_test.go"), []byte("package pkg\n\nfunc TestX(t *testing.T) {\n\tt.Skip(\"later\")\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, ".lha"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".lha", "events.ndjson"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	git(t, dir, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "c1")
+	diff := DiffSince(context.Background(), dir, git(t, dir, "rev-parse", "HEAD~1"), git(t, dir, "rev-parse", "HEAD"))
+	if !strings.HasPrefix(diff, "diff --git a/pkg/x_test.go b/pkg/x_test.go") || !strings.Contains(diff, "+\tt.Skip(\"later\")") || strings.Contains(diff, ".lha") {
+		t.Fatalf("%q", diff)
+	}
+	if got := verify.ScreenDiff(diff); !reflect.DeepEqual(got, []string{"added skip to pkg/x_test.go: t.Skip(\"later\")"}) {
+		t.Fatalf("%q", got)
+	}
+}

@@ -186,8 +186,9 @@ events and gates (`spec/systemone/labels.json`).
 These uses were considered and left for later, because each needs thresholds measured on real
 LHA missions first:
 
-- a pre-review screen of the diff for weakened or deleted tests (it would only force the full
-  reviewer, never skip it);
+- a model-backed pre-review screen: the deterministic one is built
+  ([07-verification.md](07-verification.md#pre-review-screen)) and records what it found next to
+  each review verdict, which is the label set a model-backed screen would be fitted on;
 - screening `fetch_url` and `web_search` results for instructions aimed at the agent (defence in
   depth; the Rule of Two stays the boundary);
 - choosing the implementer's model tier by the item's difficulty;

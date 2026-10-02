@@ -231,6 +231,35 @@ report shown to the model includes, for each failed gating check, its name, exit
 An `unverified` verdict produces the report `UNVERIFIED: no gating checks ran, so the item
 cannot be marked done.`
 
+## Pre-review screen
+
+Before the organization's reviewer judges a verified item's `base..head` diff, a deterministic
+screen reads the same diff for the ways a change can pass the gate by weakening it rather than by
+doing the work ([`verify/review_screen.py`](../python/src/lha/verify/review_screen.py)):
+
+| Finding | Rule |
+|---|---|
+| `deleted test file <path>` | a test file whose new side is `/dev/null` |
+| `removed test <name> from <path>` | a `def test_*`, `func Test*` or `it('...')` removed from a test file and not re-added in it |
+| `added skip to <path>: <line>` | a new `@pytest.mark.skip` / `xfail`, `pytest.skip(`, `unittest.skip`, `t.Skip(`, `testing.Short()`, `it.skip(` / `xit(` in a test file |
+| `<n> assertions removed from <path>` | more assertion lines (`assert`, `self.assert*`, `t.Fatal*` / `t.Error*`, `require.` / `assert.`, `expect(`) removed from a test file than added |
+| `lowered fail_under from <a> to <b> in <path>` | a `fail_under` / `fail-under` value that went down, in any file |
+
+Test files are those under `tests/`, `test/`, `__tests__/`, `spec/` or `testdata/`, or named
+`test_*.py`, `*_test.py`, `*_test.go`, `*.test.*` / `*.spec.*` or `conftest.py`. At most 20
+findings are kept.
+
+The screen can only narrow what happens: the findings go to the reviewer in front of the item's
+acceptance criteria as blocking unless the item itself requires them, and in `lha orchestrate
+--no-review` they force the review that would otherwise be skipped. A clean screen never approves
+anything and never skips the reviewer. Every screened diff is committed as a `review_screen`
+event (`item_id`, `base`, `head`, `findings`, `forced`), which
+[`lha labels export`](17-cli.md#lha-labels-export) joins to the review verdict as
+`screen_findings`, so a model-backed screen can later be fitted against what the reviewer
+decided ([25-system-one.md](25-system-one.md#not-built-yet)). In a durable mission the screen
+runs inside `review_cycle`, so it needs `--review`. Both implementations produce the same
+findings for the same diff (`spec/verify/review_screen.json`).
+
 ## Harness integrity
 
 The checks run the repository's own tests and configuration, which the agent can edit. To stop

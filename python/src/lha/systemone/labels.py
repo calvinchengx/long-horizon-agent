@@ -32,6 +32,7 @@ RUN_EVENT = "orchestrate"
 CYCLE_EVENT = "cycle"
 TOOL_APPROVAL_EVENT = "tool_approval"
 REVIEW_EVENT = "review"
+REVIEW_SCREEN_EVENT = "review_screen"
 
 #: A reviewed diff in a row is cut to this many characters (``--diffs``).
 DIFF_CAP = 20_000
@@ -107,9 +108,16 @@ def label_rows(
         key=lambda g: (g.opened_at, g.gate_id),
     )
     gated = {(g.request or {}).get("fingerprint", "") for g in closed} - {""}
+    # The pre-review screen's findings for each reviewed (cycle, item): the review row carries
+    # them, so a threshold can be fitted against the reviewer's verdict.
+    screens = {
+        (e.cycle_id, str(e.payload.get("item_id") or "")): _as_list(e.payload.get("findings"))
+        for e in events
+        if e.kind == REVIEW_SCREEN_EVENT
+    }
     rows: list[LabelRow] = []
     for event in events:
-        row = _event_row(event, mission, gated, diffs)
+        row = _event_row(event, mission, gated, diffs, screens)
         if row is not None:
             rows.append(row)
     for gate in closed:
@@ -122,6 +130,7 @@ def _event_row(
     mission: str,
     gated: set[str],
     diffs: Callable[[str, str], str] | None,
+    screens: dict[tuple[str, str], list[object]],
 ) -> LabelRow | None:
     payload = event.payload
     if event.kind == TOOL_APPROVAL_EVENT:
@@ -153,6 +162,9 @@ def _event_row(
         )
     if event.kind == REVIEW_EVENT and payload.get("verdict") is not None:
         data = _pick(payload, _REVIEW_FIELDS)
+        key = (event.cycle_id, str(payload.get("item_id") or ""))
+        if key in screens:
+            data["screen_findings"] = screens[key]
         base, head = str(payload.get("base") or ""), str(payload.get("head") or "")
         if diffs is not None and base and head:
             data["diff"] = diffs(base, head)[:DIFF_CAP]
@@ -206,3 +218,7 @@ def _row(
 
 def _pick(payload: dict[str, object], keys: Sequence[str]) -> dict[str, object]:
     return {key: payload[key] for key in keys if key in payload}
+
+
+def _as_list(value: object) -> list[object]:
+    return list(value) if isinstance(value, list) else []

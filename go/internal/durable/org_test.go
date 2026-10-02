@@ -212,6 +212,12 @@ func TestParallelWaveWithResearchAndReviewCompletes(t *testing.T) {
 	if len(tickets) != 2 || tickets[0].Payload.Plain()["status"] != "done" || tickets[1].Payload.Plain()["status"] != "done" {
 		t.Fatalf("tickets %v", tickets)
 	}
+	screens := eventsOf(t, work, "review_screen") // the pre-review screen ran before each review
+	reviewed := eventsOf(t, work, "review")
+	if len(screens) != 2 || len(reviewed) != 2 || screens[0].CycleID != reviewed[0].CycleID || screens[1].CycleID != reviewed[1].CycleID ||
+		screens[0].Payload.Plain()["forced"] != false || len(screens[0].Payload.Plain()["findings"].([]any)) != 0 {
+		t.Fatalf("screens %v", screens)
+	}
 	// The round's board posts are committed with the integration checkpoints: each research
 	// brief and each implementer's summary, as `lha orchestrate` posts them.
 	authors := map[string]string{}

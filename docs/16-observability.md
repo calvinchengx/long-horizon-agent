@@ -49,6 +49,7 @@ Event kinds emitted today:
 | `decision_chain_invalid` | runner, orchestrator | `reason` (the committed decision log failed verification; the run stops) |
 | `research`, `research_failed` | orchestrator | research fan-out results |
 | `reflection` | orchestrator | `item` |
+| `review_screen` | orchestrator | `item`, `findings` (count), `forced`; the findings themselves are committed as a `review_screen` event ([07-verification.md](07-verification.md#pre-review-screen)) |
 | `review`, `review_reopened` | orchestrator | reviewer verdict; `review` is also committed to `.lha/events.ndjson` (`item_id`, `verdict`, `blocking`, `blocking_issues`, `advisory`, `reopened`, `blocked`, `base`, `head`), which [`lha labels export`](17-cli.md#lha-labels-export) reads |
 | `parallel_wave` | orchestrator | the items of a parallel wave |
 | `integration` | orchestrator | `item`, `merged`, `branch`, `reason` |

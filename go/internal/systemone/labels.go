@@ -41,6 +41,7 @@ const (
 	CycleEvent        = "cycle"
 	ToolApprovalEvent = "tool_approval"
 	ReviewEvent       = "review"
+	ReviewScreenEvent = "review_screen"
 )
 
 // DiffCap is how many characters of a reviewed diff a row keeps (--diffs).
@@ -135,9 +136,21 @@ func LabelRows(events []contracts.EventRecord, gates []persistence.GateRow, miss
 			gated[fp] = true
 		}
 	}
+	// The pre-review screen's findings for each reviewed (cycle, item): the review row carries
+	// them, so a threshold can be fitted against the reviewer's verdict.
+	screens := map[[2]string][]any{}
+	for _, e := range events {
+		if e.Kind == ReviewScreenEvent && e.Payload != nil {
+			list, _ := contracts.PlainJSON(e.Payload.Value("findings")).([]any)
+			if list == nil {
+				list = []any{}
+			}
+			screens[[2]string{e.CycleID, strOr(e.Payload.Value("item_id"), "")}] = list
+		}
+	}
 	rows := []LabelRow{}
 	for _, event := range events {
-		if row, ok := eventRow(event, mission, gated, diffs); ok {
+		if row, ok := eventRow(event, mission, gated, diffs, screens); ok {
 			rows = append(rows, row)
 		}
 	}
@@ -147,7 +160,7 @@ func LabelRows(events []contracts.EventRecord, gates []persistence.GateRow, miss
 	return rows
 }
 
-func eventRow(event contracts.EventRecord, mission string, gated map[string]bool, diffs func(base, head string) string) (LabelRow, bool) {
+func eventRow(event contracts.EventRecord, mission string, gated map[string]bool, diffs func(base, head string) string, screens map[[2]string][]any) (LabelRow, bool) {
 	payload := event.Payload
 	if payload == nil {
 		payload = contracts.NewOrderedMap()
@@ -184,6 +197,9 @@ func eventRow(event contracts.EventRecord, mission string, gated map[string]bool
 			return LabelRow{}, false
 		}
 		data := pick(payload, reviewFields)
+		if list, ok := screens[[2]string{event.CycleID, strOr(payload.Value("item_id"), "")}]; ok {
+			data["screen_findings"] = list
+		}
 		base, head := strOr(payload.Value("base"), ""), strOr(payload.Value("head"), "")
 		if diffs != nil && base != "" && head != "" {
 			data["diff"] = headRunes(diffs(base, head), DiffCap)

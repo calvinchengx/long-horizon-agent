@@ -113,6 +113,7 @@ from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, MISSION_FILE, GitMissionAnchor
 from lha.systemone.build import build_system_one
+from lha.verify.review_screen import review_screen_event, screen_criteria, screen_diff
 from lha.verify.verifier import default_python_checks
 
 __all__ = ["MissionResumeError", "Orchestrator", "anchor_exists", "parallel_batch"]
@@ -683,11 +684,28 @@ class _MissionRun:
         Returns ``"approved"``, ``"reopened"`` (a blocking verdict put the item back to
         ``todo``) or ``"looping"`` (the review keeps blocking; ``stopped`` is set).
         """
-        if not self.org._do_review:
-            return "approved"
         diff = await asyncio.to_thread(diff_since, self.workdir, base, head)
+        # The deterministic screen runs first: its findings go to the reviewer as criteria, and
+        # they force the review when the organization would have skipped it (--no-review). It
+        # never approves anything itself.
+        findings = screen_diff(diff)
+        forced = bool(findings) and not self.org._do_review
+        self.recorder.record(
+            "review_screen",
+            mission_id=self.mission_id,
+            item=item.id,
+            findings=len(findings),
+            forced=forced,
+        )
+        await self.anchor.append_event(
+            review_screen_event(item.id, base, head, findings, forced=forced, cycle_id=cycle_id)
+        )
+        if not self.org._do_review and not findings:
+            return "approved"
         review = await self.reviewer.review(
-            diff=diff[:_REVIEW_DIFF_CAP], criteria=item.description, ctx=self.ctx
+            diff=diff[:_REVIEW_DIFF_CAP],
+            criteria=screen_criteria(findings, item.description),
+            ctx=self.ctx,
         )
         self.recorder.record(
             "review",

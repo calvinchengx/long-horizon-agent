@@ -149,7 +149,7 @@ unless the item was split), `rolled_back` (the files a failed attempt changed, s
 duration. An integration checkpoint of a parallel wave adds `writer` and `branch` to its `cycle`
 event and appends a `ticket` event (the ticket's id, item, role, write set, branch, status,
 status history, ownership violations and leases). The multi-agent organization adds `research`,
-`review`, `lease`, `orchestrate`, `blackboard` and `reflection` events
+`review`, `review_screen`, `lease`, `orchestrate`, `blackboard` and `reflection` events
 ([wire contract](19-wire-contract.md#mission-anchor-lha)). A human-approved retry after a deadlock appends an
 `unblock` event. Every tool call that reached an approval gate appends a `tool_approval` event
 with the cycle's checkpoint (the tool, redacted arguments, reason, fingerprint, the decision

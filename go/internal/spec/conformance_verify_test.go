@@ -3,6 +3,7 @@ package spec
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
@@ -100,5 +101,39 @@ func TestFlakyRetry(t *testing.T) {
 			calls = append(calls, out)
 		}
 		JSONEqual(t, c.Name, map[string]any{"runs": inner.runs, "calls": calls}, c.Expected)
+	}
+}
+
+// TestReviewScreen is python's test_review_screen: the pre-review diff screen's findings and
+// criteria, and which paths count as test files.
+func TestReviewScreen(t *testing.T) {
+	var s struct {
+		Paths []struct {
+			Path string `json:"path"`
+			Test bool   `json:"test"`
+		} `json:"paths"`
+		Cases []struct {
+			Diff     string   `json:"diff"`
+			Findings []string `json:"findings"`
+			Criteria string   `json:"criteria"`
+		} `json:"cases"`
+	}
+	Load(t, "verify/review_screen.json", &s)
+	if len(s.Cases) == 0 || len(s.Paths) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range s.Paths {
+		if verify.IsTestPath(c.Path) != c.Test {
+			t.Errorf("IsTestPath(%q) = %v", c.Path, !c.Test)
+		}
+	}
+	for _, c := range s.Cases {
+		findings := verify.ScreenDiff(c.Diff)
+		if !reflect.DeepEqual(findings, c.Findings) {
+			t.Errorf("%q:\n got %q\nwant %q", c.Diff, findings, c.Findings)
+		}
+		if got := verify.ScreenCriteria(findings, "do the thing"); got != c.Criteria {
+			t.Errorf("%q: criteria\n got %q\nwant %q", c.Diff, got, c.Criteria)
+		}
 	}
 }

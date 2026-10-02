@@ -201,6 +201,12 @@ async def test_parallel_wave_with_research_and_review_completes(tmp_path: Path) 
     assert history == ["created", "in_progress", "awaiting_verify", "awaiting_merge", "done"]
     reviews = _events(work, "review")
     assert [r["payload"]["verdict"] for r in reviews] == ["approve", "approve"]  # type: ignore[index]
+    screens = _events(work, "review_screen")  # the pre-review screen ran before each review
+    assert [(s["payload"]["findings"], s["payload"]["forced"]) for s in screens] == [
+        ([], False),
+        ([], False),
+    ]  # type: ignore[index]
+    assert [s["cycle_id"] for s in screens] == [r["cycle_id"] for r in reviews]
     research = _events(work, "research")
     assert sorted(r["payload"]["item"] for r in research) == ["01", "02"]  # type: ignore[index]
     assert {c.role_name for c in _research_calls} == {"researcher"}

@@ -96,6 +96,20 @@
      "payload_ref": null
     },
     {
+     "kind": "review_screen",
+     "cycle_id": "c2",
+     "payload": {
+      "item_id": "01",
+      "base": "aaa111",
+      "head": "bbb222",
+      "findings": [
+       "deleted test file tests/test_a.py"
+      ],
+      "forced": false
+     },
+     "payload_ref": null
+    },
+    {
      "kind": "review",
      "cycle_id": "c2",
      "payload": {
@@ -335,6 +349,9 @@
       ],
       "advisory": [
        "token *** in a comment"
+      ],
+      "screen_findings": [
+       "deleted test file tests/test_a.py"
       ]
      }
     },
@@ -437,7 +454,7 @@
      }
     }
    ],
-   "jsonl": "{\"at\":\"\",\"by\":\"default\",\"cycle_id\":\"c1\",\"input\":{\"arguments\":\"{\\\"argv\\\": [\\\"git\\\", \\\"push\\\"], \\\"env\\\": {\\\"GH_TOKEN\\\": \\\"***\\\"}}\",\"fingerprint\":\"fp9\",\"reason\":\"pushes to a remote\",\"tool\":\"run_command\"},\"item_id\":\"\",\"label\":\"reject\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"tool_approval\"}\n{\"at\":\"\",\"by\":\"verifier\",\"cycle_id\":\"c1\",\"input\":{\"checks\":[{\"exit_code\":1,\"gating\":true,\"name\":\"pytest\",\"passed\":false},{\"exit_code\":0,\"gating\":false,\"name\":\"ruff\",\"passed\":true}],\"rolled_back\":[\"src/x.py\"],\"split_into\":[],\"status\":\"in_progress\",\"tool_calls\":7,\"verified\":false},\"item_id\":\"01\",\"label\":\"failed\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"verifier\"}\n{\"at\":\"\",\"by\":\"reviewer\",\"cycle_id\":\"c2\",\"input\":{\"advisory\":[\"token *** in a comment\"],\"base\":\"aaa111\",\"blocking\":true,\"blocking_issues\":[\"weakens test_x\"],\"head\":\"bbb222\"},\"item_id\":\"01\",\"label\":\"block\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"review\"}\n{\"at\":\"\",\"by\":\"verifier\",\"cycle_id\":\"c3\",\"input\":{\"checks\":[{\"exit_code\":0,\"gating\":true,\"name\":\"pytest\",\"passed\":true},{\"exit_code\":0,\"gating\":false,\"name\":\"ruff\",\"passed\":true}],\"rolled_back\":[],\"split_into\":[],\"status\":\"done\",\"tool_calls\":7,\"verified\":true},\"item_id\":\"01\",\"label\":\"passed\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"verifier\"}\n{\"at\":\"\",\"by\":\"reviewer\",\"cycle_id\":\"c4\",\"input\":{\"advisory\":[\"token *** in a comment\"],\"base\":\"bbb222\",\"blocking\":false,\"blocking_issues\":[],\"head\":\"ccc333\"},\"item_id\":\"01\",\"label\":\"approve\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"review\"}\n{\"at\":\"2026-01-01T01:05:00+00:00\",\"by\":\"terminal:calvin\",\"cycle_id\":\"\",\"input\":{\"kind\":\"tool_call\",\"options\":[\"approve\",\"reject\"],\"question\":\"Allow `curl -H 'Authorization: Bearer ***'`? (fp1)\",\"request\":{\"argv\":\"[\\\"curl\\\"]\",\"fingerprint\":\"fp1\",\"tool\":\"run_command\"},\"risk\":\"high\"},\"item_id\":\"\",\"label\":\"approve\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"gate\"}\n{\"at\":\"2026-01-01T02:05:00+00:00\",\"by\":\"default\",\"cycle_id\":\"\",\"input\":{\"kind\":\"tool_call\",\"options\":[\"approve\",\"reject\"],\"question\":\"Allow `curl -H 'Authorization: Bearer ***'`? (fp2)\",\"request\":{\"argv\":\"[\\\"curl\\\"]\",\"fingerprint\":\"fp2\",\"tool\":\"run_command\"},\"risk\":\"high\"},\"item_id\":\"\",\"label\":\"reject\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"gate\"}\n"
+   "jsonl": "{\"at\":\"\",\"by\":\"default\",\"cycle_id\":\"c1\",\"input\":{\"arguments\":\"{\\\"argv\\\": [\\\"git\\\", \\\"push\\\"], \\\"env\\\": {\\\"GH_TOKEN\\\": \\\"***\\\"}}\",\"fingerprint\":\"fp9\",\"reason\":\"pushes to a remote\",\"tool\":\"run_command\"},\"item_id\":\"\",\"label\":\"reject\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"tool_approval\"}\n{\"at\":\"\",\"by\":\"verifier\",\"cycle_id\":\"c1\",\"input\":{\"checks\":[{\"exit_code\":1,\"gating\":true,\"name\":\"pytest\",\"passed\":false},{\"exit_code\":0,\"gating\":false,\"name\":\"ruff\",\"passed\":true}],\"rolled_back\":[\"src/x.py\"],\"split_into\":[],\"status\":\"in_progress\",\"tool_calls\":7,\"verified\":false},\"item_id\":\"01\",\"label\":\"failed\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"verifier\"}\n{\"at\":\"\",\"by\":\"reviewer\",\"cycle_id\":\"c2\",\"input\":{\"advisory\":[\"token *** in a comment\"],\"base\":\"aaa111\",\"blocking\":true,\"blocking_issues\":[\"weakens test_x\"],\"head\":\"bbb222\",\"screen_findings\":[\"deleted test file tests/test_a.py\"]},\"item_id\":\"01\",\"label\":\"block\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"review\"}\n{\"at\":\"\",\"by\":\"verifier\",\"cycle_id\":\"c3\",\"input\":{\"checks\":[{\"exit_code\":0,\"gating\":true,\"name\":\"pytest\",\"passed\":true},{\"exit_code\":0,\"gating\":false,\"name\":\"ruff\",\"passed\":true}],\"rolled_back\":[],\"split_into\":[],\"status\":\"done\",\"tool_calls\":7,\"verified\":true},\"item_id\":\"01\",\"label\":\"passed\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"verifier\"}\n{\"at\":\"\",\"by\":\"reviewer\",\"cycle_id\":\"c4\",\"input\":{\"advisory\":[\"token *** in a comment\"],\"base\":\"bbb222\",\"blocking\":false,\"blocking_issues\":[],\"head\":\"ccc333\"},\"item_id\":\"01\",\"label\":\"approve\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"review\"}\n{\"at\":\"2026-01-01T01:05:00+00:00\",\"by\":\"terminal:calvin\",\"cycle_id\":\"\",\"input\":{\"kind\":\"tool_call\",\"options\":[\"approve\",\"reject\"],\"question\":\"Allow `curl -H 'Authorization: Bearer ***'`? (fp1)\",\"request\":{\"argv\":\"[\\\"curl\\\"]\",\"fingerprint\":\"fp1\",\"tool\":\"run_command\"},\"risk\":\"high\"},\"item_id\":\"\",\"label\":\"approve\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"gate\"}\n{\"at\":\"2026-01-01T02:05:00+00:00\",\"by\":\"default\",\"cycle_id\":\"\",\"input\":{\"kind\":\"tool_call\",\"options\":[\"approve\",\"reject\"],\"question\":\"Allow `curl -H 'Authorization: Bearer ***'`? (fp2)\",\"request\":{\"argv\":\"[\\\"curl\\\"]\",\"fingerprint\":\"fp2\",\"tool\":\"run_command\"},\"risk\":\"high\"},\"item_id\":\"\",\"label\":\"reject\",\"mission_id\":\"m1\",\"schema\":1,\"source\":\"gate\"}\n"
   },
   {
    "name": "diffs_supplied_and_capped",
