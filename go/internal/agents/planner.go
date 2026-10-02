@@ -17,6 +17,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
 // PlannerSystemPrompt is ROLES["planner"].system_prompt.
@@ -29,7 +30,10 @@ const PlannerInstructions = "Decompose the mission into 3-15 small, ordered, ind
 	"Reply with ONLY a JSON array; each element: " +
 	`{"description": "<imperative step>", "depends_on": [<1-based numbers of EARLIER steps>], ` +
 	`"files": [<repo-relative paths this step creates or modifies>], ` +
-	`"allow_harness_edits": <true only if the step must modify EXISTING tests or test config>}.` + "\n" +
+	`"allow_harness_edits": <true only if the step must modify EXISTING tests or test config>, ` +
+	`"witnesses": [<optional: checks proving THIS step is delivered, each "pytest:<node id>", ` +
+	`"go:TestName" or "cmd:<shell command that exits 0>"; they gate the step on top of the ` +
+	`mission checks>]}.` + "\n" +
 	"Steps whose files do not overlap can be built in parallel, each by its own writer; list " +
 	"every file a step writes, and keep shared files (pyproject.toml, lockfiles, __init__.py, " +
 	"conftest.py, migrations) in as few steps as possible.\n" +
@@ -120,11 +124,48 @@ func pyTruthy(v any) bool {
 }
 
 type planEntry struct {
-	position    int
-	description string
-	deps        []any
-	allow       bool
-	files       []string
+	position     int
+	description  string
+	deps         []any
+	allow        bool
+	files        []string
+	witnesses    []string
+	badWitnesses []string
+}
+
+// witnessesOf is the entry's valid witnesses and the ones dropped (as "<witness>: <why>").
+// A Planner witness may only ADD a gate the sandbox can run (pytest:, go:, cmd:): a trusted:
+// check runs outside the sandbox and stays the operator's to name (python: _witnesses_of).
+func witnessesOf(entry *pyfmt.OrderedMap) (kept, dropped []string) {
+	kept, dropped = []string{}, []string{}
+	raw, ok := entry.Values["witnesses"]
+	if !ok {
+		return kept, dropped
+	}
+	values, isList := raw.([]any)
+	if !isList {
+		values = []any{raw}
+	}
+	for _, v := range values {
+		s, ok := v.(string)
+		if !ok || pyfmt.PyStrip(s) == "" {
+			continue
+		}
+		witness := pyfmt.PyStrip(s)
+		scheme, _, _ := strings.Cut(witness, ":")
+		if scheme == "trusted" || scheme == "ci" {
+			dropped = append(dropped, witness+": only the operator may name a trusted check")
+			continue
+		}
+		if err := verify.ValidateWitness(witness); err != nil {
+			dropped = append(dropped, witness+": "+err.Error())
+			continue
+		}
+		if !slices.Contains(kept, witness) {
+			kept = append(kept, witness)
+		}
+	}
+	return kept, dropped
 }
 
 // ParsePlan extracts checklist items and each item's declared files from model output. Ids are
@@ -169,10 +210,12 @@ func ParsePlan(text string) ([]contracts.ChecklistItem, map[string][]string) {
 			}
 			e.allow = entry.Values["allow_harness_edits"] == true
 			e.files = filesOf(entry)
+			e.witnesses, e.badWitnesses = witnessesOf(entry)
 		} else {
 			e.description = pyfmt.PyStrip(pyfmt.PyStr(raw))
 			e.deps = []any{}
 			e.files = []string{}
+			e.witnesses, e.badWitnesses = []string{}, []string{}
 		}
 		if e.description != "" {
 			e.position = position
@@ -204,9 +247,15 @@ func ParsePlan(text string) ([]contracts.ChecklistItem, map[string][]string) {
 		}
 		item := contracts.NewChecklistItem(idFor[e.position], e.description, kept...)
 		item.AllowHarnessEdits = e.allow
+		item.Witnesses = e.witnesses
+		notes := []string{}
 		if len(dropped) > 0 {
-			item.Notes = "planner dropped invalid depends_on: " + pyfmt.PyReprValue(dropped)
+			notes = append(notes, "planner dropped invalid depends_on: "+pyfmt.PyReprValue(dropped))
 		}
+		if len(e.badWitnesses) > 0 {
+			notes = append(notes, "planner dropped invalid witnesses: "+pyfmt.PyReprValue(e.badWitnesses))
+		}
+		item.Notes = strings.Join(notes, "; ")
 		items = append(items, item)
 		if len(e.files) > 0 {
 			filesByItem[idFor[e.position]] = e.files

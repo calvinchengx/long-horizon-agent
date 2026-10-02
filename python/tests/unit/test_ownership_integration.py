@@ -727,3 +727,19 @@ async def test_parallel_items_are_gated_by_witnesses_and_split_when_blocked(
     cycles = [e for e in _events(tmp_path) if e["kind"] == "cycle"]
     assert cycles[-1]["payload"]["split_into"] in (["01.1", "01.2"], ["02.1", "02.2"])  # type: ignore[index]
     assert not (tmp_path / "a.py").exists()  # never merged
+
+
+def test_planner_witnesses_are_kept_validated_and_never_trusted() -> None:
+    """The Planner may propose pytest:/go:/cmd: witnesses; bad syntax and trusted: are dropped
+    into the notes (spec/agent/prompts.json pins the exact rows)."""
+    items, _files = parse_plan(
+        '[{"description": "a", "witnesses": ["pytest:tests/test_a.py::test_x", " go:TestA ", '
+        '"pytest:tests/test_a.py::test_x"]}, '
+        '{"description": "b", "witnesses": ["trusted:e2e", "go:not an identifier", "cmd:"]}]'
+    )
+    assert items[0].witnesses == ["pytest:tests/test_a.py::test_x", "go:TestA"]
+    assert items[0].notes == ""
+    assert items[1].witnesses == []
+    assert items[1].notes.startswith("planner dropped invalid witnesses: [")
+    assert "trusted:e2e: only the operator may name a trusted check" in items[1].notes
+    assert "go:not an identifier: " in items[1].notes and "cmd:: " in items[1].notes

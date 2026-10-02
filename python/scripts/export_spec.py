@@ -959,6 +959,12 @@ _PLANS = [
     '"allow_harness_edits": true, "depends_on": "1"}]',
     "no json here",
     '{"description": "not a list"}',
+    '[{"description": "a", "witnesses": ["pytest:tests/test_a.py::test_x", " go:TestA ", '
+    '"cmd:make check", "pytest:tests/test_a.py::test_x"]}, '
+    '{"description": "b", "witnesses": "go:TestB@./internal/..."}, '
+    '{"description": "c", "depends_on": ["9"], "witnesses": ["trusted:e2e", "ci:smoke", '
+    '"go:not an identifier", "pytest:-rf", "cmd:", "nope:x", 7, "", null]}, '
+    '{"description": "d", "witnesses": []}]',
 ]
 
 

@@ -194,3 +194,19 @@ func TestNormalizePathAndIsShared(t *testing.T) {
 		}
 	}
 }
+
+// TestPlannerWitnessesAreKeptValidatedAndNeverTrusted is python's
+// test_planner_witnesses_are_kept_validated_and_never_trusted.
+func TestPlannerWitnessesAreKeptValidatedAndNeverTrusted(t *testing.T) {
+	items, _ := ParsePlan(`[{"description": "a", "witnesses": ["pytest:tests/test_a.py::test_x", " go:TestA ", ` +
+		`"pytest:tests/test_a.py::test_x"]}, ` +
+		`{"description": "b", "witnesses": ["trusted:e2e", "go:not an identifier", "cmd:"]}]`)
+	if !reflect.DeepEqual(items[0].Witnesses, []string{"pytest:tests/test_a.py::test_x", "go:TestA"}) || items[0].Notes != "" {
+		t.Fatalf("%+v", items[0])
+	}
+	if len(items[1].Witnesses) != 0 || !strings.HasPrefix(items[1].Notes, "planner dropped invalid witnesses: [") ||
+		!strings.Contains(items[1].Notes, "trusted:e2e: only the operator may name a trusted check") ||
+		!strings.Contains(items[1].Notes, "go:not an identifier: ") || !strings.Contains(items[1].Notes, "cmd:: ") {
+		t.Fatalf("%+v", items[1])
+	}
+}
