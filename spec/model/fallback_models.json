@@ -4,12 +4,14 @@
    "entry": "ollama:qwen3:8b",
    "backend": "ollama",
    "model": "qwen3:8b",
+   "base_url": "",
    "price": null
   },
   {
    "entry": " OpenAI_Compat:llama-3.3-70b@0.59/0.79 ",
    "backend": "openai_compat",
    "model": "llama-3.3-70b",
+   "base_url": "",
    "price": {
     "input_per_mtok": 0.59,
     "output_per_mtok": 0.79
@@ -19,12 +21,14 @@
    "entry": "claude:claude-haiku-4-5",
    "backend": "claude",
    "model": "claude-haiku-4-5",
+   "base_url": "",
    "price": null
   },
   {
    "entry": "CLAUDE:claude-opus-4-8@5/25",
    "backend": "claude",
    "model": "claude-opus-4-8",
+   "base_url": "",
    "price": {
     "input_per_mtok": 5.0,
     "output_per_mtok": 25.0
@@ -34,6 +38,7 @@
    "entry": "openai_compat:a@b@ 1 / 2 ",
    "backend": "openai_compat",
    "model": "a@b",
+   "base_url": "",
    "price": {
     "input_per_mtok": 1.0,
     "output_per_mtok": 2.0
@@ -43,6 +48,7 @@
    "entry": "openai_compat:m@1_0/2e1",
    "backend": "openai_compat",
    "model": "m",
+   "base_url": "",
    "price": {
     "input_per_mtok": 10.0,
     "output_per_mtok": 20.0
@@ -52,6 +58,7 @@
    "entry": "openai_compat:m@.5/5.",
    "backend": "openai_compat",
    "model": "m",
+   "base_url": "",
    "price": {
     "input_per_mtok": 0.5,
     "output_per_mtok": 5.0
@@ -61,6 +68,7 @@
    "entry": "openai_compat:m@+1/-0",
    "backend": "openai_compat",
    "model": "m",
+   "base_url": "",
    "price": {
     "input_per_mtok": 1.0,
     "output_per_mtok": -0.0
@@ -70,12 +78,14 @@
    "entry": "stub: s ",
    "backend": "stub",
    "model": "s",
+   "base_url": "",
    "price": null
   },
   {
    "entry": "claude_code:sonnet",
    "backend": "claude_code",
    "model": "sonnet",
+   "base_url": "",
    "price": null
   },
   {
@@ -138,12 +148,50 @@
    "entry": "  ollama : qwen3 ",
    "backend": "ollama",
    "model": "qwen3",
+   "base_url": "",
    "price": null
   },
   {
    "entry": "ollama:'quoted'é",
    "backend": "ollama",
    "model": "'quoted'é",
+   "base_url": "",
+   "price": null
+  },
+  {
+   "entry": "openai_compat:llama-3.3-70b|https://api.groq.com/openai/v1",
+   "backend": "openai_compat",
+   "model": "llama-3.3-70b",
+   "base_url": "https://api.groq.com/openai/v1",
+   "price": null
+  },
+  {
+   "entry": " openai_compat:m@1/2 | http://localhost:8000/v1 ",
+   "backend": "openai_compat",
+   "model": "m",
+   "base_url": "http://localhost:8000/v1",
+   "price": {
+    "input_per_mtok": 1.0,
+    "output_per_mtok": 2.0
+   }
+  },
+  {
+   "entry": "openai_compat:m|ftp://x/v1",
+   "error": "invalid endpoint in LHA_FALLBACK_MODELS entry 'openai_compat:m|ftp://x/v1': expected '|http(s)://host/v1'"
+  },
+  {
+   "entry": "openai_compat:m|",
+   "error": "invalid endpoint in LHA_FALLBACK_MODELS entry 'openai_compat:m|': expected '|http(s)://host/v1'"
+  },
+  {
+   "entry": "claude:claude-haiku-4-5|https://x.test/v1",
+   "error": "invalid LHA_FALLBACK_MODELS entry 'claude:claude-haiku-4-5|https://x.test/v1': only openai_compat entries take an endpoint"
+  },
+  {
+   "entry": "openai_compat:a|b|https://x.test/v1",
+   "backend": "openai_compat",
+   "model": "a|b",
+   "base_url": "https://x.test/v1",
    "price": null
   }
  ]

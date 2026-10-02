@@ -257,7 +257,9 @@ transient failures it backs off (same rules) and tries again, up to `max_rounds`
 errors (400, 401, 403, programming errors) raise immediately.
 
 `LHA_FALLBACK_MODELS` selects it. It is a comma-separated, ordered list of
-`backend:model[@in/out]` entries, where `in`/`out` are USD per 1M tokens. When it is non-empty,
+`backend:model[@in/out][|endpoint]` entries, where `in`/`out` are USD per 1M tokens and
+`|endpoint` gives an `openai_compat` entry its own base URL (`|https://host/v1`; only
+`openai_compat` entries take one). When it is non-empty,
 `build_provider` returns `FailoverModel([primary, *fallbacks])`, so every run path gets the chain
 (`mission`, `run-local`, `orchestrate` including per-role routing and the planner,
 `mission-start`, and the Temporal cycle and sub-agent activities).
@@ -268,7 +270,7 @@ export LHA_MODEL_NAME=claude-sonnet-4-6
 export LHA_ANTHROPIC_API_KEY=...
 export LHA_OPENAI_BASE_URL=https://api.groq.com/openai/v1
 export LHA_OPENAI_API_KEY=...
-export LHA_FALLBACK_MODELS="openai_compat:llama-3.3-70b-versatile@0.59/0.79,ollama:qwen3:8b"
+export LHA_FALLBACK_MODELS="openai_compat:llama-3.3-70b-versatile@0.59/0.79,openai_compat:gpt-4.1-mini@0.4/1.6|https://api.openai.com/v1,ollama:qwen3:8b"
 ```
 
 | Setting | Default | Notes |
@@ -277,9 +279,10 @@ export LHA_FALLBACK_MODELS="openai_compat:llama-3.3-70b-versatile@0.59/0.79,olla
 | `LHA_FALLBACK_MAX_ROUNDS` | `2` | `FailoverModel.max_rounds` |
 
 - Fallback entries use the backend's shared settings: `openai_compat` entries use
-  `LHA_OPENAI_BASE_URL` / `LHA_OPENAI_API_KEY` (so one OpenAI-compatible endpoint per
-  deployment), `claude` entries use `LHA_ANTHROPIC_API_KEY`, `ollama` entries use
-  `LHA_OLLAMA_BASE_URL`. A missing key or base URL fails when the provider is built.
+  `LHA_OPENAI_BASE_URL` unless the entry names its own `|endpoint`, and always
+  `LHA_OPENAI_API_KEY` (one key for every OpenAI-compatible endpoint), `claude` entries use
+  `LHA_ANTHROPIC_API_KEY`, `ollama` entries use `LHA_OLLAMA_BASE_URL`. A missing key or base
+  URL fails when the provider is built.
 - Prices: an entry's `@in/out` price wins. Otherwise `claude` entries use the built-in table
   (an id not in the table fails with `UnknownPriceError`), `ollama` and `stub` are `$0`, and an
   unpriced `openai_compat` entry is **unknown**. `LHA_OPENAI_PRICE_*` and `LHA_CLAUDE_PRICE_*`

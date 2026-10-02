@@ -16,6 +16,7 @@ func TestFallbackModels(t *testing.T) {
 			Error   *string `json:"error"`
 			Backend string  `json:"backend"`
 			Model   string  `json:"model"`
+			BaseURL string  `json:"base_url"`
 			Price   *struct {
 				In  float64 `json:"input_per_mtok"`
 				Out float64 `json:"output_per_mtok"`
@@ -34,7 +35,7 @@ func TestFallbackModels(t *testing.T) {
 			}
 			continue
 		}
-		if err != nil || got.Backend != c.Backend || got.Model != c.Model || (got.Price == nil) != (c.Price == nil) {
+		if err != nil || got.Backend != c.Backend || got.Model != c.Model || got.BaseURL != c.BaseURL || (got.Price == nil) != (c.Price == nil) {
 			t.Errorf("%q: %+v %v", c.Entry, got, err)
 			continue
 		}

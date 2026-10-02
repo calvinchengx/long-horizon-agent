@@ -107,6 +107,26 @@ def test_fallbacks_build_a_failover_chain_in_order() -> None:
     assert routed.name.startswith("failover:claude:claude-opus-4-8,openai_compat:")
 
 
+def test_a_fallback_entry_can_name_its_own_endpoint() -> None:
+    settings = _settings(
+        model_backend="openai_compat",
+        model_name="primary",
+        openai_base_url="https://api.groq.test/openai/v1",
+        fallback_models="openai_compat:second|https://other.test/v1/, openai_compat:third",
+    )
+    provider = build_provider(settings)
+    assert isinstance(provider, FailoverModel)
+    members = provider._providers
+    assert [m._base_url for m in members] == [  # type: ignore[attr-defined]
+        "https://api.groq.test/openai/v1",
+        "https://other.test/v1",
+        "https://api.groq.test/openai/v1",
+    ]
+    # With its own endpoint, an entry needs no shared LHA_OPENAI_BASE_URL.
+    alone = build_provider(_settings(fallback_models="openai_compat:second|https://other.test/v1"))
+    assert isinstance(alone, FailoverModel)
+
+
 def test_fallback_config_errors_surface_at_build() -> None:
     with pytest.raises(ValueError, match="LHA_OPENAI_BASE_URL"):
         build_provider(_settings(fallback_models="openai_compat:m"))
