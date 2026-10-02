@@ -245,6 +245,9 @@ model, and the same runs exposed the split-ordering starvation fixed above. The 
 and the trace-first retries came after these runs and are not measured yet. Leave it off unless you
 measure a gain on your own missions.
 
+The reviewer's effect was measured separately, on three small changes to this repository
+([11-multi-agent-organization.md](11-multi-agent-organization.md#measured-the-reviewer-and-the-gates-2-october-2026)).
+
 ## Optional: ask the code instead of reading it
 
 `LHA_CODE_QUERY=true` gives every role (the lead, researchers, the reviewer and implementers) a
