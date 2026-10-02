@@ -301,6 +301,7 @@ async def _wave(
                     approved_actions=list(state.approved_actions),
                     research_briefs=research.get(item.item_id, ([], []))[0],
                     research_failures=research.get(item.item_id, ([], []))[1],
+                    wave_size=len(plan.items),
                 ),
                 start_to_close_timeout=_WORK_TIMEOUT,
                 heartbeat_timeout=_HEARTBEAT,

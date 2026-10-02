@@ -391,6 +391,7 @@ func (w *missionRun) wave(ctx workflow.Context, plan RoundPlan, research map[str
 			ApprovedActions:  append([]ApprovedAction{}, st.ApprovedActions...),
 			ResearchBriefs:   briefs,
 			ResearchFailures: failures,
+			WaveSize:         len(plan.Items),
 		})
 	}
 	// Every implementer is waited for (a cancelled one acknowledges first), like asyncio.gather.

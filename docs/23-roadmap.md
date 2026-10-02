@@ -142,8 +142,9 @@ These limitations are in the current code:
 - Leases: a request for a file another open item owns is refused, not queued, and a lease lasts
   until its writer's item is done.
 - The durable organization's blackboard and reflections live only in committed events (no
-  in-memory round board), and the implementers of one durable wave see each other's spend only after they finish, so the
-  budget ceiling can be overshot by up to one wave's spend. A durable mission gets parallel waves
+  in-memory round board), and the implementers of one durable wave each get an equal share of
+  the remaining budget (one that finishes early leaves its share unused until the next round). A
+  durable mission gets parallel waves
   only when `mission-start` planned it (an imported `--checklist` declares no file ownership).
 - Temporal histories do not replay across the two languages, so each implementation's workers
   need their own task queue (see [Go phase 2](#go-phase-2-temporal-done)).

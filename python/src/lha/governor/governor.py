@@ -134,3 +134,12 @@ class LoopDetector:
             self._counts.clear()
         else:
             self._counts.pop(signature, None)
+
+
+def wave_share(ceiling_usd: float, prior_usd: float, wave_size: int) -> float:
+    """The ceiling one of ``wave_size`` concurrent implementers gets: what the mission has
+    already spent plus an equal share of what is left, so a whole wave cannot overshoot the
+    mission ceiling (each implementer meters only its own calls while the wave runs)."""
+    if wave_size <= 1:
+        return ceiling_usd
+    return prior_usd + max(0.0, ceiling_usd - prior_usd) / wave_size

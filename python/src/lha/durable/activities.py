@@ -69,7 +69,7 @@ from lha.durable.types import (
 )
 from lha.execution import UnsafeSandboxError
 from lha.governor.cost import CostEntry, CostLedger
-from lha.governor.governor import BudgetGovernor
+from lha.governor.governor import BudgetGovernor, wave_share
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.hitl.approvals import DeferredApprovalGate
 from lha.hitl.notify import post_webhook
@@ -197,9 +197,10 @@ def record_spend(workdir: str, *, key: str, cycle_id: str, ledger: CostLedger) -
 _PRIOR_CYCLE = "(prior)"
 
 
-def build_cycle_meter(settings: Settings, inp: CycleInput) -> CostMeter:
+def build_cycle_meter(settings: Settings, inp: CycleInput, *, wave_size: int = 1) -> CostMeter:
     """A meter whose ledger is seeded with the mission's prior spend and whose ceiling is the
-    mission budget (``inp.budget_usd`` or the worker's ``budget_usd_ceiling``)."""
+    mission budget (``inp.budget_usd`` or the worker's ``budget_usd_ceiling``), or, for one of
+    ``wave_size`` concurrent implementers, that implementer's share of it (``wave_share``)."""
     ledger = CostLedger()
     prior_usd, prior_unknown = read_prior_spend(inp.workdir)
     if prior_usd:
@@ -223,8 +224,9 @@ def build_cycle_meter(settings: Settings, inp: CycleInput) -> CostMeter:
                 cost_known=False,
             )
         )
+    ceiling = inp.budget_usd if inp.budget_usd is not None else settings.budget_usd_ceiling
     governor = BudgetGovernor(
-        ceiling_usd=inp.budget_usd if inp.budget_usd is not None else settings.budget_usd_ceiling,
+        ceiling_usd=wave_share(ceiling, prior_usd, wave_size),
         max_cycles=inp.max_cycles,
         allow_unknown_cost=settings.allow_unpriced_models,
     )

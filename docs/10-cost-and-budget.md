@@ -145,8 +145,9 @@ uses `budget_usd` (else the worker's ceiling) as the ceiling, and appends its ow
 (keys `idempotency_key(mission, cycle, "impl" | "split", attempt)`,
 `idempotency_key(mission, "<cycle>-review", attempt)`, and for a sub-agent
 `idempotency_key(mission, "sub:<workflow>:<activity>@<attempt>")`). The implementers of one
-parallel wave run concurrently and each sees only the spend recorded before it started, so a wave
-can overshoot the ceiling by up to its own spend. A `run_subagent` outside a git checkout builds
+parallel wave run concurrently and each sees only the spend recorded before it started, so each
+meters against its share of the budget: the spend recorded before the wave plus an equal fraction
+of what is left (`wave_share`), and the wave cannot overshoot the ceiling. A `run_subagent` outside a git checkout builds
 a fresh meter from the worker's ceiling. Every call of these activities is also written to the
 persistent cost ledger under the mission id (sub-agent cycle id `subagent:<role>`, or
 `<cycle>-research:<role>` for the organization's researchers).

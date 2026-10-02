@@ -279,15 +279,17 @@ async def _run_implementer(
             )
         ownership = effective_ownership(await anchor.read_ownership(), finished_writers(checklist))
         meter = await asyncio.to_thread(
-            build_cycle_meter,
-            settings,
-            CycleInput(
-                mission_id=inp.mission_id,
-                workdir=inp.workdir,
-                cycle_id=inp.cycle_id,
-                budget_usd=inp.budget_usd,
-                max_cycles=inp.max_cycles,
-            ),
+            lambda: build_cycle_meter(
+                settings,
+                CycleInput(
+                    mission_id=inp.mission_id,
+                    workdir=inp.workdir,
+                    cycle_id=inp.cycle_id,
+                    budget_usd=inp.budget_usd,
+                    max_cycles=inp.max_cycles,
+                ),
+                wave_size=inp.wave_size,
+            )
         )
         focused = snapshot.model_copy(update={"active_item": item})
         try:

@@ -439,7 +439,7 @@ func (a *Activities) RunImplementer(ctx context.Context, inp ImplementerInput) (
 		return ImplementerOutput{}, err
 	}
 	ownership := coordination.EffectiveOwnership(persisted, coordination.FinishedWriters(checklist))
-	meter, err := BuildCycleMeter(ctx, settings, inp.Workdir, inp.CycleID, inp.BudgetUSD, inp.MaxCycles)
+	meter, err := BuildWaveMeter(ctx, settings, inp.Workdir, inp.CycleID, inp.BudgetUSD, inp.MaxCycles, inp.WaveSize)
 	if err != nil {
 		return ImplementerOutput{}, err
 	}

@@ -463,8 +463,10 @@ path shipped with this behaviour, so it has no patch of its own.
 
 Budget: every implementer, integration (the replanner's split), review and researcher starts
 its ledger from the mission's spend journal and appends its own spend to it, so all of them count
-against `budget_usd`. The implementers of one wave run concurrently, so each sees the others'
-spend only after they finish: the ceiling can be overshot by up to one wave's spend. Their calls
+against `budget_usd`. The implementers of one wave run concurrently and each sees the others'
+spend only after they finish, so each is given a share of the budget instead: the spend recorded
+before the wave plus an equal fraction of what is left (`wave_share`; `ImplementerInput.wave_size`),
+and the wave as a whole cannot overshoot the mission ceiling. Their calls
 also go to the persistent cost ledger (`lha costs`). The blackboard and reflections work from the
 committed log: each round's research briefs, each implementer's summary and each blocking review
 verdict are committed as `blackboard` events with the round's checkpoints, a failed integration
