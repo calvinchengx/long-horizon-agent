@@ -64,6 +64,7 @@ const (
 	QueryCycles            = "cycles_done"
 	QueryGate              = "gate_v1"
 	QueryGateLog           = "gate_log_v1"
+	QuerySteerNotes        = "steer_notes"
 	QueryLastItem          = "last_item"
 	QueryParkReason        = "park_reason"
 	QueryResumeAt          = "resume_at"

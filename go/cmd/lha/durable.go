@@ -112,6 +112,9 @@ func (c *cli) worker(args []string) error {
 	if _, err := settings.ResetKeepPaths(); err != nil { // fails here, not in every cycle
 		return fail(2, "%s", err.Error())
 	}
+	if _, err := durable.SweepObjects(settings); err != nil {
+		return err
+	}
 	deployment, versioned, err := durable.DeploymentOptions(settings) // a half-set deployment fails here
 	if err != nil {
 		return fail(2, "%s", err.Error())
@@ -523,6 +526,19 @@ func (c *cli) missionStatus(args []string) error {
 	if resumeAt != 0 {
 		lines = append(lines, "sleeping until "+durable.IsoFull(resumeAt))
 	}
+	var notes []string
+	if _, err := query(c.ctx, cl, wid, durable.QuerySteerNotes, &notes, true); err != nil {
+		return err
+	}
+	if len(notes) > 0 {
+		lines = append(lines, fmt.Sprintf("steering notes (%d, latest last):", len(notes)))
+		if len(notes) > 3 {
+			notes = notes[len(notes)-3:]
+		}
+		for _, n := range notes {
+			lines = append(lines, "  "+oneLine(n, 120))
+		}
+	}
 	var log []string
 	if _, err := query(c.ctx, cl, wid, durable.QueryGateLog, &log, true); err != nil {
 		return err
@@ -667,3 +683,49 @@ type promoteError struct{ err error }
 
 func (e *promoteError) Error() string { return e.err.Error() }
 func (e *promoteError) Unwrap() error { return e.err }
+
+// oneLine is text on one line, cut to limit characters with an ellipsis (python: _one_line).
+func oneLine(text string, limit int) string {
+	flat := strings.Join(strings.Fields(text), " ")
+	r := []rune(flat)
+	if len(r) <= limit {
+		return flat
+	}
+	return string(r[:limit-3]) + "..."
+}
+
+// missionSteer is python's mission-steer: append an operator note every following cycle's
+// prompt includes.
+func (c *cli) missionSteer(args []string) error {
+	fs := c.newFlags("mission-steer", commandHelpFor("mission-steer"))
+	var note optional
+	fs.Var(&note, "note", "The note (at most 2000 characters); every following cycle's prompt includes it.")
+	positional, err := c.parseWithArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	id, err := c.missionID("mission-steer", positional)
+	if err != nil {
+		return err
+	}
+	if !note.set {
+		return &exitError{code: 2, message: "Usage: lha mission-steer [OPTIONS] MISSION_ID\nTry 'lha mission-steer --help' for help.\n\nError: Missing option '--note'."}
+	}
+	text := pyfmt.PyStrip(note.value)
+	if text == "" {
+		return fail(2, "--note must not be empty")
+	}
+	if n := len([]rune(text)); n > durable.MaxSteerChars {
+		return fail(2, "--note is %d characters; at most %d are kept", n, durable.MaxSteerChars)
+	}
+	cl, err := c.connect()
+	if err != nil {
+		return err
+	}
+	defer cl.Close()
+	if err := cl.SignalWorkflow(c.ctx, durable.MissionWorkflowID(id), "", durable.SignalSteer, text); err != nil {
+		return err
+	}
+	fmt.Fprintf(c.stdout, "mission %s: steering note added (%d chars; the last %d notes are kept)\n", id, len([]rune(text)), durable.MaxSteerNotes)
+	return nil
+}

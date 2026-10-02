@@ -267,6 +267,9 @@ func (w *missionRun) registerQueries(ctx workflow.Context) {
 	}))
 	must(workflow.SetQueryHandler(ctx, QueryResumeAt, func() (float64, error) { return w.state.ResumeAt, nil }))
 	must(workflow.SetQueryHandler(ctx, QueryOpenQuestion, func() (string, error) { return w.openQuestion, nil }))
+	must(workflow.SetQueryHandler(ctx, QuerySteerNotes, func() ([]string, error) {
+		return append([]string{}, w.state.SteerNotes...), nil
+	}))
 	must(workflow.SetQueryHandler(ctx, QueryRejectedDecisions, func() ([]string, error) {
 		return append([]string{}, w.rejectedDecisions...), nil
 	}))

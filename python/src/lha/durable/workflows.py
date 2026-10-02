@@ -96,9 +96,12 @@ from lha.durable.signals import (
     DEADLOCK_DEFAULTS,
     GATE_DEADLOCK,
     GATE_TOOL_CALL,
+    MAX_STEER_CHARS,
+    MAX_STEER_NOTES,
     QUERY_GATE,
     QUERY_GATE_LOG,
     QUERY_STATUS,
+    QUERY_STEER_NOTES,
     SIGNAL_HUMAN_DECISION,
     SIGNAL_SNOOZE,
     SIGNAL_STEER,
@@ -145,8 +148,6 @@ CYCLE_HEARTBEAT_TIMEOUT = timedelta(minutes=2)
 _ONE_SHOT = RetryPolicy(maximum_attempts=1)
 _SHORT_RETRY = RetryPolicy(maximum_attempts=3)
 
-MAX_STEER_NOTES = 20
-MAX_STEER_CHARS = 2000
 # The pre-ladder deadlock gate's options (kept so histories recorded before it replay).
 DEADLOCK_OPTIONS = ("retry", "abort")
 LADDER_DEADLOCK_OPTIONS = ("retry", "abort", "impossible")
@@ -744,6 +745,11 @@ class MissionWorkflow:
     def open_question(self) -> str:
         """The question an open human gate is waiting on ('' when none is open)."""
         return self._open_question
+
+    @workflow.query(name=QUERY_STEER_NOTES)
+    def steer_notes(self) -> list[str]:
+        """The operator's steering notes, oldest first (``lha mission-steer``)."""
+        return list(self._state.steer_notes)
 
     @workflow.query
     def rejected_decisions(self) -> list[str]:

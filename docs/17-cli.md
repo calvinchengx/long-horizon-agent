@@ -12,7 +12,7 @@ and exit codes. `go/cmd/lha` implements every command: `version`, `config`, `run
 needs no extra for `db migrate`: the Postgres driver is built in), `objects prune`,
 `memory reembed`, `worker`, `mission-start`
 (including the organization options `--research`, `--review` and `--max-parallel`),
-`mission-status`, `mission-approve`, `mission-snooze` and `mission-abort`. It installs the trace
+`mission-status`, `mission-approve`, `mission-snooze`, `mission-steer` and `mission-abort`. It installs the trace
 exporter at start like Python; see [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
@@ -38,6 +38,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
 | [`mission-approve`](#lha-mission-approve) | answer the open gate (a queued irreversible action, or the deadlock gate) | Temporal |
 | [`mission-snooze`](#lha-mission-snooze) | sleep a mission before its next cycle, or wake it | Temporal |
+| [`mission-steer`](#lha-mission-steer) | add an operator note that every following cycle's prompt includes | Temporal |
 | [`mission-abort`](#lha-mission-abort) | cancel a durable mission | Temporal |
 
 ## Exit codes
@@ -52,7 +53,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 Once a local run is under way, a governor refusal (before a cycle or before a single model call)
 stops it normally: the summary is printed with `stopped_reason` `governor: ...` and the exit code
 is `1`. Only a refusal during planning, before anything has run, exits `3`. The Temporal commands
-(`worker`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-abort`) do not
+(`worker`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-abort`) do not
 translate errors: an unreachable server or unknown workflow id ends in a traceback with exit `1`.
 `mission-approve` exits `2` when the decision is unknown or not offered by the open gate.
 
@@ -142,7 +143,8 @@ Deletes the objects in the ClaimCheck store at `LHA_OBJECT_STORE_ROOT` not modif
 Durable missions offload every payload over 32 KiB there and journal only its key, so the store
 grows with every cycle. An object a live workflow history still refers to must not be deleted:
 choose `N` longer than your longest mission plus the Temporal namespace's history retention
-([runbook](15-operations-runbook.md#memory-and-disk-over-a-long-mission)).
+([runbook](15-operations-runbook.md#memory-and-disk-over-a-long-mission)). With
+`LHA_OBJECT_RETENTION_DAYS=N` set, `lha worker` runs the same deletion as it starts.
 
 ## `lha memory reembed`
 
@@ -486,6 +488,20 @@ lha mission-snooze MISSION_ID --seconds INT
 Signals `snooze_v1`: the mission sleeps (status `SLEEPING`, a durable timer) for `--seconds`
 before its next cycle; `--seconds 0` wakes a sleeping mission. A cycle already running finishes
 first. Prints `mission <id>: snoozed <n>s` or `mission <id>: woken`.
+
+## `lha mission-steer`
+
+```
+lha mission-steer MISSION_ID --note TEXT
+```
+
+Signals `steer_v1` with the note (leading and trailing whitespace stripped). Every following
+cycle's prompt, for the lead and for the organization's implementers, shows the mission's notes
+under "Operator steering (most recent last)"; the workflow keeps the last 20. A note that is
+empty or longer than 2000 characters is refused before anything is sent (exit 2). Prints
+`mission <id>: steering note added (<n> chars; the last 20 notes are kept)`.
+[`mission-status`](#lha-mission-status) lists the notes (`steering notes (<n>, latest last):`,
+the last three, each on one line cut to 120 characters).
 
 ## `lha mission-abort`
 
