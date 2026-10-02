@@ -441,6 +441,8 @@ type ImplementerInput struct {
 	ApprovedActions  []ApprovedAction `json:"approved_actions"`
 	ResearchBriefs   []string         `json:"research_briefs"`
 	ResearchFailures []string         `json:"research_failures"`
+	// How many implementers run in this wave: each gets an equal share of the remaining budget.
+	WaveSize int `json:"wave_size"`
 }
 
 // MarshalJSON never emits null for the lists.
@@ -458,7 +460,7 @@ func (i ImplementerInput) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON applies the dataclass defaults.
 func (i *ImplementerInput) UnmarshalJSON(data []byte) error {
 	type alias ImplementerInput
-	a := alias{MaxCycles: 1000}
+	a := alias{MaxCycles: 1000, WaveSize: 1}
 	if err := json.Unmarshal(data, &a); err != nil {
 		return err
 	}

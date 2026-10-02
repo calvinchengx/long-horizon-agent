@@ -2,6 +2,7 @@ package governor
 
 import (
 	"fmt"
+	"math"
 	"sync"
 )
 
@@ -135,4 +136,14 @@ func (d *LoopDetector) ResetAll() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	clear(d.counts)
+}
+
+// WaveShare is the ceiling one of waveSize concurrent implementers gets: what the mission has
+// already spent plus an equal share of what is left, so a whole wave cannot overshoot the
+// mission ceiling (each implementer meters only its own calls while the wave runs).
+func WaveShare(ceilingUSD, priorUSD float64, waveSize int) float64 {
+	if waveSize <= 1 {
+		return ceilingUSD
+	}
+	return priorUSD + math.Max(0, ceilingUSD-priorUSD)/float64(waveSize)
 }

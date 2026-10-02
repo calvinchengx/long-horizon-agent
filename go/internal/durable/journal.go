@@ -267,6 +267,13 @@ func RecordSpend(ctx context.Context, workdir, key, cycleID string, ledger *gove
 // ceiling is the mission budget (budgetUSD, else LHA_BUDGET_USD_CEILING) (python:
 // build_cycle_meter).
 func BuildCycleMeter(ctx context.Context, settings *config.Settings, workdir, cycleID string, budgetUSD *float64, maxCycles int) (*governor.CostMeter, error) {
+	return BuildWaveMeter(ctx, settings, workdir, cycleID, budgetUSD, maxCycles, 1)
+}
+
+// BuildWaveMeter is BuildCycleMeter for one of waveSize concurrent implementers: its ceiling is
+// that implementer's share of the mission budget (governor.WaveShare; python: build_cycle_meter
+// with wave_size).
+func BuildWaveMeter(ctx context.Context, settings *config.Settings, workdir, cycleID string, budgetUSD *float64, maxCycles, waveSize int) (*governor.CostMeter, error) {
 	ledger := governor.NewCostLedger()
 	priorUSD, priorUnknown, err := ReadPriorSpend(ctx, workdir)
 	if err != nil {
@@ -284,7 +291,7 @@ func BuildCycleMeter(ctx context.Context, settings *config.Settings, workdir, cy
 	if budgetUSD != nil {
 		ceiling = *budgetUSD
 	}
-	meter := governor.NewCostMeter(ledger, governor.NewBudgetGovernor(ceiling, maxCycles, settings.AllowUnpricedModels))
+	meter := governor.NewCostMeter(ledger, governor.NewBudgetGovernor(governor.WaveShare(ceiling, priorUSD, waveSize), maxCycles, settings.AllowUnpricedModels))
 	meter.SetCycleID(cycleID)
 	return meter, nil
 }

@@ -439,3 +439,15 @@ func TestPyJSONDumpsMatchesPython(t *testing.T) {
 		t.Error(got)
 	}
 }
+
+func TestWaveShare(t *testing.T) {
+	for _, c := range []struct {
+		ceiling, prior float64
+		n              int
+		want           float64
+	}{{10, 4, 1, 10}, {10, 4, 3, 6}, {10, 12, 2, 12}, {10, 0, 4, 2.5}} {
+		if got := WaveShare(c.ceiling, c.prior, c.n); got != c.want {
+			t.Errorf("WaveShare(%v, %v, %d) = %v, want %v", c.ceiling, c.prior, c.n, got, c.want)
+		}
+	}
+}

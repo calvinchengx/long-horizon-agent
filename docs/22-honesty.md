@@ -117,8 +117,8 @@ Limits of features that are wired and tested:
 - The mission row and the `hitl_gates` rows are best-effort copies that lag when the store is
   down, and a durable gate's row cannot name the person who answered.
 - A contended lease is refused, not queued, and a lease lasts until its writer's item is done.
-- The implementers of one durable wave run concurrently, so the budget ceiling can be overshot by
-  up to one wave's spend.
+- The implementers of one durable wave each get an equal share of the remaining budget, so one
+  that finishes early leaves its unspent share unused until the next round.
 - `lha orchestrate --resume` loses blackboard posts and reflections a run killed mid-wave made
   after its last checkpoint (a run that ends commits them first).
 - The default `hash` embedder is lexical, not semantic (`ollama` is semantic but needs a running

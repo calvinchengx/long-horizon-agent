@@ -364,6 +364,8 @@ class ImplementerInput:
     approved_actions: list[ApprovedAction] = field(default_factory=list)
     research_briefs: list[str] = field(default_factory=list)
     research_failures: list[str] = field(default_factory=list)
+    # How many implementers run in this wave: each gets an equal share of the remaining budget.
+    wave_size: int = 1
 
 
 @dataclass

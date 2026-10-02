@@ -236,6 +236,11 @@ func TestSpendJournalIsIdempotentPerKeyAndSeedsTheMeter(t *testing.T) {
 	if err := RecordSpend(ctx, dir, "k2", "c2", meter.Ledger); err != nil {
 		t.Fatal(err)
 	}
+	// One of three concurrent implementers gets the prior spend plus a third of what is left.
+	shared, err := BuildWaveMeter(ctx, testSettings(t), dir, "c3", &cap1, 10, 3)
+	if err != nil || shared.Governor.CeilingUSD() != 0.25+0.75/3 || shared.Ledger.TotalUSD() != 0.25 {
+		t.Fatalf("wave meter %+v %v", shared, err)
+	}
 	if again, _, _ := ReadPriorSpend(ctx, dir); again != 0.25 {
 		t.Fatalf("prior spend re-journaled: %v", again)
 	}

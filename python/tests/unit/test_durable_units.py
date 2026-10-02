@@ -184,6 +184,23 @@ def test_spend_journal_roundtrip_and_seeding(tmp_path: Path) -> None:
     # Seeded rows are not re-journaled as this attempt's spend.
     acts.record_spend(str(repo), key="k2", cycle_id="c2", ledger=meter.ledger)
     assert acts.read_prior_spend(str(repo)) == (1.25, 1)
+    # One of three concurrent implementers gets the prior spend plus a third of what is left.
+    shared = acts.build_cycle_meter(
+        SETTINGS,
+        CycleInput(mission_id="m", workdir=str(repo), cycle_id="c3", budget_usd=2.0),
+        wave_size=3,
+    )
+    assert shared.governor.ceiling_usd == 1.25 + 0.75 / 3
+    assert shared.ledger.total_usd == 1.25
+
+
+def test_wave_share() -> None:
+    from lha.governor.governor import wave_share
+
+    assert wave_share(10.0, 4.0, 1) == 10.0
+    assert wave_share(10.0, 4.0, 3) == 6.0
+    assert wave_share(10.0, 12.0, 2) == 12.0  # nothing left: the share is the spend itself
+    assert wave_share(10.0, 0.0, 4) == 2.5
 
 
 def test_anchor_text_carries_steering_notes() -> None:
