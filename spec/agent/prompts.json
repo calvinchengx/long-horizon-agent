@@ -10,6 +10,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -120,6 +121,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -243,6 +245,7 @@
      "000000a lha: attempt 10",
      "000000b lha: attempt 11"
     ],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -353,6 +356,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -463,6 +467,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -576,6 +581,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -711,6 +717,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -821,6 +828,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
@@ -934,6 +942,7 @@
    "snapshot": {
     "head_sha": "abc",
     "recent_commits": [],
+    "members": [],
     "mission": null,
     "progress_summary": "",
     "open_items": [],
