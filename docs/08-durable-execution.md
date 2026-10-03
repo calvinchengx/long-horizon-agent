@@ -322,6 +322,26 @@ then (`wait_condition` with a timeout, so a new `snooze_v1` moves or ends the sl
 
 The `resume_at` query returns the wake-up time (0 when not sleeping).
 
+## Operator checklist edits
+
+`checklist_edit_v1` (`lha mission-edit`) carries a batch of edits (add, remove, edit, reopen,
+block, unblock; [17-cli.md](17-cli.md#lha-mission-edit)). The signal handler only queues it in
+`MissionState.pending_edits`; the workflow never changes the checklist itself. Batches are
+applied, one `edit_checklist` activity each in arrival order, at three points: at the top of
+the loop before a cycle is dispatched, inside the `SLEEPING` wait (the wait condition also wakes
+on a pending batch; the sleep then goes on), and at the deadlock gate's `retry`, before
+`unblock_items`, so that a retry whose edits removed every blocked item keeps going when the
+checklist is no longer deadlocked. A batch never lands while a cycle runs (the cycle holds the
+workdir lock and reads the checklist once), and not while a gate is open. The activity resets the
+checkout to `HEAD`, applies the batch atomically (`lha.state.checklist_edit.apply_edits`:
+one bad edit refuses them all, the checklist unchanged), commits `.lha/` only (`lha: checklist
+edited by <who>`, a `checklist_edit` event with `by`, `edits` and `summary`) and returns a
+snapshot; a refusal is a normal result (`advanced` false, the reason in `note`), not an activity
+failure. Each outcome is a gate-log line (`mission-status`). The activity is idempotent per edit
+id (`e1`, `e2`, ...): a retry that finds its own event with the same batch in `HEAD` applies
+nothing again. The behaviour is guarded by `lha-checklist-edit-v1`, consulted only while a batch
+is pending.
+
 ## Signals, queries and statuses
 
 | Name (wire) | Kind | Payload / result |
@@ -330,6 +350,8 @@ The `resume_at` query returns the wake-up time (0 when not sleeping).
 | `human_decision_v2` | signal | `{"decision", "by"}`: the same, naming who decided (`mission-approve --as`) |
 | `snooze_v1` | signal | seconds to sleep before the next cycle (`0` wakes) |
 | `steer_v1` | signal | note appended to `steer_notes` (max 20 notes, 2000 chars each); every following cycle's prompt includes them |
+| `checklist_edit_v1` | signal | `{"edits": [...], "by"}`: a checklist edit batch (`lha mission-edit`), queued in `pending_edits` (max 20 batches) and applied by the `edit_checklist` activity before the next cycle, while sleeping, or at the deadlock gate's `retry` |
+| `pending_edits` | query | edit batches queued but not yet applied |
 | `status_v1` | query | current status string |
 | `gate_v1` | query | the open `GateView`, or `null` |
 | `gate_log_v1` | query | recent gate and sleep events (last 50 lines) |
@@ -549,6 +571,7 @@ Behaviour added to `MissionWorkflow` after histories were recorded is guarded by
 | `lha-mission-row-v1` | the `record_mission_status` activity: the workflow writes `SLEEPING`, `DEGRADED_PARK`, an open gate's `WAITING_ON_HUMAN` and every final status to the mission row |
 | `lha-cycle-wait-cancel-v1` | the cycle activity's cancellation type `WAIT_CANCELLATION_COMPLETED`: after `lha mission-abort`, the workflow waits for the cycle to acknowledge (or finish) before it writes `ABORTED`, and re-raises a cancellation that a cycle finishing normally would otherwise swallow |
 | `lha-complete-skips-approvals-v1` | a cycle that completes the mission opens no approval gate for the actions it queued: no later cycle could use them |
+| `lha-checklist-edit-v1` | operator checklist edits (`checklist_edit_v1`, the `edit_checklist` activity); consulted only while a batch is pending, so a history recorded without the signal never reaches it |
 | `lha-durable-org-v1` | an organization round; reached only by a mission whose `MissionInput` opts in, so a history recorded without those fields never hits it. The round's activities always wait for a cancellation the same way (the org path is new, so it needs no separate patch) |
 
 Without the `lha-gate-escalation-v1` guard both legacy histories fail replay with a
@@ -604,12 +627,13 @@ What differs:
   not affected: either CLI drives missions served by either worker.
 - **Versioning.** A Go behaviour change after histories are recorded is guarded with
   `workflow.GetVersion(ctx, "lha-go-<change>-v<n>", workflow.DefaultVersion, <n>)` instead of
-  `workflow.patched`. There are two. The organization (`lha-go-durable-org-v1`, the counterpart
+  `workflow.patched`. There are three. The organization (`lha-go-durable-org-v1`, the counterpart
   of `lha-durable-org-v1`) is consulted only by a mission that opts in, and a history recorded by
   a Go build that still refused the options (`DefaultVersion`) replays down that refusal.
   `lha-go-complete-skips-approvals-v1` (the counterpart of `lha-complete-skips-approvals-v1`) is
   consulted only when a completing cycle queued an approval; an older history replays down the
-  path that asked.
+  path that asked. `lha-go-checklist-edit-v1` (the counterpart of `lha-checklist-edit-v1`) is
+  consulted only while an edit batch is pending.
 - **Replay tests.** `go/internal/durable/replay_test.go` replays the Go histories in
   [`testdata/histories/`](../go/internal/durable/testdata/histories/) (a completed mission, an
   approval gate with an escalation reminder, `SLEEPING` with a snooze, a deadlock gate declared

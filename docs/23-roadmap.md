@@ -11,8 +11,8 @@ workflow calls it.
 
 - `MissionWorkflow` on Temporal: one `run_agent_cycle` activity per cycle, Continue-As-New, park
   with backoff on outages (`DEGRADED_PARK`) until the health probe reports git, the model and the
-  sandbox healthy, `status_v1` and `open_question` queries, `human_decision_v1`, `steer_v1` and
-  snooze signals ([08-durable-execution.md](08-durable-execution.md), [14-running-on-temporal.md](14-running-on-temporal.md)).
+  sandbox healthy, `status_v1` and `open_question` queries, `human_decision_v1`, `steer_v1`,
+  `checklist_edit_v1` and snooze signals ([08-durable-execution.md](08-durable-execution.md), [14-running-on-temporal.md](14-running-on-temporal.md)).
 - Human gates (`WAITING_ON_HUMAN`): an approval gate for irreversible actions (approve / reject,
   default reject, `--approval-timeout-hours`, default `LHA_APPROVAL_TIMEOUT_S` = 24 h) and a
   deadlock gate (retry / abort / impossible, default `LHA_DEADLOCK_GATE_DEFAULT` = abort,
@@ -27,7 +27,8 @@ workflow calls it.
 - Git mission anchor (`.lha/`) as the source of truth ([06-mission-anchor.md](06-mission-anchor.md)).
 - ClaimCheck codec, replay test against a recorded history.
 - CLI: `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze`,
-  `mission-abort`, plus the local `run-local` and `mission` ([17-cli.md](17-cli.md)).
+  `mission-steer`, `mission-edit`, `mission-abort`, plus the local `run-local` and `mission`
+  ([17-cli.md](17-cli.md)).
 - Crash recovery, Continue-As-New and long-run tests on the Temporal test server.
 
 ### Phase 1: deterministic verifier as the gate (done)
@@ -115,6 +116,7 @@ quality with real models.
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
 | Deadlock gate with "impossible", escalation ladder, gate webhook, `SLEEPING` | done: durable path |
 | Operator steering from the CLI (`lha mission-steer`, notes in `mission-status`) | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-steer)) |
+| Pause and edit the checklist mid-mission (`lha mission-edit`: add, remove, edit, reopen, block, unblock; applied between cycles, while sleeping or at the deadlock gate's retry, never mid-cycle; `--workdir` for local missions) | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-edit), [08-durable-execution.md](08-durable-execution.md#operator-checklist-edits)) |
 | `lha mission-report`: one page per mission from the anchor and the store | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-report)) |
 | Observability: OTLP trace export (any collector, and Langfuse through its OTLP endpoint) | done: the CLI and worker install an exporter at start when `LHA_OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_ENDPOINT` or the Langfuse keys are set; mission, cycle, cycle-activity, model-call and tool-call spans on every run path ([16-observability.md](16-observability.md)) |
 | Offline prompt evolution (evolver, judge, eval harness, promotion gate) | removed: roles' prompts are code constants with no override store to promote into, and the repo has no gold eval set; rebuild it with both when it is needed |

@@ -177,6 +177,7 @@ this size). See [running on Temporal](14-running-on-temporal.md).
 lha mission-status <id>        # status, cycles, sleep time, the open gate and recent gate events
 lha mission-approve <id> --decision approve   # or reject; retry | abort | impossible for a deadlock
 lha mission-snooze <id> --seconds 3600        # sleep before the next cycle; --seconds 0 wakes it
+lha mission-edit <id> --remove 07 --add "Document the API (witness: cmd:make docs)"   # change the plan between cycles
 lha costs <id>                 # every metered model call and the totals
 lha decisions --workdir ~/missions/fabric-emulator --verify   # the design decisions, hash-chain checked
 ```

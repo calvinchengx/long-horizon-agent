@@ -129,6 +129,15 @@ next cycle; `--seconds 0` wakes it. `--cycle-pause-seconds` and `--start-in-seco
 **Steer.** Send `steer_v1` with a note (`temporal workflow signal --workflow-id mission:<id>
 --name steer_v1 --input '"..."'`). Following cycles include it in the prompt.
 
+**Edit the checklist.** `lha mission-edit <id> --add "..." --remove ID --reopen ID --block ID
+--unblock ID --describe ID=TEXT --depends ID=A,B --edits FILE --as WHO` queues one batch
+([17-cli.md](17-cli.md#lha-mission-edit)); it is applied before the next cycle, while the mission
+sleeps, or at the deadlock gate's `retry`, never mid-cycle. `mission-status` shows
+`checklist edits pending: N` until then and afterwards the outcome in the gate events
+(`checklist edited by ...` or `checklist edit refused: ...`); the anchor gets a
+`lha: checklist edited by <who>` commit. For a local mission (`lha mission`, `lha orchestrate`)
+run `lha mission-edit --workdir DIR ...` between runs, then `--resume`.
+
 **Stop.** `lha mission-abort <id>` cancels the workflow (see
 [14-running-on-temporal.md](14-running-on-temporal.md#5-gates-sleep-and-abort)). A cycle in
 flight is cancelled at its next heartbeat and the workflow waits for it before it writes
@@ -238,6 +247,10 @@ on park. A model fallback chain is configured with `LHA_FALLBACK_MODELS` (see
   deadlock gate to `abort` (or `impossible`).
 - The deadlock gate recommends "impossible" when `ops.lifecycle.should_declare_impossible` says
   the blocked item failed `LHA_IMPOSSIBLE_AFTER_FAILURES` (3) cycles in a row.
+- A deadlock the blocked items alone cannot resolve (an item that can never pass as written, a
+  wrong dependency) is edited away: `lha mission-edit <id> --remove 04 --add "..."` (or
+  `--describe`, `--depends`) while the gate is open, then `mission-approve --decision retry`. The
+  edits land before the blocked items are reset.
 - `MissionOutcome` in `ops/lifecycle.py` and the `AutoPolicyGate` / `CallbackGate` classes in
   `hitl/gate.py` have no caller in a run path.
 - Every gate event (opened, reminder, resolved, defaulted) is written to the `hitl_gates` table

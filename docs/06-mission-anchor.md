@@ -151,7 +151,9 @@ event and appends a `ticket` event (the ticket's id, item, role, write set, bran
 status history, ownership violations and leases). The multi-agent organization adds `research`,
 `review`, `review_screen`, `lease`, `orchestrate`, `blackboard` and `reflection` events
 ([wire contract](19-wire-contract.md#mission-anchor-lha)). A human-approved retry after a deadlock appends an
-`unblock` event. Every tool call that reached an approval gate appends a `tool_approval` event
+`unblock` event. An operator's checklist edit (`lha mission-edit`) is its own anchor-only commit,
+`lha: checklist edited by <who>`, with a `checklist_edit` event (`by`, the `edits` batch and its
+`summary`, cycle id `e<n>`). Every tool call that reached an approval gate appends a `tool_approval` event
 with the cycle's checkpoint (the tool, redacted arguments, reason, fingerprint, the decision
 `approve`, `reject` or `pending`, who resolved it and whether the default applied); the local
 terminal approver (`--approve-interactive`) also appends a `gate_reminder` event per reminder.
@@ -214,6 +216,12 @@ stateDiagram-v2
   On Temporal this happens when a human answers `retry` to the deadlock gate (activity
   `unblock_items`, sent with `lha mission-approve <id> --decision retry`); the local runners have
   no unblock command.
+- **Operator edits.** `lha mission-edit` adds, removes, edits, reopens (`done` back to `todo`,
+  verification forgotten), blocks (an open item, `last_failure` names who) or unblocks items as
+  one atomic batch, applied between cycles (never while one runs). A `done` item cannot be edited
+  or removed without reopening it first; a `split` parent cannot be touched; the batch must leave
+  a valid, non-empty checklist. New ids never repeat one the mission has used
+  ([17-cli.md](17-cli.md#lha-mission-edit), [`spec/state/checklist_edit.json`](../spec/state/checklist_edit.json)).
 
 ## Complete versus deadlocked
 
