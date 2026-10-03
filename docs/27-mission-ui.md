@@ -54,6 +54,36 @@ flowchart LR
   Every implementation's worker obeys them. Local runs have no control channel, so the UI is
   read-only for them.
 
+## Contract coverage
+
+The UI and every implementation meet only at contracts, so the contracts are complete, current and
+fully tested, in CI, for every implementation. Contract tests are fast, so 100% is the bar, not a
+target.
+
+Enforced today, for the behavioural cases in [`spec/`](../spec/README.md):
+
+- **Every file and every case group is checked by every implementation.** Go's
+  `go/internal/spec` records which files and top-level groups its tests read and fails a full run
+  on any gap; it decodes each group strictly, so a nested field a test does not map fails too.
+  Python's runner does the same under `pytest --contract-coverage`, which CI passes. A Rust
+  implementation adds its runner under the same rule.
+- **The cases cannot fall behind the code.** CI regenerates every file from the Python reference
+  and fails on any difference.
+- **Every file is indexed** in `spec/README.md` (a unit test).
+
+For the UI API (Phase 1), contract first:
+
+- `spec/serve/openapi.yaml` (OpenAPI 3.1) is written and reviewed before any server code, and is
+  the only definition of the API, including a JSON Schema for every `mission_events` kind sent
+  over the event stream.
+- One black-box runner exercises any implementation's `lha serve` over HTTP: data-driven cases in
+  `spec/serve/cases/` (fixture state, request, expected status and body), plus validation of every
+  response against the OpenAPI schemas.
+- CI fails unless every operation, every documented status code and every event kind has a case,
+  and unless every route a server registers is in the spec (no undocumented endpoints).
+- The UI's TypeScript types are generated from the spec (with a drift check), the spec is linted,
+  and a breaking change against `main` fails CI unless the API version changes.
+
 ## Phase 0: `mission_events`, the shared event record
 
 One new table, written by every run path of every implementation, so a reader never needs logs:

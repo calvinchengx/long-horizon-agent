@@ -20,10 +20,13 @@ the matching package is ported; it runs every file below.
 | `state/wire_bytes.json` | raw bytes of event lines, a checkpoint's `events.ndjson`, lease / egress events, `ownership.json`, gate events and webhook bodies (compared as bytes) |
 | `coordination/decision_chain.json` | the canonical JSON bytes and SHA-256 chain of the decision log |
 | `coordination/shared_paths.json` | files only the lead engineer may write |
+| `verify/review_screen.json` | the deterministic pre-review diff screen: which paths are tests, and what it flags in a diff |
 | `verify/harness_files.json` | test/harness files the agent may not weaken |
 | `verify/flaky_retry.json` | flaky-check re-runs and quarantine: re-run order, verdicts, output tails, and the `check_quarantined` / `quarantined_check_failed` event payloads |
 | `model/pricing.json` | Claude price table and per-call cost |
+| `model/claude_code_budget.json` | a `claude -p` call's spend cap: the configured cap, or what is left of the budget when that is less (at least a cent) |
 | `model/fallback_models.json` | `LHA_FALLBACK_MODELS` entries -> backend, model and price, or the exact error |
+| `state/report.json` | the text `lha mission-report` renders from an anchor and the store, byte for byte |
 | `state/vendor_paths.json` | where `lha vendor` stores a fetched URL (`<host>/<path>`, query hash, `.html`) |
 | `agent/prompts.json` | the lead's system/user prompts byte for byte, the JSON reply protocol, the memory block, and the Planner / Replanner prompts, plan parsing and file ownership |
 | `agent/org.json` | the organization: role chart and per-role models, sub-agent prompts and tool visibility, the Reviewer's prompt and verdict parsing, reflection, the implementer's objective, ownership-guard refusals, lease decisions and the ticket lifecycle |
@@ -40,6 +43,20 @@ the matching package is ported; it runs every file below.
 | `systemone/authority.json` | the invariant that a System One answer can only narrow what happens: triage's action for every answer (including options never offered and ones naming an authority-widening outcome), and that reranking only reorders and drops |
 | `systemone/gold.json` | gold evaluation rows (`lha eval`): parse and check errors, and the `recorded` and `screen` judges' scorecards and report, byte for byte |
 | `systemone/labels.json` | the label rows `lha labels export` derives from an anchor's events and the store's gates (sources, labels, who judged, redacted inputs, gate/approval de-duplication, diff capping) and their exact JSON Lines bytes |
+
+## Coverage is enforced
+
+Every file here must be loaded, and every top-level case group read, by both implementations'
+conformance runners, and listed in the table above; CI fails otherwise:
+
+- Go: `go test ./internal/spec/` checks it after a full run of the package (`spec.Uncovered`), and
+  decodes each group strictly, so a nested field a test does not map fails it.
+- Python: `pytest --contract-coverage tests/unit/test_spec_conformance.py` (CI passes the flag).
+- CI regenerates every file from the Python reference and fails on any difference, so the cases
+  can never fall behind the code.
+
+Go caches test results by its own module's files only; after changing a spec file, run
+`go test -count=1 ./internal/spec/`.
 
 ## Changing behaviour
 

@@ -67,8 +67,67 @@ SPEC = next(
 )
 
 
+# --- contract coverage -------------------------------------------------------------------------
+# Every spec file must be loaded and every top-level case group read by some test here; with
+# ``pytest --contract-coverage`` (CI's contracts step) the session fails otherwise
+# (docs/27-mission-ui.md#contract-coverage). Go enforces the same in go/internal/spec.
+READ: dict[str, set[str]] = {}
+
+
+class _Tracked(dict[str, Any]):
+    """A spec file's top level that records which case groups a test reads."""
+
+    def __init__(self, rel: str, data: dict[str, Any]) -> None:
+        super().__init__(data)
+        self._rel = rel
+
+    def _mark(self, *keys: str) -> None:
+        READ.setdefault(self._rel, set()).update(keys)
+
+    def __getitem__(self, key: str) -> Any:
+        self._mark(key)
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any = None) -> Any:
+        self._mark(key)
+        return super().get(key, default)
+
+    def items(self):  # type: ignore[override]
+        self._mark(*self.keys())
+        return super().items()
+
+    def values(self):  # type: ignore[override]
+        self._mark(*self.keys())
+        return super().values()
+
+    def __eq__(self, other: object) -> bool:
+        self._mark(*self.keys())
+        return super().__eq__(other)
+
+    __hash__ = None  # type: ignore[assignment]
+
+
 def _load(rel: str) -> Any:
-    return json.loads((SPEC / rel).read_text(encoding="utf-8"))
+    data = json.loads((SPEC / rel).read_text(encoding="utf-8"))
+    READ.setdefault(rel, set())
+    if not isinstance(data, dict):
+        READ[rel].add("")  # not an object: loading it is reading it
+        return data
+    return _Tracked(rel, data)
+
+
+def uncovered() -> list[str]:
+    """Spec files no test loaded and top-level groups no test read."""
+    gaps = []
+    for path in sorted(SPEC.rglob("*.json")):
+        rel = path.relative_to(SPEC).as_posix()
+        if rel not in READ:
+            gaps.append(f"{rel}: never loaded")
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict) and "" not in READ[rel]:
+            gaps += [f"{rel}: group {k} never read" for k in data if k not in READ[rel]]
+    return gaps
 
 
 def test_classify_command() -> None:
@@ -296,6 +355,13 @@ class _Recording(StubModel):
     ) -> TurnResult:
         self.seen.extend({"role": m.role, "content": m.content} for m in messages)
         return TurnResult(text="[]")
+
+
+def test_agent_witness_commands() -> None:
+    from lha.verify.witnesses import witness_command
+
+    for case in _load("agent/prompts.json")["witness_commands"]:
+        assert witness_command(case["witness"]) == case["command"], case
 
 
 def test_agent_prompts() -> None:
@@ -699,6 +765,22 @@ def test_wire_bytes(tmp_path: Path) -> None:
         assert event.model_dump_json() == case["event"]
 
 
+def test_system_one_wire_limits() -> None:
+    from lha.systemone.wire import (
+        MAX_CHOICE_OPTIONS,
+        MAX_SCORE_LEVELS,
+        MIN_SCORE_LEVELS,
+        SUM_TOLERANCE,
+    )
+
+    assert _load("systemone/wire.json")["limits"] == {
+        "max_choice_options": MAX_CHOICE_OPTIONS,
+        "min_score_levels": MIN_SCORE_LEVELS,
+        "max_score_levels": MAX_SCORE_LEVELS,
+        "sum_tolerance": SUM_TOLERANCE,
+    }
+
+
 def test_system_one_wire() -> None:
     from lha.contracts.memory import MemoryRecord, RetrievalHit
     from lha.contracts.state import ChecklistItem
@@ -932,3 +1014,43 @@ def test_execution_code_query() -> None:
             assert str(caught.value) == case["error"]
     for case in spec["clip"]:
         assert clip_answer(case["text"]) == case["clipped"]
+    from lha.execution.tools.code_query import SYMBOL_MISSES, alternate_targets, is_symbol_miss
+
+    assert spec["symbol_misses"] == list(SYMBOL_MISSES)
+    for case in spec["alternates"]:
+        assert alternate_targets(case["kind"], case["target"]) == case["alternates"], case
+    for case in spec["misses"]:
+        assert is_symbol_miss(case["detail"]) == case["miss"], case
+
+
+def test_execution_edit_file() -> None:
+    from lha.execution.tools.fs import EditFileTool, apply_edit
+
+    spec = _load("execution/edit_file.json")
+    assert spec["spec"] == EditFileTool.spec.model_dump(mode="json")
+    for case in spec["edits"]:
+        if case["error"] is None:
+            assert apply_edit(case["content"], case["old_text"], case["new_text"]) == case["result"]
+        else:
+            with pytest.raises(ValueError) as caught:
+                apply_edit(case["content"], case["old_text"], case["new_text"])
+            assert str(caught.value) == case["error"]
+
+
+def test_model_claude_code_budget() -> None:
+    from lha.model.claude_code import MIN_CALL_BUDGET_USD, call_budget_usd
+
+    spec = _load("model/claude_code_budget.json")
+    assert spec["min_call_budget_usd"] == MIN_CALL_BUDGET_USD
+    for case in spec["cases"]:
+        assert call_budget_usd(case["configured"], case["remaining"]) == case["cap"], case
+
+
+def test_every_spec_file_is_indexed_in_the_readme() -> None:
+    readme = (SPEC / "README.md").read_text(encoding="utf-8")
+    missing = [
+        p.relative_to(SPEC).as_posix()
+        for p in sorted(SPEC.rglob("*.json"))
+        if f"`{p.relative_to(SPEC).as_posix()}`" not in readme
+    ]
+    assert not missing, f"add to spec/README.md: {missing}"

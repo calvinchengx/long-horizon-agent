@@ -83,3 +83,26 @@ def _classifier_deadline(request: pytest.FixtureRequest) -> Iterator[None]:
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+
+
+# --- contract coverage (docs/27-mission-ui.md#contract-coverage) -------------------------------
+def pytest_addoption(parser: pytest.Parser) -> None:
+    parser.addoption(
+        "--contract-coverage",
+        action="store_true",
+        help="fail unless every spec/ file and top-level case group was checked",
+    )
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if not session.config.getoption("--contract-coverage"):
+        return
+    import sys
+
+    module = sys.modules.get("tests.unit.test_spec_conformance") or sys.modules.get(
+        "test_spec_conformance"
+    )
+    gaps = ["test_spec_conformance did not run"] if module is None else module.uncovered()
+    if gaps:
+        print("\nspec coverage gaps:\n  " + "\n  ".join(gaps))
+        session.exitstatus = 1

@@ -33,8 +33,16 @@ jobs:
       - name: Ty (type check)
         run: uv run ty check
 
+      # Contract coverage: every spec/ file and case group must be checked (spec/README.md).
       - name: Pytest (unit)
-        run: uv run pytest -q --cov --cov-report= --cov-fail-under=0 tests/unit
+        run: uv run pytest -q --contract-coverage --cov --cov-report= --cov-fail-under=0 tests/unit
+
+      # The spec/ cases are regenerated from the Python reference; any difference means the
+      # committed contract fell behind the code.
+      - name: Spec is up to date
+        run: |
+          uv run python scripts/export_spec.py > /dev/null
+          git diff --exit-code -- ../spec
 
       # The Temporal CLI, a pinned release verified by its checksum: `temporal server start-dev` is
       # a real server (the time-skipping test server lacks DescribeTaskQueue, which the

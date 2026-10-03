@@ -128,7 +128,8 @@ func TestWireBuiltEvents(t *testing.T) {
 	}
 	var egress struct {
 		ProxyLog struct {
-			Lines []string `json:"lines"`
+			Lines  []string        `json:"lines"`
+			Events json.RawMessage `json:"events"` // checked by TestSandboxEgress
 		} `json:"proxy_log"`
 	}
 	Load(t, "execution/sandbox_egress.json", &egress)
