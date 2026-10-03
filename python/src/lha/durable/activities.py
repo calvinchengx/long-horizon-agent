@@ -38,7 +38,7 @@ from temporalio.exceptions import ApplicationError
 
 from lha.agent.assembly import build_lead_loop, lead_dispatcher, open_lead_sandbox
 from lha.agents.waves import board_context, reflection_for
-from lha.config import Settings, get_settings
+from lha.config import Settings, get_settings, refresh_secrets, secret_fingerprints
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
 from lha.contracts.tools import ToolContext, ToolDispatcher
@@ -97,6 +97,41 @@ HEARTBEAT_EVERY_S = 5.0
 _SPEND_FILE = "lha/spend.ndjson"
 # How many trailing committed events to scan for an already-committed cycle id.
 _RECENT_EVENTS = 256
+
+
+SECRETS_ROTATED_EVENT = "secrets_rotated"
+
+
+def current_settings(settings: Settings | None) -> tuple[Settings, list[str]]:
+    """The settings an activity runs with: the worker's (or the process-wide) settings with the
+    secrets the environment / ``.env`` holds NOW (``config.refresh_secrets``), so a key rotated
+    mid-mission is used by the next activity without a worker restart. Returns the names of the
+    rotated fields, which the caller logs or records."""
+    base = settings or get_settings()
+    try:
+        fresh, rotated = refresh_secrets(base)
+    except Exception as exc:  # a broken .env must not fail the mission: keep what we have
+        get_logger(__name__).warning("secrets_refresh_failed", error=str(exc))
+        return base, []
+    if rotated:
+        get_logger(__name__).info(
+            "secrets_rotated", fields=rotated, fingerprints=secret_fingerprints(fresh)
+        )
+    return fresh, rotated
+
+
+def secrets_rotated_event(cycle_id: str, settings: Settings, rotated: list[str]) -> EventRecord:
+    """The anchor's record of a rotation: which secrets changed and their new fingerprints
+    (never a value), committed with the cycle that first used them."""
+    fingerprints = secret_fingerprints(settings)
+    return EventRecord(
+        kind=SECRETS_ROTATED_EVENT,
+        cycle_id=cycle_id,
+        payload={
+            "fields": list(rotated),
+            "fingerprints": {name: fingerprints.get(name, "") for name in rotated},
+        },
+    )
 
 
 def _default_model_factory(settings: Settings, _snapshot: SituationSnapshot) -> ModelProvider:
@@ -357,7 +392,7 @@ async def _execute_cycle(
     model_factory: ModelFactory | None = None,
 ) -> CycleResult:
     """Advance the mission by one verified item via the real agent loop (safe to retry)."""
-    settings = settings or get_settings()
+    settings, rotated = current_settings(settings)
     factory = model_factory or _default_model_factory
     checks = resolve_checks(inp.check_commands)
     attempt = activity.info().attempt if activity.in_activity() else 1
@@ -435,6 +470,8 @@ async def _execute_cycle(
             event = research_event(inp)
             if event is not None:
                 await anchor.append_event(event)  # committed with this cycle's checkpoint
+            if rotated:
+                await anchor.append_event(secrets_rotated_event(inp.cycle_id, settings, rotated))
             try:
                 try:
                     active = snapshot.active_item.id if snapshot.active_item else None
@@ -561,8 +598,9 @@ async def _refuse_tampered_chain(cycle: Awaitable[CycleResult]) -> CycleResult:
 
 # --- health probe (used while parked) -----------------------------------------------------
 async def probe_health(inp: HealthInput, *, settings: Settings | None = None) -> HealthReport:
-    """Probe the critical dependencies (git checkout, a real model round trip, sandbox)."""
-    settings = settings or get_settings()
+    """Probe the critical dependencies (git checkout, a real model round trip, sandbox). The
+    probe reads the rotated secrets too: a parked mission resumes once the new key works."""
+    settings, _ = current_settings(settings)
     statuses: list[DependencyStatus] = []
 
     def _git_ok() -> bool:

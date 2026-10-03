@@ -64,7 +64,7 @@ from lha.agents.waves import (
     reopen_for_review,
     review_base,
 )
-from lha.config import Settings, get_settings
+from lha.config import Settings
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checklist, ChecklistItem, Checkpoint, DecisionRecord, EventRecord
 from lha.contracts.tools import ToolContext
@@ -82,6 +82,7 @@ from lha.durable.activities import (
     _with_heartbeat,
     build_cycle_meter,
     committed_cycle_event,
+    current_settings,
     record_spend,
     resolve_checks,
     workdir_lock,
@@ -261,7 +262,7 @@ async def _run_implementer(
     model_factory: ModelFactory | None = None,
 ) -> ImplementerOutput:
     """One implementer attempt (see the module docstring); safe to retry."""
-    settings = settings or get_settings()
+    settings, _ = current_settings(settings)
     factory = model_factory or _role_factory("implementer")
     checks = resolve_checks(inp.check_commands)
     async with workdir_lock(inp.workdir, name=f"lha-impl-{_SAFE.sub('_', inp.cycle_id)}.lock"):
@@ -441,7 +442,7 @@ async def _integrate_branch(
     model_factory: ModelFactory | None = None,
 ) -> CycleResult:
     """Integrate one implementer's branch and commit the checkpoint (exactly once per cycle)."""
-    settings = settings or get_settings()
+    settings, _ = current_settings(settings)
     factory = model_factory or _default_model_factory
     checks = resolve_checks(inp.check_commands)
     branch = inp.output.branch if inp.output is not None else ""
@@ -703,7 +704,7 @@ async def _review_cycle(
     model_factory: ModelFactory | None = None,
 ) -> CycleResult:
     """Review one verified item and commit the verdict (exactly once per reviewed cycle)."""
-    settings = settings or get_settings()
+    settings, _ = current_settings(settings)
     factory = model_factory or _role_factory("reviewer")
     review_id = f"{inp.cycle_id}-review"
     async with workdir_lock(inp.workdir):

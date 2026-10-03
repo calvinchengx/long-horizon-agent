@@ -115,11 +115,53 @@ func (a *Activities) resetWorkdir(ctx context.Context, workdir string) error {
 	return state.ResetToHeadKeep(ctx, workdir, keep)
 }
 
+// SecretsRotatedEvent is the anchor event kind recording a rotation (fields and fingerprints).
+const SecretsRotatedEvent = "secrets_rotated"
+
+// settings is the worker's settings with the secrets the environment / .env holds NOW
+// (config.RefreshSecrets; python: current_settings), so a key rotated mid-mission is used by the
+// next activity without a worker restart. The rotated field names are returned for the record.
 func (a *Activities) settings() (*config.Settings, error) {
-	if a.Settings != nil {
-		return a.Settings, nil
+	s, _, err := a.currentSettings()
+	return s, err
+}
+
+func (a *Activities) currentSettings() (*config.Settings, []string, error) {
+	base := a.Settings
+	if base == nil {
+		loaded, err := config.Load()
+		if err != nil {
+			return nil, nil, err
+		}
+		base = loaded
 	}
-	return config.Load()
+	fresh, rotated, err := config.RefreshSecrets(base)
+	if err != nil { // a broken .env must not fail the mission: keep what we have
+		activityLogger().Warn("secrets_refresh_failed", "error", err.Error())
+		return base, nil, nil
+	}
+	if len(rotated) > 0 {
+		fps := []string{}
+		for _, kv := range config.SecretFingerprints(fresh) {
+			fps = append(fps, kv.Key+"="+fmt.Sprint(kv.Value))
+		}
+		activityLogger().Info("secrets_rotated", "fields", strings.Join(rotated, ","), "fingerprints", strings.Join(fps, ","))
+	}
+	return fresh, rotated, nil
+}
+
+// secretsRotatedEvent is python's secrets_rotated_event: which secrets changed and their new
+// fingerprints (never a value), committed with the cycle that first used them.
+func secretsRotatedEvent(cycleID string, settings *config.Settings, rotated []string) contracts.EventRecord {
+	current := map[string]string{}
+	for _, kv := range config.SecretFingerprints(settings) {
+		current[kv.Key] = fmt.Sprint(kv.Value)
+	}
+	fps := contracts.NewOrderedMap()
+	for _, name := range rotated {
+		fps.Set(name, current[name])
+	}
+	return contracts.EventRecord{Kind: SecretsRotatedEvent, CycleID: cycleID, Payload: contracts.Payload("fields", rotated, "fingerprints", fps)}
 }
 
 func (a *Activities) openStore(ctx context.Context, settings *config.Settings, workdir string) (Store, error) {
@@ -359,7 +401,7 @@ func (a *Activities) RunAgentCycle(ctx context.Context, inp CycleInput) (CycleRe
 }
 
 func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleResult, error) {
-	settings, err := a.settings()
+	settings, rotated, err := a.currentSettings()
 	if err != nil {
 		return CycleResult{}, configError(fmt.Sprintf("invalid configuration: %v", err), err)
 	}
@@ -484,6 +526,13 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 	tracker(StatusRunning, snapshot.HeadSHA)
 	if ev := researchEvent(inp); ev != nil {
 		if err := anchor.AppendEvent(ctx, *ev); err != nil { // committed with this checkpoint
+			_ = toolbox.Close(context.WithoutCancel(ctx))
+			closeModel()
+			return CycleResult{}, err
+		}
+	}
+	if len(rotated) > 0 {
+		if err := anchor.AppendEvent(ctx, secretsRotatedEvent(inp.CycleID, settings, rotated)); err != nil {
 			_ = toolbox.Close(context.WithoutCancel(ctx))
 			closeModel()
 			return CycleResult{}, err

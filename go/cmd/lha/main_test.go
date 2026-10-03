@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"io"
 	"net"
 	"os"
@@ -467,5 +468,20 @@ func TestEgressProxyCommand(t *testing.T) {
 	cleanEnv(t, "LHA_PROXY_PORT=nope")
 	if r := runCLI(t, nil, "egress-proxy"); r.code != 2 || r.stderr != "error: invalid literal for int() with base 10: 'nope'\n" {
 		t.Fatalf("%+v", r)
+	}
+}
+
+// lha config -fingerprints prints a hash of each set secret, never the value (python: test_config_fingerprints).
+func TestConfigFingerprints(t *testing.T) {
+	cleanEnv(t)
+	t.Setenv("LHA_ANTHROPIC_API_KEY", "sk-ant-one")
+	plain := runCLI(t, nil, "config")
+	if plain.code != 0 || strings.Contains(plain.stdout, "fingerprint") || strings.Contains(plain.stdout, "sk-ant-one") {
+		t.Fatalf("%+v", plain)
+	}
+	withFP := runCLI(t, nil, "config", "-fingerprints")
+	want := "anthropic_api_key fingerprint = " + config.SecretFingerprint(config.NewSecret("sk-ant-one")) + "\n"
+	if withFP.code != 0 || !strings.Contains(withFP.stdout, want) || strings.Contains(withFP.stdout, "sk-ant-one") {
+		t.Fatalf("%+v", withFP)
 	}
 }

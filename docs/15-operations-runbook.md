@@ -143,6 +143,19 @@ run `lha mission-edit --workdir DIR ...` between runs, then `--resume`.
 flight is cancelled at its next heartbeat and the workflow waits for it before it writes
 `ABORTED`, so the abort can take up to about a minute (the heartbeat throttle) to show.
 
+**Rotate a secret.** Update the key where the worker reads it (its environment, or the `.env`
+file in its working directory) and nothing else: every activity re-reads both at its start and
+takes the secret fields that changed, so the next cycle, review, implementer or health probe
+uses the new key, and a mission parked on a revoked key (`DEGRADED_PARK`, `model: ...401...`)
+resumes at its next probe. The rotation is recorded: the first cycle that used it commits a
+`secrets_rotated` event (`fields`, new `fingerprints`, never a value) and the worker logs
+`secrets_rotated`. Check what a worker would read with `lha config --fingerprints` in the same
+directory and environment. Only the nine `SecretStr` settings rotate this way, and only to a new value: a key that
+disappears from the environment is kept until the worker restarts, so a half-written `.env`
+cannot unset anything ([18-configuration.md](18-configuration.md#secrets)). A changed model,
+sandbox or budget still needs a worker restart ([Safe deploys](#safe-deploys-during-an-in-flight-mission)). The local
+runners (`lha mission`, `lha orchestrate`) keep the key they started with.
+
 **Change the budget ceiling.** A CLI-started mission uses the worker's `LHA_BUDGET_USD_CEILING`,
 read once per worker process and applied per cycle attempt. Change it and restart the worker; the
 next attempt uses the new ceiling, seeded with the spend already in `.git/lha/spend.ndjson`. This

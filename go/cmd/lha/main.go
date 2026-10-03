@@ -280,7 +280,9 @@ func (c *cli) version(args []string) error {
 }
 
 func (c *cli) config(args []string) error {
-	if err := c.parse(c.newFlags("config", commandHelp[1].help), args); err != nil {
+	fs := c.newFlags("config", commandHelp[1].help)
+	fingerprints := fs.Bool("fingerprints", false, "Also print a 12-hex-digit SHA-256 fingerprint of each secret that is set, so a rotation can be checked without showing a value.")
+	if err := c.parse(fs, args); err != nil {
 		return err
 	}
 	settings, err := config.Load()
@@ -291,6 +293,11 @@ func (c *cli) config(args []string) error {
 		fmt.Fprintf(c.stdout, "%s = %s\n", kv.Key, config.FormatPy(kv.Value))
 	}
 	fmt.Fprintf(c.stdout, "mission store = %s\n", persistence.DescribeStore(settings))
+	if *fingerprints {
+		for _, kv := range config.SecretFingerprints(settings) {
+			fmt.Fprintf(c.stdout, "%s fingerprint = %s\n", kv.Key, kv.Value)
+		}
+	}
 	return nil
 }
 

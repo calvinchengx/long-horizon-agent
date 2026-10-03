@@ -238,14 +238,25 @@ def version() -> None:
 
 
 @app.command()
-def config() -> None:
+def config(
+    fingerprints: bool = typer.Option(
+        False,
+        "--fingerprints",
+        help="Also print a 12-hex-digit SHA-256 fingerprint of each secret that is set, so a "
+        "rotation can be checked without showing a value.",
+    ),
+) -> None:
     """Show the resolved runtime configuration (secrets redacted), and where the store is."""
+    from lha.config import secret_fingerprints
     from lha.persistence.store import describe_store
 
     settings = get_settings()
     for key, value in settings.redacted().items():
         typer.echo(f"{key} = {value}")
     typer.echo(f"mission store = {describe_store(settings)}")
+    if fingerprints:
+        for key, fp in secret_fingerprints(settings).items():
+            typer.echo(f"{key} fingerprint = {fp}")
 
 
 @db_app.command()
