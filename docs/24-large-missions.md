@@ -342,9 +342,18 @@ lead, 20 turns, after the `Class.method` retry above):
 Every mission finished the change on its first attempt in one cycle. Sonnet called `code_query`
 once or twice per mission and every call succeeded. Every mission with the tool cost less than
 every mission without it (a rank test on the eight costs gives p ≈ 0.03), about 30% less on
-average. That is one change in one repository: the tool helped where the code was hard to find
+average.
+
+A second change run the same way the same day says to read that cautiously. It asked for a
+budget refusal message in a user's words, on the whole repository, eight missions alternating
+the two arms. Sonnet found the code within about seven tool calls in every mission and never
+called `code_query`, yet the four missions with the tool on cost $3.56 on average against $4.50
+without it: a 20% gap the tool did not cause. Both rounds always ran the arm without the tool
+first, and the second also asked for a message an existing unit test contradicted, so every
+mission spent a cycle on a rolled-back attempt. The first round's gap may be partly the same
+noise. So the result is suggestive, not shown: the tool may help where the code is hard to find
 by searching, and made no measurable difference where it was easy. It stays off by default;
-turn it on for a large repository, and measure it on your own missions.
+measure it on your own missions, with the arm order alternated.
 
 ## Give a strong model room: turns per cycle
 
