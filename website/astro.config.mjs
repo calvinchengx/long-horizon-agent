@@ -78,7 +78,12 @@ export default defineConfig({
         },
         {
           label: 'Project',
-          items: [{ slug: '21-contributing' }, { slug: '22-honesty' }, { slug: '23-roadmap' }],
+          items: [
+            { slug: '21-contributing' },
+            { slug: '22-honesty' },
+            { slug: '23-roadmap' },
+            { slug: '27-mission-ui' },
+          ],
         },
       ],
     }),
