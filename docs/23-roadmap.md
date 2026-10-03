@@ -115,6 +115,7 @@ quality with real models.
 | Operator-configurable egress allow-list | done: `LHA_SANDBOX_EGRESS`, `LHA_SANDBOX_EGRESS_EXTRA_HOSTS`, `LHA_SANDBOX_EGRESS_ALLOW_WRITE_HOSTS` (sandbox, via proxy) and `LHA_WEB_ALLOW_HOSTS` / `--allow-host` (web tools) |
 | Human approval of irreversible actions | done: durable approval gate and local `--approve-interactive` |
 | Deadlock gate with "impossible", escalation ladder, gate webhook, `SLEEPING` | done: durable path |
+| Organization against the single loop, measured | done: 6 missions on 3 October 2026; no gain on first-attempt work at about 3.5 times the cost ([11](11-multi-agent-organization.md#measured-the-organization-against-the-single-loop-3-october-2026)); harder work and parallel waves are still unmeasured |
 | Operator steering from the CLI (`lha mission-steer`, notes in `mission-status`) | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-steer)) |
 | Pause and edit the checklist mid-mission (`lha mission-edit`: add, remove, edit, reopen, block, unblock; applied between cycles, while sleeping or at the deadlock gate's retry, never mid-cycle; `--workdir` for local missions) | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-edit), [08-durable-execution.md](08-durable-execution.md#operator-checklist-edits)) |
 | `lha mission-report`: one page per mission from the anchor and the store | done: Python and Go ([17-cli.md](17-cli.md#lha-mission-report)) |
