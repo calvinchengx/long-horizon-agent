@@ -1,0 +1,3489 @@
+{
+ "schema_version": 1,
+ "kinds": {
+  "cycle_started": {
+   "type": "object",
+   "properties": {
+    "item_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "item_id"
+   ],
+   "additionalProperties": false
+  },
+  "code_map": {
+   "type": "object",
+   "properties": {
+    "item_id": {
+     "type": "string"
+    },
+    "ok": {
+     "type": "boolean"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "trace",
+      "task"
+     ]
+    },
+    "duration_s": {
+     "type": "number"
+    },
+    "exit_code": {
+     "type": "integer"
+    },
+    "timed_out": {
+     "type": "boolean"
+    },
+    "bytes": {
+     "type": "integer"
+    },
+    "error": {
+     "type": "string"
+    },
+    "fell_back": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "duration_s",
+    "item_id",
+    "mode",
+    "ok"
+   ],
+   "additionalProperties": false
+  },
+  "llm_turn": {
+   "type": "object",
+   "properties": {
+    "model": {
+     "type": "string"
+    },
+    "output_tokens": {
+     "type": "integer"
+    },
+    "stop_reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "model",
+    "output_tokens",
+    "stop_reason"
+   ],
+   "additionalProperties": false
+  },
+  "tool_call": {
+   "type": "object",
+   "properties": {
+    "tool": {
+     "type": "string"
+    },
+    "ok": {
+     "type": "boolean"
+    },
+    "role": {
+     "type": "string"
+    },
+    "error": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "ok",
+    "tool"
+   ],
+   "additionalProperties": false
+  },
+  "invalid_reply": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "turns_exhausted": {
+   "type": "object",
+   "properties": {
+    "max_turns": {
+     "type": "integer"
+    },
+    "tool_calls": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "max_turns",
+    "tool_calls"
+   ],
+   "additionalProperties": false
+  },
+  "claude_code_session": {
+   "type": "object",
+   "properties": {
+    "turns": {
+     "type": "integer"
+    },
+    "tool_calls": {
+     "type": "integer"
+    },
+    "session_id": {
+     "type": "string"
+    },
+    "stopped": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "session_id",
+    "stopped",
+    "tool_calls",
+    "turns"
+   ],
+   "additionalProperties": false
+  },
+  "verify": {
+   "type": "object",
+   "properties": {
+    "trigger": {
+     "type": "string",
+     "enum": [
+      "done",
+      "tool",
+      "cycle"
+     ]
+    },
+    "verdict": {
+     "type": "string",
+     "enum": [
+      "passed",
+      "failed",
+      "unverified"
+     ]
+    },
+    "checks": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "name": {
+        "type": "string"
+       },
+       "passed": {
+        "type": "boolean"
+       },
+       "exit_code": {
+        "type": "integer"
+       },
+       "gating": {
+        "type": "boolean"
+       },
+       "timed_out": {
+        "type": "boolean"
+       },
+       "duration_s": {
+        "type": "number"
+       }
+      },
+      "required": [
+       "duration_s",
+       "exit_code",
+       "gating",
+       "name",
+       "passed",
+       "timed_out"
+      ],
+      "additionalProperties": false
+     }
+    }
+   },
+   "required": [
+    "checks",
+    "trigger",
+    "verdict"
+   ],
+   "additionalProperties": false
+  },
+  "checkpoint": {
+   "type": "object",
+   "properties": {
+    "head_sha": {
+     "type": "string"
+    },
+    "verified": {
+     "type": "boolean"
+    },
+    "verdict": {
+     "type": "string",
+     "enum": [
+      "passed",
+      "failed",
+      "unverified"
+     ]
+    },
+    "peak_rss_mb": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "head_sha",
+    "peak_rss_mb",
+    "verdict",
+    "verified"
+   ],
+   "additionalProperties": false
+  },
+  "system_one": {
+   "type": "object",
+   "properties": {
+    "use": {
+     "type": "string"
+    },
+    "item_id": {
+     "type": "string"
+    },
+    "model": {
+     "type": "string"
+    },
+    "answer": {
+     "type": "string"
+    },
+    "confidence": {
+     "type": "number"
+    },
+    "probabilities": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "number"
+     }
+    },
+    "threshold": {
+     "type": "number"
+    },
+    "action": {
+     "type": "string",
+     "enum": [
+      "continue",
+      "split",
+      "block"
+     ]
+    },
+    "error": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "action",
+    "answer",
+    "confidence",
+    "error",
+    "item_id",
+    "model",
+    "probabilities",
+    "threshold",
+    "use"
+   ],
+   "additionalProperties": false
+  },
+  "check_quarantined": {
+   "type": "object",
+   "properties": {
+    "check": {
+     "type": "string"
+    },
+    "revision": {
+     "type": "string"
+    },
+    "passes": {
+     "type": "integer"
+    },
+    "fails": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "check",
+    "fails",
+    "passes",
+    "revision"
+   ],
+   "additionalProperties": false
+  },
+  "quarantined_check_failed": {
+   "type": "object",
+   "properties": {
+    "check": {
+     "type": "string"
+    },
+    "revision": {
+     "type": "string"
+    },
+    "passes": {
+     "type": "integer"
+    },
+    "fails": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "check",
+    "fails",
+    "passes",
+    "revision"
+   ],
+   "additionalProperties": false
+  },
+  "sandbox_egress": {
+   "type": "object",
+   "properties": {
+    "decision": {
+     "type": "string",
+     "enum": [
+      "allow",
+      "deny",
+      "fail"
+     ]
+    },
+    "method": {
+     "type": "string"
+    },
+    "host": {
+     "type": "string"
+    },
+    "port": {
+     "type": "integer"
+    },
+    "detail": {
+     "type": "string"
+    },
+    "count": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "count",
+    "decision",
+    "detail",
+    "host",
+    "method",
+    "port"
+   ],
+   "additionalProperties": false
+  },
+  "governor_block": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "decision_chain_invalid": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "model_unavailable": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "deadlocked": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "loop_detected": {
+   "type": "object",
+   "properties": {
+    "item_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "item_id"
+   ],
+   "additionalProperties": false
+  },
+  "resumed": {
+   "type": "object",
+   "properties": {
+    "run": {
+     "type": "integer"
+    },
+    "cycle_offset": {
+     "type": "integer"
+    },
+    "board": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "board",
+    "cycle_offset",
+    "run"
+   ],
+   "additionalProperties": false
+  },
+  "ownership_released": {
+   "type": "object",
+   "properties": {
+    "paths": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   },
+   "required": [
+    "paths"
+   ],
+   "additionalProperties": false
+  },
+  "ownership_violation": {
+   "type": "object",
+   "properties": {
+    "writer": {
+     "type": "string"
+    },
+    "paths": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   },
+   "required": [
+    "paths",
+    "writer"
+   ],
+   "additionalProperties": false
+  },
+  "research": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    },
+    "n": {
+     "type": "integer"
+    },
+    "failed": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "failed",
+    "item",
+    "n"
+   ],
+   "additionalProperties": false
+  },
+  "research_failed": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    },
+    "error": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "error",
+    "item"
+   ],
+   "additionalProperties": false
+  },
+  "reflection": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "item"
+   ],
+   "additionalProperties": false
+  },
+  "review_screen": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    },
+    "findings": {
+     "type": "integer"
+    },
+    "forced": {
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "findings",
+    "forced",
+    "item"
+   ],
+   "additionalProperties": false
+  },
+  "review": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    },
+    "blocking": {
+     "type": "boolean"
+    },
+    "verdict": {
+     "type": "string",
+     "enum": [
+      "approve",
+      "block",
+      "unparsed"
+     ]
+    }
+   },
+   "required": [
+    "blocking",
+    "item",
+    "verdict"
+   ],
+   "additionalProperties": false
+  },
+  "review_reopened": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "item"
+   ],
+   "additionalProperties": false
+  },
+  "parallel_wave": {
+   "type": "object",
+   "properties": {
+    "items": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "base": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "base",
+    "items"
+   ],
+   "additionalProperties": false
+  },
+  "lease": {
+   "type": "object",
+   "properties": {
+    "writer": {
+     "type": "string"
+    },
+    "path": {
+     "type": "string"
+    },
+    "granted": {
+     "type": "boolean"
+    },
+    "why": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "granted",
+    "path",
+    "why",
+    "writer"
+   ],
+   "additionalProperties": false
+  },
+  "integration": {
+   "type": "object",
+   "properties": {
+    "item": {
+     "type": "string"
+    },
+    "merged": {
+     "type": "boolean"
+    },
+    "branch": {
+     "type": "string"
+    },
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "branch",
+    "item",
+    "merged",
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "memory_error": {
+   "type": "object",
+   "properties": {
+    "where": {
+     "type": "string"
+    },
+    "error": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "error",
+    "where"
+   ],
+   "additionalProperties": false
+  },
+  "memory_degraded": {
+   "type": "object",
+   "properties": {
+    "reason": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "reason"
+   ],
+   "additionalProperties": false
+  },
+  "skill_stored": {
+   "type": "object",
+   "properties": {
+    "skill_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "skill_id"
+   ],
+   "additionalProperties": false
+  },
+  "memory_reembedded": {
+   "type": "object",
+   "properties": {
+    "count": {
+     "type": "integer"
+    },
+    "embedding_model": {
+     "type": "string"
+    },
+    "embedding_version": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "count",
+    "embedding_model",
+    "embedding_version"
+   ],
+   "additionalProperties": false
+  },
+  "memory_consolidated": {
+   "type": "object",
+   "properties": {
+    "episodes": {
+     "type": "integer"
+    },
+    "facts": {
+     "type": "integer"
+    },
+    "mode": {
+     "type": "string",
+     "enum": [
+      "model",
+      "extractive"
+     ]
+    }
+   },
+   "required": [
+    "episodes",
+    "facts",
+    "mode"
+   ],
+   "additionalProperties": false
+  }
+ },
+ "cases": [
+  {
+   "kind": "cycle_started",
+   "data": {
+    "item_id": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "cycle_started",
+   "data": {
+    "item_id": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "cycle_started",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "cycle_started",
+   "data": {
+    "item_id": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "cycle_started",
+   "data": {
+    "item_id": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": true
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "duration_s": 0.5,
+    "item_id": "s",
+    "mode": "trace",
+    "ok": true
+   },
+   "valid": true
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": 7,
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": "s",
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": 7,
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "not-trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": "s",
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": "s",
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3.5,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": "s",
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": "s",
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3.5,
+    "error": "s",
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": 7,
+    "fell_back": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "code_map",
+   "data": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": "s",
+    "output_tokens": 3,
+    "stop_reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": "s",
+    "output_tokens": 3,
+    "stop_reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "output_tokens": 3,
+    "stop_reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": "s",
+    "output_tokens": 3,
+    "stop_reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": 7,
+    "output_tokens": 3,
+    "stop_reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": "s",
+    "output_tokens": "s",
+    "stop_reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": "s",
+    "output_tokens": 3.5,
+    "stop_reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "llm_turn",
+   "data": {
+    "model": "s",
+    "output_tokens": 3,
+    "stop_reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "s",
+    "ok": true,
+    "role": "s",
+    "error": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "ok": true,
+    "tool": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "s",
+    "role": "s",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "s",
+    "ok": true,
+    "role": "s",
+    "error": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": 7,
+    "ok": true,
+    "role": "s",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "s",
+    "ok": "s",
+    "role": "s",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "s",
+    "ok": true,
+    "role": 7,
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "s",
+    "ok": true,
+    "role": "s",
+    "error": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "invalid_reply",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "invalid_reply",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "invalid_reply",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "invalid_reply",
+   "data": {
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "invalid_reply",
+   "data": {
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": 3,
+    "tool_calls": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": 3,
+    "tool_calls": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "tool_calls": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": 3,
+    "tool_calls": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": "s",
+    "tool_calls": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": 3.5,
+    "tool_calls": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": 3,
+    "tool_calls": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "turns_exhausted",
+   "data": {
+    "max_turns": 3,
+    "tool_calls": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "session_id": "s",
+    "stopped": "s",
+    "tool_calls": 3,
+    "turns": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": "s",
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3.5,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": "s",
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3.5,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": 7,
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ]
+   },
+   "valid": true
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "checks": [
+     {
+      "duration_s": 0.5,
+      "exit_code": 3,
+      "gating": true,
+      "name": "s",
+      "passed": true,
+      "timed_out": true
+     }
+    ],
+    "trigger": "done",
+    "verdict": "passed"
+   },
+   "valid": true
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "passed"
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ],
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": 7,
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "not-done",
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": 7,
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "not-passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "passed",
+    "checks": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true
+     }
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": 0.5
+   },
+   "valid": true
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "peak_rss_mb": 0.5,
+    "verdict": "passed",
+    "verified": true
+   },
+   "valid": true
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": 0.5,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": 7,
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": "s",
+    "verdict": "passed",
+    "peak_rss_mb": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": 7,
+    "peak_rss_mb": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": "not-passed",
+    "peak_rss_mb": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "action": "continue",
+    "answer": "s",
+    "confidence": 0.5,
+    "error": "s",
+    "item_id": "s",
+    "model": "s",
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "use": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": 7,
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": 7,
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": 7,
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": 7,
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": "s",
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": "s",
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": "s",
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": 7,
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "not-continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "fails": 3,
+    "passes": 3,
+    "revision": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": 7,
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": 7,
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": "s",
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3.5,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "check_quarantined",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "fails": 3,
+    "passes": 3,
+    "revision": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": 7,
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": 7,
+    "passes": 3,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": "s",
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3.5,
+    "fails": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "quarantined_check_failed",
+   "data": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "count": 3,
+    "decision": "allow",
+    "detail": "s",
+    "host": "s",
+    "method": "s",
+    "port": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": 7,
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "not-allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": 7,
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": 7,
+    "port": 3,
+    "detail": "s",
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": "s",
+    "detail": "s",
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3.5,
+    "detail": "s",
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": 7,
+    "count": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "sandbox_egress",
+   "data": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "governor_block",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "governor_block",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "governor_block",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "governor_block",
+   "data": {
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "governor_block",
+   "data": {
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "decision_chain_invalid",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "decision_chain_invalid",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "decision_chain_invalid",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "decision_chain_invalid",
+   "data": {
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "decision_chain_invalid",
+   "data": {
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "model_unavailable",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "model_unavailable",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "model_unavailable",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "model_unavailable",
+   "data": {
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "model_unavailable",
+   "data": {
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "deadlocked",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "deadlocked",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "deadlocked",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "deadlocked",
+   "data": {
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "deadlocked",
+   "data": {
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "loop_detected",
+   "data": {
+    "item_id": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "loop_detected",
+   "data": {
+    "item_id": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "loop_detected",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "loop_detected",
+   "data": {
+    "item_id": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "loop_detected",
+   "data": {
+    "item_id": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": 3,
+    "board": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "board": 3,
+    "cycle_offset": 3,
+    "run": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": 3,
+    "board": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": "s",
+    "cycle_offset": 3,
+    "board": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3.5,
+    "cycle_offset": 3,
+    "board": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": "s",
+    "board": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": 3.5,
+    "board": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": 3,
+    "board": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "resumed",
+   "data": {
+    "run": 3,
+    "cycle_offset": 3,
+    "board": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "ownership_released",
+   "data": {
+    "paths": [
+     "s"
+    ]
+   },
+   "valid": true
+  },
+  {
+   "kind": "ownership_released",
+   "data": {
+    "paths": [
+     "s"
+    ]
+   },
+   "valid": true
+  },
+  {
+   "kind": "ownership_released",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "ownership_released",
+   "data": {
+    "paths": [
+     "s"
+    ],
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "ownership_released",
+   "data": {
+    "paths": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "ownership_violation",
+   "data": {
+    "writer": "s",
+    "paths": [
+     "s"
+    ]
+   },
+   "valid": true
+  },
+  {
+   "kind": "ownership_violation",
+   "data": {
+    "paths": [
+     "s"
+    ],
+    "writer": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "ownership_violation",
+   "data": {
+    "writer": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "ownership_violation",
+   "data": {
+    "writer": "s",
+    "paths": [
+     "s"
+    ],
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "ownership_violation",
+   "data": {
+    "writer": 7,
+    "paths": [
+     "s"
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "ownership_violation",
+   "data": {
+    "writer": "s",
+    "paths": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": 3,
+    "failed": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "research",
+   "data": {
+    "failed": 3,
+    "item": "s",
+    "n": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": 3,
+    "failed": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": 7,
+    "n": 3,
+    "failed": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": "s",
+    "failed": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": 3.5,
+    "failed": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": 3,
+    "failed": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "research",
+   "data": {
+    "item": "s",
+    "n": 3,
+    "failed": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "research_failed",
+   "data": {
+    "item": "s",
+    "error": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "research_failed",
+   "data": {
+    "error": "s",
+    "item": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "research_failed",
+   "data": {
+    "item": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "research_failed",
+   "data": {
+    "item": "s",
+    "error": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "research_failed",
+   "data": {
+    "item": 7,
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "research_failed",
+   "data": {
+    "item": "s",
+    "error": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "reflection",
+   "data": {
+    "item": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "reflection",
+   "data": {
+    "item": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "reflection",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "reflection",
+   "data": {
+    "item": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "reflection",
+   "data": {
+    "item": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": "s",
+    "findings": 3,
+    "forced": true
+   },
+   "valid": true
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "findings": 3,
+    "forced": true,
+    "item": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": "s",
+    "forced": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": "s",
+    "findings": 3,
+    "forced": true,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": 7,
+    "findings": 3,
+    "forced": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": "s",
+    "findings": "s",
+    "forced": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": "s",
+    "findings": 3.5,
+    "forced": true
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_screen",
+   "data": {
+    "item": "s",
+    "findings": 3,
+    "forced": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": "s",
+    "blocking": true,
+    "verdict": "approve"
+   },
+   "valid": true
+  },
+  {
+   "kind": "review",
+   "data": {
+    "blocking": true,
+    "item": "s",
+    "verdict": "approve"
+   },
+   "valid": true
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": "s",
+    "verdict": "approve"
+   },
+   "valid": false
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": "s",
+    "blocking": true,
+    "verdict": "approve",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": 7,
+    "blocking": true,
+    "verdict": "approve"
+   },
+   "valid": false
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": "s",
+    "blocking": "s",
+    "verdict": "approve"
+   },
+   "valid": false
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": "s",
+    "blocking": true,
+    "verdict": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "review",
+   "data": {
+    "item": "s",
+    "blocking": true,
+    "verdict": "not-approve"
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_reopened",
+   "data": {
+    "item": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "review_reopened",
+   "data": {
+    "item": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "review_reopened",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "review_reopened",
+   "data": {
+    "item": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "review_reopened",
+   "data": {
+    "item": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "parallel_wave",
+   "data": {
+    "items": [
+     "s"
+    ],
+    "base": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "parallel_wave",
+   "data": {
+    "base": "s",
+    "items": [
+     "s"
+    ]
+   },
+   "valid": true
+  },
+  {
+   "kind": "parallel_wave",
+   "data": {
+    "items": [
+     "s"
+    ]
+   },
+   "valid": false
+  },
+  {
+   "kind": "parallel_wave",
+   "data": {
+    "items": [
+     "s"
+    ],
+    "base": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "parallel_wave",
+   "data": {
+    "items": "s",
+    "base": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "parallel_wave",
+   "data": {
+    "items": [
+     "s"
+    ],
+    "base": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": "s",
+    "path": "s",
+    "granted": true,
+    "why": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "granted": true,
+    "path": "s",
+    "why": "s",
+    "writer": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": "s",
+    "path": "s",
+    "why": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": "s",
+    "path": "s",
+    "granted": true,
+    "why": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": 7,
+    "path": "s",
+    "granted": true,
+    "why": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": "s",
+    "path": 7,
+    "granted": true,
+    "why": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": "s",
+    "path": "s",
+    "granted": "s",
+    "why": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "lease",
+   "data": {
+    "writer": "s",
+    "path": "s",
+    "granted": true,
+    "why": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": "s",
+    "merged": true,
+    "branch": "s",
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "branch": "s",
+    "item": "s",
+    "merged": true,
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": "s",
+    "merged": true,
+    "reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": "s",
+    "merged": true,
+    "branch": "s",
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": 7,
+    "merged": true,
+    "branch": "s",
+    "reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": "s",
+    "merged": "s",
+    "branch": "s",
+    "reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": "s",
+    "merged": true,
+    "branch": 7,
+    "reason": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "integration",
+   "data": {
+    "item": "s",
+    "merged": true,
+    "branch": "s",
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_error",
+   "data": {
+    "where": "s",
+    "error": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_error",
+   "data": {
+    "error": "s",
+    "where": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_error",
+   "data": {
+    "where": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_error",
+   "data": {
+    "where": "s",
+    "error": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_error",
+   "data": {
+    "where": 7,
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_error",
+   "data": {
+    "where": "s",
+    "error": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_degraded",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_degraded",
+   "data": {
+    "reason": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_degraded",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "memory_degraded",
+   "data": {
+    "reason": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_degraded",
+   "data": {
+    "reason": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "skill_stored",
+   "data": {
+    "skill_id": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "skill_stored",
+   "data": {
+    "skill_id": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "skill_stored",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "skill_stored",
+   "data": {
+    "skill_id": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "skill_stored",
+   "data": {
+    "skill_id": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": 3,
+    "embedding_model": "s",
+    "embedding_version": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": 3,
+    "embedding_model": "s",
+    "embedding_version": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "embedding_model": "s",
+    "embedding_version": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": 3,
+    "embedding_model": "s",
+    "embedding_version": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": "s",
+    "embedding_model": "s",
+    "embedding_version": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": 3.5,
+    "embedding_model": "s",
+    "embedding_version": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": 3,
+    "embedding_model": 7,
+    "embedding_version": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_reembedded",
+   "data": {
+    "count": 3,
+    "embedding_model": "s",
+    "embedding_version": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": 3,
+    "mode": "model"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": 3,
+    "mode": "model"
+   },
+   "valid": true
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "facts": 3,
+    "mode": "model"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": 3,
+    "mode": "model",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": "s",
+    "facts": 3,
+    "mode": "model"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3.5,
+    "facts": 3,
+    "mode": "model"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": "s",
+    "mode": "model"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": 3.5,
+    "mode": "model"
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": 3,
+    "mode": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "memory_consolidated",
+   "data": {
+    "episodes": 3,
+    "facts": 3,
+    "mode": "not-model"
+   },
+   "valid": false
+  },
+  {
+   "kind": "no_such_kind",
+   "data": {},
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": [],
+   "valid": false
+  },
+  {
+   "kind": "checkpoint",
+   "data": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": 12
+   },
+   "valid": true
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {},
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": "high"
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "tool_call",
+   "data": {
+    "tool": "grep",
+    "ok": null
+   },
+   "valid": false
+  },
+  {
+   "kind": "verify",
+   "data": {
+    "trigger": "done",
+    "verdict": "passed",
+    "checks": []
+   },
+   "valid": true
+  }
+ ]
+}

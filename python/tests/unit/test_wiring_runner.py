@@ -156,3 +156,20 @@ def test_loop_detector_counts_consecutive_failures_only() -> None:
     assert not detector.observe("01")
     assert detector.observe("01")
     assert not detector.observe("02")  # signatures are independent
+
+
+async def test_the_loop_detector_stops_a_repeating_failure(tmp_path: Path) -> None:
+    import json
+
+    summary = await run_mission_local(
+        workdir=str(tmp_path),
+        title="t",
+        description="d",
+        checklist=_one_item(),
+        checks=[_FAIL],
+        settings=_settings(stall_limit=2),
+        model=StubModel(script=[_DONE]),
+    )
+    assert summary.stopped_reason == "loop on item 01" and summary.cycles == 2
+    events = [json.loads(line) for line in summary.trace_jsonl.splitlines()]
+    assert [e["data"] for e in events if e["kind"] == "loop_detected"] == [{"item_id": "01"}]

@@ -47,7 +47,11 @@ def test_secret_looking_values_redacted_in_free_text() -> None:
 def test_trace_recorder_redacts_event_data() -> None:
     recorder = TraceRecorder()
     event = recorder.record(
-        "tool_call", mission_id="m", api_key="sk-live", output="key=sk-ABCDEFGHIJKLMNOPQRST", n=3
+        "test_redacted",
+        mission_id="m",
+        api_key="sk-live",
+        output="key=sk-ABCDEFGHIJKLMNOPQRST",
+        n=3,
     )
     assert event.data["api_key"] == REDACTED
     assert "ABCDEFGHIJ" not in str(event.data["output"])

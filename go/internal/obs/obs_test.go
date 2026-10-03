@@ -233,7 +233,7 @@ func TestRedactValue(t *testing.T) {
 func TestTraceRecorderRedactsEventData(t *testing.T) {
 	var logs bytes.Buffer
 	rec := NewTraceRecorder(slog.New(slog.NewJSONHandler(&logs, nil)))
-	event := rec.Record("tool_call", "m", "",
+	event := rec.Record("test_redacted", "m", "",
 		F("api_key", "sk-live"), F("output", "key=sk-ABCDEFGHIJKLMNOPQRST"), F("n", 3))
 	if v, _ := event.Data.Get("api_key"); v != Redacted {
 		t.Errorf("api_key = %v", v)
@@ -251,11 +251,11 @@ func TestTraceRecorderRedactsEventData(t *testing.T) {
 	if strings.Contains(jsonl, "sk-live") || strings.Contains(logs.String(), "sk-live") {
 		t.Error("secret reached the trace or the log")
 	}
-	want := `{"kind":"tool_call","mission_id":"m","cycle_id":"","data":{"api_key":"***","output":"key=***","n":3}}`
+	want := `{"kind":"test_redacted","mission_id":"m","cycle_id":"","data":{"api_key":"***","output":"key=***","n":3}}`
 	if jsonl != want {
 		t.Errorf("ToJSONL =\n %s\nwant\n %s", jsonl, want)
 	}
-	if !strings.Contains(logs.String(), `"msg":"tool_call"`) || !strings.Contains(logs.String(), `"mission_id":"m"`) {
+	if !strings.Contains(logs.String(), `"msg":"test_redacted"`) || !strings.Contains(logs.String(), `"mission_id":"m"`) {
 		t.Errorf("log line: %s", logs.String())
 	}
 }
@@ -263,14 +263,14 @@ func TestTraceRecorderRedactsEventData(t *testing.T) {
 func TestTraceRecorderOrderingAndJSON(t *testing.T) {
 	rec := &TraceRecorder{} // the zero value logs to the default logger
 	slog.SetDefault(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
-	rec.Record("a", "m", "c1", F("z", 1), F("a", "<b>&"), F("z", 2))
-	rec.Record("b", "m", "c2")
+	rec.Record("test_a", "m", "c1", F("z", 1), F("a", "<b>&"), F("z", 2))
+	rec.Record("test_b", "m", "c2")
 	jsonl, err := rec.ToJSONL()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"kind":"a","mission_id":"m","cycle_id":"c1","data":{"z":2,"a":"<b>&"}}` + "\n" +
-		`{"kind":"b","mission_id":"m","cycle_id":"c2","data":{}}`
+	want := `{"kind":"test_a","mission_id":"m","cycle_id":"c1","data":{"z":2,"a":"<b>&"}}` + "\n" +
+		`{"kind":"test_b","mission_id":"m","cycle_id":"c2","data":{}}`
 	if jsonl != want {
 		t.Errorf("ToJSONL =\n%s\nwant\n%s", jsonl, want)
 	}

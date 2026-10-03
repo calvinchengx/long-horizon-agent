@@ -40,6 +40,7 @@ from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import CostMeter
 from lha.memory.rerank import SystemOneReranker, apply_relevance, system_one_rerank_request
 from lha.model.stub import StubModel
+from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.systemone import StallTriage, StubSystemOne, SystemOneClient, build_system_one
 from lha.systemone.build import build_stall_triage
@@ -394,6 +395,7 @@ async def _run(
     session = await LocalSandbox().open(workdir=str(tmp_path))
     ctx = ToolContext(mission_id="m", session=session)
     model = StubModel(script=lead)
+    recorder = TraceRecorder()
     loop = AgentLoop(
         model=model,
         dispatcher=AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True),
@@ -404,11 +406,15 @@ async def _run(
         replanner=Replanner(StubModel(script=replanner_script or [])),
         max_replans=5,
         triage=triage,
+        recorder=recorder,
     )
     outcomes = [
         await loop.run_cycle(ctx=ctx, mission_id="m", cycle_id=f"c{n}", checks=[PASS])
         for n in (1, 2)
     ]
+    # The trace records each triage verdict with the payload committed to the anchor.
+    traced = [e.data for e in recorder.events if e.kind == "system_one"]
+    assert traced == [e["payload"] for e in _events(tmp_path, "system_one")]
     return loop, anchor, outcomes
 
 

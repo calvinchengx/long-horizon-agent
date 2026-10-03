@@ -76,8 +76,8 @@ def test_a_failing_listener_never_breaks_recording() -> None:
         raise RuntimeError("listener down")
 
     recorder.listeners.append(boom)
-    event = recorder.record("x", mission_id="m")
-    assert event.kind == "x" and recorder.events == [event]
+    event = recorder.record("test_x", mission_id="m")
+    assert event.kind == "test_x" and recorder.events == [event]
 
 
 async def test_a_local_mission_leaves_its_trace_in_the_store(tmp_path: Path) -> None:
@@ -187,3 +187,45 @@ async def test_an_organizations_sub_agents_leave_their_tool_calls_in_the_store(
         str(r.payload.get("role")) for r in rows if r.kind == "tool_call" and "role" in r.payload
     )
     assert roles == ["researcher", "reviewer"], [(r.kind, r.payload) for r in rows]
+
+
+class _DownModel(StubModel):
+    """A model whose every call fails (a researcher that cannot run)."""
+
+    async def complete(self, messages, **kwargs):  # type: ignore[no-untyped-def, override]
+        raise RuntimeError("researcher down")
+
+
+async def test_a_failed_researcher_is_recorded_and_the_item_still_runs(tmp_path: Path) -> None:
+    from lha.agents.orchestrator import Orchestrator
+
+    db = tmp_path / "lha.sqlite3"
+    settings = Settings(  # type: ignore[call-arg]
+        _env_file=None,
+        sandbox="local",
+        allow_unsafe_local=True,
+        model_backend="stub",
+        sqlite_path=str(db),
+        max_cycles=5,
+    )
+    done = TurnResult(text='{"done": true, "summary": "did it"}')
+    orchestrator = Orchestrator(
+        settings,
+        research_per_item=1,
+        do_review=False,
+        models={"lead": StubModel(script=[done]), "researcher": _DownModel(script=[])},
+    )
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path / "ws"),
+        title="Org",
+        description="D",
+        checklist=Checklist(items=[ChecklistItem(id="01", description="do it")]),
+        checks=[checks_from_commands([[sys.executable, "-c", "pass"]])[0]],
+    )
+    assert summary.completed
+    store = SqliteStore(db)
+    await store.open()
+    rows = await store.read_mission_events(mission_id=summary.mission_id)
+    await store.close()
+    (failed,) = [r.payload for r in rows if r.kind == "research_failed"]
+    assert failed["item"] == "01" and "researcher down" in str(failed["error"])

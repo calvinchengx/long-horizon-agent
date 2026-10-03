@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
@@ -27,12 +29,30 @@ func causeStub(defect, scope, environment float64) *systemone.Stub {
 func runTriaged(t *testing.T, stub *systemone.Stub, replan ...contracts.TurnResult) (*fixture, []CycleOutcome) {
 	t.Helper()
 	f := setup(t, withWitnesses(item("01", "coarse"), "cmd:exit 1"), contracts.NewChecklistItem("02", "after", "01"))
+	rec := obs.NewTraceRecorder(nil)
 	l := f.loop(model.NewStub([]contracts.TurnResult{done, done}), func(o *LoopOptions) {
 		o.MaxTurns, o.MaxConsecutiveFailures, o.MaxReplans = 2, 5, 5
 		o.Replanner = agents.NewReplanner(model.NewStub(replan))
+		o.Recorder = rec
 	})
 	l.SetTriage(systemone.NewStallTriage(stub))
-	return f, []CycleOutcome{f.run(t, l, "c1", passCheck), f.run(t, l, "c2", passCheck)}
+	outs := []CycleOutcome{f.run(t, l, "c1", passCheck), f.run(t, l, "c2", passCheck)}
+	// The trace records each triage verdict with the payload committed to the anchor.
+	traced := []map[string]any{}
+	for _, e := range rec.Events() {
+		if e.Kind == "system_one" {
+			var m map[string]any
+			raw, _ := json.Marshal(e.Data)
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatal(err)
+			}
+			traced = append(traced, m)
+		}
+	}
+	if committed := systemOneEvents(t, f.dir); !reflect.DeepEqual(traced, committed) {
+		t.Fatalf("traced %v, committed %v", traced, committed)
+	}
+	return f, outs
 }
 
 func systemOneEvents(t *testing.T, dir string) []map[string]any {

@@ -8,7 +8,7 @@ func TestTheTraceRecorderKeepsTheNewestEvents(t *testing.T) {
 	MaxTraceEvents = 10
 	r := NewTraceRecorder(nil)
 	for n := 0; n < 100; n++ {
-		r.Record("tick", "m1", "", F("n", n))
+		r.Record("test_tick", "m1", "", F("n", n))
 	}
 	events := r.Events()
 	last, _ := events[len(events)-1].Data.Get("n")

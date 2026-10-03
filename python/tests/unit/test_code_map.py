@@ -123,6 +123,35 @@ async def test_the_lead_sees_the_map_after_memory(tmp_path: Path) -> None:
     assert user.index(CODE_MAP_HEADER) < user.index("Recent commits:")
 
 
+async def test_every_cycle_records_its_code_map(tmp_path: Path) -> None:
+    from lha.obs.events import TraceRecorder
+
+    anchor = GitMissionAnchor(tmp_path)
+    await anchor.initialize(
+        title="T", description="D", items=Checklist(items=[ChecklistItem(id="01", description="x")])
+    )
+    recorder = TraceRecorder()
+    loop = AgentLoop(
+        model=StubModel(script=[TurnResult(text='{"done": true}', stop_reason="end_turn")]),
+        dispatcher=AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True),
+        verifier=DeterministicVerifier(default_timeout_s=60),
+        anchor=anchor,
+        max_turns=1,
+        code_map=RipwireCodeMap(timeout_s=30),  # mapped or not (no ripwire), the run is recorded
+        recorder=recorder,
+    )
+    session = await LocalSandbox().open(workdir=str(tmp_path))
+    passing = Check(name="ok", command=[sys.executable, "-c", "pass"])
+    await loop.run_cycle(
+        ctx=ToolContext(mission_id="m", session=session),
+        mission_id="m",
+        cycle_id="c1",
+        checks=[passing],
+    )
+    (event,) = [e.data for e in recorder.events if e.kind == "code_map"]
+    assert event["item_id"] == "01" and event["mode"] == "task" and "duration_s" in event
+
+
 def test_the_setting_turns_the_map_on(tmp_path: Path) -> None:
     anchor = GitMissionAnchor(tmp_path)
 

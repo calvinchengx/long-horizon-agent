@@ -1010,3 +1010,28 @@ func TestASubAgentsToolCallsAreRecordedWithItsRole(t *testing.T) {
 		t.Fatal(calls[2].Data)
 	}
 }
+
+// downModel is a model whose every call fails (a researcher that cannot run).
+type downModel struct{}
+
+func (downModel) Name() string { return "down" }
+func (downModel) Complete(context.Context, []contracts.ModelMessage, []map[string]any, int) (contracts.TurnResult, error) {
+	return contracts.TurnResult{}, errors.New("researcher down")
+}
+func (downModel) EstimateCostUSD(contracts.Usage) (float64, error) { return 0, nil }
+
+func TestAFailedResearcherIsRecordedAndTheItemStillRuns(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	summary := run(t, nil, OrchestratorOptions{ResearchPerItem: 1, DoReview: false, Models: map[string]contracts.ModelProvider{
+		"lead": stub(doneTurn, doneTurn), "researcher": downModel{}, "reviewer": stub(approve),
+	}}, MissionOptions{Workdir: dir, Title: "Research test", Description: "research fails", Checklist: checklist2(),
+		Checks: []contracts.Check{pass}})
+	if !summary.Completed {
+		t.Fatalf("%+v", summary)
+	}
+	failed := kinds(traceOf(t, summary), "research_failed")
+	if len(failed) != 2 || failed[0].Data["item"] != "01" || !strings.Contains(fmt.Sprint(failed[0].Data["error"]), "researcher down") {
+		t.Fatalf("%+v", failed)
+	}
+}

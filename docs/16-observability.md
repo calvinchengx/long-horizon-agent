@@ -35,7 +35,11 @@ render with `ConsoleRenderer(colors=False)`; `json_logs=True` selects `JSONRende
 runners call it with the default, so CLI runs print console-format lines. No CLI option switches
 to JSON.
 
-Event kinds emitted today:
+Event kinds emitted today. Each kind's payload is also a JSON Schema in
+[`lha/obs/event_schema.py`](../python/src/lha/obs/event_schema.py), exported to
+[`spec/obs/mission_events.json`](../spec/obs/mission_events.json); both implementations' test
+suites fail on an event that breaks it (`spec/README.md`, "Coverage is enforced"). A new kind or
+field is added there first.
 
 | Kind | Emitted by | Data |
 |---|---|---|

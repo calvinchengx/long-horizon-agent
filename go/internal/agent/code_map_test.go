@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 )
 
 // Ported from python/tests/unit/test_code_map.py.
@@ -56,6 +57,30 @@ func TestTheLeadSeesTheCodeMap(t *testing.T) {
 	user := m.calls[0][1].Content
 	if !strings.Contains(user, CodeMapHeader) || strings.Index(user, CodeMapHeader) > strings.Index(user, "Recent commits:") {
 		t.Fatalf("no code map before the recent commits:\n%s", user)
+	}
+}
+
+func TestEveryCycleRecordsItsCodeMap(t *testing.T) {
+	f := setup(t, item("01", "x"))
+	rec := obs.NewTraceRecorder(nil)
+	// Mapped or not (no ripwire on PATH), the run is recorded.
+	l := f.loop(newRecording(done), func(o *LoopOptions) {
+		o.MaxTurns, o.Recorder, o.CodeMap = 1, rec, &RipwireCodeMap{TokenBudget: 800, TimeoutS: 30}
+	})
+	f.run(t, l, "c1", passCheck)
+	var maps []obs.Fields
+	for _, e := range rec.Events() {
+		if e.Kind == "code_map" {
+			maps = append(maps, e.Data)
+		}
+	}
+	if len(maps) != 1 {
+		t.Fatalf("events: %+v", rec.Events())
+	}
+	id, _ := maps[0].Get("item_id")
+	mode, _ := maps[0].Get("mode")
+	if _, timed := maps[0].Get("duration_s"); id != "01" || mode != "task" || !timed {
+		t.Fatal(maps[0])
 	}
 }
 

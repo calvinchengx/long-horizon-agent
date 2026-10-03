@@ -65,6 +65,7 @@ from lha.execution.tools.web import FetchUrlTool, WebSearchTool  # noqa: E402
 from lha.model import parse_fallback_entry  # noqa: E402
 from lha.model.pricing import CLAUDE_PRICES, lookup_claude_price  # noqa: E402
 from lha.model.stub import StubModel  # noqa: E402
+from lha.obs.event_schema import EVENT_KINDS, SCHEMA_VERSION, event_errors  # noqa: E402
 from lha.obs.redact import is_secret_key, redact_text  # noqa: E402
 from lha.safety.commands import classify_command  # noqa: E402
 from lha.safety.egress import (  # noqa: E402
@@ -267,6 +268,87 @@ def export_redact() -> None:
             "redact_text": [{"text": t, "redacted": redact_text(t)} for t in _TEXTS],
             "is_secret_key": [{"key": k, "secret": is_secret_key(k)} for k in _KEYS],
         },
+    )
+
+
+# --- obs/mission_events: every trace event kind's payload schema -----------------------------
+
+
+def _sample(schema: dict[str, Any], *, full: bool = True) -> Any:
+    """A value ``schema`` accepts (with every optional field when ``full``)."""
+    if "enum" in schema:
+        return schema["enum"][0]
+    kind = schema["type"]
+    if kind == "object":
+        props: dict[str, Any] = schema.get("properties", {})
+        if not props:
+            return {"defect": 0.9, "scope": 0.1}  # a map of numbers (system_one probabilities)
+        names = props if full else schema["required"]
+        return {name: _sample(props[name], full=full) for name in names}
+    if kind == "array":
+        return [_sample(schema["items"], full=full)]
+    return {"string": "s", "integer": 3, "number": 0.5, "boolean": True}[kind]
+
+
+def _mutations(kind: str, schema: dict[str, Any]) -> list[dict[str, Any]]:
+    """Payloads of ``kind`` the schema rejects: a field missing, unexpected, or of the wrong type."""
+    required = schema["required"]
+    props = schema["properties"]
+    full = _sample(schema)
+    cases: list[dict[str, Any]] = []
+    if required:
+        missing = dict(full)
+        del missing[required[0]]
+        cases.append(missing)
+    cases.append({**full, "unexpected": 1})
+    for name, prop in props.items():
+        wrong = "s" if prop.get("type") != "string" else 7
+        cases.append({**full, name: wrong})
+        if "enum" in prop:
+            cases.append({**full, name: "not-" + prop["enum"][0]})
+        if prop.get("type") == "integer":
+            cases.append({**full, name: 3.5})
+        if prop.get("type") == "array" and prop["items"].get("type") == "object":
+            item = _sample(prop["items"])
+            del item[prop["items"]["required"][0]]
+            cases.append({**full, name: [item]})
+    return cases
+
+
+def export_mission_events() -> None:
+    cases: list[dict[str, Any]] = []
+    for kind, schema in EVENT_KINDS.items():
+        cases.append({"kind": kind, "data": _sample(schema), "valid": True})
+        cases.append({"kind": kind, "data": _sample(schema, full=False), "valid": True})
+        cases += [{"kind": kind, "data": d, "valid": False} for d in _mutations(kind, schema)]
+    cases += [
+        {"kind": "no_such_kind", "data": {}, "valid": False},
+        {"kind": "checkpoint", "data": [], "valid": False},
+        # a JSON number with no fraction is an integer, so it is also a valid number
+        {
+            "kind": "checkpoint",
+            "data": {**_sample(EVENT_KINDS["checkpoint"]), "peak_rss_mb": 12},
+            "valid": True,
+        },
+        {
+            "kind": "system_one",
+            "data": {**_sample(EVENT_KINDS["system_one"]), "probabilities": {}},
+            "valid": True,
+        },
+        {
+            "kind": "system_one",
+            "data": {**_sample(EVENT_KINDS["system_one"]), "probabilities": {"defect": "high"}},
+            "valid": False,
+        },
+        {"kind": "tool_call", "data": {"tool": "grep", "ok": None}, "valid": False},
+        {"kind": "verify", "data": {**_sample(EVENT_KINDS["verify"]), "checks": []}, "valid": True},
+    ]
+    for case in cases:
+        valid = not event_errors(case["kind"], case["data"])
+        assert valid == case["valid"], case
+    _write(
+        "obs/mission_events.json",
+        {"schema_version": SCHEMA_VERSION, "kinds": EVENT_KINDS, "cases": cases},
     )
 
 
@@ -3761,6 +3843,7 @@ def main() -> None:
     export_classifier()
     export_egress()
     export_redact()
+    export_mission_events()
     export_check_names()
     export_checklist()
     export_checklist_edit()

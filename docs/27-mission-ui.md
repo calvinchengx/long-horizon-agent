@@ -70,6 +70,10 @@ Enforced today, for the behavioural cases in [`spec/`](../spec/README.md):
 - **The cases cannot fall behind the code.** CI regenerates every file from the Python reference
   and fails on any difference.
 - **Every file is indexed** in `spec/README.md` (a unit test).
+- **Every recorded event matches its kind's schema** in `spec/obs/mission_events.json`. With
+  `LHA_TRACE_AUDIT_DIR` set, every trace recorder also appends the events it records to a file
+  there; CI runs each implementation's suite that way and fails on an unknown kind, a payload that
+  breaks its schema, or a kind no test recorded. The schemas are the event types the UI API sends.
 
 For the UI API (Phase 1), contract first:
 
@@ -109,9 +113,10 @@ with its error tail, `llm_turn`, `turns_exhausted`, `checkpoint`, `claude_code_s
 
 Work items:
 
-1. Spec the table, the kinds and their payload fields (`spec/state/mission_events.json`), add the
-   migration (Postgres and SQLite), and a store method to append and to read `since` an id. The
-   migration and store methods are done; the kinds' spec is next.
+1. Spec the table, the kinds and their payload fields, add the migration (Postgres and SQLite),
+   and a store method to append and to read `since` an id. Done: every kind's payload is a JSON
+   Schema in [`spec/obs/mission_events.json`](../spec/obs/mission_events.json), which both test
+   suites enforce (see [Contract coverage](#contract-coverage)).
 2. Persist trace events on every run path, including the durable cycle activity, which had no
    recorder, and the organization's sub-agents (their `tool_call` events carry `role`). Writes are
    best effort: a store outage never fails a cycle. Done.

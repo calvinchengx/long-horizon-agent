@@ -168,6 +168,15 @@ def test_redact() -> None:
         assert is_secret_key(case["key"]) == case["secret"], case
 
 
+def test_event_schemas_judge_every_case() -> None:
+    from lha.obs.event_schema import EVENT_KINDS, SCHEMA_VERSION, event_errors
+
+    spec = _load("obs/mission_events.json")
+    assert spec["schema_version"] == SCHEMA_VERSION and spec["kinds"] == EVENT_KINDS
+    for case in spec["cases"]:
+        assert (not event_errors(case["kind"], case["data"])) == case["valid"], case
+
+
 def test_check_names() -> None:
     spec = _load("contracts/check_names.json")
     for case in spec["derive_check_name"]:

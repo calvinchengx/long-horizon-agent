@@ -98,3 +98,43 @@ func TestLeadVerifierKeepsTheTrustedCheckEnvAllowList(t *testing.T) {
 		t.Fatalf("an invalid allow-list must fall back to passing nothing through, got %v", got.EnvAllow)
 	}
 }
+
+func TestAQuarantinedCheckThatThenAlwaysFailsIsTraced(t *testing.T) {
+	tmp := t.TempDir()
+	counter := filepath.Join(tmp, "counter")
+	// Fails, passes (quarantined in the first cycle), then fails every run after.
+	flip := `n=$(cat "$1" 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > "$1"; [ "$n" -eq 2 ]`
+	flaky := contracts.Check{Name: "flaky", Gating: true, Where: "sandbox", Command: []string{"sh", "-c", flip, "sh", counter}}
+	solid := contracts.Check{Name: "solid", Gating: true, Where: "sandbox", Command: []string{"true"}}
+	o := runOpts(t, filepath.Join(tmp, "ws"), runnerSettings(t, "LHA_MAX_CYCLES=2"),
+		model.NewStub([]contracts.TurnResult{done, done}), flaky, solid)
+	o.Checklist = contracts.Checklist{Items: []contracts.ChecklistItem{item("01", "a"), item("02", "b")}}
+	s, err := RunMissionLocal(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type traced struct {
+		Kind    string         `json:"kind"`
+		CycleID string         `json:"cycle_id"`
+		Data    map[string]any `json:"data"`
+	}
+	var events []traced
+	for _, line := range strings.Split(strings.TrimSpace(s.TraceJSONL), "\n") {
+		var e traced
+		if err := json.Unmarshal([]byte(line), &e); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(e.Kind, "quarantine") {
+			events = append(events, e)
+		}
+	}
+	// Quarantined in c1; in c2 every verification (one per "done") fails it on every attempt.
+	if len(events) < 2 || events[0].Kind != verify.QuarantineEvent || events[0].CycleID != "c1" {
+		t.Fatalf("%+v", events)
+	}
+	for _, e := range events[1:] {
+		if e.Kind != verify.QuarantinedFailureEvent || e.CycleID != "c2" || e.Data["check"] != "flaky" || e.Data["passes"] != 0.0 {
+			t.Fatalf("%+v", events)
+		}
+	}
+}

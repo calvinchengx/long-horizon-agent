@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 from lha.config import get_settings
+from lha.obs.event_schema import AUDIT_DIR_ENV, audit
 
 _SESSION_STORE_DIR = tempfile.mkdtemp(prefix="lha-test-store-")
 os.environ["LHA_SQLITE_PATH"] = str(Path(_SESSION_STORE_DIR) / "lha.sqlite3")
@@ -94,6 +95,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Every event any recorder records (subprocesses too) is appended here, then audited against
+    # its kind's schema when the session ends (lha.obs.event_schema).
+    if config.getoption("--contract-coverage"):
+        os.environ[AUDIT_DIR_ENV] = tempfile.mkdtemp(prefix="lha-trace-audit-")
+
+
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if not session.config.getoption("--contract-coverage"):
         return
@@ -103,6 +111,12 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
         "test_spec_conformance"
     )
     gaps = ["test_spec_conformance did not run"] if module is None else module.uncovered()
+    audit_dir = os.environ.pop(AUDIT_DIR_ENV, "")
+    if audit_dir:
+        report = audit(audit_dir)
+        shutil.rmtree(audit_dir, ignore_errors=True)
+        gaps += [f"event {v} (x{n})" for v, n in sorted(report.violations.items())]
+        gaps += [f"event kind {kind!r} was never recorded" for kind in report.unseen]
     if gaps:
         print("\nspec coverage gaps:\n  " + "\n  ".join(gaps))
         session.exitstatus = 1

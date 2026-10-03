@@ -67,7 +67,7 @@ async def test_the_embedding_cache_keeps_only_what_the_latest_recall_used(tmp_pa
 def test_the_trace_recorder_keeps_the_newest_events() -> None:
     recorder = TraceRecorder(max_events=10)
     for n in range(100):
-        recorder.record("tick", mission_id="m1", n=n)
+        recorder.record("test_tick", mission_id="m1", n=n)
     assert 10 <= len(recorder.events) <= 11
     assert recorder.events[-1].data["n"] == 99
     assert recorder.dropped + len(recorder.events) == 100

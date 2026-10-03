@@ -33,7 +33,8 @@ jobs:
       - name: Ty (type check)
         run: uv run ty check
 
-      # Contract coverage: every spec/ file and case group must be checked (spec/README.md).
+      # Contract coverage: every spec/ file and case group must be checked, and every recorded
+      # trace event must match its kind's schema, every kind recorded at least once (spec/README.md).
       - name: Pytest (unit)
         run: uv run pytest -q --contract-coverage --cov --cov-report= --cov-fail-under=0 tests/unit
 
@@ -161,11 +162,21 @@ jobs:
       # e2e tests (a Go mission driven by the Python CLI and back), the worker guard (each
       # implementation refuses, and stops on, a task queue the other polls) and the recorded
       # histories run against the dev server started above.
+      # Every trace event the suite records is also appended under LHA_TRACE_AUDIT_DIR, then
+      # checked against spec/obs/mission_events.json (and every kind must have been recorded).
       - name: go test -race
         env:
           LHA_IT_TEMPORAL_ADDRESS: 127.0.0.1:7233
-        run: go test -race ./...
+          LHA_TRACE_AUDIT_DIR: ${{ runner.temp }}/trace-audit
+        run: |
+          mkdir -p "$LHA_TRACE_AUDIT_DIR"
+          go test -race ./...
         timeout-minutes: 15
+
+      - name: Recorded events match their schemas
+        env:
+          LHA_TRACE_AUDIT_CHECK: ${{ runner.temp }}/trace-audit
+        run: go test -count=1 -run TestTraceAudit ./internal/spec
 
   python-services-integration:
     # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker

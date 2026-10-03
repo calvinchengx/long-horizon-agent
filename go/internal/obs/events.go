@@ -204,6 +204,7 @@ func (r *TraceRecorder) Record(kind, missionID, cycleID string, data ...Field) T
 		attrs = append(attrs, slog.Any(f.Key, f.Value))
 	}
 	logger.LogAttrs(context.Background(), slog.LevelInfo, kind, attrs...)
+	appendAudit(event, logger)
 	for _, listen := range listeners {
 		func() {
 			defer func() { // observing a run must never fail it

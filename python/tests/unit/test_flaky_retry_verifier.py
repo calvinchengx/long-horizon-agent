@@ -253,6 +253,44 @@ async def test_local_mission_quarantines_a_flaky_check_and_commits_the_event(
     assert committed_quarantine(str(workdir)) == {"flaky"}
 
 
+async def test_a_quarantined_check_that_then_always_fails_is_traced(tmp_path: Path) -> None:
+    counter = tmp_path / "counter"
+    # Fails, passes (quarantined in the first cycle), then fails every run after.
+    flip = (
+        "import pathlib,sys;p=pathlib.Path(sys.argv[1]);"
+        "n=int(p.read_text() if p.exists() else 0)+1;p.write_text(str(n));"
+        "sys.exit(0 if n == 2 else 1)"
+    )
+    done = TurnResult(text='{"done": true, "summary": "ok"}')
+    summary = await run_mission_local(
+        workdir=str(tmp_path / "ws"),
+        title="t",
+        description="d",
+        checklist=Checklist(
+            items=[ChecklistItem(id="01", description="a"), ChecklistItem(id="02", description="b")]
+        ),
+        checks=[
+            Check(name="flaky", command=[sys.executable, "-c", flip, str(counter)]),
+            Check(name="solid", command=[sys.executable, "-c", "pass"]),
+        ],
+        settings=Settings(
+            sandbox="local",
+            allow_unsafe_local=True,
+            model_backend="stub",
+            budget_usd_ceiling=100.0,
+            max_cycles=2,
+        ),
+        model=StubModel(script=[done, done]),
+    )
+    events = [json.loads(line) for line in summary.trace_jsonl.splitlines()]
+    traced = [(e["cycle_id"], e["kind"]) for e in events if "quarantine" in e["kind"]]
+    # Quarantined in c1; in c2 every verification (one per "done") fails it on every attempt.
+    assert traced[0] == ("c1", QUARANTINE_EVENT) and len(traced) > 1
+    assert set(traced[1:]) == {("c2", QUARANTINED_FAILURE_EVENT)}
+    failed = next(e["data"] for e in events if e["kind"] == QUARANTINED_FAILURE_EVENT)
+    assert failed["check"] == "flaky" and failed["passes"] == 0 and failed["fails"] >= 2
+
+
 # --- cross-implementation scenarios (spec/verify/flaky_retry.json) -----------------------------
 SPEC_REVISION = "0123456789abcdef0123456789abcdef01234567"
 

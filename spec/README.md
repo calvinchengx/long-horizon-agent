@@ -14,6 +14,7 @@ the matching package is ported; it runs every file below.
 | `safety/classify_command.json` | argv -> the exact gate reason (or `null` = allowed) |
 | `safety/egress.json` | host normalization (IDNA 2008), URL parsing, public-address checks, allow-list |
 | `obs/redact.json` | secret redaction in free text and secret-looking keys |
+| `obs/mission_events.json` | every trace event kind's payload schema (`mission_events` rows), with payloads each schema accepts or rejects; every implementation's test suite records events only of these shapes and every kind at least once |
 | `contracts/check_names.json` | verification check names derived from argv, and de-duplication |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, status transitions |
 | `state/checklist_edit.json` | operator edit batches (`lha mission-edit`): the resulting checklist and summary lines, or the exact refusal with the checklist unchanged; the `(witness: ...)` description suffix; the next item id |
@@ -54,6 +55,12 @@ conformance runners, and listed in the table above; CI fails otherwise:
 - Python: `pytest --contract-coverage tests/unit/test_spec_conformance.py` (CI passes the flag).
 - CI regenerates every file from the Python reference and fails on any difference, so the cases
   can never fall behind the code.
+- Recorded events match `obs/mission_events.json`: with `LHA_TRACE_AUDIT_DIR` set, every trace
+  recorder also appends each event it records to a file there, and the audit fails on an event
+  whose kind is unknown or whose payload breaks its schema, and on a kind no test recorded. Python
+  runs it inside `pytest --contract-coverage`; Go runs the suite with `LHA_TRACE_AUDIT_DIR`, then
+  `TestTraceAudit` with `LHA_TRACE_AUDIT_CHECK` naming that directory. Kinds starting with `test_`
+  are test fixtures and are skipped.
 
 Go caches test results by its own module's files only; after changing a spec file, run
 `go test -count=1 ./internal/spec/`.
