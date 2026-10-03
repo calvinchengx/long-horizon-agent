@@ -542,3 +542,45 @@ func TestWorkerDeploymentVersion(t *testing.T) {
 		t.Error("an unknown versioning behaviour was accepted")
 	}
 }
+
+// Secret rotation (python: test_secret_rotation.py): fingerprints never show a value, and only the
+// secret fields that differ are taken from the fresh settings.
+func TestWithRotatedSecrets(t *testing.T) {
+	if SecretFingerprint(nil) != "" || len(SecretFingerprint(NewSecret("sk-ant-one"))) != 12 ||
+		SecretFingerprint(NewSecret("sk-ant-one")) == SecretFingerprint(NewSecret("sk-ant-two")) {
+		t.Fatal("fingerprints")
+	}
+	fields := SecretFields()
+	if len(fields) != 9 || fields[0] != "openai_api_key" || fields[1] != "anthropic_api_key" {
+		t.Fatalf("secret fields %v", fields)
+	}
+	base, err := LoadFrom([]string{"LHA_MODEL_NAME=m-old", "LHA_ANTHROPIC_API_KEY=a1", "LHA_VOYAGE_API_KEY=v1"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := LoadFrom([]string{"LHA_MODEL_NAME=m-new", "LHA_ANTHROPIC_API_KEY=a2", "LHA_VOYAGE_API_KEY=v1", "LHA_OPENAI_API_KEY=o1"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated, changed := WithRotatedSecrets(base, fresh)
+	if strings.Join(changed, ",") != "openai_api_key,anthropic_api_key" {
+		t.Fatalf("changed %v", changed)
+	}
+	if rotated.AnthropicAPIKey.Value() != "a2" || rotated.OpenAIAPIKey.Value() != "o1" || rotated.VoyageAPIKey.Value() != "v1" || rotated.ModelName != "m-old" {
+		t.Fatalf("rotated %+v", rotated)
+	}
+	if base.AnthropicAPIKey.Value() != "a1" || base.OpenAIAPIKey != nil {
+		t.Fatal("the original settings changed")
+	}
+	if same, none := WithRotatedSecrets(base, base); same != base || len(none) != 0 {
+		t.Fatal("an unchanged set rotated")
+	}
+	cleared, _ := LoadFrom([]string{"LHA_ANTHROPIC_API_KEY=a1"}, "")
+	if out, gone := WithRotatedSecrets(base, cleared); len(gone) != 0 || out != base {
+		t.Fatalf("an absent secret counted as a rotation: %v", gone)
+	}
+	fps := SecretFingerprints(rotated)
+	if len(fps) != 3 || fps[0].Key != "openai_api_key" || fmt.Sprint(fps[0].Value) != SecretFingerprint(NewSecret("o1")) {
+		t.Fatalf("fingerprints %v", fps)
+	}
+}

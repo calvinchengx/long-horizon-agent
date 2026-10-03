@@ -20,7 +20,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | Command | Purpose | Needs |
 |---|---|---|
 | [`version`](#lha-version) | print the version | nothing |
-| [`config`](#lha-config) | print resolved settings, secrets masked | nothing |
+| [`config`](#lha-config) | print resolved settings, secrets masked (`--fingerprints` adds a hash of each secret) | nothing |
 | [`db migrate`](#lha-db-migrate) | apply SQL migrations | Postgres, `postgres` extra |
 | [`objects prune`](#lha-objects-prune) | delete old payloads from the ClaimCheck object store | nothing |
 | [`memory reembed`](#lha-memory-reembed) | re-embed stored memory with the configured embedder | the mission store, an embedder |
@@ -117,7 +117,10 @@ Prints every setting as `name = value`, one per line, in declaration order. `Sec
 `gate_webhook_url`) print `***` when set and `None` when
 unset. The last line, `mission store = ...`, is where `lha missions` and `lha costs` read:
 `sqlite <absolute path>` (the resolved `LHA_SQLITE_PATH` or the per-user default), or
-`postgres (LHA_POSTGRES_DSN)` with its SQLite fallback. No options.
+`postgres (LHA_POSTGRES_DSN)` with its SQLite fallback. `--fingerprints` adds
+`<name> fingerprint = <12 hex digits>` (the SHA-256 of the value) for each secret that is set,
+so a rotated key can be checked without either value being shown
+([15-operations-runbook.md](15-operations-runbook.md#common-actions)).
 
 ## `lha db migrate`
 

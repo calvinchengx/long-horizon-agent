@@ -28,6 +28,7 @@ never show them; read the raw value only at the point of use via ``.get_secret_v
 
 from __future__ import annotations
 
+import hashlib
 import json
 from functools import lru_cache
 from typing import Literal
@@ -485,6 +486,60 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Return the process-wide settings (cached)."""
     return Settings()
+
+
+# --- secret rotation ---------------------------------------------------------------------
+# A durable mission outlives its API keys. Every activity (and the health probe of a parked
+# mission) re-reads the environment and ``.env`` and takes the SECRET fields that changed, so an
+# operator rotates a key by updating them, never by restarting the worker. Non-secret settings
+# are deliberately left as the worker started with them: a model or sandbox change mid-mission
+# is a restart, not a rotation (docs/15).
+
+#: The settings fields declared ``SecretStr``, in declaration order.
+SECRET_FIELDS: tuple[str, ...] = tuple(
+    name
+    for name, field in Settings.model_fields.items()
+    if field.annotation is not None and "SecretStr" in str(field.annotation)
+)
+
+
+def secret_fingerprint(value: SecretStr | None) -> str:
+    """The first 12 hex digits of the SHA-256 of a secret (``""`` when unset): enough to tell two
+    keys apart in a log or a report without showing either."""
+    if value is None:
+        return ""
+    return hashlib.sha256(value.get_secret_value().encode("utf-8")).hexdigest()[:12]
+
+
+def secret_fingerprints(settings: Settings) -> dict[str, str]:
+    """``{field: fingerprint}`` for every secret that is set."""
+    out: dict[str, str] = {}
+    for name in SECRET_FIELDS:
+        fp = secret_fingerprint(getattr(settings, name))
+        if fp:
+            out[name] = fp
+    return out
+
+
+def with_rotated_secrets(settings: Settings, fresh: Settings) -> tuple[Settings, list[str]]:
+    """``settings`` with every secret that ``fresh`` SETS to a different value taken from
+    ``fresh``, and the names of those fields (in declaration order). Nothing else changes: a
+    secret absent from ``fresh`` is kept (removing a key is a restart, not a rotation, and a
+    half-written ``.env`` must not unset anything)."""
+    changed = [
+        name
+        for name in SECRET_FIELDS
+        if getattr(fresh, name) is not None
+        and secret_fingerprint(getattr(settings, name)) != secret_fingerprint(getattr(fresh, name))
+    ]
+    if not changed:
+        return settings, []
+    return settings.model_copy(update={n: getattr(fresh, n) for n in changed}), changed
+
+
+def refresh_secrets(settings: Settings) -> tuple[Settings, list[str]]:
+    """Re-read the environment and ``.env`` and apply the rotated secrets to ``settings``."""
+    return with_rotated_secrets(settings, Settings())
 
 
 def _csv(value: str) -> list[str]:

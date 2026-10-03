@@ -419,7 +419,14 @@ gate.
   killed on timeout. Trusted checks are the exception: they run on the host, outside the sandbox, with
   their own minimal environment (`PATH` and the locale, a fresh `HOME` and `TMPDIR`, and
   only the extra names listed in `LHA_TRUSTED_CHECK_ENV`; [verify/trusted.py](../python/src/lha/verify/trusted.py)).
-- Settings secrets are `SecretStr`. `lha config` prints `***` for them.
+- Settings secrets are `SecretStr`. `lha config` prints `***` for them, and
+  `lha config --fingerprints` adds a 12-hex-digit SHA-256 fingerprint of each secret that is set,
+  so a rotation can be checked without a value being shown.
+- **Rotation without a restart.** Every durable activity, and the health probe of a parked
+  mission, re-reads the environment and `.env` and takes the secret fields that changed
+  (`config.refresh_secrets`); the first cycle that uses a rotated secret commits a
+  `secrets_rotated` event naming the fields and their new fingerprints. Non-secret settings
+  stay as the worker started with them ([15-operations-runbook.md](15-operations-runbook.md#common-actions)).
 - [obs/redact.py](../python/src/lha/obs/redact.py) masks values under secret-looking keys (not
   `input_tokens`-style counters) and secret-looking strings: `sk-…`, GitHub and Slack tokens, AWS
   key ids, Google keys, `Authorization:` values, `Bearer` tokens and `scheme://user:pass@`. It is

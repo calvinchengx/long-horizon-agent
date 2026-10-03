@@ -151,7 +151,9 @@ event and appends a `ticket` event (the ticket's id, item, role, write set, bran
 status history, ownership violations and leases). The multi-agent organization adds `research`,
 `review`, `review_screen`, `lease`, `orchestrate`, `blackboard` and `reflection` events
 ([wire contract](19-wire-contract.md#mission-anchor-lha)). A human-approved retry after a deadlock appends an
-`unblock` event. An operator's checklist edit (`lha mission-edit`) is its own anchor-only commit,
+`unblock` event. A cycle that first used a rotated secret appends a `secrets_rotated` event
+(`fields`, and the new 12-hex-digit `fingerprints`, never a value;
+[09-safety-model.md](09-safety-model.md#6-secrets-in-child-processes-and-traces)). An operator's checklist edit (`lha mission-edit`) is its own anchor-only commit,
 `lha: checklist edited by <who>`, with a `checklist_edit` event (`by`, the `edits` batch and its
 `summary`, cycle id `e<n>`). Every tool call that reached an approval gate appends a `tool_approval` event
 with the cycle's checkpoint (the tool, redacted arguments, reason, fingerprint, the decision

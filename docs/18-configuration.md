@@ -332,6 +332,16 @@ postgres_dsn = None          # unset
 ...
 ```
 
+`lha config --fingerprints` adds `<name> fingerprint = <12 hex digits>` (the SHA-256 of the value)
+for each secret that is set, so two keys can be told apart without showing either.
+
+**Rotation.** These nine settings are re-read from the environment and `.env` at the start of
+every durable activity and health probe (`config.refresh_secrets`): a rotated key is used by the
+next activity without a worker restart, and the cycle that first used it commits a
+`secrets_rotated` anchor event with the field names and new fingerprints. A secret that is absent
+from the fresh read is kept (removing a key is a restart). The other settings are read once, when
+the worker starts ([15-operations-runbook.md](15-operations-runbook.md#common-actions)).
+
 Sandboxed child processes get a minimal allow-listed environment
 ([`execution/proc.py`](../python/src/lha/execution/proc.py)), not the host environment, so these
 keys do not reach agent-run commands. Keep `.env` out of version control (`.gitignore` covers it).

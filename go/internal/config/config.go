@@ -6,6 +6,8 @@ package config
 
 import (
 	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -462,6 +464,83 @@ func readDotenv(path string, into map[string]string) error {
 		}
 	}
 	return scanner.Err()
+}
+
+// --- secret rotation (python: config.secret_fingerprints etc.) ------------------------------
+// A durable mission outlives its API keys. Every activity (and the health probe of a parked
+// mission) re-reads the environment and .env and takes the SECRET fields that changed, so an
+// operator rotates a key by updating them, never by restarting the worker. Non-secret settings
+// stay as the worker started with them: a model or sandbox change mid-mission is a restart.
+
+// SecretFingerprint is the first 12 hex digits of the SHA-256 of a secret ("" when unset).
+func SecretFingerprint(s *Secret) string {
+	if s == nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(s.value))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// SecretFields are the env names of the *Secret fields, in declaration order.
+func SecretFields() []string {
+	rt := reflect.TypeOf(Settings{})
+	out := []string{}
+	for i := 0; i < rt.NumField(); i++ {
+		if rt.Field(i).Type == reflect.TypeOf((*Secret)(nil)) {
+			out = append(out, rt.Field(i).Tag.Get("env"))
+		}
+	}
+	return out
+}
+
+// SecretFingerprints is {field: fingerprint} for every secret that is set.
+func SecretFingerprints(s *Settings) []KV {
+	out := []KV{}
+	rv := reflect.ValueOf(s).Elem()
+	rt := rv.Type()
+	for i := 0; i < rt.NumField(); i++ {
+		if sec, ok := rv.Field(i).Interface().(*Secret); ok && sec != nil {
+			out = append(out, KV{rt.Field(i).Tag.Get("env"), SecretFingerprint(sec)})
+		}
+	}
+	return out
+}
+
+// WithRotatedSecrets is s with every secret that fresh SETS to a different value taken from
+// fresh, and the env names of those fields (declaration order). Nothing else changes: a secret
+// absent from fresh is kept (removing a key is a restart, not a rotation, and a half-written .env
+// must not unset anything); s is left as it was.
+func WithRotatedSecrets(s, fresh *Settings) (*Settings, []string) {
+	changed := []string{}
+	out := s.Clone()
+	rv, fv, ov := reflect.ValueOf(s).Elem(), reflect.ValueOf(fresh).Elem(), reflect.ValueOf(out).Elem()
+	rt := rv.Type()
+	for i := 0; i < rt.NumField(); i++ {
+		if rt.Field(i).Type != reflect.TypeOf((*Secret)(nil)) {
+			continue
+		}
+		old, _ := rv.Field(i).Interface().(*Secret)
+		now, _ := fv.Field(i).Interface().(*Secret)
+		if now == nil || SecretFingerprint(old) == SecretFingerprint(now) {
+			continue
+		}
+		ov.Field(i).Set(reflect.ValueOf(NewSecret(now.value)))
+		changed = append(changed, rt.Field(i).Tag.Get("env"))
+	}
+	if len(changed) == 0 {
+		return s, changed
+	}
+	return out, changed
+}
+
+// RefreshSecrets re-reads the environment and .env and applies the rotated secrets to s.
+func RefreshSecrets(s *Settings) (*Settings, []string, error) {
+	fresh, err := Load()
+	if err != nil {
+		return s, nil, err
+	}
+	out, changed := WithRotatedSecrets(s, fresh)
+	return out, changed, nil
 }
 
 // Clone returns a copy whose pointer and slice fields are copied too, so a caller can override
