@@ -1,14 +1,15 @@
 """A long local mission must not grow memory with every cycle (docs/15, "Memory and disk").
 
 Forty cycles editing a small checkout, with the bounded structures' caps set low so they saturate
-early; from cycle 20 on, traced memory may grow only by a small per-cycle allowance, and the
-memory plane's embedding cache may grow only by the recalled skills. Before the bounds existed,
-each edit added its file's re-chunked vectors per cycle for good.
+early; from cycle 20 on, the median per-cycle growth of traced memory must stay within a small
+allowance, and the memory plane's embedding cache may grow only by the recalled skills. Before the
+bounds existed, each edit added its file's re-chunked vectors per cycle for good.
 """
 
 from __future__ import annotations
 
 import gc
+import statistics
 import subprocess
 import sys
 import tracemalloc
@@ -95,7 +96,7 @@ async def test_a_long_local_mission_does_not_grow_with_every_cycle(
         event = orig_record(self, kind, **kw)
         if kind == "checkpoint":
             cycle[0] += 1
-            if cycle[0] in (WARM, CYCLES):
+            if cycle[0] >= WARM:
                 gc.collect()
                 samples[cycle[0]] = (tracemalloc.get_traced_memory()[0], len(memory[0]._vectors))
         return event
@@ -127,9 +128,13 @@ async def test_a_long_local_mission_does_not_grow_with_every_cycle(
     finally:
         tracemalloc.stop()
     assert summary.completed and summary.cycles == CYCLES
-    (warm_bytes, warm_vectors), (end_bytes, end_vectors) = samples[WARM], samples[CYCLES]
-    per_cycle_kb = (end_bytes - warm_bytes) / 1024 / (CYCLES - WARM)
-    assert per_cycle_kb < ALLOWANCE_KB_PER_CYCLE, f"{per_cycle_kb:.1f} KB per cycle"
+    (_, warm_vectors), (_, end_vectors) = samples[WARM], samples[CYCLES]
+    # The median of the per-cycle growth: memory that grows with every cycle moves it, while a
+    # one-off step (Python resizing an internal table, such as the interned-string dict pathlib
+    # fills) is a single delta and does not.
+    deltas = sorted((samples[c + 1][0] - samples[c][0]) / 1024 for c in range(WARM, CYCLES))
+    per_cycle_kb = statistics.median(deltas)
+    assert per_cycle_kb < ALLOWANCE_KB_PER_CYCLE, f"{per_cycle_kb:.1f} KB per cycle ({deltas})"
     # One recalled skill per verified item, plus this cycle's query and progress note.
     assert end_vectors - warm_vectors <= CYCLES - WARM + 2, (warm_vectors, end_vectors)
     assert len(memory[0]._vectors) == len(memory[0]._touched)
