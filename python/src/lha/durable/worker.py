@@ -47,6 +47,7 @@ from lha.config import Settings, get_settings
 from lha.durable.activities import (
     check_mission_health,
     declare_impossible,
+    edit_checklist,
     notify_gate,
     read_mission_snapshot,
     record_mission_status,
@@ -288,6 +289,7 @@ def build_worker(
             notify_gate,
             declare_impossible,
             unblock_items,
+            edit_checklist,
             read_mission_snapshot,
             record_mission_status,
             run_subagent,

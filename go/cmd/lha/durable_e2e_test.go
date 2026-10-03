@@ -151,8 +151,8 @@ from temporalio.service import RPCError, RPCStatusCode
 from temporalio.worker import Worker
 from lha.config import get_settings
 from lha.contracts.model import ToolCall, TurnResult
-from lha.durable.activities import (check_mission_health, declare_impossible, make_cycle_activity,
-    notify_gate, read_mission_snapshot, record_mission_status, unblock_items)
+from lha.durable.activities import (check_mission_health, declare_impossible, edit_checklist,
+    make_cycle_activity, notify_gate, read_mission_snapshot, record_mission_status, unblock_items)
 from lha.durable.worker import check_task_queue_pollers, connect_client, worker_identity
 from lha.durable.workflows import MissionWorkflow
 from lha.model.stub import StubModel
@@ -177,7 +177,7 @@ async def main():
             raise
     worker = Worker(client, task_queue=settings.task_queue, identity=worker_identity(), workflows=[MissionWorkflow],
         activities=[make_cycle_activity(model_factory=factory), check_mission_health, notify_gate, declare_impossible,
-                    unblock_items, read_mission_snapshot, record_mission_status])
+                    unblock_items, edit_checklist, read_mission_snapshot, record_mission_status])
     async with worker:
         print("ready", flush=True)
         await asyncio.Event().wait()
@@ -263,6 +263,27 @@ func startedID(t *testing.T, r result) string {
 }
 
 // waitStatus polls status_v1 until it is want.
+// waitGateLog waits until the mission's gate log holds a line containing want.
+func waitGateLog(t *testing.T, cl client.Client, id, want string) {
+	t.Helper()
+	deadline := time.Now().Add(90 * time.Second)
+	for {
+		var log []string
+		if v, err := cl.QueryWorkflow(context.Background(), durable.MissionWorkflowID(id), "", durable.QueryGateLog); err == nil {
+			_ = v.Get(&log)
+			for _, line := range log {
+				if strings.Contains(line, want) {
+					return
+				}
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("mission %s gate log never held %q (last %q)", id, want, log)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+}
+
 func waitStatus(t *testing.T, cl client.Client, id, want string) {
 	t.Helper()
 	deadline := time.Now().Add(90 * time.Second)
@@ -355,6 +376,15 @@ func TestGoMissionDrivenByThePythonCLI(t *testing.T) {
 		!strings.Contains(out, "steering notes (2, latest last):\n  Prefer small commits. Keep tests green.\n  Second note\n") {
 		t.Fatalf("status:\n%s", out)
 	}
+	// The Python CLI edits the sleeping mission's checklist; the Go worker applies it at once.
+	if r := runPythonLHA(t, dir, processEnv(env...), "mission-edit", id2, "--add", "task three (witness: cmd:true)", "--remove", "02", "--as", "calvin"); r.code != 0 ||
+		r.stdout != fmt.Sprintf("mission %s: 2 checklist edits queued (applied before the next cycle; 'lha mission-status' shows the outcome)\n", id2) {
+		t.Fatalf("python edit: %+v", r)
+	}
+	waitGateLog(t, cl, id2, "checklist edited by calvin: removed 02; added 03")
+	if out := sameStatus(t, dir, env, id2); !strings.Contains(out, "sleeping until ") || strings.Contains(out, "checklist edits pending") {
+		t.Fatalf("status after the edit:\n%s", out)
+	}
 	if r := runPythonLHA(t, dir, processEnv(env...), "mission-abort", id2); r.code != 0 || r.stdout != "cancelled mission "+id2+"\n" {
 		t.Fatalf("python abort: %+v", r)
 	}
@@ -412,6 +442,12 @@ func TestPythonMissionDrivenByTheGoCLI(t *testing.T) {
 	if r := goLHAInProcess(t, dir, env, "mission-snooze", id2, "--seconds", "7200"); r.code != 0 || r.stdout != fmt.Sprintf("mission %s: snoozed 7200s\n", id2) {
 		t.Fatalf("go snooze: %+v", r)
 	}
+	// The Go CLI edits the sleeping mission's checklist; the Python worker applies it at once.
+	if r := goLHAInProcess(t, dir, env, "mission-edit", id2, "--describe", "01=task one, renamed", "--as", "ops-bot"); r.code != 0 ||
+		r.stdout != fmt.Sprintf("mission %s: 1 checklist edit queued (applied before the next cycle; 'lha mission-status' shows the outcome)\n", id2) {
+		t.Fatalf("go edit: %+v", r)
+	}
+	waitGateLog(t, cl, id2, "checklist edited by ops-bot: edited 01: description")
 	sameStatus(t, dir, env, id2)
 	if r := goLHAInProcess(t, dir, env, "mission-abort", id2); r.code != 0 || r.stdout != "cancelled mission "+id2+"\n" {
 		t.Fatalf("go abort: %+v", r)

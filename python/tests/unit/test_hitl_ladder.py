@@ -662,6 +662,7 @@ class _Handle:
             "steer_notes": []
             if self.gate
             else ["Prefer small commits.\nKeep tests green.", "Second"],
+            "pending_edits": 0,
         }[name]
 
     async def signal(self, name: str, payload: Any) -> None:

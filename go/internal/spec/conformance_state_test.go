@@ -1,9 +1,13 @@
 package spec
 
 import (
+	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/checklistedit"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/checklistimport"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
@@ -53,6 +57,74 @@ func TestHarnessFiles(t *testing.T) {
 	for _, c := range s.WitnessPaths {
 		if got := verify.WitnessPaths(c.Witnesses); !reflect.DeepEqual(got, c.Paths) {
 			t.Errorf("WitnessPaths(%q) = %q, want %q", c.Witnesses, got, c.Paths)
+		}
+	}
+}
+
+// TestChecklistEdit is python's test_checklist_edit: operator edit batches (lha mission-edit),
+// their summaries and refusals, the witness suffix and the next item id.
+func TestChecklistEdit(t *testing.T) {
+	var s struct {
+		Cases []struct {
+			Name    string          `json:"name"`
+			By      string          `json:"by"`
+			Initial json.RawMessage `json:"initial"`
+			Edits   []any           `json:"edits"`
+			After   json.RawMessage `json:"after"`
+			Summary []string        `json:"summary"`
+			Error   *string         `json:"error"`
+		} `json:"cases"`
+		WitnessSuffix []struct {
+			Text        string   `json:"text"`
+			Description string   `json:"description"`
+			Witnesses   []string `json:"witnesses"`
+		} `json:"witness_suffix"`
+		NextID []struct {
+			IDs      []string `json:"ids"`
+			Reserved []string `json:"reserved"`
+			Next     string   `json:"next"`
+		} `json:"next_id"`
+	}
+	Load(t, "state/checklist_edit.json", &s)
+	if len(s.Cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range s.Cases {
+		var checklist contracts.Checklist
+		if err := json.Unmarshal(c.Initial, &checklist); err != nil {
+			t.Fatal(err)
+		}
+		summary, err := checklistedit.Apply(&checklist, c.Edits, c.By, nil)
+		if c.Error != nil {
+			var refused *checklistedit.Error
+			if !errors.As(err, &refused) || refused.Message != *c.Error {
+				t.Errorf("%s: error %v, want %q", c.Name, err, *c.Error)
+			}
+			JSONEqual(t, c.Name+" (unchanged)", checklist, c.Initial)
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", c.Name, err)
+			continue
+		}
+		if !reflect.DeepEqual(summary, c.Summary) {
+			t.Errorf("%s: summary %q, want %q", c.Name, summary, c.Summary)
+		}
+		JSONEqual(t, c.Name, checklist, c.After)
+	}
+	for _, c := range s.WitnessSuffix {
+		d, w := checklistimport.SplitWitnesses(c.Text)
+		if d != c.Description || !reflect.DeepEqual(w, c.Witnesses) {
+			t.Errorf("SplitWitnesses(%q) = %q %q", c.Text, d, w)
+		}
+	}
+	for _, c := range s.NextID {
+		cl := contracts.Checklist{}
+		for _, id := range c.IDs {
+			cl.Items = append(cl.Items, contracts.NewChecklistItem(id, id))
+		}
+		if got := checklistedit.NextItemID(&cl, c.Reserved); got != c.Next {
+			t.Errorf("NextItemID(%v, %v) = %q, want %q", c.IDs, c.Reserved, got, c.Next)
 		}
 	}
 }

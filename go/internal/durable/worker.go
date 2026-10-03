@@ -200,6 +200,7 @@ func registerWith(r worker.Registry, acts *Activities, overrides map[string]any)
 		ActivityNotifyGate:          acts.NotifyGate,
 		ActivityDeclareImpossible:   acts.DeclareImpossible,
 		ActivityUnblockItems:        acts.UnblockItems,
+		ActivityEditChecklist:       acts.EditChecklist,
 		ActivityReadMissionSnapshot: acts.ReadMissionSnapshot,
 		ActivityRecordMissionStatus: acts.RecordMissionStatus,
 		ActivityRunSubAgent:         acts.RunSubAgent,

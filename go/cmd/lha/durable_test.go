@@ -28,7 +28,21 @@ import (
 type fakeTemporal struct {
 	client.Client
 	started []startCall
+	signals []signalCall
 	fail    error
+}
+
+type signalCall struct {
+	workflowID, name string
+	arg              any
+}
+
+func (f *fakeTemporal) SignalWorkflow(_ context.Context, workflowID, _, name string, arg any) error {
+	if f.fail != nil {
+		return f.fail
+	}
+	f.signals = append(f.signals, signalCall{workflowID, name, arg})
+	return nil
 }
 
 type startCall struct {
@@ -221,12 +235,88 @@ func TestDurableCommandsValidateBeforeConnecting(t *testing.T) {
 		{[]string{"mission-steer", "m1", "--note", "   "}, "error: --note must not be empty"},
 		{[]string{"mission-steer", "m1", "--note", strings.Repeat("x", 2001)}, "error: --note is 2001 characters; at most 2000 are kept"},
 		{[]string{"mission-status", "a", "b"}, "Error: Got unexpected extra argument (b)"},
+		{[]string{"mission-edit", "m1"}, "error: nothing to do: give at least one of --add, --remove, --reopen, --block, --unblock, --describe, --depends or --edits FILE"},
+		{[]string{"mission-edit", "--add", "x"}, "error: give MISSION_ID (a durable mission) or --workdir DIR (a local one), not both"},
+		{[]string{"mission-edit", "m1", "--workdir", ".", "--add", "x"}, "not both"},
+		{[]string{"mission-edit", "m1", "--describe", "nope"}, "error: --describe expects ID=VALUE (got 'nope')"},
+		{[]string{"mission-edit", "m1", "--depends", "=01"}, "error: --depends expects ID=VALUE (got '=01')"},
+		{[]string{"mission-edit", "m1", "--add", "x", "--as", strings.Repeat("x", 201)}, "error: --as is longer than 200 characters"},
+		{[]string{"mission-edit", "m1", "--edits", "no-such-file.json"}, "error: cannot read --edits 'no-such-file.json'"},
+		{append([]string{"mission-edit", "m1"}, strings.Fields(strings.Repeat("--add x ", 51))...), "error: 51 edits; at most 50 per batch"},
 		{[]string{"mission-abort"}, "Error: Missing argument 'MISSION_ID'."},
 	} {
 		r := runCLI(t, nil, tc.args...)
 		if r.code != 2 || !strings.Contains(r.stderr, tc.want) {
 			t.Fatalf("%v: %+v", tc.args, r)
 		}
+	}
+}
+
+// mission-edit sends python's checklist_edit_v1 payload, in python's option order.
+func TestMissionEditSignalsTheBatch(t *testing.T) {
+	cleanEnv(t)
+	fake := useFakeTemporal(t)
+	r := runCLI(t, nil, "mission-edit", "m1", "--remove", "03", "--add", "Ship it (witness: cmd:true)", "--describe", "02=Parse it",
+		"--depends", "02=", "--reopen", "01", "--block", "04", "--unblock", "05", "--as", " calvin ")
+	if r.code != 0 || r.stdout != "mission m1: 7 checklist edits queued (applied before the next cycle; 'lha mission-status' shows the outcome)\n" {
+		t.Fatalf("%+v", r)
+	}
+	if len(fake.signals) != 1 || fake.signals[0].workflowID != "mission:m1" || fake.signals[0].name != durable.SignalChecklistEdit {
+		t.Fatalf("signals %+v", fake.signals)
+	}
+	want := map[string]any{"by": "calvin", "edits": []map[string]any{
+		{"op": "edit", "id": "02", "description": "Parse it"},
+		{"op": "edit", "id": "02", "depends_on": []string{}},
+		{"op": "reopen", "id": "01"},
+		{"op": "unblock", "id": "05"},
+		{"op": "block", "id": "04"},
+		{"op": "remove", "id": "03"},
+		{"op": "add", "description": "Ship it (witness: cmd:true)"},
+	}}
+	got, _ := json.Marshal(fake.signals[0].arg)
+	exp, _ := json.Marshal(want)
+	if string(got) != string(exp) {
+		t.Fatalf("payload %s\nwant    %s", got, exp)
+	}
+	one := runCLI(t, nil, "mission-edit", "m1", "--add", "x")
+	if one.code != 0 || !strings.HasPrefix(one.stdout, "mission m1: 1 checklist edit queued") {
+		t.Fatalf("%+v", one)
+	}
+}
+
+// mission-edit --workdir edits a local mission's anchor directly, numbering its edits after the
+// committed ones; a refused batch exits 1.
+func TestMissionEditWorkdirAppliesLocally(t *testing.T) {
+	dir := cleanEnv(t)
+	anchor := state.NewGitMissionAnchor(dir)
+	items := contracts.Checklist{Items: []contracts.ChecklistItem{contracts.NewChecklistItem("01", "one"), contracts.NewChecklistItem("02", "two")}, SchemaVersion: 1}
+	if _, err := anchor.Initialize(context.Background(), "t", "d", items); err != nil {
+		t.Fatal(err)
+	}
+	ok := runCLI(t, nil, "mission-edit", "--workdir", dir, "--add", "three", "--as", "me")
+	if ok.code != 0 || ok.stdout != "checklist edited by me: added 03\n" {
+		t.Fatalf("%+v", ok)
+	}
+	refused := runCLI(t, nil, "mission-edit", "--workdir", dir, "--remove", "zz")
+	if refused.code != 1 || !strings.Contains(refused.stderr, "unknown item 'zz'") {
+		t.Fatalf("%+v", refused)
+	}
+	second := runCLI(t, nil, "mission-edit", "--workdir", dir, "--remove", "03")
+	if second.code != 0 {
+		t.Fatalf("%+v", second)
+	}
+	events, err := anchor.ReadEvents(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, e := range events {
+		if e.Kind == durable.EditEvent {
+			ids = append(ids, e.CycleID)
+		}
+	}
+	if strings.Join(ids, ",") != "e1,e2" {
+		t.Fatalf("edit ids %v", ids)
 	}
 }
 

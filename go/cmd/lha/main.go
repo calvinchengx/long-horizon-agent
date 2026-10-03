@@ -69,6 +69,7 @@ var commandHelp = []struct{ name, help string }{
 	{"mission-snooze", "Park a mission on a durable timer (SLEEPING) before its next cycle, or wake it."},
 	{"mission-report", "One page about a mission: items, verdicts, reviews, gates, spend and commits, from the anchor and the store."},
 	{"mission-steer", "Append an operator steering note that every following cycle's prompt includes."},
+	{"mission-edit", "Add, remove, edit, reopen, block or unblock checklist items of a mission in flight."},
 	{"mission-abort", "Cancel a running mission workflow."},
 }
 
@@ -182,6 +183,8 @@ func (c *cli) run(args []string) int {
 		err = c.missionReport(rest)
 	case "mission-steer":
 		err = c.missionSteer(rest)
+	case "mission-edit":
+		err = c.missionEdit(rest)
 	case "mission-abort":
 		err = c.missionAbort(rest)
 	case "egress-proxy": // hidden: the Docker sandbox's allow-list egress proxy

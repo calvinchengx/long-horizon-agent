@@ -357,6 +357,23 @@ func paragraphs(lines []string) [][]string {
 	return out
 }
 
+// SplitWitnesses is python's split_witnesses: "Do X (witness: cmd:true, go:TestX)" ->
+// ("Do X", ["cmd:true", "go:TestX"]). The description is the text with every (witness: ...) /
+// (witnesses: ...) group removed and whitespace collapsed; the witnesses are the groups'
+// comma-separated entries in order (the Markdown roadmap syntax, also used by lha mission-edit).
+func SplitWitnesses(text string) (string, []string) {
+	witnesses := []string{}
+	for _, m := range witnessRE.FindAllStringSubmatch(text, -1) {
+		for _, w := range strings.Split(m[1], ",") {
+			if w = pyStrip(w); w != "" {
+				witnesses = append(witnesses, w)
+			}
+		}
+	}
+	description := pyStrip(spacesRE.ReplaceAllLiteralString(witnessStripRE.ReplaceAllLiteralString(text, ""), " "))
+	return description, witnesses
+}
+
 func buildItems(path string, drafts []*draft) (contracts.Checklist, map[string]int, error) {
 	width := max(2, len(strconv.Itoa(len(drafts))))
 	items := []contracts.ChecklistItem{}
@@ -371,16 +388,7 @@ func buildItems(path string, drafts []*draft) (contracts.Checklist, map[string]i
 			}
 			currentPhase, havePhase = d.phase, true
 		}
-		text := strings.Join(d.parts, " ")
-		witnesses := []string{}
-		for _, m := range witnessRE.FindAllStringSubmatch(text, -1) {
-			for _, w := range strings.Split(m[1], ",") {
-				if w = pyStrip(w); w != "" {
-					witnesses = append(witnesses, w)
-				}
-			}
-		}
-		description := pyStrip(spacesRE.ReplaceAllLiteralString(witnessStripRE.ReplaceAllLiteralString(text, ""), " "))
+		description, witnesses := SplitWitnesses(strings.Join(d.parts, " "))
 		if description == "" {
 			return contracts.Checklist{}, nil, importErr("%s:%d: checklist item has no description", path, d.line)
 		}

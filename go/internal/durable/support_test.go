@@ -238,6 +238,7 @@ func newEnv(t *testing.T, acts *Activities, overrides map[string]any) *testEnv {
 		ActivityNotifyGate:          acts.NotifyGate,
 		ActivityDeclareImpossible:   acts.DeclareImpossible,
 		ActivityUnblockItems:        acts.UnblockItems,
+		ActivityEditChecklist:       acts.EditChecklist,
 		ActivityReadMissionSnapshot: acts.ReadMissionSnapshot,
 		ActivityRecordMissionStatus: acts.RecordMissionStatus,
 		ActivityRunSubAgent:         acts.RunSubAgent,

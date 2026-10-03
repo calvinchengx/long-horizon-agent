@@ -244,6 +244,20 @@ def _paragraphs(lines: list[str]) -> list[list[str]]:
     return out
 
 
+def split_witnesses(text: str) -> tuple[str, list[str]]:
+    """``"Do X (witness: cmd:true, go:TestX)"`` -> ``("Do X", ["cmd:true", "go:TestX"])``.
+
+    The description is the text with every ``(witness: ...)`` / ``(witnesses: ...)`` group
+    removed and whitespace collapsed; the witnesses are the groups' comma-separated entries, in
+    order (the Markdown roadmap syntax, also used by ``lha mission-edit``).
+    """
+    witnesses: list[str] = []
+    for group in _WITNESS_RE.findall(text):
+        witnesses += [w.strip() for w in group.split(",") if w.strip()]
+    description = _SPACES_RE.sub(" ", _WITNESS_STRIP_RE.sub("", text)).strip()
+    return description, witnesses
+
+
 def _build_items(path: Path, drafts: list[_Draft]) -> tuple[Checklist, dict[str, int]]:
     width = max(2, len(str(len(drafts))))
     items: list[ChecklistItem] = []
@@ -256,11 +270,7 @@ def _build_items(path: Path, drafts: list[_Draft]) -> tuple[Checklist, dict[str,
             if current_phase is not None:
                 previous = ids_by_phase[current_phase]
             current_phase = draft.phase
-        text = " ".join(draft.parts)
-        witnesses: list[str] = []
-        for group in _WITNESS_RE.findall(text):
-            witnesses += [w.strip() for w in group.split(",") if w.strip()]
-        description = _SPACES_RE.sub(" ", _WITNESS_STRIP_RE.sub("", text)).strip()
+        description, witnesses = split_witnesses(" ".join(draft.parts))
         if not description:
             raise ChecklistImportError(f"{path}:{draft.line}: checklist item has no description")
         item_id = f"{n:0{width}d}"
