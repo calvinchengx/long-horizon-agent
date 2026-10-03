@@ -157,6 +157,38 @@ async def test_postgres_store_round_trips_everything(pg_dsn: str) -> None:
         await store.close()
 
 
+async def test_postgres_mission_events_append_in_order_and_read_forward(pg_dsn: str) -> None:
+    from lha.persistence.postgres import PostgresStore
+    from lha.persistence.store import MissionEvent
+
+    await _migrate(pg_dsn)
+    store = PostgresStore(pg_dsn)
+    await store.open()
+    try:
+        before = await store.read_mission_events(limit=100_000)
+        cursor = before[-1].id if before else 0
+        await store.append_mission_events(
+            [
+                MissionEvent("pg-e1", "c1", "cycle_started", {"item_id": "01"}),
+                MissionEvent(
+                    "pg-e2", "c1", "tool_call", {"tool": "grep"}, ts="2026-10-03T00:00:00Z"
+                ),
+                MissionEvent("pg-e1", "c1", "tool_call", {"tool": "edit_file", "ok": True}),
+            ]
+        )
+        new = await store.read_mission_events(after_id=cursor)
+        assert [(e.mission_id, e.kind) for e in new] == [
+            ("pg-e1", "cycle_started"),
+            ("pg-e2", "tool_call"),
+            ("pg-e1", "tool_call"),
+        ]
+        assert new[1].ts.startswith("2026-10-03T00:00:00") and new[2].payload["tool"] == "edit_file"
+        one = await store.read_mission_events(mission_id="pg-e1", after_id=cursor, limit=1)
+        assert [e.kind for e in one] == ["cycle_started"]
+    finally:
+        await store.close()
+
+
 async def test_open_store_uses_postgres_and_falls_back_when_unmigrated(
     pg_dsn: str, tmp_path: Path
 ) -> None:

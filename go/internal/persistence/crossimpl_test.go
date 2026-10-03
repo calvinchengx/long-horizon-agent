@@ -75,6 +75,11 @@ async def main(path):
     await s.record_cost("m1", CostEntry(cycle_id="c1", model="x", input_tokens=1, output_tokens=2, usd=0.0, cost_known=False, role="researcher"), call_key="k#1")
     await s.append_event("m1", cycle_id="c1", kind="cycle_outcome", payload={"item_id": "01", "attempts": 2, "verified": True, "tools": ["a", "b"], "summary": "é ok", "n": None})
     await s.append_event("m1", cycle_id="c2", kind="memory_consolidation", payload={"upto_id": 1, "mode": "extractive"})
+    from lha.persistence.store import MissionEvent
+    await s.append_mission_events([
+        MissionEvent("m1", "c1", "tool_call", {"tool": "grep", "ok": False, "error": "bad é", "n": None}, ts="2026-01-03T00:00:00+00:00"),
+        MissionEvent("m2", "", "cycle_started", {"item_id": "07"}, ts="2026-01-03T00:00:01+00:00"),
+    ])
     await s.put_memory("m1", [MemoryRecord(id="fact:1", kind="fact", text="alpha é", metadata={"item_id": "01", "z": "y"})], vectors=[[0.1, 1.0, 1e-07]], embedding_model="hash", embedding_version="1")
     await s.put_memory("m1", [MemoryRecord(id="progress:1", kind="progress", text="beta")])
     await s.invalidate_memory(["progress:1"])
@@ -124,6 +129,10 @@ func goWriteStore(t *testing.T, s Store) {
 	must(s.AppendEvent(ctx, "m1", "c1", "cycle_outcome", map[string]any{"item_id": "01", "attempts": 2, "verified": true,
 		"tools": []string{"a", "b"}, "summary": "é ok", "n": nil}))
 	must(s.AppendEvent(ctx, "m1", "c2", "memory_consolidation", map[string]any{"upto_id": int64(1), "mode": "extractive"}))
+	ok(t, s.AppendMissionEvents(ctx, []MissionEvent{
+		{MissionID: "m1", CycleID: "c1", Kind: "tool_call", Payload: map[string]any{"tool": "grep", "ok": false, "error": "bad é", "n": nil}, TS: "2026-01-03T00:00:00+00:00"},
+		{MissionID: "m2", Kind: "cycle_started", Payload: map[string]any{"item_id": "07"}, TS: "2026-01-03T00:00:01+00:00"},
+	}))
 	ok(t, s.PutMemory(ctx, "m1", []contracts.MemoryRecord{contracts.NewMemoryRecord("fact:1", "fact", "alpha é",
 		map[string]string{"item_id": "01", "z": "y"})}, emb))
 	ok(t, s.PutMemory(ctx, "m1", []contracts.MemoryRecord{contracts.NewMemoryRecord("progress:1", "progress", "beta", nil)}, nil))
@@ -143,6 +152,7 @@ queries = {
     "hitl_gates": "SELECT mission_id, gate_id, kind, question, risk, default_action, options, request, status, deadline, decision, resolved_by, reminders, created_at, resolved_at FROM hitl_gates ORDER BY mission_id, gate_id",
     "cost_ledger": "SELECT mission_id, cycle_id, model, input_tokens, output_tokens, usd, idempotency_key, role, cost_known FROM cost_ledger ORDER BY id",
     "episodic_events": "SELECT id, mission_id, cycle_id, kind, payload, payload_ref, schema_version FROM episodic_events ORDER BY id",
+    "mission_events": "SELECT id, mission_id, cycle_id, ts, kind, payload, schema_version FROM mission_events ORDER BY id",
     "semantic_memory": "SELECT id, mission_id, kind, text, metadata, embedding, embedding_model, embedding_version, valid, source_event_id FROM semantic_memory ORDER BY rowid",
     "skills": "SELECT id, namespace, name, description, code, preconditions, provenance, expires_at, verified, uses FROM skills ORDER BY id",
 }
@@ -170,6 +180,7 @@ async def main(backend, where):
         "costs": [[c.mission_id, c.cycle_id, c.model, c.role, c.input_tokens, c.output_tokens, c.usd, c.cost_known] for c in await s.list_costs("m1")],
         "summary": vars(await s.cost_summary("m1")),
         "events": [[e.id, e.cycle_id, e.kind, e.payload] for e in await s.list_events("m1")],
+        "mission_events": [[e.id, e.mission_id, e.cycle_id, e.kind, e.payload, e.ts] for e in await s.read_mission_events()],
         "memory": [[r.id, r.kind, r.text, r.metadata, r.embedding_model, r.embedding_version, r.valid] for r in await s.list_memory("m1")],
         "vectors": vectors,
         "skills": [[k.id, k.name, k.description, k.code, k.preconditions, k.namespace, k.provenance, k.expires_at, k.verified, k.uses] for k in await s.list_skills("/repo")],
@@ -238,6 +249,11 @@ func goReadStore(t *testing.T, s Store) map[string]any {
 		events = append(events, []any{e.ID, e.CycleID, e.Kind, e.Payload})
 	}
 	out["events"] = events
+	missionEvents := []any{}
+	for _, e := range must(s.ReadMissionEvents(ctx, "", 0, 0)) {
+		missionEvents = append(missionEvents, []any{e.ID, e.MissionID, e.CycleID, e.Kind, e.Payload, e.TS})
+	}
+	out["mission_events"] = missionEvents
 	memory := []any{}
 	for _, r := range must(s.ListMemory(ctx, "m1", 0)) {
 		memory = append(memory, []any{r.ID, r.Kind, r.Text, r.Metadata, r.EmbeddingModel, r.EmbeddingVersion, r.Valid})

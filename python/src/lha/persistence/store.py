@@ -42,6 +42,7 @@ REQUIRED_PG_MIGRATIONS = (
     "0003_cost_unknown_usd_null",
     "0004_memory_skills",
     "0005_hitl_gates",
+    "0006_mission_events",
 )
 
 
@@ -87,6 +88,19 @@ class CostSummary:
 @dataclass
 class EventRow:
     id: int
+    mission_id: str
+    cycle_id: str
+    kind: str
+    payload: dict[str, Any] = field(default_factory=dict)
+    ts: str = ""
+
+
+@dataclass
+class MissionEvent:
+    """One entry of a mission's shared event record (``mission_events``): a trace event persisted
+    so any reader (``lha serve``, ``lha mission-report``, SQL) can follow a run without its logs.
+    See ``spec/state/mission_events.json`` and docs/27-mission-ui.md."""
+
     mission_id: str
     cycle_id: str
     kind: str
@@ -253,6 +267,18 @@ class MissionStore(Protocol):
         limit: int = 200,
     ) -> list[EventRow]:
         """The newest ``limit`` matching events with ``id > after_id``, oldest first."""
+        ...
+
+    async def append_mission_events(self, events: list[MissionEvent]) -> None:
+        """Append to the shared event record, in order, in one transaction. An event without a
+        ``ts`` is stamped with the time of the write."""
+        ...
+
+    async def read_mission_events(
+        self, *, mission_id: str | None = None, after_id: int = 0, limit: int = 500
+    ) -> list[EventRow]:
+        """The OLDEST ``limit`` events with ``id > after_id`` (one mission, or all), oldest first:
+        a reader pages forward from the last id it saw."""
         ...
 
     # --- semantic memory ----------------------------------------------------------------

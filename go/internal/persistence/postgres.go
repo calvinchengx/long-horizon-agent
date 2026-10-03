@@ -470,6 +470,64 @@ func (s *PostgresStore) ListEvents(ctx context.Context, missionID string, q Even
 	return out, rows.Err()
 }
 
+// AppendMissionEvents appends to the shared event record, in order, in one statement.
+func (s *PostgresStore) AppendMissionEvents(ctx context.Context, events []MissionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	values := make([]string, len(events))
+	params := make([]any, 0, 5*len(events))
+	for i, e := range events {
+		ts := e.TS
+		if ts == "" {
+			ts = now
+		}
+		n := 5 * i
+		values[i] = fmt.Sprintf("($%d, $%d, $%d::timestamptz, $%d, $%d::text::jsonb)", n+1, n+2, n+3, n+4, n+5)
+		params = append(params, e.MissionID, e.CycleID, ts, e.Kind, PyDumps(payloadOrEmpty(e.Payload)))
+	}
+	_, err := s.Pool.Exec(ctx,
+		"INSERT INTO mission_events (mission_id, cycle_id, ts, kind, payload) VALUES "+strings.Join(values, ", "),
+		params...)
+	return err
+}
+
+// ReadMissionEvents is the oldest limit events with id > afterID (one mission, or all), oldest first.
+func (s *PostgresStore) ReadMissionEvents(ctx context.Context, missionID string, afterID int64, limit int) ([]EventRow, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	query := "SELECT id, mission_id, cycle_id, kind, payload::text, ts FROM mission_events WHERE id > $1"
+	params := []any{afterID}
+	if missionID != "" {
+		params = append(params, missionID)
+		query += fmt.Sprintf(" AND mission_id = $%d", len(params))
+	}
+	params = append(params, limit)
+	query += fmt.Sprintf(" ORDER BY id LIMIT $%d", len(params))
+	rows, err := s.Pool.Query(ctx, query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []EventRow{}
+	for rows.Next() {
+		var r EventRow
+		var payload string
+		var ts *time.Time
+		if err := rows.Scan(&r.ID, &r.MissionID, &r.CycleID, &r.Kind, &payload, &ts); err != nil {
+			return nil, err
+		}
+		if r.Payload, err = decodeObject(payload); err != nil {
+			return nil, err
+		}
+		r.TS = pyTS(ts)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // --- semantic memory ---------------------------------------------------------------------------
 
 // PutMemory upserts rows WITHOUT vectors (vectors go through memory.PgSemanticIndex).

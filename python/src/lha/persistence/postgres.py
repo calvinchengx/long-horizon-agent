@@ -32,6 +32,7 @@ from lha.persistence.store import (
     EventRow,
     GateEvent,
     GateRow,
+    MissionEvent,
     MissionRow,
     StoreUnavailableError,
     terminal_guard_sql,
@@ -328,6 +329,48 @@ class PostgresStore:
             (mission_id, cycle_id, kind, json.dumps(payload, sort_keys=True, default=str)),
         )
         return int(rows[0][0])
+
+    async def append_mission_events(self, events: list[MissionEvent]) -> None:
+        if not events:
+            return
+        now = datetime.now(UTC).isoformat()
+        values = ", ".join("(%s, %s, %s::timestamptz, %s, %s::jsonb)" for _ in events)
+        params: list[Any] = []
+        for e in events:
+            params += [
+                e.mission_id,
+                e.cycle_id,
+                e.ts or now,
+                e.kind,
+                json.dumps(e.payload, sort_keys=True, default=str),
+            ]
+        await self._execute(
+            f"INSERT INTO mission_events (mission_id, cycle_id, ts, kind, payload) VALUES {values}",
+            params,
+        )
+
+    async def read_mission_events(
+        self, *, mission_id: str | None = None, after_id: int = 0, limit: int = 500
+    ) -> list[EventRow]:
+        sql = "SELECT id, mission_id, cycle_id, kind, payload, ts FROM mission_events WHERE id > %s"
+        params: list[Any] = [after_id]
+        if mission_id is not None:
+            sql += " AND mission_id = %s"
+            params.append(mission_id)
+        sql += " ORDER BY id LIMIT %s"
+        params.append(limit)
+        rows = await self._fetchall(sql, params)
+        return [
+            EventRow(
+                id=int(r[0]),
+                mission_id=str(r[1]),
+                cycle_id=str(r[2]),
+                kind=str(r[3]),
+                payload=r[4] if isinstance(r[4], dict) else json.loads(r[4] or "{}"),
+                ts=_ts(r[5]),
+            )
+            for r in rows
+        ]
 
     async def list_events(
         self,

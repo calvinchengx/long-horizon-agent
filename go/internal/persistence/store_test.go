@@ -82,10 +82,10 @@ func TestSQLiteStoreIsWALAndSchemaIsVersioned(t *testing.T) {
 		versions = append(versions, v)
 	}
 	rows.Close()
-	if !reflect.DeepEqual(versions, []string{"sqlite_0001_init", "sqlite_0002_hitl_gates"}) {
+	if !reflect.DeepEqual(versions, []string{"sqlite_0001_init", "sqlite_0002_hitl_gates", "sqlite_0003_mission_events"}) {
 		t.Fatal(versions)
 	}
-	for _, table := range []string{"missions", "hitl_gates", "cost_ledger", "episodic_events", "semantic_memory", "skills"} {
+	for _, table := range []string{"missions", "hitl_gates", "cost_ledger", "episodic_events", "mission_events", "semantic_memory", "skills"} {
 		var name string
 		ok(t, db.QueryRow("SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", table).Scan(&name))
 	}
@@ -708,5 +708,38 @@ func TestDiscoverMigrationsOrdersByNameAndVersionsAreStems(t *testing.T) {
 	}
 	if !reflect.DeepEqual(versions, RequiredPGMigrations) {
 		t.Fatal(versions)
+	}
+}
+
+func TestMissionEventsAreAppendedInOrderAndReadForward(t *testing.T) {
+	ctx := context.Background()
+	store := openTestStore(t)
+	ok(t, store.AppendMissionEvents(ctx, []MissionEvent{
+		{MissionID: "m1", CycleID: "c1", Kind: "cycle_started", Payload: map[string]any{"item_id": "01"}},
+		{MissionID: "m2", CycleID: "c1", Kind: "cycle_started", Payload: map[string]any{"item_id": "07"}, TS: "2026-10-03T00:00:00Z"},
+		{MissionID: "m1", CycleID: "c1", Kind: "tool_call", Payload: map[string]any{"tool": "grep", "ok": true}},
+	}))
+	ok(t, store.AppendMissionEvents(ctx, nil)) // nothing to write is not an error
+	every := must(store.ReadMissionEvents(ctx, "", 0, 0))
+	if len(every) != 3 || every[0].Kind != "cycle_started" || every[1].MissionID != "m2" || every[2].Kind != "tool_call" {
+		t.Fatalf("%+v", every)
+	}
+	if !(every[0].ID < every[1].ID && every[1].ID < every[2].ID) || every[0].TS == "" || every[1].TS != "2026-10-03T00:00:00Z" {
+		t.Fatalf("%+v", every)
+	}
+	if every[2].Payload["tool"] != "grep" || every[2].Payload["ok"] != true {
+		t.Fatal(every[2].Payload)
+	}
+	if m1 := must(store.ReadMissionEvents(ctx, "m1", 0, 0)); len(m1) != 2 || m1[1].Kind != "tool_call" {
+		t.Fatalf("%+v", m1)
+	}
+	// Paging forward: the oldest limit after the last id seen, never the newest.
+	first := must(store.ReadMissionEvents(ctx, "", 0, 1))
+	rest := must(store.ReadMissionEvents(ctx, "", first[0].ID, 5))
+	if len(first) != 1 || len(rest) != 2 || first[0].ID != every[0].ID || rest[1].ID != every[2].ID {
+		t.Fatalf("%+v %+v", first, rest)
+	}
+	if after := must(store.ReadMissionEvents(ctx, "", every[2].ID, 0)); len(after) != 0 {
+		t.Fatal(after)
 	}
 }

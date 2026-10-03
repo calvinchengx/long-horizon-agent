@@ -134,6 +134,19 @@ var SQLiteMigrations = [][2]string{
         );
         CREATE INDEX IF NOT EXISTS hitl_gates_opened ON hitl_gates (created_at);
         `},
+	// The Postgres mission_events table (0006): the shared event record a reader follows.
+	{"sqlite_0003_mission_events", `
+        CREATE TABLE IF NOT EXISTS mission_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id      TEXT NOT NULL,
+            cycle_id        TEXT NOT NULL DEFAULT '',
+            ts              TEXT NOT NULL,
+            kind            TEXT NOT NULL,
+            payload         TEXT NOT NULL DEFAULT '{}',
+            schema_version  INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS mission_events_mission ON mission_events (mission_id, id);
+        `},
 }
 
 // Per gate event: the ON CONFLICT update (excluded = the incoming event's row). "opened" reopens
@@ -658,6 +671,69 @@ func (s *SQLiteStore) ListEvents(ctx context.Context, missionID string, q EventQ
 		}
 	}
 	query = "SELECT id, mission_id, cycle_id, kind, payload, ts FROM (" + query + " ORDER BY id DESC LIMIT ?) ORDER BY id"
+	params = append(params, limit)
+	out := []EventRow{}
+	err := s.run(ctx, func(c *sql.Conn) error {
+		rows, err := c.QueryContext(ctx, query, params...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r EventRow
+			var payload sql.NullString
+			if err := rows.Scan(&r.ID, &r.MissionID, &r.CycleID, &r.Kind, &payload, &r.TS); err != nil {
+				return err
+			}
+			if r.Payload, err = decodeObject(payload.String); err != nil {
+				return err
+			}
+			out = append(out, r)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// AppendMissionEvents appends to the shared event record, in order, in one transaction.
+func (s *SQLiteStore) AppendMissionEvents(ctx context.Context, events []MissionEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	now := NowISO()
+	return s.run(ctx, func(c *sql.Conn) error {
+		tx, err := c.BeginTx(ctx, nil)
+		if err != nil {
+			return err
+		}
+		for _, e := range events {
+			ts := e.TS
+			if ts == "" {
+				ts = now
+			}
+			if _, err := tx.ExecContext(ctx,
+				"INSERT INTO mission_events (mission_id, cycle_id, ts, kind, payload) VALUES (?, ?, ?, ?, ?)",
+				e.MissionID, e.CycleID, ts, e.Kind, PyDumps(payloadOrEmpty(e.Payload))); err != nil {
+				_ = tx.Rollback()
+				return err
+			}
+		}
+		return tx.Commit()
+	})
+}
+
+// ReadMissionEvents is the oldest limit events with id > afterID (one mission, or all), oldest first.
+func (s *SQLiteStore) ReadMissionEvents(ctx context.Context, missionID string, afterID int64, limit int) ([]EventRow, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	query := "SELECT id, mission_id, cycle_id, kind, payload, ts FROM mission_events WHERE id > ?"
+	params := []any{afterID}
+	if missionID != "" {
+		query += " AND mission_id = ?"
+		params = append(params, missionID)
+	}
+	query += " ORDER BY id LIMIT ?"
 	params = append(params, limit)
 	out := []EventRow{}
 	err := s.run(ctx, func(c *sql.Conn) error {

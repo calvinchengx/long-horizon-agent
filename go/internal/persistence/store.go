@@ -63,6 +63,7 @@ var RequiredPGMigrations = []string{
 	"0003_cost_unknown_usd_null",
 	"0004_memory_skills",
 	"0005_hitl_gates",
+	"0006_mission_events",
 }
 
 // StoreUnavailableError is the configured store being unusable (unreachable, unmigrated).
@@ -106,6 +107,17 @@ type CostSummary struct {
 }
 
 // EventRow is one episodic_events row. Payload numbers are json.Number.
+// MissionEvent is one entry of a mission's shared event record (mission_events): a trace event
+// persisted so any reader (lha serve, lha mission-report, SQL) can follow a run without its logs
+// (python: lha.persistence.store.MissionEvent; spec/state/mission_events.json).
+type MissionEvent struct {
+	MissionID string
+	CycleID   string
+	Kind      string
+	Payload   map[string]any
+	TS        string // "" = stamped at the write
+}
+
 type EventRow struct {
 	ID        int64
 	MissionID string
@@ -306,6 +318,11 @@ type Store interface {
 
 	AppendEvent(ctx context.Context, missionID, cycleID, kind string, payload map[string]any) (int64, error)
 	ListEvents(ctx context.Context, missionID string, q EventQuery) ([]EventRow, error)
+	// AppendMissionEvents appends to the shared event record, in order, in one transaction.
+	AppendMissionEvents(ctx context.Context, events []MissionEvent) error
+	// ReadMissionEvents is the OLDEST limit (default 500) events with id > afterID, of one mission
+	// ("" = all), oldest first: a reader pages forward from the last id it saw.
+	ReadMissionEvents(ctx context.Context, missionID string, afterID int64, limit int) ([]EventRow, error)
 
 	// PutMemory upserts records by id (with their vectors when emb is non-nil).
 	PutMemory(ctx context.Context, missionID string, records []contracts.MemoryRecord, emb *Embedding) error

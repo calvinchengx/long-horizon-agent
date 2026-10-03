@@ -21,6 +21,7 @@ from lha.persistence.sqlite import SqliteStore
 from lha.persistence.store import (
     BACKEND_SQLITE,
     GateEvent,
+    MissionEvent,
     MissionStore,
     StoreUnavailableError,
     default_sqlite_path,
@@ -60,12 +61,17 @@ async def test_sqlite_store_is_wal_and_schema_is_versioned(store: SqliteStore) -
     versions = [r[0] for r in conn.execute("SELECT version FROM schema_migrations")]
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     conn.close()
-    assert versions == ["sqlite_0001_init", "sqlite_0002_hitl_gates"]
+    assert versions == [
+        "sqlite_0001_init",
+        "sqlite_0002_hitl_gates",
+        "sqlite_0003_mission_events",
+    ]
     assert {
         "missions",
         "hitl_gates",
         "cost_ledger",
         "episodic_events",
+        "mission_events",
         "semantic_memory",
         "skills",
     } <= tables
@@ -237,6 +243,35 @@ async def test_events_are_ordered_filterable_and_bounded(store: SqliteStore) -> 
 
 
 # --- semantic memory --------------------------------------------------------------------------
+async def test_mission_events_are_appended_in_order_and_read_forward(store: SqliteStore) -> None:
+    await store.append_mission_events(
+        [
+            MissionEvent("m1", "c1", "cycle_started", {"item_id": "01"}),
+            MissionEvent("m2", "c1", "cycle_started", {"item_id": "07"}, ts="2026-10-03T00:00:00Z"),
+            MissionEvent("m1", "c1", "tool_call", {"tool": "grep", "ok": True}),
+        ]
+    )
+    await store.append_mission_events([])  # nothing to write is not an error
+    every = await store.read_mission_events()
+    assert [(e.mission_id, e.kind) for e in every] == [
+        ("m1", "cycle_started"),
+        ("m2", "cycle_started"),
+        ("m1", "tool_call"),
+    ]
+    assert every[0].id < every[1].id < every[2].id and every[0].ts  # stamped at the write
+    assert every[1].ts == "2026-10-03T00:00:00Z" and every[2].payload == {
+        "tool": "grep",
+        "ok": True,
+    }
+    m1 = await store.read_mission_events(mission_id="m1")
+    assert [e.kind for e in m1] == ["cycle_started", "tool_call"]
+    # Paging forward: the oldest ``limit`` after the last id seen, never the newest.
+    first = await store.read_mission_events(limit=1)
+    rest = await store.read_mission_events(after_id=first[-1].id, limit=5)
+    assert [e.id for e in first + rest] == [e.id for e in every]
+    assert await store.read_mission_events(after_id=every[-1].id) == []
+
+
 async def test_memory_upsert_vectors_gating_and_soft_invalidation(store: SqliteStore) -> None:
     a = MemoryRecord(id="a", kind="fact", text="alpha", metadata={"item_id": "01"})
     b = MemoryRecord(id="b", kind="progress", text="beta")

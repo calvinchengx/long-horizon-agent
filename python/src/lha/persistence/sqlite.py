@@ -36,6 +36,7 @@ from lha.persistence.store import (
     EventRow,
     GateEvent,
     GateRow,
+    MissionEvent,
     MissionRow,
     terminal_guard_sql,
     validate_gate_event,
@@ -147,6 +148,22 @@ SQLITE_MIGRATIONS: tuple[tuple[str, str], ...] = (
             PRIMARY KEY (mission_id, gate_id)
         );
         CREATE INDEX IF NOT EXISTS hitl_gates_opened ON hitl_gates (created_at);
+        """,
+    ),
+    (
+        # The Postgres ``mission_events`` table (0006): the shared event record a reader follows.
+        "sqlite_0003_mission_events",
+        """
+        CREATE TABLE IF NOT EXISTS mission_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id      TEXT NOT NULL,
+            cycle_id        TEXT NOT NULL DEFAULT '',
+            ts              TEXT NOT NULL,
+            kind            TEXT NOT NULL,
+            payload         TEXT NOT NULL DEFAULT '{}',
+            schema_version  INTEGER NOT NULL DEFAULT 1
+        );
+        CREATE INDEX IF NOT EXISTS mission_events_mission ON mission_events (mission_id, id);
         """,
     ),
 )
@@ -515,6 +532,61 @@ class SqliteStore:
             return int(cursor.lastrowid or 0)
 
         return await self._run(_append)
+
+    async def append_mission_events(self, events: list[MissionEvent]) -> None:
+        if not events:
+            return
+        now = _now()
+        rows = [
+            (
+                e.mission_id,
+                e.cycle_id,
+                e.ts or now,
+                e.kind,
+                json.dumps(e.payload, sort_keys=True, default=str),
+            )
+            for e in events
+        ]
+
+        def _append(conn: sqlite3.Connection) -> None:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.executemany(
+                    "INSERT INTO mission_events (mission_id, cycle_id, ts, kind, payload) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    rows,
+                )
+                conn.execute("COMMIT")
+            except BaseException:
+                conn.execute("ROLLBACK")
+                raise
+
+        await self._run(_append)
+
+    async def read_mission_events(
+        self, *, mission_id: str | None = None, after_id: int = 0, limit: int = 500
+    ) -> list[EventRow]:
+        def _read(conn: sqlite3.Connection) -> list[EventRow]:
+            sql = "SELECT * FROM mission_events WHERE id > ?"
+            params: list[Any] = [after_id]
+            if mission_id is not None:
+                sql += " AND mission_id = ?"
+                params.append(mission_id)
+            sql += " ORDER BY id LIMIT ?"
+            params.append(limit)
+            return [
+                EventRow(
+                    id=int(r["id"]),
+                    mission_id=r["mission_id"],
+                    cycle_id=r["cycle_id"],
+                    kind=r["kind"],
+                    payload=json.loads(r["payload"] or "{}"),
+                    ts=r["ts"],
+                )
+                for r in conn.execute(sql, params).fetchall()
+            ]
+
+        return await self._run(_read)
 
     async def list_events(
         self,

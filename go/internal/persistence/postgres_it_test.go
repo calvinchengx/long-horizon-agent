@@ -242,3 +242,25 @@ func TestOpenStoreUsesPostgresAndFallsBackWhenUnmigrated(t *testing.T) {
 		t.Fatal(store.Backend(), store.DegradedReason())
 	}
 }
+
+func TestPGMissionEventsAppendInOrderAndReadForward(t *testing.T) {
+	dsn := pgtest.FreshDB(t)
+	migrate(t, dsn)
+	store := openPG(t, dsn)
+	ctx := context.Background()
+	if err := store.AppendMissionEvents(ctx, []persistence.MissionEvent{
+		{MissionID: "e1", CycleID: "c1", Kind: "cycle_started", Payload: map[string]any{"item_id": "01"}},
+		{MissionID: "e2", CycleID: "c1", Kind: "tool_call", Payload: map[string]any{"tool": "grep"}, TS: "2026-10-03T00:00:00Z"},
+		{MissionID: "e1", CycleID: "c1", Kind: "tool_call", Payload: map[string]any{"tool": "edit_file", "ok": true}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	every, err := store.ReadMissionEvents(ctx, "", 0, 0)
+	if err != nil || len(every) != 3 || every[1].MissionID != "e2" || !strings.HasPrefix(every[1].TS, "2026-10-03T00:00:00") || every[2].Payload["tool"] != "edit_file" {
+		t.Fatalf("%v %+v", err, every)
+	}
+	one, err := store.ReadMissionEvents(ctx, "e1", 0, 1)
+	if err != nil || len(one) != 1 || one[0].Kind != "cycle_started" {
+		t.Fatalf("%v %+v", err, one)
+	}
+}
