@@ -353,10 +353,11 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 			plannerSpend = append(plannerSpend, e)
 		}
 	}
+	missionID := agent.NewID("mission")
 	anchor := state.NewGitMissionAnchor(r.workdir)
-	if _, err := anchor.InitializeSpecWithOwnership(ctx, contracts.MissionSpec{
+	if _, err := anchor.InitializeMission(ctx, contracts.MissionSpec{
 		Title: mTitle, Description: description, References: references,
-	}, planned, ownershipJSON); err != nil {
+	}, planned, ownershipJSON, missionID); err != nil {
 		return "", err
 	}
 	cl, err := dialTemporal(ctx, settings)
@@ -364,7 +365,6 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 		return "", err
 	}
 	defer cl.Close()
-	missionID := agent.NewID("mission")
 	workflowID := durable.MissionWorkflowID(missionID)
 	// The mission row + the Planner's spend, written BEFORE the workflow starts so a status the
 	// workflow records right away (e.g. SLEEPING for a scheduled start) is never overwritten.

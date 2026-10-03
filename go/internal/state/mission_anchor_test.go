@@ -522,3 +522,31 @@ func TestAnchorErrorsPropagate(t *testing.T) {
 		t.Fatal("init into a file succeeded")
 	}
 }
+
+// An anchor initialized with a mission id records it as a mission event in the initial commit
+// (python: test_an_anchor_initialized_with_a_mission_id_names_it).
+func TestInitializeMissionRecordsTheMissionID(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	anchor := NewGitMissionAnchor(dir)
+	if _, err := anchor.InitializeMission(ctx, contracts.MissionSpec{Title: "t", Description: "d"}, oneItem(), nil, "mission_abc"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := anchor.ReadEvents(ctx)
+	if err != nil || len(events) != 1 || events[0].Kind != MissionEvent {
+		t.Fatalf("%+v %v", events, err)
+	}
+	if id, _ := events[0].Payload.String("mission_id"); id != "mission_abc" {
+		t.Fatalf("mission id %q", id)
+	}
+	if got := readText(t, filepath.Join(dir, AnchorDir, EventsFile)); got != `{"kind":"mission","cycle_id":"","payload":{"mission_id":"mission_abc"},"payload_ref":null}`+"\n" {
+		t.Fatalf("event line %q", got)
+	}
+	plain := NewGitMissionAnchor(filepath.Join(dir, "plain"))
+	if _, err := plain.Initialize(ctx, "t", "d", oneItem()); err != nil {
+		t.Fatal(err)
+	}
+	if events, _ := plain.ReadEvents(ctx); len(events) != 0 {
+		t.Fatalf("an anchor without an id has events %+v", events)
+	}
+}

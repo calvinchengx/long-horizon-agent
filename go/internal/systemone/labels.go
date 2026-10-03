@@ -38,6 +38,7 @@ var Sources = []string{SourceGate, SourceToolApproval, SourceVerifier, SourceRev
 // Anchor event kinds the rows come from.
 const (
 	RunEvent          = "orchestrate"
+	MissionEvent      = "mission" // the anchor's initialization for lha mission, run-local, mission-start
 	CycleEvent        = "cycle"
 	ToolApprovalEvent = "tool_approval"
 	ReviewEvent       = "review"
@@ -98,7 +99,7 @@ func ToJSONL(rows []LabelRow) string {
 // MissionIDOf is the mission id the anchor's latest orchestrate event names ("" when none does).
 func MissionIDOf(events []contracts.EventRecord) string {
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind == RunEvent {
+		if events[i].Kind == RunEvent || events[i].Kind == MissionEvent {
 			return strOr(events[i].Payload.Value("mission_id"), "")
 		}
 	}

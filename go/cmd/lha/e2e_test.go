@@ -192,6 +192,7 @@ func normalizeNDJSON(t *testing.T, body string) string {
 			t.Fatalf("bad ndjson line %q", line)
 		}
 		line = durationRE.ReplaceAllString(line, `"duration_s":0.0`)
+		line = missionIDRE.ReplaceAllString(line, "MISSION")
 		lines = append(lines, shaRE.ReplaceAllString(line, "SHA"))
 	}
 	return strings.Join(lines, "\n")

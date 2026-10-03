@@ -360,9 +360,9 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 	if binder, ok := toolbox.(GateStoreBinder); ok {
 		binder.BindGateStore(svc.Store) // a terminal approver writes hitl_gates rows
 	}
-	if _, err := anchor.InitializeSpec(ctx, contracts.MissionSpec{
+	if _, err := anchor.InitializeMission(ctx, contracts.MissionSpec{
 		Title: o.Title, Description: o.Description, References: o.References,
-	}, o.Checklist); err != nil {
+	}, o.Checklist, nil, missionID); err != nil {
 		return MissionSummary{}, err
 	}
 	if o.AllowEgress != nil && *o.AllowEgress && len(settings.WebHosts()) == 0 {

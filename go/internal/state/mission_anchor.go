@@ -123,6 +123,17 @@ func (a *GitMissionAnchor) InitializeSpec(ctx context.Context, spec contracts.Mi
 // initialize(..., ownership=)): ownershipJSON is written as .lha/ownership.json; nil means the
 // mission has no map, and a stale ownership.json from an earlier initialization is removed.
 func (a *GitMissionAnchor) InitializeSpecWithOwnership(ctx context.Context, spec contracts.MissionSpec, items contracts.Checklist, ownershipJSON []byte) (string, error) {
+	return a.InitializeMission(ctx, spec, items, ownershipJSON, "")
+}
+
+// MissionEvent is the event an initialization with a mission id writes: who this anchor belongs
+// to in the store (python: MISSION_EVENT).
+const MissionEvent = "mission"
+
+// InitializeMission is InitializeSpecWithOwnership plus the mission id (python:
+// initialize(..., mission_id=)): recorded as a mission event in the initial commit, so the
+// store's rows for this anchor can be found later (lha mission-report, lha labels export).
+func (a *GitMissionAnchor) InitializeMission(ctx context.Context, spec contracts.MissionSpec, items contracts.Checklist, ownershipJSON []byte, missionID string) (string, error) {
 	if errs := items.DependencyErrors(); len(errs) > 0 {
 		return "", errors.New("invalid checklist: " + strings.Join(errs, "; "))
 	}
@@ -158,11 +169,20 @@ func (a *GitMissionAnchor) InitializeSpecWithOwnership(ctx context.Context, spec
 	if err := a.writeFile(ProgressFile, progress); err != nil {
 		return "", err
 	}
-	// Create the append-only logs (empty).
-	for _, name := range []string{DecisionsFile, EventsFile} {
-		if err := a.writeFile(name, ""); err != nil {
+	// Create the append-only logs (empty, but for the mission event when the id is known).
+	started := ""
+	if missionID != "" {
+		line, err := pydanticJSON(contracts.EventRecord{Kind: MissionEvent, Payload: contracts.Payload("mission_id", missionID)}, false)
+		if err != nil {
 			return "", err
 		}
+		started = string(line) + "\n"
+	}
+	if err := a.writeFile(DecisionsFile, ""); err != nil {
+		return "", err
+	}
+	if err := a.writeFile(EventsFile, started); err != nil {
+		return "", err
 	}
 	a.pendingEvents = nil
 	a.pendingDecisions = nil

@@ -284,3 +284,24 @@ def test_cli_exports_the_anchor_and_the_missions_gates(
     # Neither an anchor nor a mission id: a clean error.
     result = runner.invoke(cli.app, ["labels", "export", "--workdir", str(tmp_path / "none")])
     assert result.exit_code == 2 and "no mission anchor" in result.output
+
+
+def test_an_anchor_initialized_with_a_mission_id_names_it(tmp_path: Path) -> None:
+    """`lha mission`, `run-local` and `mission-start` write no `orchestrate` event; the anchor's
+    initial commit records the mission id instead, so `mission-report` and `labels export` find
+    the store's rows without being told the id."""
+    anchor = GitMissionAnchor(tmp_path)
+    items = Checklist(items=[ChecklistItem(id="01", description="x")])
+    asyncio.run(
+        anchor.initialize(title="t", description="d", items=items, mission_id="mission_abc")
+    )
+    events = asyncio.run(anchor.read_events())
+    assert [(e.kind, e.payload) for e in events] == [("mission", {"mission_id": "mission_abc"})]
+    assert mission_id_of(events) == "mission_abc"
+    # A later orchestrate run on the same anchor names its own id; the latest wins.
+    events.append(EventRecord(kind="orchestrate", payload={"mission_id": "mission_def", "run": 1}))
+    assert mission_id_of(events) == "mission_def"
+    # Without an id nothing is written (the events log starts empty, as before).
+    plain = GitMissionAnchor(tmp_path / "plain")
+    asyncio.run(plain.initialize(title="t", description="d", items=items))
+    assert asyncio.run(plain.read_events()) == []

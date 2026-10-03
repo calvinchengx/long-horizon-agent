@@ -488,9 +488,13 @@ func TestMissionReport(t *testing.T) {
 // lha eval check / run on the committed gold sets, with Python's output (python: test_gold.py).
 func TestEvalCheckAndRun(t *testing.T) {
 	dir := cleanEnv(t)
-	sets, err := filepath.Glob(filepath.Join(spec.Dir(), "..", "eval", "gold", "*.jsonl"))
-	if err != nil || len(sets) == 0 {
-		t.Fatalf("no gold sets: %v", err)
+	sets := []string{filepath.Join(spec.Dir(), "..", "eval", "gold", "review-and-verifier-2026-10-02.jsonl")}
+	all, err := filepath.Glob(filepath.Join(spec.Dir(), "..", "eval", "gold", "*.jsonl"))
+	if err != nil || len(all) < 2 {
+		t.Fatalf("gold sets: %v %v", all, err)
+	}
+	if every := runCLI(t, nil, append([]string{"eval", "check"}, all...)...); every.code != 0 || !strings.Contains(every.stdout, "100 gold rows (0 gate, 0 tool_approval, 70 verifier, 30 review) in 2 files") {
+		t.Fatalf("%+v", every)
 	}
 	checked := runCLI(t, nil, append([]string{"eval", "check"}, sets...)...)
 	if checked.code != 0 || !strings.HasPrefix(checked.stdout, "73 gold rows (0 gate, 0 tool_approval, 52 verifier, 21 review) in 1 file") {
