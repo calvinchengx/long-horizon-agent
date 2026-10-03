@@ -409,7 +409,7 @@ asyncio.run(main())
 		strings.Join(got.Decisions[0].Affected, ",") != "hello.txt" {
 		t.Fatalf("decisions: %+v", got.Decisions)
 	}
-	if strings.Join(got.EventKinds, ",") != "cycle,cycle" {
+	if strings.Join(got.EventKinds, ",") != "mission,cycle,cycle" {
 		t.Fatalf("events: %v", got.EventKinds)
 	}
 }

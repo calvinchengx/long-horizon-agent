@@ -72,7 +72,7 @@ def test_the_fixed_screen_catches_every_conftest_injection() -> None:
 
 
 def test_eval_check_and_run(tmp_path: Path) -> None:
-    paths = [str(p) for p in SETS]
+    paths = [str(GOLD / "review-and-verifier-2026-10-02.jsonl")]
     checked = runner.invoke(cli.app, ["eval", "check", *paths])
     assert checked.exit_code == 0, checked.output
     assert checked.output.startswith(
@@ -104,3 +104,13 @@ def test_eval_check_and_run(tmp_path: Path) -> None:
     refused = runner.invoke(cli.app, ["eval", "check", str(dup)])
     assert refused.exit_code == 2 and "duplicate of" in refused.output
     assert runner.invoke(cli.app, ["eval", "check", str(tmp_path / "missing.jsonl")]).exit_code == 2
+
+
+def test_the_honest_set_has_no_disagreements() -> None:
+    rows = _rows(GOLD / "org-vs-single-2026-10-03.jsonl")
+    assert count_by_source(rows) == "27 gold rows (0 gate, 0 tool_approval, 18 verifier, 9 review)"
+    for judge in (judge_recorded, judge_screen):
+        for card in score(rows, judge):
+            assert card.agree == card.judged and card.fp == 0, (card.source, card.disagreements)
+    # Both sets together stay one valid set: no judgment appears in both.
+    assert check_gold([row for path in SETS for row in _rows(path)]) == []

@@ -208,7 +208,11 @@ async def _run_mission_local(
             bind_gate_store(gate, services.store)  # a terminal approver writes hitl_gates rows
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(
-            title=title, description=description, items=checklist, references=references
+            title=title,
+            description=description,
+            items=checklist,
+            references=references,
+            mission_id=mission_id,
         )
         if allow_egress and not settings.web_hosts():
             raise ValueError(

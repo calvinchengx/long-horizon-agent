@@ -151,7 +151,10 @@ event and appends a `ticket` event (the ticket's id, item, role, write set, bran
 status history, ownership violations and leases). The multi-agent organization adds `research`,
 `review`, `review_screen`, `lease`, `orchestrate`, `blackboard` and `reflection` events
 ([wire contract](19-wire-contract.md#mission-anchor-lha)). A human-approved retry after a deadlock appends an
-`unblock` event. A cycle that first used a rotated secret appends a `secrets_rotated` event
+`unblock` event. An anchor initialized by `lha mission`, `lha run-local` or `lha mission-start`
+starts its log with a `mission` event (`mission_id`), in the initial commit, so
+`lha mission-report` and `lha labels export` find the mission's store rows without being given
+the id (`lha orchestrate` names its id in its `orchestrate` event). A cycle that first used a rotated secret appends a `secrets_rotated` event
 (`fields`, and the new 12-hex-digit `fingerprints`, never a value;
 [09-safety-model.md](09-safety-model.md#6-secrets-in-child-processes-and-traces)). An operator's checklist edit (`lha mission-edit`) is its own anchor-only commit,
 `lha: checklist edited by <who>`, with a `checklist_edit` event (`by`, the `edits` batch and its
