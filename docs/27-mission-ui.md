@@ -110,10 +110,13 @@ with its error tail, `llm_turn`, `turns_exhausted`, `checkpoint`, `claude_code_s
 Work items:
 
 1. Spec the table, the kinds and their payload fields (`spec/state/mission_events.json`), add the
-   migration (Postgres and SQLite), and a store method to append and to read `since` an id.
-2. Persist trace events on every run path, including the durable cycle activity, which today has
-   no recorder. Writes are best effort: a store outage never fails a cycle.
-3. Record `verify` events.
+   migration (Postgres and SQLite), and a store method to append and to read `since` an id. The
+   migration and store methods are done; the kinds' spec is next.
+2. Persist trace events on every run path, including the durable cycle activity, which had no
+   recorder, and the organization's sub-agents (their `tool_call` events carry `role`). Writes are
+   best effort: a store outage never fails a cycle. Done.
+3. Record `verify` events: what asked for the run (`done`, the session's `verify` tool, or the end
+   of the cycle), the verdict and each check. Done.
 4. Stream a `claude_code` session (`stream-json`): `session_progress` events while it runs, and a
    killed session charged the last spend it reported instead of its whole cap.
 

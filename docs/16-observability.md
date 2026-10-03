@@ -44,6 +44,7 @@ Event kinds emitted today:
 | `tool_call` | `AgentLoop`; sub-agents (researchers, implementers and the reviewer) add `role` | `tool`, `ok`; a failed call adds `error`: the last 500 characters of its error and output (for `run_command`, the stderr tail), redacted like every event |
 | `turns_exhausted` | `AgentLoop` | `max_turns`, `tool_calls`: the cycle used every turn in `LHA_MAX_TURNS_PER_CYCLE` without signalling done (the verifier still runs) |
 | `invalid_reply` | `AgentLoop` | `reason` |
+| `verify` | `AgentLoop` | `trigger` (`done`: the lead signalled done; `tool`: a `claude_code` session called `verify`; `cycle`: the cycle ended with edits not yet verified), `verdict`, `checks` (each `name`, `passed`, `exit_code`, `gating`, `timed_out`, `duration_s`). The harness-integrity check is added afterwards and shows in the `checkpoint` verdict |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict`, `peak_rss_mb` (the process's peak resident memory, so growth over a long mission is visible) |
 | `claude_code_session` | `AgentLoop` (the `claude_code` lead engine) | `turns`, `tool_calls`, `session_id`, `stopped` |
 | `code_map` | `AgentLoop` (`LHA_CODE_MAP=ripwire`) | `item_id`, `mode` (`trace` or `task`), `ok`, `exit_code`, `timed_out`, `bytes`, `duration_s`, `fell_back`, `error` ([24-large-missions.md](24-large-missions.md#optional-a-code-map-each-cycle)) |

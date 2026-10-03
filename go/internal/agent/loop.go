@@ -253,7 +253,7 @@ func (l *AgentLoop) runCycle(ctx context.Context, tctx contracts.ToolContext, mi
 	}
 	core := act.core
 	if core == nil || act.dirty {
-		v, err := l.verifyCore(ctx, cs)
+		v, err := l.verifyCore(ctx, cs, "cycle")
 		if err != nil {
 			return CycleOutcome{}, err
 		}
@@ -351,7 +351,7 @@ func (l *AgentLoop) modelTurns(ctx context.Context, act *acting, messages []cont
 			if !l.opts.VerifyOnDone || turns == l.opts.MaxTurns {
 				return nil
 			}
-			core, err := l.verifyCore(ctx, cs)
+			core, err := l.verifyCore(ctx, cs, "done")
 			if err != nil {
 				return err
 			}
@@ -391,7 +391,7 @@ func (l *AgentLoop) engineSession(ctx context.Context, act *acting, messages []c
 		return result
 	}
 	verifyFn := func(ctx context.Context) (contracts.VerificationResult, error) {
-		core, err := l.verifyCore(ctx, cs)
+		core, err := l.verifyCore(ctx, cs, "tool")
 		if err != nil {
 			return contracts.VerificationResult{}, err
 		}
@@ -508,7 +508,8 @@ func (l *AgentLoop) witnessChecks(item contracts.ChecklistItem) ([]contracts.Che
 	return checks, errs
 }
 
-func (l *AgentLoop) verifyCore(ctx context.Context, cs *cycleState) (contracts.VerificationResult, error) {
+// verifyCore runs the gate and records a verify event; trigger says what asked for it.
+func (l *AgentLoop) verifyCore(ctx context.Context, cs *cycleState, trigger string) (contracts.VerificationResult, error) {
 	v, err := l.opts.Verifier.Verify(ctx, cs.tctx.Session, cs.gate)
 	if err != nil {
 		return contracts.VerificationResult{}, err
@@ -516,6 +517,15 @@ func (l *AgentLoop) verifyCore(ctx context.Context, cs *cycleState) (contracts.V
 	if len(cs.witnessErrors) > 0 {
 		v = v.WithResults(cs.witnessErrors)
 	}
+	checks := make([]map[string]any, 0, len(v.Results))
+	for _, r := range v.Results {
+		checks = append(checks, map[string]any{
+			"name": r.Name, "passed": r.Passed, "exit_code": r.ExitCode, "gating": r.Gating,
+			"timed_out": r.TimedOut, "duration_s": math.Round(r.DurationS*1000) / 1000,
+		})
+	}
+	l.emit("verify", cs.missionID, cs.cycleID, obs.F("trigger", trigger),
+		obs.F("verdict", v.Verdict), obs.F("checks", checks))
 	return v, nil
 }
 

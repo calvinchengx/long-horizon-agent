@@ -411,6 +411,9 @@ async def test_a_cycle_is_one_claude_session_using_lha_tools(
 
     assert (ws / "hello.txt").read_text() == "hi\n"  # written through LHA's write_file
     assert "claude_code_session" in summary.trace_jsonl
+    events = [json.loads(line) for line in summary.trace_jsonl.splitlines()]
+    (verified,) = [e["data"] for e in events if e["kind"] == "verify"]  # reused at the end
+    assert verified["trigger"] == "tool" and verified["verdict"] == "passed"
 
 
 @pytest.mark.asyncio

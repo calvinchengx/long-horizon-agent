@@ -354,7 +354,7 @@ class AgentLoop:
         core, dirty = acting.core, acting.dirty
 
         if core is None or dirty:
-            core = self._with_errors(await self._verifier.verify(ctx.session, gate), witness_errors)
+            core = await self._run_checks(ctx, gate, witness_errors, mission_id, cycle_id, "cycle")
         # Always re-check the harness right before committing (tampering needs no tool call).
         verification = await self._with_integrity(core, ctx, harness_before, tampered)
 
@@ -464,8 +464,8 @@ class AgentLoop:
                 acting.done_summary = action.summary
                 if not self._verify_on_done or turns == self._max_turns:
                     return
-                acting.core = self._with_errors(
-                    await self._verifier.verify(ctx.session, gate), witness_errors
+                acting.core = await self._run_checks(
+                    ctx, gate, witness_errors, mission_id, cycle_id, "done"
                 )
                 acting.dirty = False
                 verification = await self._with_integrity(
@@ -526,8 +526,8 @@ class AgentLoop:
             return result
 
         async def verify() -> VerificationResult:
-            acting.core = self._with_errors(
-                await self._verifier.verify(ctx.session, gate), witness_errors
+            acting.core = await self._run_checks(
+                ctx, gate, witness_errors, mission_id, cycle_id, "tool"
             )
             acting.dirty = engine.native  # native edits bypass the dispatcher: re-verify after
             return await self._with_integrity(acting.core, ctx, harness_before, tampered)
@@ -624,6 +624,39 @@ class AgentLoop:
                     )
                 )
         return checks, errors
+
+    async def _run_checks(
+        self,
+        ctx: ToolContext,
+        gate: list[Check],
+        witness_errors: list[CheckResult],
+        mission_id: str,
+        cycle_id: str,
+        trigger: str,
+    ) -> VerificationResult:
+        """Run the gate and record a ``verify`` event; ``trigger`` says what asked for it."""
+        verification = self._with_errors(
+            await self._verifier.verify(ctx.session, gate), witness_errors
+        )
+        self._emit(
+            "verify",
+            mission_id,
+            cycle_id,
+            trigger=trigger,
+            verdict=verification.verdict,
+            checks=[
+                {
+                    "name": r.name,
+                    "passed": r.passed,
+                    "exit_code": r.exit_code,
+                    "gating": r.gating,
+                    "timed_out": r.timed_out,
+                    "duration_s": round(r.duration_s, 3),
+                }
+                for r in verification.results
+            ],
+        )
+        return verification
 
     @staticmethod
     def _with_errors(

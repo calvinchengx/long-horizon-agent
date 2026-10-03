@@ -152,6 +152,19 @@ func TestACycleIsOneClaudeSessionUsingLHATools(t *testing.T) {
 	if !strings.Contains(summary.TraceJSONL, "claude_code_session") {
 		t.Fatalf("trace %s", summary.TraceJSONL)
 	}
+	var verified []map[string]any
+	for _, line := range strings.Split(summary.TraceJSONL, "\n") {
+		var e struct {
+			Kind string         `json:"kind"`
+			Data map[string]any `json:"data"`
+		}
+		if json.Unmarshal([]byte(line), &e) == nil && e.Kind == "verify" {
+			verified = append(verified, e.Data)
+		}
+	}
+	if len(verified) != 1 || verified[0]["trigger"] != "tool" || verified[0]["verdict"] != "passed" { // reused at the end
+		t.Fatalf("verify events %v", verified)
+	}
 }
 
 func TestVerifyReportsFailuresAndTheHarnessStillDecides(t *testing.T) {

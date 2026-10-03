@@ -473,6 +473,43 @@ async def test_running_out_of_turns_is_recorded(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_every_verification_is_recorded_with_what_asked_for_it(tmp_path: Path) -> None:
+    from lha.obs.events import TraceRecorder
+
+    anchor, session = await _setup(
+        tmp_path, Checklist(items=[ChecklistItem(id="01", description="write a file")])
+    )
+    read = TurnResult(text='{"tool": "list_files", "arguments": {}}')
+    recorder = TraceRecorder()
+
+    async def cycle(script: list[TurnResult], cycle_id: str) -> list[dict[str, object]]:
+        loop = AgentLoop(
+            model=StubModel(script=script),
+            dispatcher=AllowListDispatcher.for_tools(default_local_tools(), allow_mutating=True),
+            verifier=DeterministicVerifier(default_timeout_s=60),
+            anchor=anchor,
+            max_turns=3,
+            recorder=recorder,
+        )
+        await loop.run_cycle(
+            ctx=ToolContext(mission_id="m1", session=session),
+            mission_id="m1",
+            cycle_id=cycle_id,
+            checks=[FILE_HAS_HELLO],
+        )
+        return [e.data for e in recorder.events if e.kind == "verify" and e.cycle_id == cycle_id]
+
+    (ran_out,) = await cycle([read, read, read], "c1")  # verified once, when the cycle ends
+    assert ran_out["trigger"] == "cycle" and ran_out["verdict"] == "failed"
+    (check,) = ran_out["checks"]  # type: ignore[misc]
+    assert check["name"] == FILE_HAS_HELLO.name and check["passed"] is False
+    assert check["exit_code"] != 0 and check["gating"] is True and check["timed_out"] is False
+    # Done is verified at once; the cycle's end reuses that verdict instead of running it again.
+    (done,) = await cycle([_write("out.txt", "hello"), DONE], "c2")
+    assert done["trigger"] == "done" and done["verdict"] == "passed"
+
+
+@pytest.mark.asyncio
 async def test_a_failed_tool_call_records_why(tmp_path: Path) -> None:
     import json
 

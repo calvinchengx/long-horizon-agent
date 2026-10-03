@@ -733,6 +733,55 @@ func TestRunningOutOfTurnsIsRecorded(t *testing.T) {
 	}
 }
 
+func TestEveryVerificationIsRecordedWithWhatAskedForIt(t *testing.T) {
+	f := setup(t, item("01", "x"))
+	rec := obs.NewTraceRecorder(nil)
+	verifies := func(cycleID string) (found []obs.Fields) {
+		for _, e := range rec.Events() {
+			if e.CycleID == cycleID && e.Kind == "verify" {
+				found = append(found, e.Data)
+			}
+		}
+		return found
+	}
+	withRec := func(o *LoopOptions) { o.MaxTurns, o.Recorder = 2, rec }
+	read := text(`{"tool": "list_files", "arguments": {}}`)
+	f.run(t, f.loop(model.NewStub([]contracts.TurnResult{read, read}), withRec), "c1", fileHasHello)
+	ranOut := verifies("c1") // verified once, when the cycle ends
+	if len(ranOut) != 1 {
+		t.Fatalf("events: %+v", rec.Events())
+	}
+	if tr, _ := ranOut[0].Get("trigger"); tr != "cycle" {
+		t.Fatal(ranOut[0])
+	}
+	if v, _ := ranOut[0].Get("verdict"); v != contracts.VerdictFailed {
+		t.Fatal(ranOut[0])
+	}
+	checks, _ := ranOut[0].Get("checks")
+	list, _ := checks.([]any)
+	if len(list) != 1 {
+		t.Fatal(checks)
+	}
+	check, _ := list[0].(map[string]any)
+	if check["name"] != fileHasHello.Name || check["passed"] != false || check["exit_code"] == 0 ||
+		check["gating"] != true || check["timed_out"] != false {
+		t.Fatal(check)
+	}
+	// Done is verified at once; the cycle's end reuses that verdict instead of running it again.
+	f.run(t, f.loop(model.NewStub([]contracts.TurnResult{writeTurn("out.txt", "hello"), done}),
+		func(o *LoopOptions) { o.MaxTurns, o.Recorder = 3, rec }), "c2", fileHasHello)
+	finished := verifies("c2")
+	if len(finished) != 1 {
+		t.Fatalf("events: %+v", rec.Events())
+	}
+	if tr, _ := finished[0].Get("trigger"); tr != "done" {
+		t.Fatal(finished[0])
+	}
+	if v, _ := finished[0].Get("verdict"); v != contracts.VerdictPassed {
+		t.Fatal(finished[0])
+	}
+}
+
 func TestAFailedToolCallRecordsWhy(t *testing.T) {
 	f := setup(t, item("01", "x"))
 	rec := obs.NewTraceRecorder(nil)
