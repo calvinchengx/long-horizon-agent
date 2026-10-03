@@ -283,6 +283,17 @@ On Temporal, each cycle attempt additionally resets the checkout to `HEAD` befor
 never committed. See
 [durable execution](08-durable-execution.md).
 
+## Multi-repo workspaces
+
+A workspace that holds other repositories as git submodules (`lha workspace init`, [24-large-missions.md](24-large-missions.md#optional-one-mission-over-several-repositories))
+keeps the anchor and every checkpoint in the workspace repository. A checkpoint commits each
+member's changes inside the member first (same message), then the workspace commit records the
+members' new commits as gitlinks. Resets reach into the members (each goes back to the commit the
+workspace's `HEAD` records for it), review diffs expand each member's changes, and the
+`SituationSnapshot` lists the members (`members`) so the prompt can name them. A member is one of
+`HEAD`'s gitlinks whose `.git` is a pointer file into the workspace's `.git/modules/` that links
+back to it; a directory the agent turned into a repository is not a member and is left alone.
+
 ## Importing a checklist
 
 Instead of letting the Planner decompose a task, `lha run-local`, `lha mission`,

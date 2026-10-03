@@ -444,12 +444,199 @@ func HeadSHA(ctx context.Context, cwd string) (string, error) {
 	return RunGit(ctx, cwd, "rev-parse", "HEAD")
 }
 
+// --- member repositories (a multi-repo workspace; python: git_ops member_paths etc.) ---------
+// A workspace repository may hold other repositories as git submodules ("members", docs/24). The
+// anchor and every harness commit live in the workspace; a member's changes are committed in the
+// member first and the workspace commit records the new gitlink. A member is one of HEAD's
+// gitlinks whose .git is a validated pointer file (into the workspace's .git/modules/, linking
+// back to the member); a directory the agent turned into a repository is not a member.
+
+const gitlinkMode = "160000"
+
+// MemberPaths is the workspace's member repositories: HEAD's gitlinks that are checked out.
+func MemberPaths(ctx context.Context, cwd string) ([]string, error) {
+	ok, err := HasCommits(ctx, cwd)
+	if err != nil || !ok {
+		return []string{}, err
+	}
+	out, err := RunGit(ctx, cwd, "ls-tree", "-r", "-z", "HEAD")
+	if err != nil {
+		return nil, err
+	}
+	members := []string{}
+	for _, entry := range strings.Split(out, "\x00") {
+		if entry == "" {
+			continue
+		}
+		meta, path, _ := strings.Cut(entry, "\t")
+		if strings.SplitN(meta, " ", 2)[0] == gitlinkMode && isFile(filepath.Join(cwd, path, ".git")) {
+			members = append(members, path)
+		}
+	}
+	return members, nil
+}
+
+// IsWorkspace is whether cwd is a multi-repo workspace (has at least one member).
+func IsWorkspace(ctx context.Context, cwd string) bool {
+	members, err := MemberPaths(ctx, cwd)
+	return err == nil && len(members) > 0
+}
+
+func dirty(ctx context.Context, cwd string) (bool, error) {
+	out, err := RunGit(ctx, cwd, "status", "--porcelain", "--untracked-files=all")
+	return pyStrip(out) != "", err
+}
+
+// CommitIdentity is the user.name / user.email the repository at cwd commits with, falling back
+// to the identity InitRepo sets (a member clone has no identity of its own).
+func CommitIdentity(ctx context.Context, cwd string) (name, email string) {
+	name, _ = RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, "config", "user.name")
+	email, _ = RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, "config", "user.email")
+	if name = pyStrip(name); name == "" {
+		name = "LHA Agent"
+	}
+	if email = pyStrip(email); email == "" {
+		email = "agent@lha.local"
+	}
+	return name, email
+}
+
+// CommitMembers commits every member's changes inside the member (add -A there, with the
+// workspace's commit identity) and returns the paths that got a commit. The workspace's own
+// add -A then records the new gitlinks.
+func CommitMembers(ctx context.Context, cwd, message string) ([]string, error) {
+	members, err := MemberPaths(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	committed := []string{}
+	var identity []string
+	for _, path := range members {
+		member := filepath.Join(cwd, path)
+		isDirty, err := dirty(ctx, member)
+		if err != nil {
+			return nil, err
+		}
+		if !isDirty {
+			continue
+		}
+		if identity == nil {
+			name, email := CommitIdentity(ctx, cwd)
+			identity = []string{"-c", "user.name=" + name, "-c", "user.email=" + email}
+		}
+		if _, err := RunGit(ctx, member, "add", "-A"); err != nil {
+			return nil, err
+		}
+		if _, err := RunGit(ctx, member, append(identity, "commit", "-q", "-m", message)...); err != nil {
+			return nil, err
+		}
+		committed = append(committed, path)
+	}
+	return committed, nil
+}
+
+// ResetMembers returns every member to the commit the workspace's HEAD records for it (reset
+// --hard to that sha on the member's current branch, then clean; ignored cleans the ignored
+// files too, keeping keep).
+func ResetMembers(ctx context.Context, cwd string, keep []string, ignored bool) error {
+	members, err := MemberPaths(ctx, cwd)
+	if err != nil {
+		return err
+	}
+	for _, path := range members {
+		sha, err := RunGit(ctx, cwd, "rev-parse", "HEAD:"+path)
+		if err != nil {
+			return err
+		}
+		member := filepath.Join(cwd, path)
+		if _, err := RunGit(ctx, member, "reset", "--hard", "--quiet", sha); err != nil {
+			return err
+		}
+		args := []string{"clean", "-fdq"}
+		if ignored {
+			args = []string{"clean", "-ffdxq"}
+			for _, p := range keep {
+				args = append(args, "-e", p)
+			}
+		}
+		if _, err := RunGit(ctx, member, args...); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// AddMember is `git submodule add url name` (checked out at ref when given) in the workspace
+// repository cwd. A local directory is allowed as a source.
+func AddMember(ctx context.Context, cwd, url, name, ref string) error {
+	args := []string{"submodule", "add", "--quiet"}
+	if isDir(url) { // a local repository: git refuses the file transport by default
+		args = append([]string{"-c", "protocol.file.allow=always"}, args...)
+	}
+	if _, err := RunGit(ctx, cwd, append(args, "--", url, name)...); err != nil {
+		return err
+	}
+	if ref != "" {
+		if _, err := RunGit(ctx, filepath.Join(cwd, name), "checkout", "--quiet", ref); err != nil {
+			return err
+		}
+		if _, err := RunGit(ctx, cwd, "add", "--", name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// emptyTree is git's empty tree: a new member's diff base.
+const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+// DiffRange is `git diff base..head` of the workspace with each member's own changes expanded:
+// for a member whose gitlink moved, the member's diff follows with its paths prefixed by the
+// member path, so a reviewer sees the code, not two commit ids. --no-ext-diff: the hardening
+// config sets diff.external to an empty string. exclude are workspace pathspecs.
+func DiffRange(ctx context.Context, cwd, base, head string, exclude ...string) string {
+	pathspec := []string{"--", "."}
+	for _, p := range exclude {
+		pathspec = append(pathspec, ":(exclude)"+p)
+	}
+	parts := []string{}
+	diff, _ := RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, append([]string{"diff", "--no-ext-diff", base + ".." + head}, pathspec...)...)
+	if diff != "" {
+		parts = append(parts, diff)
+	}
+	members, err := MemberPaths(ctx, cwd)
+	if err != nil {
+		return strings.Join(parts, "\n")
+	}
+	for _, path := range members {
+		old, _ := RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, "rev-parse", "--quiet", "--verify", base+":"+path)
+		newSHA, _ := RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, "rev-parse", "--quiet", "--verify", head+":"+path)
+		if newSHA == "" || old == newSHA {
+			continue
+		}
+		args := []string{"diff", "--no-ext-diff", "--src-prefix=a/" + path + "/", "--dst-prefix=b/" + path + "/"}
+		if old != "" {
+			args = append(args, old+".."+newSHA)
+		} else {
+			args = append(args, emptyTree, newSHA)
+		}
+		member, _ := RunGitWith(ctx, filepath.Join(cwd, path), RunOptions{NoCheck: true}, args...)
+		if member != "" {
+			parts = append(parts, member)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // CommitAll stages everything and commits; it returns the resulting HEAD sha.
 //
 // forcePaths are additionally staged with `git add -f` so they are committed even when the
 // repository's .gitignore excludes them. If there is nothing to commit this is a no-op that
 // returns the current HEAD (a "checkpoint with no changes" is benign and idempotent).
 func CommitAll(ctx context.Context, cwd, message string, forcePaths ...string) (string, error) {
+	if _, err := CommitMembers(ctx, cwd, message); err != nil {
+		return "", err
+	}
 	if _, err := RunGit(ctx, cwd, "add", "-A"); err != nil {
 		return "", err
 	}
@@ -586,8 +773,10 @@ func ResetToHeadKeep(ctx context.Context, cwd string, keep []string) error {
 	for _, p := range keep {
 		args = append(args, "-e", p)
 	}
-	_, err = RunGit(ctx, cwd, args...)
-	return err
+	if _, err = RunGit(ctx, cwd, args...); err != nil {
+		return err
+	}
+	return ResetMembers(ctx, cwd, keep, true)
 }
 
 // DiscardChanges returns the work tree to HEAD: tracked edits and untracked (NOT ignored) files
@@ -601,8 +790,10 @@ func DiscardChanges(ctx context.Context, cwd string) error {
 	if _, err := RunGit(ctx, cwd, "reset", "--hard", "--quiet", "HEAD"); err != nil {
 		return err
 	}
-	_, err = RunGit(ctx, cwd, "clean", "-fdq")
-	return err
+	if _, err = RunGit(ctx, cwd, "clean", "-fdq"); err != nil {
+		return err
+	}
+	return ResetMembers(ctx, cwd, nil, false)
 }
 
 // ListBranches returns branch names (empty if no commits yet). With includeRemote the

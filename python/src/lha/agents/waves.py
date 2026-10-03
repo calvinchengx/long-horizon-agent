@@ -78,19 +78,8 @@ def diff_since(workdir: str | Path, base: str, head: str) -> str:
     """``git diff base..head`` without the harness's ``.lha/`` files."""
     if not base or not head or base == head:
         return "(no new commits)"
-    # ``--no-ext-diff``: the hardening config sets ``diff.external`` to an empty string, and git
-    # would otherwise try to run it and die, leaving the reviewer an empty diff.
-    diff = git_ops.run_git(
-        workdir,
-        "diff",
-        "--no-ext-diff",
-        f"{base}..{head}",
-        "--",
-        ".",
-        ":(exclude).lha",
-        check=False,
-    )
-    return diff or "(empty diff)"
+    # Members of a multi-repo workspace have their own changes expanded (``git_ops.diff_range``).
+    return git_ops.diff_range(workdir, base, head, exclude=(".lha",)) or "(empty diff)"
 
 
 @dataclass

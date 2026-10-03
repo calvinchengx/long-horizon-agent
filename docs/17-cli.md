@@ -25,6 +25,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`objects prune`](#lha-objects-prune) | delete old payloads from the ClaimCheck object store | nothing |
 | [`memory reembed`](#lha-memory-reembed) | re-embed stored memory with the configured embedder | the mission store, an embedder |
 | [`vendor`](#lha-vendor) | snapshot reference pages into the workspace | network access to the URLs |
+| [`workspace init`](#lha-workspace-init) | build a multi-repo workspace: a repository holding each `--repo` as a git submodule | git access to the repositories |
 | [`run-local`](#lha-run-local) | run a given or imported checklist locally | a sandbox |
 | [`mission`](#lha-mission) | plan a task (or import a checklist), then run it locally | a sandbox |
 | [`orchestrate`](#lha-orchestrate) | plan, then run the multi-agent org locally | a sandbox |
@@ -162,6 +163,24 @@ mission. Prints one `<mission>  <n> rows` line per mission, then `<total> rows r
 (`... rows to re-embed with ...`). Exits `2` when memory is disabled (`LHA_MEMORY_ENABLED=false`)
 or there is no embedder to use (`LHA_MEMORY_EMBEDDER=none`, or the embedder is unreachable).
 Missions also do this on their own, 64 rows per cycle ([12-memory.md](12-memory.md#re-embedding)).
+
+## `lha workspace init`
+
+```
+lha workspace init DIRECTORY --repo [NAME=]URL[@REF] [--repo ...]
+```
+
+Creates `DIRECTORY` as a git repository (or extends one) holding each `--repo` as a git submodule,
+a **member**, and commits them as one workspace commit, `lha: workspace members <names>`. `URL`
+is anything `git submodule add` accepts, including a local path; `NAME` defaults to the URL's
+last path component without `.git`; `@REF` checks the member out at that branch, tag or commit.
+Prints `<name> <- <url>[@ref] (<member HEAD, 12 chars>)` per member added, `<name>: already a
+member, kept` on stderr for one it has, and `workspace <dir>: <n> members`. Exit `2` for a spec
+without a URL, a name that repeats, an unusable name, or a directory that already anchors a
+mission (members are added before the mission starts); exit `1` when git cannot add a member.
+Point a mission at it with `--workdir`; see
+[24-large-missions.md](24-large-missions.md#optional-one-mission-over-several-repositories) for
+what a mission on a workspace does, and what it does not (`--max-parallel` is refused there).
 
 ## `lha vendor`
 

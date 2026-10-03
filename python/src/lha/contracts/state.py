@@ -333,6 +333,8 @@ class SituationSnapshot(BaseModel):
 
     head_sha: str
     recent_commits: list[str] = Field(default_factory=list)
+    # Member repositories of a multi-repo workspace (git submodule paths), if any.
+    members: list[str] = Field(default_factory=list)
     mission: MissionSpec | None = None
     progress_summary: str = ""
     open_items: list[ChecklistItem] = Field(default_factory=list)

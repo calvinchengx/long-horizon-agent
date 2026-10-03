@@ -232,6 +232,9 @@ func (c *cli) missionStart(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := c.refuseParallelWavesOnAWorkspace(absWorkdir, *maxParallel); err != nil {
+		return err
+	}
 	settings, err := config.Load()
 	if err != nil {
 		return err

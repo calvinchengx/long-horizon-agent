@@ -195,6 +195,11 @@ func BuildMessages(in PromptInput) []contracts.ModelMessage {
 	}
 	item := in.Item
 	user := "Active checklist item: [" + item.ID + "] " + item.Description + "\n\n"
+	if len(in.Snapshot.Members) > 0 {
+		user += "This workspace holds member repositories (git submodules), each a repository of " +
+			"its own with its own tests and tooling; paths below are relative to the workspace " +
+			"root: " + strings.Join(in.Snapshot.Members, ", ") + "\n\n"
+	}
 	if len(item.Witnesses) > 0 {
 		listed := make([]string, len(item.Witnesses))
 		for i, w := range item.Witnesses {

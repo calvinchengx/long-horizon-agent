@@ -171,6 +171,52 @@ the mission reports `SLEEPING` while it waits.
 plus a model and a budget: `LHA_BUDGET_USD_CEILING` is $10 by default, far too low for a mission of
 this size). See [running on Temporal](14-running-on-temporal.md).
 
+## Optional: one mission over several repositories
+
+A change that spans repositories (a service and the client library it ships, a schema and its
+generated bindings) runs as one mission on a **multi-repo workspace**: a git repository that holds
+each member repository as a git submodule.
+
+```bash
+lha workspace init ~/missions/platform \
+  --repo git@github.com:org/svc.git@main \
+  --repo client=git@github.com:org/svc-client.git \
+  --repo /srv/mirrors/schema            # a local path works too
+lha mission-start --checklist roadmap.md --workdir ~/missions/platform \
+  --no-default-checks \
+  --check "sh -c 'cd svc && go test ./...'" --check "sh -c 'cd client && uv run pytest -q'"
+```
+
+What changes, and what does not ([17-cli.md](17-cli.md#lha-workspace-init)):
+
+- **One anchor, one history.** `.lha/` and every checkpoint live in the workspace repository.
+  A cycle that changed files in a member gets a commit inside that member first (same message,
+  on the branch the member has checked out), and the workspace commit records the member's new
+  commit; `git log` in the workspace is the mission's history, `git log` in a member is that
+  member's part of it. Uncommitted member changes of a failed or crashed attempt are discarded
+  like the workspace's own (the saved `refs/lha/attempts/...` snapshot holds the workspace's
+  files only).
+- **Checks and witnesses run from the workspace root.** Name the member in the command
+  (`cmd:sh -c 'cd svc && make test'`); `pytest:` and `go:` witnesses take paths from the root
+  (`pytest:client/tests/test_x.py::test_y`). Protected paths, witness scripts and harness files
+  are protected inside members too.
+- **The reviewer sees the code.** A review diff expands each member's own changes with the
+  member's path prefixed, instead of showing two commit ids.
+- **The lead is told.** Every cycle's prompt lists the members and says paths are relative to
+  the workspace root.
+- **A member's `.git` pointer is checked** before every harness git command, like a linked
+  worktree's: it must lead into the workspace's `.git/modules/` and link back to the member;
+  one re-pointed at the workspace itself or at another member is refused
+  ([09-safety-model.md](09-safety-model.md#7-host-side-git)).
+- **Not across members: parallel waves.** `--max-parallel 2` or more is refused on a
+  workspace (implementer worktrees do not carry the members); items are worked serially, with
+  researchers and the reviewer as usual.
+- **Pushing is yours.** LHA pushes nothing. When the mission is done, push each member's branch
+  from inside the member, then the workspace if you keep it.
+
+`lha workspace init` on an existing workspace adds the members it lacks and keeps the rest; it
+refuses a directory that already anchors a mission.
+
 ## 7. Operate it
 
 ```bash
