@@ -23,7 +23,7 @@ dependencies = [
 # Heavy / environment-specific deps are opt-in extras so the core installs fast and runs at $0.
 [project.optional-dependencies]
 postgres = ["psycopg[binary,pool]>=3.2", "pgvector>=0.3"]
-embeddings = ["sentence-transformers>=3.0"]
+embeddings = ["sentence-transformers>=5.6.0"]
 # OTLP/HTTP trace export (to any OTLP collector, and to Langfuse through its OTLP endpoint).
 observability = ["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp-proto-http>=1.25"]
 sandbox = ["docker>=7.1"]
