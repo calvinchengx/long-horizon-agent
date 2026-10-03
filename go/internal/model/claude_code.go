@@ -286,6 +286,20 @@ func ClaudeCodeChildEnv(extra map[string]string) []string {
 	return env
 }
 
+// MinCallBudgetUSD is the least budget a claude -p call is started with; below it the call keeps its
+// configured cap, so the governor refuses it rather than starting one that can do nothing.
+const MinCallBudgetUSD = 0.01
+
+// CallBudgetUSD is a claude -p call's spend cap: configured, or what is left of the budget if less
+// (python: call_budget_usd). The cap is both --max-budget-usd and the worst case the governor
+// reserves, so a call never reserves more than the mission can still spend.
+func CallBudgetUSD(configured, remaining float64) float64 {
+	if remaining < MinCallBudgetUSD {
+		return configured
+	}
+	return math.Min(configured, remaining)
+}
+
 // ClaudeCodeBaseArgs are the flags every LHA claude -p call shares: JSON out, no saved session, a
 // spend cap.
 func ClaudeCodeBaseArgs(model string, maxBudgetUSD float64) []string {
@@ -511,6 +525,14 @@ func (m *ClaudeCodeModel) Complete(ctx context.Context, messages []contracts.Mod
 	return contracts.TurnResult{
 		Text: result.Text, Usage: result.Usage, StopReason: result.StopReason, SessionID: result.SessionID,
 	}, nil
+}
+
+// BudgetCapped is this model with its per-call cap lowered to what is left of the budget (see
+// CallBudgetUSD); the metered wrapper asks for it before each call (python: budget_capped).
+func (m *ClaudeCodeModel) BudgetCapped(remainingUSD float64) contracts.ModelProvider {
+	capped := *m
+	capped.maxBudgetUSD = CallBudgetUSD(m.maxBudgetUSD, remainingUSD)
+	return &capped
 }
 
 // EstimateCostUSD is the cost Claude Code reported; before a call, its worst case: the token

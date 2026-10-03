@@ -214,7 +214,11 @@ func (e *ClaudeCodeEngine) bridgeTools(specs []contracts.ToolSpec, dispatch Engi
 // Args is the claude argv (after the binary) for a session on bridge with system appended to
 // Claude Code's own system prompt.
 func (e *ClaudeCodeEngine) Args(bridge *mcpbridge.Bridge, system string) []string {
-	args := append(model.ClaudeCodeBaseArgs(e.model, e.maxBudgetUSD),
+	return e.args(bridge, system, e.maxBudgetUSD)
+}
+
+func (e *ClaudeCodeEngine) args(bridge *mcpbridge.Bridge, system string, maxBudgetUSD float64) []string {
+	args := append(model.ClaudeCodeBaseArgs(e.model, maxBudgetUSD),
 		"--strict-mcp-config",
 		"--mcp-config",
 		bridge.MCPConfig(),
@@ -263,14 +267,19 @@ func (e *ClaudeCodeEngine) Run(ctx context.Context, req EngineRequest) (EngineRu
 	used := &usedTools{}
 	tools := e.bridgeTools(req.Specs, req.Dispatch, req.Verify, req.CycleID, used)
 
+	// The session's cap is what is left of the budget when that is less than the configured cap.
+	budget := e.maxBudgetUSD
+	if mm, ok := req.Meter.(*governor.MeteredModel); ok {
+		budget = model.CallBudgetUSD(budget, mm.RemainingUSD())
+	}
 	var run EngineRun
-	err := governor.RunExternal(ctx, req.Meter, e.maxBudgetUSD, func(ctx context.Context) (contracts.Usage, error) {
+	err := governor.RunExternal(ctx, req.Meter, budget, func(ctx context.Context) (contracts.Usage, error) {
 		bridge := mcpbridge.New(tools)
 		if err := bridge.Start(ctx); err != nil {
 			return contracts.Usage{}, err
 		}
 		result, err := model.RunClaude(ctx, model.ClaudeCodeRun{
-			Args: e.Args(bridge, system), Prompt: prompt, Binary: e.binary, Cwd: req.Cwd,
+			Args: e.args(bridge, system, budget), Prompt: prompt, Binary: e.binary, Cwd: req.Cwd,
 			TimeoutS: e.timeoutS, Provider: e.name, FallbackModel: e.model,
 		})
 		_ = bridge.Close()

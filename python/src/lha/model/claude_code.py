@@ -16,8 +16,9 @@ Two uses, sharing the helpers here:
 
 Cost: the ledger records the ``total_cost_usd`` Claude Code reports (``Usage.reported_cost_usd``).
 On a subscription that is the API-equivalent cost, not a bill, but the budget ceiling still
-applies to it. Before a call runs, its worst case is ``LHA_CLAUDE_CODE_MAX_BUDGET_USD``, which is
-also passed to the CLI as ``--max-budget-usd``.
+applies to it. Before a call runs, its worst case is ``LHA_CLAUDE_CODE_MAX_BUDGET_USD``, or what is
+left of the budget when that is less (``call_budget_usd``); the same amount is passed to the CLI
+as ``--max-budget-usd``.
 
 Failures: a result with ``is_error`` raises ``ClaudeCodeError``; rate limits, overload and 5xx
 are marked retryable (``lha.model.retry.is_retryable``), authentication and usage errors are not.
@@ -26,6 +27,7 @@ are marked retryable (``lha.model.retry.is_retryable``), authentication and usag
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import shutil
@@ -155,6 +157,23 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if k not in _NESTED_ENV}
     env.update(extra or {})
     return env
+
+
+#: The least budget a ``claude -p`` call is started with; below it the call keeps its configured
+#: cap, so the governor refuses it rather than starting one that can do nothing.
+MIN_CALL_BUDGET_USD = 0.01
+
+
+def call_budget_usd(configured: float, remaining: float) -> float:
+    """A ``claude -p`` call's spend cap: ``configured``, or what is left of the budget if less.
+
+    The cap is both ``--max-budget-usd`` and the worst case the governor reserves, so a call never
+    reserves more than the mission can still spend: a $5 cap against a $10 ceiling no longer
+    stops a mission once it has spent $5.
+    """
+    if remaining < MIN_CALL_BUDGET_USD:
+        return configured
+    return min(configured, remaining)
 
 
 def base_args(*, model: str, max_budget_usd: float) -> list[str]:
@@ -308,6 +327,13 @@ class ClaudeCodeModel(ModelProvider):
             stop_reason=result.stop_reason,
             session_id=result.session_id,
         )
+
+    def budget_capped(self, remaining_usd: float) -> ClaudeCodeModel:
+        """This model with its per-call cap lowered to what is left of the budget (see
+        ``call_budget_usd``); the metered wrapper asks for it before each call."""
+        capped = copy.copy(self)
+        capped._max_budget_usd = call_budget_usd(self._max_budget_usd, remaining_usd)
+        return capped
 
     def estimate_cost_usd(self, usage: Usage) -> float:
         """The cost Claude Code reported; before a call, its worst case.

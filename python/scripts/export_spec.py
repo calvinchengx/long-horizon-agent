@@ -3724,6 +3724,33 @@ def export_report() -> None:
     _write("state/report.json", {"cases": cases})
 
 
+def export_claude_code_budget() -> None:
+    """spec/model/claude_code_budget.json: a ``claude -p`` call's spend cap is the configured cap,
+    or what is left of the budget when that is less (and at least a cent)."""
+    from lha.model.claude_code import MIN_CALL_BUDGET_USD, call_budget_usd
+
+    pairs = [
+        (5.0, 10.0),
+        (5.0, 5.0),
+        (5.0, 4.25),
+        (2.0, 1.999999),
+        (5.0, 0.01),
+        (5.0, 0.009999),
+        (5.0, 0.0),
+        (5.0, -3.5),
+        (0.5, 0.25),
+    ]
+    _write(
+        "model/claude_code_budget.json",
+        {
+            "min_call_budget_usd": MIN_CALL_BUDGET_USD,
+            "cases": [
+                {"configured": c, "remaining": r, "cap": call_budget_usd(c, r)} for c, r in pairs
+            ],
+        },
+    )
+
+
 def main() -> None:
     export_wire_bytes()
     export_memory()
@@ -3754,6 +3781,7 @@ def main() -> None:
     export_report()
     export_code_query()
     export_edit_file()
+    export_claude_code_budget()
 
 
 if __name__ == "__main__":

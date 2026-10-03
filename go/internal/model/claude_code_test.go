@@ -305,3 +305,19 @@ func TestBuildProviderClaudeCode(t *testing.T) {
 		t.Fatal(s.ModelBackend)
 	}
 }
+
+func TestACallIsCappedAtWhatIsLeftOfTheBudget(t *testing.T) {
+	m := NewClaudeCode(ClaudeCodeOptions{ModelName: "opus", MaxBudgetUSD: 5})
+	big := contracts.Usage{InputTokens: 10_000_000}
+	for _, c := range []struct{ remaining, want float64 }{{10, 5}, {4.25, 4.25}, {0.01, 0.01}, {0.009, 5}, {-1, 5}} {
+		if got := CallBudgetUSD(5, c.remaining); got != c.want {
+			t.Errorf("CallBudgetUSD(5, %v) = %v, want %v", c.remaining, got, c.want)
+		}
+		if got, _ := m.BudgetCapped(c.remaining).EstimateCostUSD(big); got != c.want { // unpriced: the cap
+			t.Errorf("capped(%v) worst case %v, want %v", c.remaining, got, c.want)
+		}
+	}
+	if got, _ := m.EstimateCostUSD(big); got != 5 { // the original is unchanged
+		t.Fatal(got)
+	}
+}

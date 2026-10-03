@@ -39,3 +39,25 @@ func TestPricing(t *testing.T) {
 		}
 	}
 }
+
+// TestClaudeCodeCallBudget runs spec/model/claude_code_budget.json: a claude -p call's spend cap
+// is the configured cap, or what is left of the budget when that is less (and at least a cent).
+func TestClaudeCodeCallBudget(t *testing.T) {
+	var s struct {
+		Min   float64 `json:"min_call_budget_usd"`
+		Cases []struct {
+			Configured float64 `json:"configured"`
+			Remaining  float64 `json:"remaining"`
+			Cap        float64 `json:"cap"`
+		} `json:"cases"`
+	}
+	Load(t, "model/claude_code_budget.json", &s)
+	if s.Min != model.MinCallBudgetUSD || len(s.Cases) == 0 {
+		t.Fatalf("min %v, %d cases", s.Min, len(s.Cases))
+	}
+	for _, c := range s.Cases {
+		if got := model.CallBudgetUSD(c.Configured, c.Remaining); got != c.Cap {
+			t.Errorf("CallBudgetUSD(%v, %v) = %v, want %v", c.Configured, c.Remaining, got, c.Cap)
+		}
+	}
+}

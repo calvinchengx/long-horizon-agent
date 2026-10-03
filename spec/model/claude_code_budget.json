@@ -1,0 +1,50 @@
+{
+ "min_call_budget_usd": 0.01,
+ "cases": [
+  {
+   "configured": 5.0,
+   "remaining": 10.0,
+   "cap": 5.0
+  },
+  {
+   "configured": 5.0,
+   "remaining": 5.0,
+   "cap": 5.0
+  },
+  {
+   "configured": 5.0,
+   "remaining": 4.25,
+   "cap": 4.25
+  },
+  {
+   "configured": 2.0,
+   "remaining": 1.999999,
+   "cap": 1.999999
+  },
+  {
+   "configured": 5.0,
+   "remaining": 0.01,
+   "cap": 0.01
+  },
+  {
+   "configured": 5.0,
+   "remaining": 0.009999,
+   "cap": 5.0
+  },
+  {
+   "configured": 5.0,
+   "remaining": 0.0,
+   "cap": 5.0
+  },
+  {
+   "configured": 5.0,
+   "remaining": -3.5,
+   "cap": 5.0
+  },
+  {
+   "configured": 0.5,
+   "remaining": 0.25,
+   "cap": 0.25
+  }
+ ]
+}

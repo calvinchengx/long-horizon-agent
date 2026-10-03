@@ -451,3 +451,50 @@ func TestWaveShare(t *testing.T) {
 		}
 	}
 }
+
+// cappedProvider is a provider whose calls carry their own spend cap, like claude -p.
+type cappedProvider struct {
+	cap  float64
+	seen *[]float64 // the cap each call ran with
+}
+
+func (p cappedProvider) Name() string { return "capped" }
+
+func (p cappedProvider) Complete(context.Context, []contracts.ModelMessage, []map[string]any, int) (contracts.TurnResult, error) {
+	*p.seen = append(*p.seen, p.cap)
+	cost := 0.25
+	return contracts.TurnResult{Text: "ok", Usage: contracts.Usage{ReportedCostUSD: &cost}}, nil
+}
+
+func (p cappedProvider) EstimateCostUSD(usage contracts.Usage) (float64, error) {
+	if usage.ReportedCostUSD != nil {
+		return *usage.ReportedCostUSD, nil
+	}
+	return p.cap, nil
+}
+
+func (p cappedProvider) BudgetCapped(remaining float64) contracts.ModelProvider {
+	if remaining >= 0.01 && remaining < p.cap {
+		p.cap = remaining
+	}
+	return p
+}
+
+func TestAMeteredCallReservesAndRunsWithTheSameLoweredCap(t *testing.T) {
+	m := NewCostMeter(NewCostLedger(), NewBudgetGovernor(3.0, 9, false))
+	seen := []float64{}
+	model := m.Wrap(cappedProvider{cap: 5, seen: &seen}, "lead")
+	if m.RemainingUSD() != 3 || model.RemainingUSD() != 3 {
+		t.Fatal(m.RemainingUSD())
+	}
+	msgs := []contracts.ModelMessage{{Role: "user", Content: "x"}}
+	if _, err := model.Complete(context.Background(), msgs, nil, 0); err != nil { // allowed: capped at $3
+		t.Fatal(err)
+	}
+	if len(seen) != 1 || seen[0] != 3 {
+		t.Fatalf("caps %v", seen)
+	}
+	if !approx(m.RemainingUSD(), 2.75) { // the reported cost was charged
+		t.Fatal(m.RemainingUSD())
+	}
+}

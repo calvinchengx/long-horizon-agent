@@ -96,6 +96,11 @@ class CostMeter:
         """Worst-case cost of calls currently in flight."""
         return self._reserved_usd
 
+    @property
+    def remaining_usd(self) -> float:
+        """The ceiling less what has been spent and what calls in flight have reserved."""
+        return self.governor.ceiling_usd - self.ledger.total_usd - self._reserved_usd
+
     def wrap(self, provider: ModelProvider, *, role: str = "") -> MeteredModel:
         return MeteredModel(provider, self, role=role)
 
@@ -174,6 +179,11 @@ class MeteredModel(ModelProvider):
         """The shared meter this provider records into."""
         return self._meter
 
+    @property
+    def remaining_usd(self) -> float:
+        """What is left of the mission's budget (``CostMeter.remaining_usd``)."""
+        return self._meter.remaining_usd
+
     def worst_case_usd(
         self,
         messages: list[ModelMessage],
@@ -182,18 +192,34 @@ class MeteredModel(ModelProvider):
         max_tokens: int | None = None,
     ) -> float | None:
         """Upper bound on this call's cost, or ``None`` if the provider cannot price it."""
+        return self._worst_case_usd(self._provider, messages, tools=tools, max_tokens=max_tokens)
+
+    def _worst_case_usd(
+        self,
+        provider: ModelProvider,
+        messages: list[ModelMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+        max_tokens: int | None = None,
+    ) -> float | None:
         output_cap = (
             max_tokens
-            or getattr(self._provider, "default_max_tokens", None)
+            or getattr(provider, "default_max_tokens", None)
             or self._meter.assumed_max_output_tokens
         )
         usage = Usage(
             input_tokens=estimate_input_tokens(messages, tools), output_tokens=int(output_cap)
         )
         try:
-            return self._provider.estimate_cost_usd(usage)
+            return provider.estimate_cost_usd(usage)
         except UnknownPriceError:
             return None
+
+    def _for_this_call(self) -> ModelProvider:
+        """The provider for one call: one that carries its own spend cap (``claude -p``) is
+        capped to what is left of the budget, so its worst case never exceeds it."""
+        capped = getattr(self._provider, "budget_capped", None)
+        return self._provider if capped is None else capped(self._meter.remaining_usd)
 
     async def complete(
         self,
@@ -232,7 +258,8 @@ class MeteredModel(ModelProvider):
         max_tokens: int | None = None,
     ) -> tuple[TurnResult, CostEntry]:
         meter = self._meter
-        worst = self.worst_case_usd(messages, tools=tools, max_tokens=max_tokens)
+        provider = self._for_this_call()
+        worst = self._worst_case_usd(provider, messages, tools=tools, max_tokens=max_tokens)
         decision = meter.governor.authorize_call(
             meter.ledger, worst_case_usd=worst, reserved_usd=meter.reserved_usd
         )
@@ -242,12 +269,12 @@ class MeteredModel(ModelProvider):
         reservation = worst or 0.0
         meter._reserve(reservation)
         try:
-            result = await self._provider.complete(messages, tools=tools, max_tokens=max_tokens)
+            result = await provider.complete(messages, tools=tools, max_tokens=max_tokens)
         finally:
             meter._release(reservation)
 
         try:
-            usd: float | None = self._provider.estimate_cost_usd(result.usage)
+            usd: float | None = provider.estimate_cost_usd(result.usage)
         except UnknownPriceError:
             usd = None
         entry = meter.ledger.record(

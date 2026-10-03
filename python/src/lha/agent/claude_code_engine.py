@@ -20,8 +20,8 @@ item's witnesses exactly as the harness will afterwards, so Claude Code can iter
 before it stops. LHA still verifies again after the session; ``verify`` never marks anything done.
 
 Budget: the session is authorized up front with ``LHA_CLAUDE_CODE_MAX_BUDGET_USD`` as its worst
-case (also passed as ``--max-budget-usd``), and the ``total_cost_usd`` Claude Code reports is
-recorded in the mission's ledger.
+case, or what is left of the budget when that is less (also passed as ``--max-budget-usd``), and
+the ``total_cost_usd`` Claude Code reports is recorded in the mission's ledger.
 """
 
 from __future__ import annotations
@@ -34,12 +34,13 @@ from lha.agent.mcp_bridge import BridgeTool, McpBridge, bridge_tool
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall, Usage
 from lha.contracts.tools import ToolResult, ToolSpec
 from lha.contracts.verify import VerificationResult
-from lha.governor.metering import run_external
+from lha.governor.metering import MeteredModel, run_external
 from lha.model.claude_code import (
     DEFAULT_MODEL,
     ClaudeCodeError,
     ClaudeCodeResult,
     base_args,
+    call_budget_usd,
     run_claude,
 )
 
@@ -155,9 +156,12 @@ class ClaudeCodeEngine:
         tools.append(bridge_tool("verify", _VERIFY_DESCRIPTION, {}, _verify))
         return tools, used
 
-    def _args(self, bridge: McpBridge, system: str) -> list[str]:
+    def _args(
+        self, bridge: McpBridge, system: str, max_budget_usd: float | None = None
+    ) -> list[str]:
+        budget = self._max_budget_usd if max_budget_usd is None else max_budget_usd
         args = [
-            *base_args(model=self._model, max_budget_usd=self._max_budget_usd),
+            *base_args(model=self._model, max_budget_usd=budget),
             "--strict-mcp-config",
             "--mcp-config",
             json.dumps(bridge.mcp_config()),
@@ -186,12 +190,16 @@ class ClaudeCodeEngine:
         system = "\n\n".join(m.content for m in messages if m.role == "system")
         prompt = "\n\n".join(m.content for m in messages if m.role != "system")
         tools, used = self._bridge_tools(specs, dispatch, verify, cycle_id)
+        # The session's cap is what is left of the budget when that is less than the configured cap.
+        budget = self._max_budget_usd
+        if isinstance(meter, MeteredModel):
+            budget = call_budget_usd(budget, meter.remaining_usd)
 
         async def _session() -> tuple[EngineRun, Usage]:
             async with McpBridge(tools) as bridge:
                 try:
                     result: ClaudeCodeResult = await run_claude(
-                        self._args(bridge, system),
+                        self._args(bridge, system, budget),
                         prompt=prompt,
                         binary=self._binary,
                         cwd=cwd,
@@ -216,7 +224,7 @@ class ClaudeCodeEngine:
             )
             return run, result.usage
 
-        return await run_external(meter, _session, worst_case_usd=self._max_budget_usd)
+        return await run_external(meter, _session, worst_case_usd=budget)
 
     def _stopped(self, reason: str, used: list[str]) -> EngineRun:
         return EngineRun(

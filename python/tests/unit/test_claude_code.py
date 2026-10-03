@@ -27,7 +27,7 @@ from lha.contracts.model import ModelMessage, ToolCall, Usage
 from lha.contracts.state import Checklist, ChecklistItem
 from lha.contracts.verify import checks_from_commands
 from lha.model import build_provider
-from lha.model.claude_code import ClaudeCodeError, ClaudeCodeModel, parse_result
+from lha.model.claude_code import ClaudeCodeError, ClaudeCodeModel, call_budget_usd, parse_result
 from lha.model.pricing import ModelPrice
 from lha.model.retry import is_retryable
 
@@ -238,6 +238,37 @@ def test_worst_case_is_the_budget_cap_unless_the_model_is_priced() -> None:
     assert priced.estimate_cost_usd(big) == 3.0  # never above the cap the CLI enforces
 
 
+@pytest.mark.parametrize(
+    ("configured", "remaining", "cap"),
+    [(5.0, 10.0, 5.0), (5.0, 4.25, 4.25), (5.0, 0.01, 0.01), (5.0, 0.009, 5.0), (5.0, -1.0, 5.0)],
+)
+def test_a_call_is_capped_at_what_is_left_of_the_budget(
+    configured: float, remaining: float, cap: float
+) -> None:
+    assert call_budget_usd(configured, remaining) == cap
+    model = ClaudeCodeModel(model_name="opus", max_budget_usd=configured)
+    capped = model.budget_capped(remaining)
+    assert capped.estimate_cost_usd(Usage(input_tokens=10_000_000)) == cap  # unpriced: the cap
+    assert model.estimate_cost_usd(Usage(input_tokens=10_000_000)) == configured  # unchanged
+
+
+@pytest.mark.asyncio
+async def test_a_metered_call_reserves_and_passes_the_same_lowered_cap(
+    fake_claude: Path, tmp_path: Path
+) -> None:
+    from lha.governor import BudgetGovernor, CostLedger, CostMeter
+
+    meter = CostMeter(ledger=CostLedger(), governor=BudgetGovernor(ceiling_usd=3.0, max_cycles=9))
+    model = meter.wrap(ClaudeCodeModel(model_name="opus", binary=str(fake_claude)))  # $5 cap
+    assert model.remaining_usd == 3.0
+    await model.complete([ModelMessage(role="user", content="x")])  # allowed: capped at $3
+    (call,) = _calls(tmp_path)
+    argv = call["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("--max-budget-usd") + 1] == "3.0000"
+    assert meter.remaining_usd == pytest.approx(3.0 - 0.01)  # the reported cost was charged
+
+
 def test_build_provider_and_settings() -> None:
     model = build_provider(Settings(_env_file=None, model_backend="claude_code"))  # type: ignore[call-arg]
     assert isinstance(model, ClaudeCodeModel) and model.name == "claude_code:default"
@@ -414,13 +445,37 @@ async def test_verify_reports_failures_and_the_harness_still_decides(
 
 
 @pytest.mark.asyncio
-async def test_the_session_is_refused_when_its_cap_would_break_the_budget(
+async def test_the_session_cap_is_lowered_to_what_is_left_of_the_budget(
+    fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "mcp")
+    calls = [["write_file", {"path": "hello.txt", "content": "hi\n"}]]
+    monkeypatch.setenv("FAKE_CLAUDE_CALLS", json.dumps(calls))
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    settings = _engine_settings(fake_claude, budget_usd_ceiling=0.5)  # below the $1 session cap
+    summary = await run_mission_local(
+        workdir=str(ws),
+        title="Hello",
+        description="Write hello.txt",
+        checklist=_checklist(),
+        checks=checks_from_commands([["test", "-f", "hello.txt"]]),
+        settings=settings,
+    )
+    assert summary.completed, summary.stopped_reason  # not refused for its $1 cap
+    argv = _calls(tmp_path)[0]["argv"]
+    assert isinstance(argv, list)
+    assert argv[argv.index("--max-budget-usd") + 1] == "0.5000"
+
+
+@pytest.mark.asyncio
+async def test_the_session_is_refused_when_almost_nothing_is_left(
     fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKE_CLAUDE_MODE", "mcp")
     ws = tmp_path / "ws"
     ws.mkdir()
-    settings = _engine_settings(fake_claude, budget_usd_ceiling=0.5)  # below the $1 session cap
+    settings = _engine_settings(fake_claude, budget_usd_ceiling=0.005)  # under a cent left
     summary = await run_mission_local(
         workdir=str(ws),
         title="Hello",

@@ -180,11 +180,26 @@ func TestVerifyReportsFailuresAndTheHarnessStillDecides(t *testing.T) {
 	}
 }
 
-func TestTheSessionIsRefusedWhenItsCapWouldBreakTheBudget(t *testing.T) {
+func TestTheSessionCapIsLoweredToWhatIsLeftOfTheBudget(t *testing.T) {
+	bin, log := claudecodetest.Install(t)
+	t.Setenv("FAKE_CLAUDE_MODE", "mcp")
+	setCalls(t, []any{"write_file", map[string]any{"path": "hello.txt", "content": "hi\n"}})
+	ws := filepath.Join(t.TempDir(), "ws")
+	summary := engineRun(t, ws, engineSettings(t, bin, "LHA_BUDGET_USD_CEILING=0.5"), helloChecklist(), nil) // below the $1 session cap
+	// Not refused for its $1 cap.
+	if !summary.Completed {
+		t.Fatalf("%+v", summary)
+	}
+	if got := after(claudecodetest.Calls(t, log)[0].Argv, "--max-budget-usd"); len(got) == 0 || got[0] != "0.5000" {
+		t.Fatalf("--max-budget-usd %q", got)
+	}
+}
+
+func TestTheSessionIsRefusedWhenAlmostNothingIsLeft(t *testing.T) {
 	bin, log := claudecodetest.Install(t)
 	t.Setenv("FAKE_CLAUDE_MODE", "mcp")
 	ws := filepath.Join(t.TempDir(), "ws")
-	summary := engineRun(t, ws, engineSettings(t, bin, "LHA_BUDGET_USD_CEILING=0.5"), helloChecklist(), nil) // below the $1 session cap
+	summary := engineRun(t, ws, engineSettings(t, bin, "LHA_BUDGET_USD_CEILING=0.005"), helloChecklist(), nil) // under a cent left
 	if !strings.HasPrefix(summary.StoppedReason, "governor") {
 		t.Fatalf("%+v", summary)
 	}

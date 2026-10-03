@@ -91,7 +91,9 @@ and a running total of in-flight reservations. Every provider a mission uses is 
 `meter.wrap(provider, role=…)`, which returns a `MeteredModel`. The planner, lead, researchers,
 reviewer and reflection models are all wrapped. A `claude_code` lead engine session is metered
 through the lead's model (`run_external`): authorized with `LHA_CLAUDE_CODE_MAX_BUDGET_USD` as its
-worst case, then charged the cost it reports, or that worst case when it reports none. The
+worst case, or what is left of the budget when that is less (the session's `--max-budget-usd` is
+lowered to match), then charged the cost it reports, or that worst case when it reports none. A
+`claude_code` model call is capped the same way. The
 replanner uses the lead's metered model, so the call that splits a blocked item is authorized
 against the budget and recorded under role `lead` in the same cycle. For each `complete()` call:
 

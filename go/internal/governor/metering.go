@@ -149,6 +149,20 @@ func (m *CostMeter) ReservedUSD() float64 {
 	return m.reserved
 }
 
+// RemainingUSD is the ceiling less what has been spent and what calls in flight have reserved.
+func (m *CostMeter) RemainingUSD() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.Governor.CeilingUSD() - m.Ledger.TotalUSD() - m.reserved
+}
+
+// BudgetCapper is a provider whose calls carry their own spend cap (a claude -p call's
+// --max-budget-usd): before each call the meter asks for a copy capped to what is left of the
+// budget, so the call's worst case never exceeds it.
+type BudgetCapper interface {
+	BudgetCapped(remainingUSD float64) contracts.ModelProvider
+}
+
 // Wrap returns provider metered by this meter, recording its calls under role.
 func (m *CostMeter) Wrap(provider contracts.ModelProvider, role string) *MeteredModel {
 	return &MeteredModel{provider: provider, meter: m, Role: role}
@@ -170,6 +184,18 @@ func (mm *MeteredModel) Name() string { return mm.provider.Name() }
 // Inner is the wrapped provider.
 func (mm *MeteredModel) Inner() contracts.ModelProvider { return mm.provider }
 
+// RemainingUSD is what is left of the mission's budget (CostMeter.RemainingUSD).
+func (mm *MeteredModel) RemainingUSD() float64 { return mm.meter.RemainingUSD() }
+
+// forThisCall is the provider for one call: one that carries its own spend cap is capped to what
+// is left of the budget.
+func (mm *MeteredModel) forThisCall() contracts.ModelProvider {
+	if c, ok := mm.provider.(BudgetCapper); ok {
+		return c.BudgetCapped(mm.meter.RemainingUSD())
+	}
+	return mm.provider
+}
+
 // DefaultMaxTokens forwards the wrapped provider's default output ceiling (0 if not stated).
 func (mm *MeteredModel) DefaultMaxTokens() int {
 	if d, ok := mm.provider.(DefaultMaxTokenser); ok {
@@ -181,15 +207,21 @@ func (mm *MeteredModel) DefaultMaxTokens() int {
 // WorstCaseUSD is an upper bound on this call's cost; nil (with a nil error) if the provider
 // cannot price it. maxTokens <= 0 means "provider default".
 func (mm *MeteredModel) WorstCaseUSD(messages []contracts.ModelMessage, tools []map[string]any, maxTokens int) (*float64, error) {
+	return mm.worstCaseUSD(mm.provider, messages, tools, maxTokens)
+}
+
+func (mm *MeteredModel) worstCaseUSD(provider contracts.ModelProvider, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int) (*float64, error) {
 	outputCap := maxTokens
 	if outputCap <= 0 {
-		outputCap = mm.DefaultMaxTokens()
+		if d, ok := provider.(DefaultMaxTokenser); ok {
+			outputCap = d.DefaultMaxTokens()
+		}
 	}
 	if outputCap <= 0 {
 		outputCap = mm.meter.AssumedMaxOutputTokens
 	}
 	usage := contracts.Usage{InputTokens: EstimateInputTokens(messages, tools), OutputTokens: outputCap}
-	return priceOrNil(mm.provider, usage)
+	return priceOrNil(provider, usage)
 }
 
 func priceOrNil(p contracts.ModelProvider, usage contracts.Usage) (*float64, error) {
@@ -221,7 +253,8 @@ func (mm *MeteredModel) Complete(ctx context.Context, messages []contracts.Model
 
 func (mm *MeteredModel) complete(ctx context.Context, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int, cost **float64) (contracts.TurnResult, error) {
 	meter := mm.meter
-	worst, err := mm.WorstCaseUSD(messages, tools, maxTokens)
+	provider := mm.forThisCall()
+	worst, err := mm.worstCaseUSD(provider, messages, tools, maxTokens)
 	if err != nil {
 		return contracts.TurnResult{}, err
 	}
@@ -239,7 +272,7 @@ func (mm *MeteredModel) complete(ctx context.Context, messages []contracts.Model
 	meter.reserved += reservation
 	meter.mu.Unlock()
 
-	result, err := mm.provider.Complete(ctx, messages, tools, maxTokens)
+	result, err := provider.Complete(ctx, messages, tools, maxTokens)
 	meter.mu.Lock()
 	meter.reserved = max(0.0, meter.reserved-reservation)
 	meter.mu.Unlock()
@@ -247,7 +280,7 @@ func (mm *MeteredModel) complete(ctx context.Context, messages []contracts.Model
 		return contracts.TurnResult{}, err
 	}
 
-	usd, err := priceOrNil(mm.provider, result.Usage)
+	usd, err := priceOrNil(provider, result.Usage)
 	if err != nil {
 		return contracts.TurnResult{}, err
 	}

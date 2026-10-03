@@ -56,7 +56,7 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 | `LHA_LEAD_ENGINE` | `loop` \| `claude_code` | `loop` | `claude_code` runs each lead cycle as one `claude -p` session |
 | `LHA_CLAUDE_CODE_BIN` | string | `claude` | the Claude Code executable |
 | `LHA_CLAUDE_CODE_TOOLS` | `lha` \| `native` | `lha` | the lead engine's tools: LHA's over MCP, or Claude Code's own (unsandboxed) |
-| `LHA_CLAUDE_CODE_MAX_BUDGET_USD` | float (> 0) | `5.0` | `--max-budget-usd` for each `claude -p` call, and its worst case for the governor |
+| `LHA_CLAUDE_CODE_MAX_BUDGET_USD` | float (> 0) | `5.0` | `--max-budget-usd` for each `claude -p` call, and its worst case for the governor; lowered to what is left of the budget when that is less |
 | `LHA_CLAUDE_CODE_TIMEOUT_S` | float (> 0) | `3600.0` | a `claude -p` call running longer is killed |
 
 See [13-models.md](13-models.md).

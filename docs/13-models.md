@@ -204,8 +204,11 @@ witnesses exactly as the harness will, so Claude Code can iterate to green befor
 never marks anything done: LHA verifies again after the session.
 
 **Cost and budget.** Before a `claude -p` call runs, the governor authorizes it with
-`LHA_CLAUDE_CODE_MAX_BUDGET_USD` (default $5) as its worst case. The same amount is passed as
-`--max-budget-usd`. Afterwards the ledger records the `total_cost_usd` Claude Code reports.
+`LHA_CLAUDE_CODE_MAX_BUDGET_USD` (default $5) as its worst case, or with what is left of the
+budget when that is less (and at least a cent; with less left, the call is refused). The same
+amount is passed as `--max-budget-usd`, so a call never reserves more than the mission can still
+spend, and the whole ceiling is usable: a $5 cap against a $10 ceiling no longer stops a mission
+once it has spent $5. Afterwards the ledger records the `total_cost_usd` Claude Code reports.
 Claude Code checks the cap between API calls, so one call can overshoot it by a single turn. On a
 subscription, that figure is the API-equivalent cost, not a bill, but the budget ceiling still
 applies to it: raise `LHA_BUDGET_USD_CEILING` for long missions. A session killed at
