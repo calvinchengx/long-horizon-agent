@@ -12,6 +12,7 @@ Langfuse through its OTLP endpoint) is the OpenTelemetry spans of ``lha.obs.otel
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -62,6 +63,9 @@ class TraceRecorder:
         self._max = max_events
         self.events: list[TraceEvent] = []
         self.dropped = 0  # events no longer in ``events``
+        # Called with every recorded event, after redaction (the mission's shared event record,
+        # ``lha.persistence.event_log``). A listener that raises is logged, never propagated.
+        self.listeners: list[Callable[[TraceEvent], None]] = []
 
     def record(
         self, kind: str, *, mission_id: str, cycle_id: str = "", **data: object
@@ -74,6 +78,11 @@ class TraceRecorder:
             del self.events[:excess]
             self.dropped += excess
         self._log.info(kind, mission_id=mission_id, cycle_id=cycle_id, **safe)
+        for listener in self.listeners:
+            try:
+                listener(event)
+            except Exception as exc:  # observing a run must never fail it
+                self._log.warning("trace_listener_failed", error=f"{type(exc).__name__}: {exc}")
         return event
 
     def to_jsonl(self) -> str:

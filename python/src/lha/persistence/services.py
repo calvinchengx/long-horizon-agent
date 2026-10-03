@@ -29,6 +29,7 @@ from lha.contracts.system_one import SystemOneModel
 from lha.governor.metering import CostMeter
 from lha.memory.service import MissionMemory, open_mission_memory
 from lha.obs.events import TraceRecorder
+from lha.persistence.event_log import MissionEventLog
 from lha.persistence.store import MissionStore, open_store
 from lha.persistence.tracking import LedgerSink, MissionTracker
 from lha.systemone.build import close_system_one
@@ -42,6 +43,8 @@ class RunServices:
     memory: MissionMemory | None
     meter: CostMeter | None = None
     system_one: SystemOneModel | None = None
+    # The shared event record (``mission_events``) the run's recorder writes to, if it has one.
+    events: MissionEventLog | None = None
 
     async def finish(self, stopped_reason: str, *, head_sha: str | None = None) -> str:
         return await self.tracker.finish(stopped_reason, head_sha=head_sha)
@@ -49,6 +52,8 @@ class RunServices:
     async def close(self) -> None:
         if self.meter is not None and self.meter.on_record is self.sink:
             self.meter.on_record = None
+        if self.events is not None:
+            await self.events.aclose()  # before the store closes; best effort, never raises
         try:
             if self.memory is not None:
                 await self.memory.close()
@@ -105,6 +110,11 @@ async def open_run_services(
         await store.close()
         await close_system_one(system_one)
         raise
+    events = None
+    if recorder is not None:
+        events = MissionEventLog(store)
+        recorder.listeners.append(events.add)
+        events.start()
     return RunServices(
         store=store,
         tracker=tracker,
@@ -112,4 +122,5 @@ async def open_run_services(
         memory=memory,
         meter=meter,
         system_one=system_one,
+        events=events,
     )

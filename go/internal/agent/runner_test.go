@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
@@ -208,5 +210,39 @@ func TestNoToolboxOpenerIsNotLinked(t *testing.T) {
 	o.OpenToolbox = nil
 	if _, err := RunMissionLocal(context.Background(), o); !errors.Is(err, ErrExecutionNotLinked) {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestALocalMissionLeavesItsTraceInTheStore(t *testing.T) {
+	db := filepath.Join(t.TempDir(), "lha.sqlite3")
+	settings := runnerSettings(t, "LHA_SQLITE_PATH="+db)
+	o := runOpts(t, filepath.Join(t.TempDir(), "ws"), settings,
+		model.NewStub([]contracts.TurnResult{writeTurn("out.txt", "hello"), done}), fileHasHello)
+	s, err := RunMissionLocal(context.Background(), o)
+	if err != nil || !s.Completed {
+		t.Fatalf("%+v %v", s, err)
+	}
+	store, err := persistence.OpenSQLite(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	rows, err := store.ReadMissionEvents(context.Background(), s.MissionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := []string{}
+	var call *persistence.EventRow
+	for i, r := range rows {
+		kinds = append(kinds, r.Kind)
+		if r.Kind == "tool_call" {
+			call = &rows[i]
+		}
+	}
+	if call == nil || call.Payload["tool"] != "write_file" || call.Payload["ok"] != true || call.CycleID != "c1" {
+		t.Fatalf("%v %+v", kinds, call)
+	}
+	if !slices.Contains(kinds, "cycle_started") || !slices.Contains(kinds, "checkpoint") {
+		t.Fatal(kinds)
 	}
 }

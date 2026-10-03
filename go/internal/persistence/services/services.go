@@ -58,6 +58,8 @@ type RunServices struct {
 	Memory    *memory.MissionMemory // nil when memory is disabled
 	Meter     *governor.CostMeter
 	SystemOne systemone.Model // nil when system_one_backend=off
+	// The shared event record (mission_events) the run's recorder writes to, if it has one.
+	Events *persistence.MissionEventLog
 }
 
 // CycleMemory is the memory plane as the agent loop sees it (nil when disabled).
@@ -77,6 +79,9 @@ func (s *RunServices) Finish(ctx context.Context, stoppedReason, headSHA string)
 func (s *RunServices) Close() error {
 	if s.Meter != nil && s.Meter.Hook() == governor.CostHook(s.Sink) {
 		s.Meter.SetHook(nil)
+	}
+	if s.Events != nil {
+		s.Events.Close(context.Background()) // before the store closes; best effort, never fails
 	}
 	var memErr error
 	if s.Memory != nil {
@@ -105,5 +110,11 @@ func Open(ctx context.Context, settings *config.Settings, r Request) (*RunServic
 	opts := r.Memory
 	opts.Model, opts.Recorder, opts.SystemOne = r.Model, r.Recorder, r.SystemOne
 	mem := memory.OpenMissionMemory(ctx, settings, store, r.Workdir, r.MissionID, opts)
-	return &RunServices{Store: store, Tracker: tracker, Sink: sink, Memory: mem, Meter: r.Meter, SystemOne: r.SystemOne}, nil
+	var events *persistence.MissionEventLog
+	if r.Recorder != nil {
+		events = persistence.NewMissionEventLog(store)
+		r.Recorder.AddListener(events.Add)
+		events.Start()
+	}
+	return &RunServices{Store: store, Tracker: tracker, Sink: sink, Memory: mem, Meter: r.Meter, SystemOne: r.SystemOne, Events: events}, nil
 }

@@ -149,6 +149,30 @@ async def test_mission_completes(tmp_path: Path) -> None:
     assert commits_with(tmp_path, "lha: complete") == 3
 
 
+async def test_durable_cycles_leave_their_trace_in_the_store(tmp_path: Path) -> None:
+    """A durable cycle's tool calls reach the shared event record (they used to be lost)."""
+    from lha.persistence.sqlite import SqliteStore
+
+    db = tmp_path / "events.sqlite3"
+    settings = SETTINGS.model_copy(update={"sqlite_path": str(db)})
+    inp = await init_mission(tmp_path / "ws", n=2)
+    async with await WorkflowEnvironment.start_time_skipping() as env:
+        result = await _run(
+            env, inp, make_cycle_activity(settings=settings, model_factory=working_model)
+        )
+    assert result.completed
+    store = SqliteStore(db)
+    await store.open()
+    rows = await store.read_mission_events(mission_id=inp.mission_id)
+    await store.close()
+    calls = [(r.cycle_id, r.payload) for r in rows if r.kind == "tool_call"]
+    assert calls == [
+        ("c1", {"tool": "write_file", "ok": True}),
+        ("c2", {"tool": "write_file", "ok": True}),
+    ]
+    assert [r.kind for r in rows].count("checkpoint") == 2
+
+
 # --- crash AFTER the commit ------------------------------------------------------------
 _after: dict[str, bool] = {"crashed": False}
 

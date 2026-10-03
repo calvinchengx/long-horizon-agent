@@ -3,6 +3,7 @@ package durable
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -62,6 +63,23 @@ func TestMissionPersistsToTheGoMissionStore(t *testing.T) {
 	records, err := store.ListMemory(ctx, inp.MissionID, 0)
 	if err != nil || len(records) == 0 {
 		t.Fatalf("memory records %v err %v", records, err)
+	}
+	// Each cycle's trace reaches the shared event record (it used to be lost on this path).
+	events, err := store.ReadMissionEvents(ctx, inp.MissionID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, checkpoints := []string{}, 0
+	for _, e := range events {
+		switch e.Kind {
+		case "tool_call":
+			calls = append(calls, fmt.Sprintf("%s:%v:%v", e.CycleID, e.Payload["tool"], e.Payload["ok"]))
+		case "checkpoint":
+			checkpoints++
+		}
+	}
+	if strings.Join(calls, " ") != "c1:write_file:true c2:write_file:true" || checkpoints != 2 {
+		t.Fatalf("calls %v checkpoints %d", calls, checkpoints)
 	}
 }
 

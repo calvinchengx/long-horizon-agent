@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -159,6 +160,16 @@ type TraceRecorder struct {
 	mu      sync.Mutex
 	events  []TraceEvent
 	dropped int
+	// Called with every recorded event, after redaction (the mission's shared event record,
+	// persistence.MissionEventLog). A listener that panics is logged, never propagated.
+	listeners []func(TraceEvent)
+}
+
+// AddListener calls fn with every event recorded from now on (python: recorder.listeners).
+func (r *TraceRecorder) AddListener(fn func(TraceEvent)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.listeners = append(r.listeners, fn)
 }
 
 // NewTraceRecorder returns a recorder logging to logger (Logger("lha") when nil).
@@ -182,6 +193,7 @@ func (r *TraceRecorder) Record(kind, missionID, cycleID string, data ...Field) T
 		r.dropped += excess
 	}
 	logger := r.log
+	listeners := r.listeners
 	r.mu.Unlock()
 	if logger == nil {
 		logger = Logger("lha")
@@ -192,6 +204,16 @@ func (r *TraceRecorder) Record(kind, missionID, cycleID string, data ...Field) T
 		attrs = append(attrs, slog.Any(f.Key, f.Value))
 	}
 	logger.LogAttrs(context.Background(), slog.LevelInfo, kind, attrs...)
+	for _, listen := range listeners {
+		func() {
+			defer func() { // observing a run must never fail it
+				if p := recover(); p != nil {
+					logger.Warn("trace_listener_failed", "error", fmt.Sprint(p))
+				}
+			}()
+			listen(event)
+		}()
+	}
 	return event
 }
 

@@ -29,6 +29,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
@@ -502,10 +503,17 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 	// The memory plane over the mission store (python: open_run_services -> open_mission_memory),
 	// its librarian model metered like the lead. A store without a persistence.Store (a test fake)
 	// runs without memory.
+	// The cycle's trace events go to the shared event record (mission_events) through recorder
+	// (python: open_run_services(recorder=...)); closed before the store, which is deferred above.
+	recorder := obs.NewTraceRecorder(nil)
 	var cycleMemory memory.CycleMemory
 	if backed, ok := store.(persistenceBacked); ok {
+		events := persistence.NewMissionEventLog(backed.Persistence())
+		recorder.AddListener(events.Add)
+		events.Start()
+		defer events.Close(context.WithoutCancel(ctx))
 		if mem := memory.OpenMissionMemory(ctx, settings, backed.Persistence(), inp.Workdir, inp.MissionID,
-			memory.OpenOptions{Model: meter.Wrap(inner, "librarian"), SystemOne: systemOne}); mem != nil {
+			memory.OpenOptions{Model: meter.Wrap(inner, "librarian"), Recorder: recorder, SystemOne: systemOne}); mem != nil {
 			defer mem.Close()
 			cycleMemory = mem
 		}
@@ -556,7 +564,7 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 		if err != nil {
 			return agent.CycleOutcome{}, err
 		}
-		loop, err := agent.BuildLeadLoop(settings, lead, anchor, dispatcher, obs.NewTraceRecorder(nil))
+		loop, err := agent.BuildLeadLoop(settings, lead, anchor, dispatcher, recorder)
 		if err != nil { // e.g. malformed LHA_TRUSTED_CHECKS
 			return agent.CycleOutcome{}, configError(fmt.Sprintf("invalid configuration: %v", err), err)
 		}

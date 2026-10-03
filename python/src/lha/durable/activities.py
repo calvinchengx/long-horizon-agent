@@ -77,7 +77,7 @@ from lha.hitl.notify import post_webhook
 from lha.ids import idempotency_key
 from lha.model import build_provider
 from lha.model.health import probe_model
-from lha.obs.events import get_logger
+from lha.obs.events import TraceRecorder, get_logger
 from lha.obs.otel import span
 from lha.obs.redact import redact_text
 from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
@@ -443,12 +443,15 @@ async def _execute_cycle(
             await session.close()
             await model.aclose()
             raise _config_error(f"cannot build the System One model: {exc}", exc) from exc
+        # The cycle's trace events go to the shared event record (mission_events) through it.
+        recorder = TraceRecorder()
         try:
             services = await open_run_services(
                 settings,
                 mission_id=inp.mission_id,
                 workdir=inp.workdir,
                 meter=meter,
+                recorder=recorder,
                 system_one=system_one,
                 title=snapshot.mission.title if snapshot.mission else "",
                 description=snapshot.mission.description if snapshot.mission else "",
@@ -484,6 +487,7 @@ async def _execute_cycle(
                         memory=services.memory,
                         dispatcher=await lead_guard(settings, anchor, gate, active),
                         system_one=services.system_one,
+                        recorder=recorder,
                     )
                 except ValueError as exc:  # e.g. malformed LHA_TRUSTED_CHECKS
                     raise _config_error(f"invalid configuration: {exc}", exc) from exc
