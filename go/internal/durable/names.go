@@ -31,6 +31,7 @@ const (
 	ActivityNotifyGate          = "notify_gate"
 	ActivityDeclareImpossible   = "declare_impossible"
 	ActivityUnblockItems        = "unblock_items"
+	ActivityEditChecklist       = "edit_checklist"
 	ActivityReadMissionSnapshot = "read_mission_snapshot"
 	ActivityRecordMissionStatus = "record_mission_status"
 	ActivityRunSubAgent         = "run_subagent"
@@ -54,18 +55,29 @@ const VersionOrg = "lha-go-durable-org-v1"
 // a Go history recorded before it (DefaultVersion) replays down the old path, which asked.
 const VersionCompleteSkipsApprovals = "lha-go-complete-skips-approvals-v1"
 
+// VersionChecklistEdit is the workflow.GetVersion change id of operator checklist edits
+// (checklist_edit_v1, python: PATCH_CHECKLIST_EDIT "lha-checklist-edit-v1"). Consulted only while
+// an edit batch is pending, so a Go history recorded before it never reaches it.
+const VersionChecklistEdit = "lha-go-checklist-edit-v1"
+
 // Signals and queries (python: lha.durable.signals and the MissionWorkflow query methods).
 const (
 	SignalHumanDecision   = "human_decision_v1"
 	SignalSteer           = "steer_v1"
 	SignalHumanDecisionV2 = "human_decision_v2" // {"decision", "by"}: the decision with who made it
 	SignalSnooze          = "snooze_v1"
+	// SignalChecklistEdit is {"edits": [...], "by": str} (lha mission-edit): queued and applied
+	// by the edit_checklist activity before the next cycle, never mid-cycle.
+	SignalChecklistEdit = "checklist_edit_v1"
+	// MaxPendingEdits is how many edit batches a mission holds unapplied; extra ones are dropped.
+	MaxPendingEdits = 20
 
 	QueryStatus            = "status_v1"
 	QueryCycles            = "cycles_done"
 	QueryGate              = "gate_v1"
 	QueryGateLog           = "gate_log_v1"
 	QuerySteerNotes        = "steer_notes"
+	QueryPendingEdits      = "pending_edits"
 	QueryLastItem          = "last_item"
 	QueryParkReason        = "park_reason"
 	QueryResumeAt          = "resume_at"

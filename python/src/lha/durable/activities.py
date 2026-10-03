@@ -58,6 +58,7 @@ from lha.durable.types import (
     ERROR_CONFIG,
     CycleInput,
     CycleResult,
+    EditInput,
     FinalizeInput,
     GateNotice,
     HealthInput,
@@ -83,6 +84,7 @@ from lha.ops.degradation import DependencyStatus, Health, decide_safe_park
 from lha.persistence.services import open_run_services
 from lha.persistence.store import GateEvent, StoreUnavailableError, open_store
 from lha.state import git_ops
+from lha.state.checklist_edit import ChecklistEditError, apply_edits, worked_item_ids
 from lha.state.locks import CYCLE_LOCK, LOCK_WAIT_S, WorkdirBusyError, workdir_flock
 from lha.state.mission_anchor import ANCHOR_DIR, EVENTS_FILE, GitMissionAnchor
 from lha.systemone.build import build_system_one
@@ -843,6 +845,66 @@ async def _unblock(inp: UnblockInput) -> CycleResult:
 async def unblock_items(inp: UnblockInput) -> CycleResult:
     """Activity: reset every ``blocked`` item to retryable (a human chose "retry")."""
     return await _unblock(inp)
+
+
+# --- operator checklist edits -------------------------------------------------------------
+EDIT_EVENT = "checklist_edit"
+
+
+def edit_summary(by: str, lines: Sequence[str]) -> str:
+    who = by or "an operator"
+    return f"checklist edited by {who}: {'; '.join(lines)}"
+
+
+async def _edit_checklist(inp: EditInput, *, settings: Settings | None = None) -> CycleResult:
+    """Apply ``inp.edits`` to the committed checklist in one anchor-only commit.
+
+    The batch is applied atomically or refused (``advanced`` False, the refusal in ``note``);
+    a refusal never fails the activity. Idempotent per ``cycle_id``: a retry that finds its own
+    ``checklist_edit`` event (same edits, same sender) in ``HEAD`` applies nothing again.
+    """
+    async with workdir_lock(inp.workdir):
+        await asyncio.to_thread(_reset_workdir, inp.workdir, settings)
+        anchor = GitMissionAnchor(inp.workdir)
+        done = committed_cycle_event(inp.workdir, inp.cycle_id, kind=EDIT_EVENT)
+        if done is not None and done.get("edits") == inp.edits and done.get("by") == inp.by:
+            snapshot = await anchor.read_situational_awareness()
+            return _result_from_snapshot(
+                snapshot, item_id=None, advanced=True, note=str(done.get("summary", ""))
+            )
+        checklist = await anchor.read_checklist()
+        reserved = worked_item_ids(await anchor.read_events())
+        try:
+            lines = apply_edits(checklist, inp.edits, by=inp.by, reserved=reserved)
+        except ChecklistEditError as exc:
+            snapshot = await anchor.read_situational_awareness()
+            return _result_from_snapshot(
+                snapshot, item_id=None, advanced=False, note=f"checklist edit refused: {exc}"
+            )
+        summary = edit_summary(inp.by, lines)
+        await anchor.commit_anchor_update(
+            Checkpoint(
+                cycle_id=inp.cycle_id,
+                progress_summary=f"- {inp.cycle_id} {summary}",
+                checklist=checklist,
+                events=[
+                    EventRecord(
+                        kind=EDIT_EVENT,
+                        cycle_id=inp.cycle_id,
+                        payload={"by": inp.by, "edits": inp.edits, "summary": summary},
+                    )
+                ],
+                commit_message=f"lha: checklist edited by {inp.by or 'an operator'}",
+            )
+        )
+        snapshot = await anchor.read_situational_awareness()
+        return _result_from_snapshot(snapshot, item_id=None, advanced=True, note=summary)
+
+
+@activity.defn
+async def edit_checklist(inp: EditInput) -> CycleResult:
+    """Activity: apply an operator's checklist edit batch (``lha mission-edit``)."""
+    return await _edit_checklist(inp)
 
 
 # --- read-only snapshot (terminal summaries) ----------------------------------------------

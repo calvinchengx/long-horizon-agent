@@ -60,6 +60,7 @@ import asyncio
 import dataclasses
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
@@ -76,6 +77,7 @@ with workflow.unsafe.imports_passed_through():
     from lha.durable.activities import (
         check_mission_health,
         declare_impossible,
+        edit_checklist,
         notify_gate,
         read_mission_snapshot,
         record_mission_status,
@@ -96,12 +98,15 @@ from lha.durable.signals import (
     DEADLOCK_DEFAULTS,
     GATE_DEADLOCK,
     GATE_TOOL_CALL,
+    MAX_PENDING_EDITS,
     MAX_STEER_CHARS,
     MAX_STEER_NOTES,
     QUERY_GATE,
     QUERY_GATE_LOG,
+    QUERY_PENDING_EDITS,
     QUERY_STATUS,
     QUERY_STEER_NOTES,
+    SIGNAL_CHECKLIST_EDIT,
     SIGNAL_HUMAN_DECISION,
     SIGNAL_HUMAN_DECISION_V2,
     SIGNAL_SNOOZE,
@@ -124,8 +129,10 @@ from lha.durable.types import (
     OUTCOME_IMPOSSIBLE,
     OUTCOME_MAX_CYCLES,
     ApprovedAction,
+    ChecklistEditRequest,
     CycleInput,
     CycleResult,
+    EditInput,
     FinalizeInput,
     GateNotice,
     GateView,
@@ -163,6 +170,10 @@ PATCH_MISSION_ROW = "lha-mission-row-v1"
 PATCH_CYCLE_CANCEL = "lha-cycle-wait-cancel-v1"
 # A cycle that completes the mission opens no approval gate: no later cycle could use it.
 PATCH_COMPLETE_SKIPS_APPROVALS = "lha-complete-skips-approvals-v1"
+# Operator checklist edits (``checklist_edit_v1``), applied between cycles by ``edit_checklist``.
+# Consulted only while a batch is pending, so a history recorded without the signal never
+# reaches it.
+PATCH_CHECKLIST_EDIT = "lha-checklist-edit-v1"
 # PATCH_ORG ("lha-durable-org-v1", ``lha.durable.org_round``): the multi-agent round, reached
 # only by missions that opt in, so every history recorded without it replays unchanged. The org
 # path always waits for a cancelled activity (see ``org_round``), so it needs no cancel patch.
@@ -239,6 +250,7 @@ class MissionWorkflow:
             state.pending_decision = early.pending_decision
             state.pending_decision_by = early.pending_decision_by
         state.steer_notes = [*state.steer_notes, *early.steer_notes][-MAX_STEER_NOTES:]
+        state.pending_edits = [*state.pending_edits, *early.pending_edits][:MAX_PENDING_EDITS]
         if inp.state is None:
             state.resume_at = max(inp.resume_at, early.resume_at)
         elif early.resume_at:
@@ -263,6 +275,7 @@ class MissionWorkflow:
                 return await self._terminal(inp, OUTCOME_MAX_CYCLES, "iteration ceiling reached")
 
             await self._sleep_until_resume(inp)
+            await self._apply_edits(inp)  # operator edits land before a cycle reads the anchor
             state.status = STATUS_RUNNING
             org = org_enabled(inp) and workflow.patched(PATCH_ORG)
             cycles_before = state.cycles_done
@@ -460,11 +473,14 @@ class MissionWorkflow:
                 break
             try:
                 await workflow.wait_condition(
-                    lambda target=target: state.resume_at != target,
+                    lambda target=target: state.resume_at != target or bool(state.pending_edits),
                     timeout=timedelta(seconds=remaining),
                 )
             except TimeoutError:
                 break
+            if state.pending_edits:  # edits are applied while sleeping; the sleep goes on
+                await self._apply_edits(inp)
+                state.status = STATUS_SLEEPING
         state.resume_at = 0.0
         state.status = STATUS_RUNNING
         self._log("woke up")
@@ -625,7 +641,11 @@ class MissionWorkflow:
         )
         how = "by default (no human answered)" if defaulted else "by a human"
         if decision == "retry":
-            if await self._unblock(inp):
+            # Edits sent while the gate was open land first: removing or reopening items is
+            # how an operator resolves a deadlock the blocked items alone cannot.
+            edited = await self._apply_edits(inp)
+            unblocked = await self._unblock(inp)
+            if unblocked.advanced or (edited is not None and not unblocked.is_deadlocked):
                 return None
             return OUTCOME_DEADLOCKED, reason
         if decision == "impossible":
@@ -644,7 +664,35 @@ class MissionWorkflow:
             return OUTCOME_IMPOSSIBLE, f"declared impossible {how}: {reason}"
         return OUTCOME_ABORTED, f"aborted at the deadlock gate {how}: {reason}"
 
-    async def _unblock(self, inp: MissionInput) -> bool:
+    async def _apply_edits(self, inp: MissionInput) -> CycleResult | None:
+        """Apply every pending checklist edit batch (one ``edit_checklist`` activity each, in
+        arrival order); returns the last applied result, or ``None`` when none applied. A
+        refused batch is logged (``mission-status``) and dropped; the others still apply."""
+        state = self._state
+        last: CycleResult | None = None
+        while state.pending_edits and workflow.patched(PATCH_CHECKLIST_EDIT):
+            req = state.pending_edits[0]
+            state.pending_edits = state.pending_edits[1:]
+            state.checklist_edits += 1
+            result = await workflow.execute_activity(
+                edit_checklist,
+                EditInput(
+                    mission_id=inp.mission_id,
+                    workdir=inp.workdir,
+                    cycle_id=f"e{state.checklist_edits}",
+                    edits=list(req.edits),
+                    by=req.by,
+                ),
+                start_to_close_timeout=timedelta(minutes=5),
+                retry_policy=_SHORT_RETRY,
+            )
+            self._absorb(result)
+            self._log(result.note)
+            if result.advanced:
+                last = result
+        return last
+
+    async def _unblock(self, inp: MissionInput) -> CycleResult:
         state = self._state
         state.deadlock_retries += 1
         unblocked = await workflow.execute_activity(
@@ -659,7 +707,7 @@ class MissionWorkflow:
         )
         self._absorb(unblocked)
         state.fail_item, state.fail_streak = None, 0
-        return unblocked.advanced
+        return unblocked
 
     async def _resolve_deadlock(self, inp: MissionInput, result: CycleResult) -> bool:
         """The pre-ladder deadlock gate (replays of older histories take this path)."""
@@ -671,7 +719,7 @@ class MissionWorkflow:
         )
         if decision != "retry":
             return False
-        return await self._unblock(inp)
+        return (await self._unblock(inp)).advanced
 
     async def _record_row(self, inp: MissionInput, status: str, reason: str = "") -> None:
         """Write a status the workflow owns to the ``missions`` row (an activity; best effort).
@@ -766,6 +814,11 @@ class MissionWorkflow:
         """The operator's steering notes, oldest first (``lha mission-steer``)."""
         return list(self._state.steer_notes)
 
+    @workflow.query(name=QUERY_PENDING_EDITS)
+    def pending_edits(self) -> int:
+        """Checklist edit batches signalled but not yet applied (``lha mission-edit``)."""
+        return len(self._state.pending_edits)
+
     @workflow.query
     def rejected_decisions(self) -> list[str]:
         """Human decisions that were discarded because they matched no offered option."""
@@ -802,6 +855,23 @@ class MissionWorkflow:
         note = note.strip()[:MAX_STEER_CHARS]
         if note:
             self._state.steer_notes = [*self._state.steer_notes, note][-MAX_STEER_NOTES:]
+
+    @workflow.signal(name=SIGNAL_CHECKLIST_EDIT)
+    def checklist_edit(self, payload: dict[str, Any]) -> None:
+        """Queue a checklist edit batch (``{"edits": [...], "by": str}``). It is applied by the
+        ``edit_checklist`` activity before the next cycle starts (or while the mission sleeps),
+        never while a cycle runs; a refused batch is reported in the gate log."""
+        edits = payload.get("edits")
+        if not isinstance(edits, list) or not edits:
+            return
+        if len(self._state.pending_edits) >= MAX_PENDING_EDITS:
+            self._log(f"checklist edit dropped: {MAX_PENDING_EDITS} batches already pending")
+            return
+        by = str(payload.get("by", "") or "").strip()[:200]
+        self._state.pending_edits = [
+            *self._state.pending_edits,
+            ChecklistEditRequest(edits=[e for e in edits if isinstance(e, dict)], by=by),
+        ]
 
     async def await_human_gate(
         self,

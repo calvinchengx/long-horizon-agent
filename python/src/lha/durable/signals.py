@@ -16,11 +16,17 @@ SIGNAL_STEER = "steer_v1"
 MAX_STEER_NOTES = 20
 MAX_STEER_CHARS = 2000
 SIGNAL_SNOOZE = "snooze_v1"
+#: A batch of checklist edits with who sent it: ``{"edits": [...], "by": str}`` (``lha
+#: mission-edit``); queued and applied by an activity before the next cycle (never mid-cycle).
+SIGNAL_CHECKLIST_EDIT = "checklist_edit_v1"
+#: Edit batches a mission holds unapplied (a gate or a cycle is in the way); extra ones are dropped.
+MAX_PENDING_EDITS = 20
 QUERY_STATUS = "status_v1"
 QUERY_CYCLES = "cycles_done"
 QUERY_GATE = "gate_v1"
 QUERY_GATE_LOG = "gate_log_v1"
 QUERY_STEER_NOTES = "steer_notes"
+QUERY_PENDING_EDITS = "pending_edits"
 UPDATE_VERIFY_VERDICT = "verify_verdict_v1"
 
 # Mission status values (the values of the text column `missions.status`).

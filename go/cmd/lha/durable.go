@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
 	"math"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,6 +19,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/checklistedit"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
@@ -539,6 +542,13 @@ func (c *cli) missionStatus(args []string) error {
 			lines = append(lines, "  "+oneLine(n, 120))
 		}
 	}
+	var pending int
+	if _, err := query(c.ctx, cl, wid, durable.QueryPendingEdits, &pending, true); err != nil {
+		return err
+	}
+	if pending > 0 {
+		lines = append(lines, fmt.Sprintf("checklist edits pending: %d (applied before the next cycle)", pending))
+	}
 	var log []string
 	if _, err := query(c.ctx, cl, wid, durable.QueryGateLog, &log, true); err != nil {
 		return err
@@ -665,6 +675,172 @@ func (c *cli) missionSnooze(args []string) error {
 	} else {
 		fmt.Fprintf(c.stdout, "mission %s: woken\n", id)
 	}
+	return nil
+}
+
+// repeated is a repeatable string option (python: list[str] typer options).
+type repeated []string
+
+func (r *repeated) String() string     { return strings.Join(*r, ",") }
+func (r *repeated) Set(v string) error { *r = append(*r, v); return nil }
+
+// editOps is python's _edit_ops: the checklist_edit_v1 batch an lha mission-edit invocation
+// describes (the --edits file first, then describe, depends, reopen, unblock, block, remove, add).
+func editOps(editsFile string, describe, depends, reopen, unblock, block, remove, add []string) ([]map[string]any, error) {
+	ops := []map[string]any{}
+	if editsFile != "" {
+		data, err := os.ReadFile(editsFile)
+		if err != nil {
+			return nil, fail(2, "cannot read --edits %s: %v", contracts.PyRepr(editsFile), err)
+		}
+		var parsed any
+		if err := json.Unmarshal(data, &parsed); err != nil {
+			return nil, fail(2, "cannot read --edits %s: %v", contracts.PyRepr(editsFile), err)
+		}
+		if m, ok := parsed.(map[string]any); ok {
+			parsed = m["edits"]
+		}
+		list, ok := parsed.([]any)
+		if !ok {
+			return nil, fail(2, "--edits %s: expected a JSON list of edit objects", contracts.PyRepr(editsFile))
+		}
+		for _, e := range list {
+			em, ok := e.(map[string]any)
+			if !ok {
+				return nil, fail(2, "--edits %s: expected a JSON list of edit objects", contracts.PyRepr(editsFile))
+			}
+			ops = append(ops, em)
+		}
+	}
+	split := func(option, value string) (string, string, error) {
+		id, rest, found := strings.Cut(value, "=")
+		if !found || pyfmt.PyStrip(id) == "" {
+			return "", "", fail(2, "%s expects ID=VALUE (got %s)", option, contracts.PyRepr(value))
+		}
+		return pyfmt.PyStrip(id), rest, nil
+	}
+	for _, v := range describe {
+		id, text, err := split("--describe", v)
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, map[string]any{"op": "edit", "id": id, "description": text})
+	}
+	for _, v := range depends {
+		id, text, err := split("--depends", v)
+		if err != nil {
+			return nil, err
+		}
+		deps := []string{}
+		for _, d := range strings.Split(text, ",") {
+			if d = pyfmt.PyStrip(d); d != "" {
+				deps = append(deps, d)
+			}
+		}
+		ops = append(ops, map[string]any{"op": "edit", "id": id, "depends_on": deps})
+	}
+	for _, id := range reopen {
+		ops = append(ops, map[string]any{"op": "reopen", "id": id})
+	}
+	for _, id := range unblock {
+		ops = append(ops, map[string]any{"op": "unblock", "id": id})
+	}
+	for _, id := range block {
+		ops = append(ops, map[string]any{"op": "block", "id": id})
+	}
+	for _, id := range remove {
+		ops = append(ops, map[string]any{"op": "remove", "id": id})
+	}
+	for _, text := range add {
+		ops = append(ops, map[string]any{"op": "add", "description": text})
+	}
+	return ops, nil
+}
+
+// missionEdit is python's mission-edit: add, remove, edit, reopen, block or unblock checklist
+// items of a mission in flight (a durable one by id, or a local one's anchor by --workdir).
+func (c *cli) missionEdit(args []string) error {
+	fs := c.newFlags("mission-edit", commandHelpFor("mission-edit"))
+	var add, remove, reopen, block, unblock, describe, depends repeated
+	var editsFile, by, workdir string
+	fs.Var(&add, "add", "Add an item with this description (repeatable); witnesses the roadmap way: 'Do X (witness: cmd:make test)'.")
+	fs.Var(&remove, "remove", "Remove an open item (repeatable).")
+	fs.Var(&reopen, "reopen", "Reopen a done item (repeatable).")
+	fs.Var(&block, "block", "Block an open item (repeatable).")
+	fs.Var(&unblock, "unblock", "Unblock a blocked item (repeatable).")
+	fs.Var(&describe, "describe", "ID=TEXT: replace an open item's description (repeatable).")
+	fs.Var(&depends, "depends", "ID=DEP[,DEP]: replace an open item's dependencies (ID= clears them).")
+	fs.StringVar(&editsFile, "edits", "", "A JSON file with a list of edit objects (or {\"edits\": [...]}): op add | remove | edit | reopen | block | unblock; applied before the options below.")
+	fs.StringVar(&by, "as", "", "Who edits; recorded in the anchor's event.")
+	fs.StringVar(&workdir, "workdir", "", "Edit the checklist of the mission anchored in this directory directly (a mission run with 'lha mission' or 'lha orchestrate', between runs) instead of signalling a durable one.")
+	positional, err := c.parseWithArgs(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(positional) > 1 {
+		return &exitError{code: 2, message: fmt.Sprintf("Error: Got unexpected extra argument (%s)", positional[1])}
+	}
+	id := ""
+	if len(positional) == 1 {
+		id = positional[0]
+	}
+	if (id != "") == (workdir != "") {
+		return fail(2, "give MISSION_ID (a durable mission) or --workdir DIR (a local one), not both")
+	}
+	by = pyfmt.PyStrip(by)
+	if len([]rune(by)) > 200 {
+		return fail(2, "--as is longer than 200 characters")
+	}
+	ops, err := editOps(editsFile, describe, depends, reopen, unblock, block, remove, add)
+	if err != nil {
+		return err
+	}
+	if len(ops) == 0 {
+		return fail(2, "nothing to do: give at least one of --add, --remove, --reopen, --block, --unblock, --describe, --depends or --edits FILE")
+	}
+	if len(ops) > checklistedit.MaxEditOps {
+		return fail(2, "%d edits; at most %d per batch", len(ops), checklistedit.MaxEditOps)
+	}
+	if workdir != "" {
+		anchor := state.NewGitMissionAnchor(workdir)
+		events, err := anchor.ReadEvents(c.ctx)
+		if err != nil {
+			return err
+		}
+		done := 0
+		for _, e := range events {
+			if e.Kind == durable.EditEvent {
+				done++
+			}
+		}
+		acts := &durable.Activities{}
+		result, err := acts.EditChecklist(c.ctx, durable.EditInput{Workdir: workdir, CycleID: fmt.Sprintf("e%d", done+1), Edits: ops, By: by})
+		if err != nil {
+			if errors.As(err, new(*durable.WorkdirBusyError)) {
+				return fail(1, "a cycle is running in %s; edit the mission by id instead", workdir)
+			}
+			return err
+		}
+		if !result.Advanced {
+			return fail(1, "%s", result.Note)
+		}
+		fmt.Fprintln(c.stdout, result.Note)
+		return nil
+	}
+	cl, err := c.connect()
+	if err != nil {
+		return err
+	}
+	defer cl.Close()
+	payload := map[string]any{"edits": ops, "by": by}
+	if err := cl.SignalWorkflow(c.ctx, durable.MissionWorkflowID(id), "", durable.SignalChecklistEdit, payload); err != nil {
+		return err
+	}
+	plural := "s"
+	if len(ops) == 1 {
+		plural = ""
+	}
+	fmt.Fprintf(c.stdout, "mission %s: %d checklist edit%s queued (applied before the next cycle; 'lha mission-status' shows the outcome)\n", id, len(ops), plural)
 	return nil
 }
 

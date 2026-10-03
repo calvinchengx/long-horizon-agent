@@ -326,7 +326,7 @@ func TestPayloadsUsePythonFieldNames(t *testing.T) {
 		t.Fatalf("cycle result %s", data)
 	}
 	data, _ = json.Marshal(MissionState{})
-	for _, list := range []string{"steer_notes", "approved_actions", "rejected_actions", "gate_log"} {
+	for _, list := range []string{"steer_notes", "pending_edits", "approved_actions", "rejected_actions", "gate_log"} {
 		if !strings.Contains(string(data), `"`+list+`":[]`) {
 			t.Fatalf("state %s", data)
 		}

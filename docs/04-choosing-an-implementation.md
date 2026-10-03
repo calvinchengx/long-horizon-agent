@@ -18,7 +18,7 @@ process can observe:
 
 | Surface | Shared definition |
 |---|---|
-| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has every command: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `memory reembed`, `objects prune`, `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze` and `mission-abort`, including `mission-start`'s durable organization options. |
+| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has every command: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `memory reembed`, `objects prune`, `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit` and `mission-abort`, including `mission-start`'s durable organization options. |
 | Settings | The `LHA_*` environment variables and `.env` file, with the same names and defaults ([`python/src/lha/config.py`](../python/src/lha/config.py), [`go/internal/config/`](../go/internal/config/)) |
 | Mission anchor | The `.lha/` files and their JSON shapes ([the mission anchor](06-mission-anchor.md)) |
 | Mission store | The SQLite file (same tables, migration ids and JSON columns) and the Postgres schema in [`db/migrations/`](../db/migrations/), with the same `schema_migrations` bookkeeping |
@@ -30,9 +30,9 @@ The Temporal names the Python worker registers are:
 | Kind | Names |
 |---|---|
 | Workflows | `MissionWorkflow`, `SubAgentWorkflow` |
-| Activities | `run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`, `read_mission_snapshot`, `record_mission_status`, `run_subagent`, `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle` |
-| Signals | `human_decision_v1`, `steer_v1`, `snooze_v1` |
-| Queries | `status_v1`, `gate_v1`, `gate_log_v1`, `cycles_done`, `last_item`, `park_reason`, `resume_at`, `open_question`, `rejected_decisions` |
+| Activities | `run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`, `edit_checklist`, `read_mission_snapshot`, `record_mission_status`, `run_subagent`, `plan_round`, `run_implementer`, `integrate_branch`, `review_cycle` |
+| Signals | `human_decision_v1`, `human_decision_v2`, `steer_v1`, `snooze_v1`, `checklist_edit_v1` |
+| Queries | `status_v1`, `gate_v1`, `gate_log_v1`, `cycles_done`, `last_item`, `park_reason`, `resume_at`, `open_question`, `steer_notes`, `pending_edits`, `rejected_decisions` |
 | Task queue / workflow id | `LHA_TASK_QUEUE` (default `lha-mission`) / `mission:<mission_id>` |
 
 Payloads are the dataclasses in [`python/src/lha/durable/types.py`](../python/src/lha/durable/types.py),
@@ -158,8 +158,8 @@ What the Go worker runs:
   verified item, with Python's retry safety, gate-log lines, events and ledger keys. A Go-served
   and a Python-served org mission on the same scripted inputs leave the same commits and anchor.
 - `lha mission-start` plans (or imports) a checklist and starts a mission; `mission-status`,
-  `mission-approve`, `mission-snooze` and `mission-abort` work on missions served by either
-  implementation, with the same output and exit codes as Python.
+  `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit` and `mission-abort` work on
+  missions served by either implementation, with the same output and exit codes as Python.
 
 What remains Python-only:
 

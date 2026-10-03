@@ -1,0 +1,3890 @@
+{
+ "cases": [
+  {
+   "name": "add_default_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "Write docs (witness: cmd:true)"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "04",
+      "description": "Write docs",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [
+       "cmd:true"
+      ],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "added 04"
+   ],
+   "error": null
+  },
+  {
+   "name": "add_after_with_fields",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "id": "02a",
+     "description": " Fix the parser ",
+     "after": "02",
+     "depends_on": [
+      "01",
+      " 02 "
+     ],
+     "witnesses": [
+      "go:TestParser"
+     ],
+     "allow_harness_edits": true,
+     "notes": "operator-added"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02a",
+      "description": "Fix the parser",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01",
+       "02"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": true,
+      "witnesses": [
+       "go:TestParser"
+      ],
+      "notes": "operator-added",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "added 02a"
+   ],
+   "error": null
+  },
+  {
+   "name": "add_tenth_item_width",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "04",
+      "description": "task 04",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "05",
+      "description": "task 05",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "06",
+      "description": "task 06",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "07",
+      "description": "task 07",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "08",
+      "description": "task 08",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "09",
+      "description": "task 09",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "ten"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "04",
+      "description": "task 04",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "05",
+      "description": "task 05",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "06",
+      "description": "task 06",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "07",
+      "description": "task 07",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "08",
+      "description": "task 08",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "09",
+      "description": "task 09",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "10",
+      "description": "ten",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "added 10"
+   ],
+   "error": null
+  },
+  {
+   "name": "remove_open",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "03"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "removed 03"
+   ],
+   "error": null
+  },
+  {
+   "name": "remove_in_progress",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "in_progress",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "03"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "removed 03"
+   ],
+   "error": null
+  },
+  {
+   "name": "remove_done_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: cannot remove done item '01'"
+  },
+  {
+   "name": "remove_dependency_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "invalid checklist: item '02' depends on unknown item '01'"
+  },
+  {
+   "name": "remove_with_dependent_in_same_batch",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "01"
+    },
+    {
+     "op": "remove",
+     "id": "02"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "removed 01",
+    "removed 02"
+   ],
+   "error": null
+  },
+  {
+   "name": "add_after_remove_never_reuses_an_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "03"
+    },
+    {
+     "op": "add",
+     "description": "x"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "04",
+      "description": "x",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "removed 03",
+    "added 04"
+   ],
+   "error": null
+  },
+  {
+   "name": "edit_fields",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "edit",
+     "id": "02",
+     "description": "Parse it (witnesses: cmd:true, go:TestParse)",
+     "depends_on": [],
+     "notes": "n",
+     "allow_harness_edits": true
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "Parse it",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": true,
+      "witnesses": [
+       "cmd:true",
+       "go:TestParse"
+      ],
+      "notes": "n",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "edited 02: description, depends_on, notes, allow_harness_edits"
+   ],
+   "error": null
+  },
+  {
+   "name": "edit_witnesses_replace",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "edit",
+     "id": "02",
+     "witnesses": [
+      "cmd:make test"
+     ]
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [
+       "cmd:make test"
+      ],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "edited 02: witnesses"
+   ],
+   "error": null
+  },
+  {
+   "name": "edit_description_keeps_witnesses",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "x",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [
+       "cmd:true"
+      ],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "edit",
+     "id": "01",
+     "description": "y"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "y",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [
+       "cmd:true"
+      ],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "edited 01: description"
+   ],
+   "error": null
+  },
+  {
+   "name": "edit_done_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "edit",
+     "id": "01",
+     "description": "x"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '01' is done; reopen it first"
+  },
+  {
+   "name": "edit_nothing_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "edit",
+     "id": "02"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: nothing to change on '02'"
+  },
+  {
+   "name": "edit_empty_description_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "edit",
+     "id": "02",
+     "description": " (witness: cmd:true) "
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: description must not be empty"
+  },
+  {
+   "name": "reopen_done",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [
+       "pytest"
+      ],
+      "depends_on": [],
+      "attempts": 2,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "reopen",
+     "id": "01"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 2,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "reopened 01"
+   ],
+   "error": null
+  },
+  {
+   "name": "reopen_todo_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "reopen",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '01' is not done"
+  },
+  {
+   "name": "block_and_unblock",
+   "by": "calvin",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "in_progress",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "block",
+     "id": "03"
+    },
+    {
+     "op": "unblock",
+     "id": "02"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "blocked by calvin",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "blocked 03",
+    "unblocked 02"
+   ],
+   "error": null
+  },
+  {
+   "name": "block_anonymous",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "block",
+     "id": "01"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "blocked by an operator",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "blocked 01"
+   ],
+   "error": null
+  },
+  {
+   "name": "block_blocked_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "in_progress",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "block",
+     "id": "02"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '02' is already blocked"
+  },
+  {
+   "name": "block_done_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "in_progress",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "block",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '01' is done"
+  },
+  {
+   "name": "unblock_todo_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "unblock",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '01' is not blocked"
+  },
+  {
+   "name": "split_item_refused",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "coarse",
+      "status": "split",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02.1",
+      "description": "task 02.1",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "02"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '02' was split"
+  },
+  {
+   "name": "unknown_op",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "rename",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: unknown op 'rename'"
+  },
+  {
+   "name": "missing_op",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: missing 'op'"
+  },
+  {
+   "name": "not_an_object",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    "remove 01"
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: must be an object"
+  },
+  {
+   "name": "unknown_field",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "01",
+     "why": "x",
+     "after": "02"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: unknown field(s) ['after', 'why']"
+  },
+  {
+   "name": "bad_type_witnesses",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "x",
+     "witnesses": "cmd:true"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: 'witnesses' must be a list of strings"
+  },
+  {
+   "name": "bad_type_flag",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "x",
+     "allow_harness_edits": "yes"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: 'allow_harness_edits' must be a boolean"
+  },
+  {
+   "name": "bad_type_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": 1
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: 'id' must be a string"
+  },
+  {
+   "name": "missing_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: 'id' is required"
+  },
+  {
+   "name": "blank_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "  "
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: 'id' is required"
+  },
+  {
+   "name": "unknown_item",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "99"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: unknown item '99'"
+  },
+  {
+   "name": "add_duplicate_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "id": "02",
+     "description": "x"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: item '02' already exists"
+  },
+  {
+   "name": "add_blank_id",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "id": " ",
+     "description": "x"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: 'id' must not be empty"
+  },
+  {
+   "name": "add_empty_description",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "  "
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: description must not be empty"
+  },
+  {
+   "name": "add_after_unknown",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "x",
+     "after": "zz"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #1: unknown item 'zz' in 'after'"
+  },
+  {
+   "name": "add_bad_witness",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "x",
+     "witnesses": [
+      "pytest:bad node"
+     ]
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "item '04': witness 'pytest:bad node': pytest node id must be a path or node id without whitespace, shell metacharacters or a leading '-'"
+  },
+  {
+   "name": "add_unknown_dependency",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "x",
+     "depends_on": [
+      "77"
+     ]
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "invalid checklist: item '04' depends on unknown item '77'"
+  },
+  {
+   "name": "would_be_empty",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "remove",
+     "id": "01"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "the checklist would have no items"
+  },
+  {
+   "name": "empty_batch",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [],
+   "after": null,
+   "summary": null,
+   "error": "edits must be a non-empty list of objects"
+  },
+  {
+   "name": "too_many_edits",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "x0"
+    },
+    {
+     "op": "add",
+     "description": "x1"
+    },
+    {
+     "op": "add",
+     "description": "x2"
+    },
+    {
+     "op": "add",
+     "description": "x3"
+    },
+    {
+     "op": "add",
+     "description": "x4"
+    },
+    {
+     "op": "add",
+     "description": "x5"
+    },
+    {
+     "op": "add",
+     "description": "x6"
+    },
+    {
+     "op": "add",
+     "description": "x7"
+    },
+    {
+     "op": "add",
+     "description": "x8"
+    },
+    {
+     "op": "add",
+     "description": "x9"
+    },
+    {
+     "op": "add",
+     "description": "x10"
+    },
+    {
+     "op": "add",
+     "description": "x11"
+    },
+    {
+     "op": "add",
+     "description": "x12"
+    },
+    {
+     "op": "add",
+     "description": "x13"
+    },
+    {
+     "op": "add",
+     "description": "x14"
+    },
+    {
+     "op": "add",
+     "description": "x15"
+    },
+    {
+     "op": "add",
+     "description": "x16"
+    },
+    {
+     "op": "add",
+     "description": "x17"
+    },
+    {
+     "op": "add",
+     "description": "x18"
+    },
+    {
+     "op": "add",
+     "description": "x19"
+    },
+    {
+     "op": "add",
+     "description": "x20"
+    },
+    {
+     "op": "add",
+     "description": "x21"
+    },
+    {
+     "op": "add",
+     "description": "x22"
+    },
+    {
+     "op": "add",
+     "description": "x23"
+    },
+    {
+     "op": "add",
+     "description": "x24"
+    },
+    {
+     "op": "add",
+     "description": "x25"
+    },
+    {
+     "op": "add",
+     "description": "x26"
+    },
+    {
+     "op": "add",
+     "description": "x27"
+    },
+    {
+     "op": "add",
+     "description": "x28"
+    },
+    {
+     "op": "add",
+     "description": "x29"
+    },
+    {
+     "op": "add",
+     "description": "x30"
+    },
+    {
+     "op": "add",
+     "description": "x31"
+    },
+    {
+     "op": "add",
+     "description": "x32"
+    },
+    {
+     "op": "add",
+     "description": "x33"
+    },
+    {
+     "op": "add",
+     "description": "x34"
+    },
+    {
+     "op": "add",
+     "description": "x35"
+    },
+    {
+     "op": "add",
+     "description": "x36"
+    },
+    {
+     "op": "add",
+     "description": "x37"
+    },
+    {
+     "op": "add",
+     "description": "x38"
+    },
+    {
+     "op": "add",
+     "description": "x39"
+    },
+    {
+     "op": "add",
+     "description": "x40"
+    },
+    {
+     "op": "add",
+     "description": "x41"
+    },
+    {
+     "op": "add",
+     "description": "x42"
+    },
+    {
+     "op": "add",
+     "description": "x43"
+    },
+    {
+     "op": "add",
+     "description": "x44"
+    },
+    {
+     "op": "add",
+     "description": "x45"
+    },
+    {
+     "op": "add",
+     "description": "x46"
+    },
+    {
+     "op": "add",
+     "description": "x47"
+    },
+    {
+     "op": "add",
+     "description": "x48"
+    },
+    {
+     "op": "add",
+     "description": "x49"
+    },
+    {
+     "op": "add",
+     "description": "x50"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "too many edits (51 > 50)"
+  },
+  {
+   "name": "atomic_batch",
+   "by": "",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "add",
+     "description": "fine"
+    },
+    {
+     "op": "remove",
+     "id": "99"
+    }
+   ],
+   "after": null,
+   "summary": null,
+   "error": "edit #2: unknown item '99'"
+  },
+  {
+   "name": "mixed_batch",
+   "by": "ops",
+   "initial": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "done",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "task 02",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "01"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "03",
+      "description": "task 03",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "edits": [
+    {
+     "op": "reopen",
+     "id": "01"
+    },
+    {
+     "op": "remove",
+     "id": "03"
+    },
+    {
+     "op": "add",
+     "description": "Ship it (witness: cmd:true)",
+     "depends_on": [
+      "02"
+     ]
+    },
+    {
+     "op": "edit",
+     "id": "02",
+     "description": "Parse",
+     "depends_on": []
+    },
+    {
+     "op": "block",
+     "id": "01"
+    }
+   ],
+   "after": {
+    "items": [
+     {
+      "id": "01",
+      "description": "task 01",
+      "status": "blocked",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "blocked by ops",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "02",
+      "description": "Parse",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [],
+      "notes": "",
+      "schema_version": 1
+     },
+     {
+      "id": "04",
+      "description": "Ship it",
+      "status": "todo",
+      "verified_by": [],
+      "depends_on": [
+       "02"
+      ],
+      "attempts": 0,
+      "consecutive_failures": 0,
+      "last_failure": "",
+      "allow_harness_edits": false,
+      "witnesses": [
+       "cmd:true"
+      ],
+      "notes": "",
+      "schema_version": 1
+     }
+    ],
+    "schema_version": 1
+   },
+   "summary": [
+    "reopened 01",
+    "removed 03",
+    "added 04",
+    "edited 02: description, depends_on",
+    "blocked 01"
+   ],
+   "error": null
+  }
+ ],
+ "witness_suffix": [
+  {
+   "text": "Do X (witness: cmd:true)",
+   "description": "Do X",
+   "witnesses": [
+    "cmd:true"
+   ]
+  },
+  {
+   "text": "Do  X   (witnesses: cmd:true,  go:TestX , ) and Y",
+   "description": "Do X and Y",
+   "witnesses": [
+    "cmd:true",
+    "go:TestX"
+   ]
+  },
+  {
+   "text": "(Witness: pytest:tests/test_a.py::test_b) lead",
+   "description": "lead",
+   "witnesses": [
+    "pytest:tests/test_a.py::test_b"
+   ]
+  },
+  {
+   "text": "no witnesses here",
+   "description": "no witnesses here",
+   "witnesses": []
+  },
+  {
+   "text": "two (witness: a:b) groups (witness: c:d)",
+   "description": "two groups",
+   "witnesses": [
+    "a:b",
+    "c:d"
+   ]
+  },
+  {
+   "text": "   ",
+   "description": "",
+   "witnesses": []
+  }
+ ],
+ "next_id": [
+  {
+   "ids": [],
+   "reserved": [],
+   "next": "01"
+  },
+  {
+   "ids": [
+    "01",
+    "02",
+    "03"
+   ],
+   "reserved": [],
+   "next": "04"
+  },
+  {
+   "ids": [
+    "01",
+    "04"
+   ],
+   "reserved": [],
+   "next": "05"
+  },
+  {
+   "ids": [
+    "02",
+    "03"
+   ],
+   "reserved": [],
+   "next": "04"
+  },
+  {
+   "ids": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10"
+   ],
+   "reserved": [],
+   "next": "11"
+  },
+  {
+   "ids": [
+    "01",
+    "02",
+    "04"
+   ],
+   "reserved": [],
+   "next": "05"
+  },
+  {
+   "ids": [
+    "01",
+    "03"
+   ],
+   "reserved": [],
+   "next": "04"
+  },
+  {
+   "ids": [
+    "02.1",
+    "02.2",
+    "a"
+   ],
+   "reserved": [],
+   "next": "01"
+  },
+  {
+   "ids": [
+    "1",
+    "2",
+    "3"
+   ],
+   "reserved": [],
+   "next": "04"
+  },
+  {
+   "ids": [
+    "098",
+    "099"
+   ],
+   "reserved": [],
+   "next": "100"
+  },
+  {
+   "ids": [
+    "01"
+   ],
+   "reserved": [
+    "02",
+    "03"
+   ],
+   "next": "04"
+  },
+  {
+   "ids": [
+    "01"
+   ],
+   "reserved": [
+    "02.1",
+    "x"
+   ],
+   "next": "02"
+  },
+  {
+   "ids": [],
+   "reserved": [
+    "07"
+   ],
+   "next": "08"
+  }
+ ]
+}

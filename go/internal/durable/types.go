@@ -118,21 +118,25 @@ type MissionStatusInput struct {
 
 // MissionState is carried across Continue-As-New (pointers + small counters only).
 type MissionState struct {
-	CyclesDone        int              `json:"cycles_done"`
-	Status            string           `json:"status"`
-	HeadSHA           string           `json:"head_sha"`
-	ItemsDone         int              `json:"items_done"`
-	ItemsTotal        int              `json:"items_total"`
-	LastItem          *string          `json:"last_item"`
-	PendingDecision   *string          `json:"pending_decision"`
-	PendingDecisionBy string           `json:"pending_decision_by"` // who sent it (human_decision_v2); "" = unknown
-	SteerNotes        []string         `json:"steer_notes"`
-	Parks             int              `json:"parks"`
-	DeadlockRetries   int              `json:"deadlock_retries"`
-	ApprovedActions   []ApprovedAction `json:"approved_actions"`
-	RejectedActions   []string         `json:"rejected_actions"`
-	FailItem          *string          `json:"fail_item"`
-	FailStreak        int              `json:"fail_streak"`
+	CyclesDone        int      `json:"cycles_done"`
+	Status            string   `json:"status"`
+	HeadSHA           string   `json:"head_sha"`
+	ItemsDone         int      `json:"items_done"`
+	ItemsTotal        int      `json:"items_total"`
+	LastItem          *string  `json:"last_item"`
+	PendingDecision   *string  `json:"pending_decision"`
+	PendingDecisionBy string   `json:"pending_decision_by"` // who sent it (human_decision_v2); "" = unknown
+	SteerNotes        []string `json:"steer_notes"`
+	// PendingEdits are checklist edit batches signalled but not yet applied; ChecklistEdits is
+	// how many were applied so far (the e<n> ids of their anchor commits).
+	PendingEdits    []ChecklistEditRequest `json:"pending_edits"`
+	ChecklistEdits  int                    `json:"checklist_edits"`
+	Parks           int                    `json:"parks"`
+	DeadlockRetries int                    `json:"deadlock_retries"`
+	ApprovedActions []ApprovedAction       `json:"approved_actions"`
+	RejectedActions []string               `json:"rejected_actions"`
+	FailItem        *string                `json:"fail_item"`
+	FailStreak      int                    `json:"fail_streak"`
 	// ResumeAt: no cycle starts before this epoch time; 0 = none.
 	ResumeAt    float64  `json:"resume_at"`
 	Escalations int      `json:"escalations"`
@@ -147,6 +151,7 @@ func (s MissionState) MarshalJSON() ([]byte, error) {
 	type alias MissionState
 	a := alias(s)
 	a.SteerNotes = nz(a.SteerNotes)
+	a.PendingEdits = nz(a.PendingEdits)
 	a.ApprovedActions = nz(a.ApprovedActions)
 	a.RejectedActions = nz(a.RejectedActions)
 	a.GateLog = nz(a.GateLog)
@@ -326,6 +331,37 @@ func (h HealthReport) MarshalJSON() ([]byte, error) {
 	type alias HealthReport
 	a := alias(h)
 	a.Degraded = nz(a.Degraded)
+	return json.Marshal(a)
+}
+
+// ChecklistEditRequest is one checklist_edit_v1 batch waiting to be applied (lha mission-edit).
+type ChecklistEditRequest struct {
+	Edits []map[string]any `json:"edits"`
+	By    string           `json:"by"`
+}
+
+// MarshalJSON never emits null for the edits.
+func (r ChecklistEditRequest) MarshalJSON() ([]byte, error) {
+	type alias ChecklistEditRequest
+	a := alias(r)
+	a.Edits = nz(a.Edits)
+	return json.Marshal(a)
+}
+
+// EditInput applies one operator edit batch to the anchor's checklist (edit_checklist).
+type EditInput struct {
+	MissionID string           `json:"mission_id"`
+	Workdir   string           `json:"workdir"`
+	CycleID   string           `json:"cycle_id"`
+	Edits     []map[string]any `json:"edits"`
+	By        string           `json:"by"`
+}
+
+// MarshalJSON never emits null for the edits.
+func (i EditInput) MarshalJSON() ([]byte, error) {
+	type alias EditInput
+	a := alias(i)
+	a.Edits = nz(a.Edits)
 	return json.Marshal(a)
 }
 

@@ -56,6 +56,8 @@ from lha.safety.egress import (
     normalize_host,
     parse_url,
 )
+from lha.state.checklist_edit import ChecklistEditError, apply_edits, next_item_id
+from lha.state.checklist_import import split_witnesses
 from lha.state.vendor import _target_path
 from lha.verify.harness_integrity import _is_harness_file
 
@@ -155,6 +157,26 @@ def test_checklist() -> None:
     ]
     assert checklist.items_total == split["items_total"]
     assert checklist.is_complete == split["is_complete"]
+
+
+def test_checklist_edit() -> None:
+    spec = _load("state/checklist_edit.json")
+    for case in spec["cases"]:
+        checklist = Checklist.model_validate(case["initial"])
+        try:
+            summary = apply_edits(checklist, case["edits"], by=case["by"])
+        except ChecklistEditError as exc:
+            assert str(exc) == case["error"], case["name"]
+            assert json.loads(checklist.model_dump_json()) == case["initial"], case["name"]
+        else:
+            assert case["error"] is None, case["name"]
+            assert summary == case["summary"], case["name"]
+            assert json.loads(checklist.model_dump_json()) == case["after"], case["name"]
+    for case in spec["witness_suffix"]:
+        assert split_witnesses(case["text"]) == (case["description"], case["witnesses"]), case
+    for case in spec["next_id"]:
+        items = [ChecklistItem(id=i, description=i) for i in case["ids"]]
+        assert next_item_id(Checklist(items=items), case["reserved"]) == case["next"], case
 
 
 def test_decision_chain() -> None:

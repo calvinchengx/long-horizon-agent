@@ -12,7 +12,7 @@ and exit codes. `go/cmd/lha` implements every command: `version`, `config`, `run
 needs no extra for `db migrate`: the Postgres driver is built in), `objects prune`,
 `memory reembed`, `worker`, `mission-start`
 (including the organization options `--research`, `--review` and `--max-parallel`),
-`mission-status`, `mission-approve`, `mission-snooze`, `mission-steer` and `mission-abort`. It installs the trace
+`mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit` and `mission-abort`. It installs the trace
 exporter at start like Python; see [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
@@ -40,6 +40,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`mission-approve`](#lha-mission-approve) | answer the open gate (a queued irreversible action, or the deadlock gate) | Temporal |
 | [`mission-snooze`](#lha-mission-snooze) | sleep a mission before its next cycle, or wake it | Temporal |
 | [`mission-steer`](#lha-mission-steer) | add an operator note that every following cycle's prompt includes | Temporal |
+| [`mission-edit`](#lha-mission-edit) | add, remove, edit, reopen, block or unblock checklist items of a mission in flight | Temporal, or a mission workspace with `--workdir` |
 | [`mission-abort`](#lha-mission-abort) | cancel a durable mission | Temporal |
 
 ## Exit codes
@@ -47,14 +48,14 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | Code | Meaning |
 |---|---|
 | `0` | success; for the local mission commands, every item verified done |
-| `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`, decision log failed verification, model unavailable); `mission`'s Planner call failed because the model stayed unavailable (`error: model unavailable: ...`); `decisions` found a broken chain; `costs` found no ledger rows; or an unhandled error (Python traceback) |
-| `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, a Rule-of-Two violation or invalid web settings, an invalid `--checklist` file, neither or both of `--item`/`--checklist`, an unknown `--decision` or one the open gate does not offer, a refused `vendor` URL) |
+| `1` | a local mission ended without completing (deadlocked, stopped by the governor, loop, `max_cycles`, decision log failed verification, model unavailable); `mission`'s Planner call failed because the model stayed unavailable (`error: model unavailable: ...`); `decisions` found a broken chain; `costs` found no ledger rows; `mission-edit --workdir` refused the batch or found a cycle running; or an unhandled error (Python traceback) |
+| `2` | usage error, or a handled operator error printed as `error: ...` on stderr (bad `--check`, unknown `--sandbox`, unsafe `local` sandbox, missing optional module, missing `LHA_POSTGRES_DSN`, an unusable Postgres store with `LHA_POSTGRES_FALLBACK_TO_SQLITE=false`, a Rule-of-Two violation or invalid web settings, an invalid `--checklist` file, neither or both of `--item`/`--checklist`, an unknown `--decision` or one the open gate does not offer, a refused `vendor` URL, a `mission-edit` call with nothing to do, more than 50 edits, a malformed `ID=VALUE` or an unreadable `--edits` file) |
 | `3` | the budget governor refused the planning call (`mission`, `orchestrate`, `mission-start`) |
 
 Once a local run is under way, a governor refusal (before a cycle or before a single model call)
 stops it normally: the summary is printed with `stopped_reason` `governor: ...` and the exit code
 is `1`. Only a refusal during planning, before anything has run, exits `3`. The Temporal commands
-(`worker`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-abort`) do not
+(`worker`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit`, `mission-abort`) do not
 translate errors: an unreachable server or unknown workflow id ends in a traceback with exit `1`.
 `mission-approve` exits `2` when the decision is unknown or not offered by the open gate.
 
@@ -489,8 +490,9 @@ lha mission-status MISSION_ID
 Queries workflow `mission:MISSION_ID` and prints `status=<status> cycles=<n>`, then, when they
 apply: the open gate (`gate_v1`: kind, id, question, options, default on timeout, opened /
 deadline, reminders sent and the next one, a recommendation, and for a queued action its tool,
-arguments, reason and fingerprint), `sleeping until <time>` (`resume_at`), and the last 8 lines of
-`gate_log_v1`. For a workflow whose worker does not answer `gate_v1` it prints `waiting on:
+arguments, reason and fingerprint), `sleeping until <time>` (`resume_at`), the steering notes,
+`checklist edits pending: <n> (applied before the next cycle)` (`pending_edits`, when a
+[`mission-edit`](#lha-mission-edit) batch is waiting), and the last 8 lines of `gate_log_v1`. For a workflow whose worker does not answer `gate_v1` it prints `waiting on:
 <question>` from `open_question` instead. Works while running and after the workflow has closed;
 a worker must be running to answer the queries.
 
@@ -537,6 +539,56 @@ empty or longer than 2000 characters is refused before anything is sent (exit 2)
 `mission <id>: steering note added (<n> chars; the last 20 notes are kept)`.
 [`mission-status`](#lha-mission-status) lists the notes (`steering notes (<n>, latest last):`,
 the last three, each on one line cut to 120 characters).
+
+## `lha mission-edit`
+
+```
+lha mission-edit MISSION_ID [OPTIONS]
+lha mission-edit --workdir DIR [OPTIONS]
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--add TEXT` | none | add a `todo` item with this description (repeatable); witnesses the roadmap way, `"Do X (witness: cmd:make test, go:TestX)"` |
+| `--remove ID` | none | remove an open item (repeatable); a `done` or `split` item is refused |
+| `--reopen ID` | none | a `done` item back to `todo`, its verification forgotten (repeatable) |
+| `--block ID` | none | park an open item as `blocked` (its `last_failure` says who) (repeatable) |
+| `--unblock ID` | none | a `blocked` item back to `todo` (repeatable) |
+| `--describe ID=TEXT` | none | replace an open item's description (repeatable); a witness suffix adds to its witnesses |
+| `--depends ID=DEP[,DEP]` | none | replace an open item's dependencies; `ID=` clears them (repeatable) |
+| `--edits FILE` | unset | a JSON list of edit objects, or `{"edits": [...]}`, for anything the options cannot say (an explicit `id`, `after`, `witnesses`, `notes`, `allow_harness_edits`); applied before the options |
+| `--as TEXT` | unset | who edits (at most 200 characters); recorded in the anchor's `checklist_edit` event and commit |
+| `--workdir DIR` | unset | edit the anchor of a local mission (`lha mission`, `lha orchestrate`) directly, between runs, instead of signalling a durable one |
+
+One call is one batch. The edit objects are `{"op": "add", "description", "id"?, "witnesses"?,
+"depends_on"?, "after"?, "allow_harness_edits"?, "notes"?}`, `{"op": "remove" | "reopen" |
+"block" | "unblock", "id"}` and `{"op": "edit", "id", "description"?, "witnesses"?,
+"depends_on"?, "notes"?, "allow_harness_edits"?}`; the options become edits in the order
+`--edits` file, `--describe`, `--depends`, `--reopen`, `--unblock`, `--block`, `--remove`,
+`--add`. An added item without an `id` gets one past the largest numeric id the checklist has
+ever had (`04` after `01`..`03`, and still `04` when `03` was removed), so the anchor's history
+never names two items the same. The batch is validated as a whole: unknown items or fields,
+a `done` item edited or removed, dependencies that would dangle, an invalid witness, or a
+checklist left empty refuse the whole batch and change nothing. Statuses the ops do not name are
+untouched: the item a cycle is working stays `in_progress`.
+
+With `MISSION_ID` it sends signal `checklist_edit_v1` (`{"edits": [...], "by": ...}`) and prints
+`mission <id>: <n> checklist edit(s) queued (applied before the next cycle; 'lha mission-status'
+shows the outcome)`. The workflow applies the batch with the `edit_checklist` activity before its
+next cycle starts, at once while the mission sleeps (the sleep goes on), or at the deadlock gate's
+`retry` before the blocked items are reset (so removing or reopening items is how an operator
+resolves a deadlock the blocked items alone cannot); never while a cycle runs, and not while a
+gate is open ([`mission-status`](#lha-mission-status) shows `checklist edits pending`). Each
+applied batch is one anchor-only commit, `lha: checklist edited by <who>`, with a
+`checklist_edit` event; the gate log then shows `checklist edited by <who>: added 04; removed 02`
+or `checklist edit refused: <why>`. A refused batch is dropped; later batches still apply. A
+mission holds at most 20 unapplied batches.
+
+With `--workdir DIR` the same batch is applied to that anchor at once (the checkout is reset to
+`HEAD` first, as before a cycle) and the summary is printed; a refusal exits `1` with the reason,
+as does a cycle holding the workdir lock. Exit `2` before anything is sent or changed: no edit
+given, more than 50, a malformed `ID=VALUE`, an unreadable `--edits` file, both or neither of
+`MISSION_ID` and `--workdir`, `--as` over 200 characters.
 
 ## `lha mission-abort`
 

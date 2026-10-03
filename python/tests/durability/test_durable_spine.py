@@ -34,6 +34,7 @@ from lha.config import Settings
 from lha.contracts.model import ModelProvider, Usage
 from lha.contracts.state import SituationSnapshot
 from lha.durable.activities import (
+    _edit_checklist,
     _execute_cycle,
     _read_snapshot,
     _unblock,
@@ -56,6 +57,7 @@ from lha.durable.types import (
     OUTCOME_DEADLOCKED,
     CycleInput,
     CycleResult,
+    EditInput,
     HealthInput,
     HealthReport,
     MissionInput,
@@ -86,6 +88,11 @@ async def _healthy(inp: HealthInput) -> HealthReport:
 @activity.defn(name="unblock_items")
 async def _unblock_activity(inp: UnblockInput) -> CycleResult:
     return await _unblock(inp)
+
+
+@activity.defn(name="edit_checklist")
+async def _edit_activity(inp: EditInput) -> CycleResult:
+    return await _edit_checklist(inp)
 
 
 @activity.defn(name="read_mission_snapshot")

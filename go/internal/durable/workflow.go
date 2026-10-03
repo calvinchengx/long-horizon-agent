@@ -125,6 +125,7 @@ type missionRun struct {
 	decisionBy   string // who sent the decision takeDecision last consumed
 	steerCh      workflow.ReceiveChannel
 	snoozeCh     workflow.ReceiveChannel
+	editCh       workflow.ReceiveChannel
 }
 
 func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
@@ -137,6 +138,7 @@ func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
 	w.decisionV2Ch = workflow.GetSignalChannel(ctx, SignalHumanDecisionV2)
 	w.steerCh = workflow.GetSignalChannel(ctx, SignalSteer)
 	w.snoozeCh = workflow.GetSignalChannel(ctx, SignalSnooze)
+	w.editCh = workflow.GetSignalChannel(ctx, SignalChecklistEdit)
 	w.drainSignals(ctx)
 
 	st := NewMissionState()
@@ -148,6 +150,10 @@ func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
 		st.PendingDecisionBy = early.PendingDecisionBy
 	}
 	st.SteerNotes = lastN(append(append([]string{}, st.SteerNotes...), early.SteerNotes...), MaxSteerNotes)
+	st.PendingEdits = append(append([]ChecklistEditRequest{}, st.PendingEdits...), early.PendingEdits...)
+	if len(st.PendingEdits) > MaxPendingEdits {
+		st.PendingEdits = st.PendingEdits[:MaxPendingEdits]
+	}
 	if inp.State == nil {
 		st.ResumeAt = math.Max(inp.ResumeAt, early.ResumeAt)
 	} else if early.ResumeAt != 0 {
@@ -169,6 +175,7 @@ func newMissionRun(ctx workflow.Context, inp MissionInput) *missionRun {
 func copyState(s MissionState) MissionState {
 	c := s
 	c.SteerNotes = append([]string{}, s.SteerNotes...)
+	c.PendingEdits = append([]ChecklistEditRequest{}, s.PendingEdits...)
 	c.ApprovedActions = append([]ApprovedAction{}, s.ApprovedActions...)
 	c.RejectedActions = append([]string{}, s.RejectedActions...)
 	c.GateLog = append([]string{}, s.GateLog...)
@@ -203,6 +210,11 @@ func (w *missionRun) addSignalHandlers(ctx workflow.Context, sel workflow.Select
 		c.Receive(ctx, &v)
 		w.onSnooze(ctx, v)
 	})
+	sel.AddReceive(w.editCh, func(c workflow.ReceiveChannel, _ bool) {
+		var v any
+		c.Receive(ctx, &v)
+		w.onChecklistEdit(ctx, v)
+	})
 }
 
 // drainSignals applies every buffered signal now (before the run starts and before
@@ -219,6 +231,8 @@ func (w *missionRun) drainSignals(ctx workflow.Context) {
 			w.onSteer(v)
 		case w.snoozeCh.ReceiveAsync(&v):
 			w.onSnooze(ctx, v)
+		case w.editCh.ReceiveAsync(&v):
+			w.onChecklistEdit(ctx, v)
 		default:
 			return
 		}
@@ -282,6 +296,35 @@ func (w *missionRun) onSnooze(ctx workflow.Context, v any) {
 	}
 }
 
+// onChecklistEdit queues a checklist edit batch ({"edits": [...], "by": str}). It is applied by
+// the edit_checklist activity before the next cycle starts (or while the mission sleeps), never
+// while a cycle runs; a refused batch is reported in the gate log.
+func (w *missionRun) onChecklistEdit(ctx workflow.Context, v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	raw, ok := m["edits"].([]any)
+	if !ok || len(raw) == 0 {
+		return
+	}
+	if len(w.state.PendingEdits) >= MaxPendingEdits {
+		w.log(ctx, fmt.Sprintf("checklist edit dropped: %d batches already pending", MaxPendingEdits))
+		return
+	}
+	by := ""
+	if m["by"] != nil {
+		by = headRunes(pyfmt.PyStrip(fmt.Sprint(m["by"])), 200)
+	}
+	edits := []map[string]any{}
+	for _, e := range raw {
+		if em, ok := e.(map[string]any); ok {
+			edits = append(edits, em)
+		}
+	}
+	w.state.PendingEdits = append(append([]ChecklistEditRequest{}, w.state.PendingEdits...), ChecklistEditRequest{Edits: edits, By: by})
+}
+
 func (w *missionRun) registerQueries(ctx workflow.Context) {
 	must := func(err error) {
 		if err != nil {
@@ -301,6 +344,7 @@ func (w *missionRun) registerQueries(ctx workflow.Context) {
 	must(workflow.SetQueryHandler(ctx, QuerySteerNotes, func() ([]string, error) {
 		return append([]string{}, w.state.SteerNotes...), nil
 	}))
+	must(workflow.SetQueryHandler(ctx, QueryPendingEdits, func() (int, error) { return len(w.state.PendingEdits), nil }))
 	must(workflow.SetQueryHandler(ctx, QueryRejectedDecisions, func() ([]string, error) {
 		return append([]string{}, w.rejectedDecisions...), nil
 	}))
@@ -344,6 +388,9 @@ func (w *missionRun) runMission(ctx workflow.Context) (MissionResult, error) {
 			return w.terminal(ctx, OutcomeMaxCycles, "iteration ceiling reached")
 		}
 		if err := w.sleepUntilResume(ctx); err != nil {
+			return MissionResult{}, err
+		}
+		if _, err := w.applyEdits(ctx); err != nil { // operator edits land before a cycle reads the anchor
 			return MissionResult{}, err
 		}
 		st.Status = StatusRunning
@@ -636,12 +683,20 @@ func (w *missionRun) sleepUntilResume(ctx workflow.Context) error {
 		if remaining <= 0 {
 			break
 		}
-		moved, err := workflow.AwaitWithTimeout(ctx, seconds(remaining), func() bool { return st.ResumeAt != target })
+		moved, err := workflow.AwaitWithTimeout(ctx, seconds(remaining), func() bool {
+			return st.ResumeAt != target || len(st.PendingEdits) > 0
+		})
 		if err != nil {
 			return err
 		}
 		if !moved {
 			break
+		}
+		if len(st.PendingEdits) > 0 { // edits are applied while sleeping; the sleep goes on
+			if _, err := w.applyEdits(ctx); err != nil {
+				return err
+			}
+			st.Status = StatusSleeping
 		}
 	}
 	st.ResumeAt = 0
@@ -828,11 +883,17 @@ func (w *missionRun) onDeadlock(ctx workflow.Context, result CycleResult) (strin
 	}
 	switch decision {
 	case "retry":
-		advanced, err := w.unblock(ctx)
+		// Edits sent while the gate was open land first: removing or reopening items is how an
+		// operator resolves a deadlock the blocked items alone cannot.
+		edited, err := w.applyEdits(ctx)
 		if err != nil {
 			return "", "", false, err
 		}
-		if advanced {
+		unblocked, err := w.unblock(ctx)
+		if err != nil {
+			return "", "", false, err
+		}
+		if unblocked.Advanced || (edited != nil && !unblocked.IsDeadlocked) {
 			return "", "", true, nil
 		}
 		return OutcomeDeadlocked, reason, false, nil
@@ -862,7 +923,38 @@ func pyNone(p *string) string {
 	return *p
 }
 
-func (w *missionRun) unblock(ctx workflow.Context) (bool, error) {
+// applyEdits applies every pending checklist edit batch (one edit_checklist activity each, in
+// arrival order); it returns the last applied result, or nil when none applied. A refused batch
+// is logged (mission-status) and dropped; the others still apply.
+func (w *missionRun) applyEdits(ctx workflow.Context) (*CycleResult, error) {
+	st := w.state
+	var last *CycleResult
+	for len(st.PendingEdits) > 0 && workflow.GetVersion(ctx, VersionChecklistEdit, workflow.DefaultVersion, 1) != workflow.DefaultVersion {
+		req := st.PendingEdits[0]
+		st.PendingEdits = append([]ChecklistEditRequest{}, st.PendingEdits[1:]...)
+		st.ChecklistEdits++
+		actx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
+			StartToCloseTimeout: 5 * time.Minute,
+			RetryPolicy:         shortRetry,
+		})
+		var result CycleResult
+		if err := workflow.ExecuteActivity(actx, ActivityEditChecklist, EditInput{
+			MissionID: w.inp.MissionID, Workdir: w.inp.Workdir, CycleID: fmt.Sprintf("e%d", st.ChecklistEdits),
+			Edits: req.Edits, By: req.By,
+		}).Get(ctx, &result); err != nil {
+			return nil, err
+		}
+		w.absorb(result)
+		w.log(ctx, result.Note)
+		if result.Advanced {
+			r := result
+			last = &r
+		}
+	}
+	return last, nil
+}
+
+func (w *missionRun) unblock(ctx workflow.Context) (CycleResult, error) {
 	st := w.state
 	st.DeadlockRetries++
 	actx := workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
@@ -873,11 +965,11 @@ func (w *missionRun) unblock(ctx workflow.Context) (bool, error) {
 	if err := workflow.ExecuteActivity(actx, ActivityUnblockItems, UnblockInput{
 		MissionID: w.inp.MissionID, Workdir: w.inp.Workdir, CycleID: fmt.Sprintf("u%d", st.DeadlockRetries),
 	}).Get(ctx, &unblocked); err != nil {
-		return false, err
+		return CycleResult{}, err
 	}
 	w.absorb(unblocked)
 	st.FailItem, st.FailStreak = nil, 0
-	return unblocked.Advanced, nil
+	return unblocked, nil
 }
 
 // recordRow writes a status the workflow owns to the missions row (an activity; best effort):

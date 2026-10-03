@@ -281,6 +281,14 @@ as a `gate_opened` / `gate_reminder` / `gate_resolved` / `gate_defaulted` event,
 **Sleeping.** `mission-snooze --seconds N` parks the mission on a durable timer (status
 `SLEEPING`) before its next cycle; `--seconds 0` wakes it. A cycle already running finishes first.
 
+**Editing the checklist.** `lha mission-edit <id> --add "..." --remove 04 --reopen 02 ...`
+([17-cli.md](17-cli.md#lha-mission-edit)) sends `checklist_edit_v1`. The batch lands before the
+next cycle, at once while the mission sleeps, or at the deadlock gate's `retry`; never mid-cycle.
+To change the plan without a cycle running in between: snooze, edit, check `mission-status` for
+`checklist edited by ...` (or `checklist edit refused: ...`) in the gate events, then wake it. At
+a deadlock gate, send the edits first and then `--decision retry`; the retry keeps going when the
+edits left nothing blocked.
+
 `mission-abort` requests cancellation of the workflow. Temporal delivers it to a running
 `run_agent_cycle` with the response to a heartbeat (the activity heartbeats every 5 s; the SDK
 sends one to the server at most every 60 s by default); a cancelled cycle never parks the mission.

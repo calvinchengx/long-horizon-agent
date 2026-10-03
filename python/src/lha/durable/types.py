@@ -14,6 +14,7 @@ turns the input into a ``dict``. State carried across Continue-As-New therefore 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 # Mission outcomes reported in ``MissionResult.outcome``.
 OUTCOME_COMPLETED = "completed"
@@ -120,6 +121,14 @@ class MissionStatusInput:
 
 
 @dataclass
+class ChecklistEditRequest:
+    """One ``checklist_edit_v1`` batch waiting to be applied (``lha mission-edit``)."""
+
+    edits: list[dict[str, Any]] = field(default_factory=list)
+    by: str = ""
+
+
+@dataclass
 class MissionState:
     """State carried across Continue-As-New (pointers + small counters only — never history)."""
 
@@ -135,6 +144,10 @@ class MissionState:
     pending_decision_by: str = ""  # who sent it (``human_decision_v2``); "" = unknown
     # Operator steering notes (``steer`` signal); every following cycle's prompt includes them.
     steer_notes: list[str] = field(default_factory=list)
+    # Checklist edit batches signalled but not yet applied, and how many were applied so far
+    # (the ``e<n>`` ids of their anchor commits).
+    pending_edits: list[ChecklistEditRequest] = field(default_factory=list)
+    checklist_edits: int = 0
     # How many times the mission parked on a degraded dependency (observability).
     parks: int = 0
     # How many times a human chose to retry blocked items after a deadlock.
@@ -268,6 +281,17 @@ class UnblockInput:
     mission_id: str
     workdir: str
     cycle_id: str
+
+
+@dataclass
+class EditInput:
+    """Apply one operator edit batch to the anchor's checklist (``edit_checklist``)."""
+
+    mission_id: str
+    workdir: str
+    cycle_id: str
+    edits: list[dict[str, Any]] = field(default_factory=list)
+    by: str = ""
 
 
 @dataclass

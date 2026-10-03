@@ -249,6 +249,9 @@ row stays in the mission store; `lha config` prints where that is.
 
 ## What to try next
 
+- Change the plan while it runs: `lha mission-snooze <id> --seconds 3600`, then
+  `lha mission-edit <id> --add "..." --remove 03`, check `mission-status`, then `--seconds 0`
+  ([CLI](17-cli.md#lha-mission-edit)).
 - Give the same roadmap to a durable organization: `--research 1 --review` adds researchers and
   an independent reviewer ([multi-agent organization](11-multi-agent-organization.md)).
 - Run the same steps with the Go CLI: `go build -o lha ./cmd/lha` from `go/`. It has the same

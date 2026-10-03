@@ -74,6 +74,8 @@ from lha.safety.egress import (  # noqa: E402
     normalize_host,
     parse_url,
 )
+from lha.state.checklist_edit import ChecklistEditError, apply_edits, next_item_id  # noqa: E402
+from lha.state.checklist_import import split_witnesses  # noqa: E402
 from lha.state.vendor import _target_path  # noqa: E402
 from lha.verify.harness_integrity import _is_harness_file  # noqa: E402
 from lha.verify.witnesses import witness_command  # noqa: E402
@@ -423,6 +425,240 @@ def export_checklist() -> None:
             "transitions": {"initial": initial, "steps": steps},
             "split": splits,
         },
+    )
+
+
+# --- state/checklist_edit: operator edits (lha mission-edit) ---------------------------------
+
+
+def _edit_cases() -> list[dict[str, Any]]:
+    fresh = [_item("01"), _item("02", deps=["01"]), _item("03")]
+    done_first = [_item("01", "done"), _item("02", deps=["01"]), _item("03")]
+    blocked = [_item("01", "done"), _item("02", "blocked"), _item("03", "in_progress")]
+    split = [
+        _item("01", "done"),
+        ChecklistItem(id="02", description="coarse", status="split"),
+        _item("02.1"),
+    ]
+    verified = [
+        ChecklistItem(
+            id="01",
+            description="task 01",
+            status="done",
+            verified_by=["pytest"],
+            attempts=2,
+            consecutive_failures=0,
+            last_failure="",
+        ),
+        _item("02"),
+    ]
+    cases: list[tuple[str, list[ChecklistItem], list[Any], str]] = [
+        (
+            "add_default_id",
+            fresh,
+            [{"op": "add", "description": "Write docs (witness: cmd:true)"}],
+            "",
+        ),
+        (
+            "add_after_with_fields",
+            fresh,
+            [
+                {
+                    "op": "add",
+                    "id": "02a",
+                    "description": " Fix the parser ",
+                    "after": "02",
+                    "depends_on": ["01", " 02 "],
+                    "witnesses": ["go:TestParser"],
+                    "allow_harness_edits": True,
+                    "notes": "operator-added",
+                }
+            ],
+            "",
+        ),
+        (
+            "add_tenth_item_width",
+            [_item(f"{n:02d}") for n in range(1, 10)],
+            [{"op": "add", "description": "ten"}],
+            "",
+        ),
+        ("remove_open", fresh, [{"op": "remove", "id": "03"}], ""),
+        ("remove_in_progress", blocked, [{"op": "remove", "id": "03"}], ""),
+        ("remove_done_refused", done_first, [{"op": "remove", "id": "01"}], ""),
+        ("remove_dependency_refused", fresh, [{"op": "remove", "id": "01"}], ""),
+        (
+            "remove_with_dependent_in_same_batch",
+            fresh,
+            [{"op": "remove", "id": "01"}, {"op": "remove", "id": "02"}],
+            "",
+        ),
+        (
+            "add_after_remove_never_reuses_an_id",
+            fresh,
+            [{"op": "remove", "id": "03"}, {"op": "add", "description": "x"}],
+            "",
+        ),
+        (
+            "edit_fields",
+            fresh,
+            [
+                {
+                    "op": "edit",
+                    "id": "02",
+                    "description": "Parse it (witnesses: cmd:true, go:TestParse)",
+                    "depends_on": [],
+                    "notes": "n",
+                    "allow_harness_edits": True,
+                }
+            ],
+            "",
+        ),
+        (
+            "edit_witnesses_replace",
+            fresh,
+            [{"op": "edit", "id": "02", "witnesses": ["cmd:make test"]}],
+            "",
+        ),
+        (
+            "edit_description_keeps_witnesses",
+            [ChecklistItem(id="01", description="x", witnesses=["cmd:true"])],
+            [{"op": "edit", "id": "01", "description": "y"}],
+            "",
+        ),
+        ("edit_done_refused", done_first, [{"op": "edit", "id": "01", "description": "x"}], ""),
+        ("edit_nothing_refused", fresh, [{"op": "edit", "id": "02"}], ""),
+        (
+            "edit_empty_description_refused",
+            fresh,
+            [{"op": "edit", "id": "02", "description": " (witness: cmd:true) "}],
+            "",
+        ),
+        ("reopen_done", verified, [{"op": "reopen", "id": "01"}], ""),
+        ("reopen_todo_refused", fresh, [{"op": "reopen", "id": "01"}], ""),
+        (
+            "block_and_unblock",
+            blocked,
+            [{"op": "block", "id": "03"}, {"op": "unblock", "id": "02"}],
+            "calvin",
+        ),
+        ("block_anonymous", fresh, [{"op": "block", "id": "01"}], ""),
+        ("block_blocked_refused", blocked, [{"op": "block", "id": "02"}], ""),
+        ("block_done_refused", blocked, [{"op": "block", "id": "01"}], ""),
+        ("unblock_todo_refused", fresh, [{"op": "unblock", "id": "01"}], ""),
+        ("split_item_refused", split, [{"op": "remove", "id": "02"}], ""),
+        ("unknown_op", fresh, [{"op": "rename", "id": "01"}], ""),
+        ("missing_op", fresh, [{"id": "01"}], ""),
+        ("not_an_object", fresh, ["remove 01"], ""),
+        ("unknown_field", fresh, [{"op": "remove", "id": "01", "why": "x", "after": "02"}], ""),
+        (
+            "bad_type_witnesses",
+            fresh,
+            [{"op": "add", "description": "x", "witnesses": "cmd:true"}],
+            "",
+        ),
+        (
+            "bad_type_flag",
+            fresh,
+            [{"op": "add", "description": "x", "allow_harness_edits": "yes"}],
+            "",
+        ),
+        ("bad_type_id", fresh, [{"op": "remove", "id": 1}], ""),
+        ("missing_id", fresh, [{"op": "remove"}], ""),
+        ("blank_id", fresh, [{"op": "remove", "id": "  "}], ""),
+        ("unknown_item", fresh, [{"op": "remove", "id": "99"}], ""),
+        ("add_duplicate_id", fresh, [{"op": "add", "id": "02", "description": "x"}], ""),
+        ("add_blank_id", fresh, [{"op": "add", "id": " ", "description": "x"}], ""),
+        ("add_empty_description", fresh, [{"op": "add", "description": "  "}], ""),
+        ("add_after_unknown", fresh, [{"op": "add", "description": "x", "after": "zz"}], ""),
+        (
+            "add_bad_witness",
+            fresh,
+            [{"op": "add", "description": "x", "witnesses": ["pytest:bad node"]}],
+            "",
+        ),
+        (
+            "add_unknown_dependency",
+            fresh,
+            [{"op": "add", "description": "x", "depends_on": ["77"]}],
+            "",
+        ),
+        ("would_be_empty", [_item("01")], [{"op": "remove", "id": "01"}], ""),
+        ("empty_batch", fresh, [], ""),
+        ("too_many_edits", fresh, [{"op": "add", "description": f"x{n}"} for n in range(51)], ""),
+        (
+            "atomic_batch",
+            fresh,
+            [{"op": "add", "description": "fine"}, {"op": "remove", "id": "99"}],
+            "",
+        ),
+        (
+            "mixed_batch",
+            done_first,
+            [
+                {"op": "reopen", "id": "01"},
+                {"op": "remove", "id": "03"},
+                {"op": "add", "description": "Ship it (witness: cmd:true)", "depends_on": ["02"]},
+                {"op": "edit", "id": "02", "description": "Parse", "depends_on": []},
+                {"op": "block", "id": "01"},
+            ],
+            "ops",
+        ),
+    ]
+    out: list[dict[str, Any]] = []
+    for name, items, edits, by in cases:
+        checklist = Checklist(items=[i.model_copy(deep=True) for i in items])
+        initial = json.loads(checklist.model_dump_json())
+        case: dict[str, Any] = {"name": name, "by": by, "initial": initial, "edits": edits}
+        try:
+            summary = apply_edits(checklist, edits, by=by)
+        except ChecklistEditError as exc:
+            assert json.loads(checklist.model_dump_json()) == initial, name
+            case.update(after=None, summary=None, error=str(exc))
+        else:
+            case.update(after=json.loads(checklist.model_dump_json()), summary=summary, error=None)
+        out.append(case)
+    return out
+
+
+def export_checklist_edit() -> None:
+    suffix_texts = [
+        "Do X (witness: cmd:true)",
+        "Do  X   (witnesses: cmd:true,  go:TestX , ) and Y",
+        "(Witness: pytest:tests/test_a.py::test_b) lead",
+        "no witnesses here",
+        "two (witness: a:b) groups (witness: c:d)",
+        "   ",
+    ]
+    suffix = [
+        {"text": t, "description": split_witnesses(t)[0], "witnesses": split_witnesses(t)[1]}
+        for t in suffix_texts
+    ]
+    id_sets: list[tuple[list[str], list[str]]] = [
+        ([], []),
+        (["01", "02", "03"], []),
+        (["01", "04"], []),
+        (["02", "03"], []),
+        ([f"{n:02d}" for n in range(1, 11)], []),
+        (["01", "02", "04"], []),
+        (["01", "03"], []),
+        (["02.1", "02.2", "a"], []),
+        (["1", "2", "3"], []),
+        (["098", "099"], []),
+        (["01"], ["02", "03"]),  # removed earlier: never reused
+        (["01"], ["02.1", "x"]),
+        ([], ["07"]),
+    ]
+    next_ids = [
+        {
+            "ids": ids,
+            "reserved": reserved,
+            "next": next_item_id(Checklist(items=[_item(i) for i in ids]), reserved),
+        }
+        for ids, reserved in id_sets
+    ]
+    _write(
+        "state/checklist_edit.json",
+        {"cases": _edit_cases(), "witness_suffix": suffix, "next_id": next_ids},
     )
 
 
@@ -3315,6 +3551,7 @@ def main() -> None:
     export_redact()
     export_check_names()
     export_checklist()
+    export_checklist_edit()
     export_decision_chain()
     export_ownership()
     export_harness_files()

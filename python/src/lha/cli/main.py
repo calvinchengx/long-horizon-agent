@@ -1131,7 +1131,13 @@ def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) ->
     from datetime import UTC, datetime
 
     from lha.config import get_settings
-    from lha.durable.signals import QUERY_CYCLES, QUERY_GATE_LOG, QUERY_STATUS, QUERY_STEER_NOTES
+    from lha.durable.signals import (
+        QUERY_CYCLES,
+        QUERY_GATE_LOG,
+        QUERY_PENDING_EDITS,
+        QUERY_STATUS,
+        QUERY_STEER_NOTES,
+    )
     from lha.durable.worker import connect_client
 
     async def _run() -> list[str]:
@@ -1154,6 +1160,9 @@ def mission_status(mission_id: str = typer.Argument(..., help="Mission id.")) ->
         if notes:
             lines.append(f"steering notes ({len(notes)}, latest last):")
             lines += [f"  {_one_line(n, 120)}" for n in notes[-3:]]
+        pending = await _optional_query(handle.query(QUERY_PENDING_EDITS)) or 0
+        if pending:
+            lines.append(f"checklist edits pending: {pending} (applied before the next cycle)")
         log = await _optional_query(handle.query(QUERY_GATE_LOG)) or []
         if log:
             lines.append("recent gate events:")
@@ -1266,6 +1275,156 @@ def mission_steer(
     typer.echo(
         f"mission {mission_id}: steering note added ({len(text)} chars; "
         f"the last {MAX_STEER_NOTES} notes are kept)"
+    )
+
+
+_EDIT_ADD_HELP = (
+    "Add an item with this description (repeatable); witnesses the roadmap way: "
+    "'Do X (witness: cmd:make test)'."
+)
+_EDIT_DESCRIBE_HELP = "ID=TEXT: replace an open item's description (repeatable)."
+_EDIT_DEPENDS_HELP = "ID=DEP[,DEP]: replace an open item's dependencies (ID= clears them)."
+_EDIT_FILE_HELP = (
+    'A JSON file with a list of edit objects (or {"edits": [...]}): op add | remove | edit | '
+    "reopen | block | unblock; applied before the options below."
+)
+_EDIT_WORKDIR_HELP = (
+    "Edit the checklist of the mission anchored in this directory directly (a mission run "
+    "with 'lha mission' or 'lha orchestrate', between runs) instead of signalling a durable one."
+)
+
+
+def _edit_ops(
+    *,
+    edits_file: str | None,
+    describe: list[str],
+    depends: list[str],
+    reopen: list[str],
+    unblock: list[str],
+    block: list[str],
+    remove: list[str],
+    add: list[str],
+) -> list[dict[str, object]]:
+    """The ``checklist_edit_v1`` batch an ``lha mission-edit`` invocation describes."""
+    import json
+    from pathlib import Path
+
+    ops: list[dict[str, object]] = []
+    if edits_file:
+        try:
+            data = json.loads(Path(edits_file).read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            _fail(f"cannot read --edits {edits_file!r}: {exc}")
+        if isinstance(data, dict):
+            data = data.get("edits")
+        if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+            _fail(f"--edits {edits_file!r}: expected a JSON list of edit objects")
+        ops += data
+
+    def split(option: str, value: str) -> tuple[str, str]:
+        item_id, sep, rest = value.partition("=")
+        if not sep or not item_id.strip():
+            _fail(f"{option} expects ID=VALUE (got {value!r})")
+        return item_id.strip(), rest
+
+    for value in describe:
+        item_id, text = split("--describe", value)
+        ops.append({"op": "edit", "id": item_id, "description": text})
+    for value in depends:
+        item_id, text = split("--depends", value)
+        deps = [d.strip() for d in text.split(",") if d.strip()]
+        ops.append({"op": "edit", "id": item_id, "depends_on": deps})
+    ops += [{"op": "reopen", "id": i} for i in reopen]
+    ops += [{"op": "unblock", "id": i} for i in unblock]
+    ops += [{"op": "block", "id": i} for i in block]
+    ops += [{"op": "remove", "id": i} for i in remove]
+    ops += [{"op": "add", "description": text} for text in add]
+    return ops
+
+
+@app.command(name="mission-edit")
+def mission_edit(
+    mission_id: str | None = typer.Argument(None, help="Mission id (omit with --workdir)."),
+    add: list[str] = typer.Option([], "--add", help=_EDIT_ADD_HELP),
+    remove: list[str] = typer.Option([], "--remove", help="Remove an open item (repeatable)."),
+    reopen: list[str] = typer.Option([], "--reopen", help="Reopen a done item (repeatable)."),
+    block: list[str] = typer.Option([], "--block", help="Block an open item (repeatable)."),
+    unblock: list[str] = typer.Option([], "--unblock", help="Unblock a blocked item (repeatable)."),
+    describe: list[str] = typer.Option([], "--describe", help=_EDIT_DESCRIBE_HELP),
+    depends: list[str] = typer.Option([], "--depends", help=_EDIT_DEPENDS_HELP),
+    edits_file: str | None = typer.Option(None, "--edits", help=_EDIT_FILE_HELP),
+    by: str = typer.Option("", "--as", help="Who edits; recorded in the anchor's event."),
+    workdir: str | None = typer.Option(None, "--workdir", help=_EDIT_WORKDIR_HELP),
+) -> None:
+    """Add, remove, edit, reopen, block or unblock checklist items of a mission in flight.
+
+    A durable mission applies the batch before its next cycle (or while it sleeps or at the
+    deadlock gate's 'retry'), never mid-cycle; 'lha mission-status' shows it pending, then the
+    gate log shows what was applied or why the batch was refused. Edits are validated as one
+    batch: one bad edit refuses them all.
+    """
+    from lha.state.checklist_edit import MAX_EDIT_OPS
+
+    if bool(mission_id) == bool(workdir):
+        _fail("give MISSION_ID (a durable mission) or --workdir DIR (a local one), not both")
+    by = by.strip()
+    if len(by) > 200:
+        _fail("--as is longer than 200 characters")
+    ops = _edit_ops(
+        edits_file=edits_file,
+        describe=describe,
+        depends=depends,
+        reopen=reopen,
+        unblock=unblock,
+        block=block,
+        remove=remove,
+        add=add,
+    )
+    if not ops:
+        _fail(
+            "nothing to do: give at least one of --add, --remove, --reopen, --block, --unblock, "
+            "--describe, --depends or --edits FILE"
+        )
+    if len(ops) > MAX_EDIT_OPS:
+        _fail(f"{len(ops)} edits; at most {MAX_EDIT_OPS} per batch")
+
+    if workdir:
+        from lha.durable.activities import EDIT_EVENT, _edit_checklist
+        from lha.durable.types import EditInput
+        from lha.state.locks import WorkdirBusyError
+        from lha.state.mission_anchor import GitMissionAnchor
+
+        async def _local() -> str:
+            anchor = GitMissionAnchor(workdir)
+            done = sum(1 for e in await anchor.read_events() if e.kind == EDIT_EVENT)
+            try:
+                result = await _edit_checklist(
+                    EditInput(
+                        mission_id="", workdir=workdir, cycle_id=f"e{done + 1}", edits=ops, by=by
+                    )
+                )
+            except WorkdirBusyError:
+                _fail(f"a cycle is running in {workdir}; edit the mission by id instead", code=1)
+            if not result.advanced:
+                _fail(result.note, code=1)
+            return result.note
+
+        typer.echo(_run_cli(_local()))
+        return
+
+    from lha.durable.signals import SIGNAL_CHECKLIST_EDIT
+    from lha.durable.worker import connect_client
+
+    async def _signal() -> None:
+        client = await connect_client(get_settings())
+        handle = client.get_workflow_handle(f"mission:{mission_id}")
+        await handle.signal(SIGNAL_CHECKLIST_EDIT, {"edits": ops, "by": by})
+
+    _run_cli(_signal())
+    plural = "" if len(ops) == 1 else "s"
+    typer.echo(
+        f"mission {mission_id}: {len(ops)} checklist edit{plural} queued (applied before the "
+        "next cycle; 'lha mission-status' shows the outcome)"
     )
 
 

@@ -24,6 +24,7 @@ the two worker implementations ([cross-language workers](#cross-language-workers
 | Activity | `run_agent_cycle`: `CycleInput` -> `CycleResult` | [`durable/activities.py`](../python/src/lha/durable/activities.py) |
 | Activity | `check_mission_health`: `HealthInput` -> `HealthReport` | same |
 | Activity | `unblock_items`: `UnblockInput` -> `CycleResult` | same |
+| Activity | `edit_checklist`: `EditInput` -> `CycleResult` | same |
 | Activity | `read_mission_snapshot`: `HealthInput` -> `CycleResult` | same |
 | Activity | `notify_gate`: `GateNotice` -> `NoticeResult` | same |
 | Activity | `declare_impossible`: `FinalizeInput` -> `CycleResult` | same |
@@ -36,6 +37,7 @@ the two worker implementations ([cross-language workers](#cross-language-workers
 | Signal | `human_decision_v1` (string); `human_decision_v2` (`{"decision": str, "by": str}`) | [`durable/signals.py`](../python/src/lha/durable/signals.py) |
 | Signal | `steer_v1` (string) | same |
 | Signal | `snooze_v1` (int seconds; `0` wakes a sleeping mission) | same |
+| Signal | `checklist_edit_v1` (`{"edits": [edit objects], "by": str}`; see [17-cli.md](17-cli.md#lha-mission-edit)) | same |
 | Query | `status_v1` -> string | same |
 | Query | `gate_v1` -> `GateView` or null | same |
 | Query | `gate_log_v1` -> list of strings (at most 50, oldest first) | same |
@@ -45,6 +47,8 @@ the two worker implementations ([cross-language workers](#cross-language-workers
 | Query | `park_reason` -> string | `MissionWorkflow` |
 | Query | `open_question` -> string (`""` when no gate is open) | `MissionWorkflow` |
 | Query | `rejected_decisions` -> list of strings | `MissionWorkflow` |
+| Query | `steer_notes` -> list of strings (at most 20, oldest first) | `MissionWorkflow` |
+| Query | `pending_edits` -> int (edit batches queued, not yet applied) | `MissionWorkflow` |
 | Update | `verify_verdict_v1` | constant only; no handler exists |
 
 Identifiers:
@@ -117,7 +121,7 @@ Continue-As-New rides inside `MissionInput.state`.
 | Type | Fields (default) |
 |---|---|
 | `MissionInput` | `mission_id: str`, `workdir: str`, `max_cycles: int (1000)`, `cycles_before_can: int (200)`, `check_commands: list[list[str]] \| null (null)`, `budget_usd: float \| null (null)`, `park_initial_seconds: int (60)`, `park_max_seconds: int (3600)`, `deadlock_gate_seconds: int (0)`, `approval_timeout_seconds: int (86400)`, `gate_escalation_seconds: list[int] ([900, 2700, 14400, 43200])`, `deadlock_gate_default: str ("abort")`, `impossible_after_failures: int (3)`, `cycle_pause_seconds: int (0)`, `resume_at: float (0.0)` (epoch seconds; scheduled start), `research_per_item: int (0)` (0 to 4), `review: bool (false)`, `max_parallel: int (0)` (0 to 8), `state: MissionState \| null (null)` |
-| `MissionState` | `cycles_done: int (0)`, `status: str ("RUNNING")`, `head_sha: str ("")`, `items_done: int (0)`, `items_total: int (0)`, `last_item: str \| null`, `pending_decision: str \| null`, `steer_notes: list[str] ([])`, `parks: int (0)`, `deadlock_retries: int (0)`, `approved_actions: list[ApprovedAction] ([])`, `rejected_actions: list[str] ([])` (fingerprints), `fail_item: str \| null (null)`, `fail_streak: int (0)`, `resume_at: float (0.0)`, `escalations: int (0)`, `gate_log: list[str] ([])` |
+| `MissionState` | `cycles_done: int (0)`, `status: str ("RUNNING")`, `head_sha: str ("")`, `items_done: int (0)`, `items_total: int (0)`, `last_item: str \| null`, `pending_decision: str \| null`, `pending_decision_by: str ("")`, `steer_notes: list[str] ([])`, `pending_edits: list[ChecklistEditRequest] ([])`, `checklist_edits: int (0)`, `parks: int (0)`, `deadlock_retries: int (0)`, `approved_actions: list[ApprovedAction] ([])`, `rejected_actions: list[str] ([])` (fingerprints), `fail_item: str \| null (null)`, `fail_streak: int (0)`, `resume_at: float (0.0)`, `escalations: int (0)`, `gate_log: list[str] ([])` |
 | `CycleInput` | `mission_id`, `workdir`, `cycle_id: str`, `check_commands: list[list[str]] \| null`, `budget_usd: float \| null`, `max_cycles: int (1000)`, `steer_notes: list[str] ([])`, `approved_actions: list[ApprovedAction] ([])`, `research_item: str \| null (null)`, `research_briefs: list[str] ([])`, `research_failures: list[str] ([])` |
 | `CycleResult` | `item_id: str \| null`, `advanced: bool`, `head_sha: str`, `is_complete: bool`, `items_done: int`, `items_total: int`, `note: str ("")`, `verdict: str ("")` (`passed`, `failed`, ..., and `review_blocked` from `review_cycle`), `is_deadlocked: bool (false)`, `item_blocked: bool (false)`, `reason: str ("")`, `spent_usd: float (0.0)`, `item_split: bool (false)`, `pending_approvals: list[PendingApproval] ([])`, `used_approvals: list[str] ([])` (fingerprints), `base_sha: str ("")` (`HEAD` before the cycle or the merge) |
 | `PendingApproval` | `fingerprint: str`, `tool: str`, `reason: str`, `arguments: str ("")` (the `repr` of the arguments, at most 2000 chars) |
@@ -129,6 +133,8 @@ Continue-As-New rides inside `MissionInput.state`.
 | `HealthInput` | `mission_id`, `workdir` |
 | `HealthReport` | `healthy: bool`, `reason: str ("")`, `degraded: list[str] ([])` |
 | `UnblockInput` | `mission_id`, `workdir`, `cycle_id` |
+| `ChecklistEditRequest` | `edits: list[object] ([])` (the `checklist_edit_v1` edit objects), `by: str ("")` |
+| `EditInput` | `mission_id`, `workdir`, `cycle_id` (`e<n>`), `edits: list[object] ([])`, `by: str ("")` |
 | `MissionResult` | `mission_id`, `completed: bool`, `cycles: int`, `head_sha`, `items_done`, `items_total`, `outcome: str ("completed")`, `reason: str ("")`, `status: str ("")` |
 | `SubAgentInput` | `role_name: str`, `objective: str`, `workdir`, `mission_id`, `allow_egress: bool (false)`, `budget_usd: float \| null (null)`, `cycle_id: str ("")` |
 | `SubAgentOutput` | `role: str`, `brief: str`, `tool_calls: int`, `turns: int` |

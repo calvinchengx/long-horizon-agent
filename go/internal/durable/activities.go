@@ -2,10 +2,12 @@ package durable
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents/org"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/checklistedit"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
@@ -884,6 +887,106 @@ func (a *Activities) UnblockItems(ctx context.Context, inp UnblockInput) (CycleR
 		return CycleResult{}, err
 	}
 	return resultFromSnapshot(snapshot, resultOpts{advanced: len(blocked) > 0, note: "unblocked " + pyList(blocked)}), nil
+}
+
+// EditEvent is the anchor event kind of an applied operator checklist edit batch.
+const EditEvent = "checklist_edit"
+
+// EditSummary is the one-line account of an applied batch (python: edit_summary).
+func EditSummary(by string, lines []string) string {
+	who := by
+	if who == "" {
+		who = "an operator"
+	}
+	return "checklist edited by " + who + ": " + strings.Join(lines, "; ")
+}
+
+// EditChecklist is edit_checklist: apply inp.Edits to the committed checklist in one anchor-only
+// commit. The batch is applied atomically or refused (Advanced false, the refusal in Note); a
+// refusal never fails the activity. Idempotent per cycle id: a retry that finds its own
+// checklist_edit event (same edits, same sender) in HEAD applies nothing again.
+func (a *Activities) EditChecklist(ctx context.Context, inp EditInput) (CycleResult, error) {
+	release, err := lockWorkdir(ctx, inp.Workdir, LockWait)
+	if err != nil {
+		return CycleResult{}, err
+	}
+	defer release()
+	if err := a.resetWorkdir(ctx, inp.Workdir); err != nil {
+		return CycleResult{}, err
+	}
+	anchor := state.NewGitMissionAnchor(inp.Workdir)
+	if done, ok := CommittedCycleEvent(ctx, inp.Workdir, inp.CycleID, EditEvent); ok && sameEdit(done, inp) {
+		snapshot, err := anchor.ReadSituationalAwareness(ctx)
+		if err != nil {
+			return CycleResult{}, err
+		}
+		return resultFromSnapshot(snapshot, resultOpts{advanced: true, note: fmt.Sprint(done["summary"])}), nil
+	}
+	checklist, err := anchor.ReadChecklist(ctx)
+	if err != nil {
+		return CycleResult{}, err
+	}
+	events, err := anchor.ReadEvents(ctx)
+	if err != nil {
+		return CycleResult{}, err
+	}
+	edits := make([]any, len(inp.Edits))
+	for i, e := range inp.Edits {
+		edits[i] = e
+	}
+	lines, err := checklistedit.Apply(&checklist, edits, inp.By, checklistedit.WorkedItemIDs(events))
+	var refused *checklistedit.Error
+	if errors.As(err, &refused) {
+		snapshot, err := anchor.ReadSituationalAwareness(ctx)
+		if err != nil {
+			return CycleResult{}, err
+		}
+		return resultFromSnapshot(snapshot, resultOpts{note: "checklist edit refused: " + refused.Message}), nil
+	}
+	if err != nil {
+		return CycleResult{}, err
+	}
+	summary := EditSummary(inp.By, lines)
+	who := inp.By
+	if who == "" {
+		who = "an operator"
+	}
+	if _, err := anchor.CommitAnchorUpdate(ctx, contracts.Checkpoint{
+		CycleID:         inp.CycleID,
+		ProgressSummary: "- " + inp.CycleID + " " + summary,
+		Checklist:       checklist,
+		Events: []contracts.EventRecord{{Kind: EditEvent, CycleID: inp.CycleID, Payload: contracts.Payload(
+			"by", inp.By, "edits", nz(inp.Edits), "summary", summary,
+		)}},
+		CommitMessage: "lha: checklist edited by " + who,
+	}); err != nil {
+		return CycleResult{}, err
+	}
+	snapshot, err := anchor.ReadSituationalAwareness(ctx)
+	if err != nil {
+		return CycleResult{}, err
+	}
+	return resultFromSnapshot(snapshot, resultOpts{advanced: true, note: summary}), nil
+}
+
+// sameEdit is whether a committed checklist_edit payload holds exactly inp's batch.
+func sameEdit(done map[string]any, inp EditInput) bool {
+	if fmt.Sprint(done["by"]) != inp.By {
+		return false
+	}
+	want, err := json.Marshal(nz(inp.Edits))
+	if err != nil {
+		return false
+	}
+	got, err := json.Marshal(done["edits"])
+	if err != nil {
+		return false
+	}
+	var a, b any
+	if json.Unmarshal(want, &a) != nil || json.Unmarshal(got, &b) != nil {
+		return false
+	}
+	return reflect.DeepEqual(a, b)
 }
 
 // ReadMissionSnapshot is read_mission_snapshot: the committed counts + HEAD (read-only, no reset).

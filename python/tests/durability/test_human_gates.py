@@ -70,6 +70,7 @@ from tests.durability._support import (
 )
 from tests.durability.test_durable_spine import (
     ROW_ACTIVITY,
+    _edit_activity,
     _healthy,
     _snapshot_activity,
     _unblock_activity,
@@ -147,6 +148,7 @@ def worker(
             declare_impossible,
             _healthy,
             _unblock_activity,
+            _edit_activity,
             _snapshot_activity,
             ROW_ACTIVITY,
         ],
