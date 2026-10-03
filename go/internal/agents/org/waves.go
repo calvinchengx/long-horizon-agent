@@ -244,7 +244,9 @@ func ImplementInWorktree(ctx context.Context, run *ImplementerRun, o ImplementOp
 	run.Worktree = worktree
 	run.Ticket.Branch = run.Branch
 	run.Advance(coordination.TicketInProgress, "")
-	globs := settings.HarnessGlobs()
+	// The item's witness scripts are protected like harness files: a witness the agent can
+	// rewrite proves nothing.
+	globs := append(append([]string{}, settings.HarnessGlobs()...), verify.WitnessPaths(run.Item.Witnesses)...)
 	trusted, err := settings.TrustedCheckCommands()
 	if err != nil {
 		return err

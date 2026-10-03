@@ -935,3 +935,42 @@ func (r *lastPromptRecorder) Complete(ctx context.Context, messages []contracts.
 func (r *lastPromptRecorder) EstimateCostUSD(u contracts.Usage) (float64, error) {
 	return r.inner.EstimateCostUSD(u)
 }
+
+// TestAnItemCannotRewriteItsOwnWitnessScript is python's test_an_item_cannot_rewrite_its_own_witness_script.
+func TestAnItemCannotRewriteItsOwnWitnessScript(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "measure"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "measure", "check.sh"), []byte("exit 1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rewrite := actText("write_file", map[string]any{"path": "measure/check.sh", "content": "exit 0\n"})
+	item := contracts.NewChecklistItem("01", "pass the check")
+	item.Witnesses = []string{"cmd:sh measure/check.sh"}
+	summary := run(t, []string{"LHA_MAX_CYCLES=1"}, OrchestratorOptions{ResearchPerItem: 0, DoReview: false, Models: map[string]contracts.ModelProvider{
+		"lead": stub(rewrite, doneTurn), "researcher": stub(doneTurn), "reviewer": stub(approve),
+	}}, MissionOptions{Workdir: dir, Title: "Witness test", Description: "the witness is the gate",
+		Checklist: &contracts.Checklist{SchemaVersion: 1, Items: []contracts.ChecklistItem{item}}, Checks: []contracts.Check{pass}})
+	if summary.ItemsDone != 0 {
+		t.Fatalf("%+v", summary)
+	}
+	cycles := committedEvents(t, dir, "cycle")
+	if len(cycles) != 1 {
+		t.Fatalf("%+v", cycles)
+	}
+	failed := map[string]bool{}
+	for _, c := range cycles[0].Payload["checks"].([]any) {
+		m := c.(map[string]any)
+		if m["passed"] != true {
+			failed[m["name"].(string)] = true
+		}
+	}
+	if !failed["harness_integrity"] {
+		t.Fatalf("%+v", failed)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "measure", "check.sh")); string(data) != "exit 1\n" {
+		t.Fatalf("not reverted: %q", data)
+	}
+}

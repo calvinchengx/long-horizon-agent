@@ -44,7 +44,8 @@ workflow calls it.
   go into the failure report ([07-verification.md](07-verification.md#mutation-gate)). It
   replaces the removed Python-only `mutmut` wrapper, whose score no policy consumed.
 - Removed: the coverage "trust bootstrap" (Python-specific, and no policy consumed its number).
-- Not done: measurements of how much the gate changes outcomes on real tasks.
+- Measured once (six missions, 2 October 2026): two ways the lead got past the gate, both closed since
+  ([11-multi-agent-organization.md](11-multi-agent-organization.md#measured-the-reviewer-and-the-gates-2-october-2026)).
 
 ### Large missions (done)
 
@@ -87,7 +88,9 @@ quality with real models.
   decisions go into the next prompt. `lha decisions --verify` checks the chain. An altered log
   stops a local run, and fails a durable cycle with a non-retryable error
   ([06-mission-anchor.md](06-mission-anchor.md#decisionsndjson)).
-- Not done: measurements of how much review changes outcomes on real tasks.
+- Measured once (six missions, 2 October 2026): the reviewer refused both gate bypasses every time it saw
+  them and cost about the mission's price again on an honest run
+  ([11-multi-agent-organization.md](11-multi-agent-organization.md#measured-the-reviewer-and-the-gates-2-october-2026)).
 
 ### Phase 3: read-only researcher fan-out (done)
 

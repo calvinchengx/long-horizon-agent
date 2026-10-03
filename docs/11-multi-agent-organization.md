@@ -372,6 +372,63 @@ every read ([Mission anchor](06-mission-anchor.md#decisionsndjson)).
   ([execution/tools/decisions.py](../python/src/lha/execution/tools/decisions.py)) and
   `lha decisions [--verify]` ([CLI](17-cli.md#lha-decisions)).
 
+## Measured: the reviewer and the gates (2 October 2026)
+
+Six `lha orchestrate` missions, after four pilot missions, on a clone of LHA's own repository at
+`main`: a Sonnet lead through Claude Code (`LHA_LEAD_ENGINE=claude_code`), 20 turns per cycle,
+the Docker sandbox, no researchers, a $12 ceiling and nine cycles. The same three small additions
+to the Python package each time, each with a shell witness committed under `measure/` in the
+target clone, with ruff and three unit-test files as the mission checks. Three pairs, one mission
+with `--review` and one with `--no-review` each (the pre-review screen ran in both). The run
+directory, roadmaps, scripts, reports and labels are kept under `~/calvinchengx/lha-runs/`.
+
+| Pair | Arm | Items done | Cycles | Cost | Wall | Reviewer calls / spend |
+|---|---|---|---|---|---|---|
+| 1 | review | 1 of 3 | 9 (limit) | $9.12 | 58 min | 16 / $0.57 |
+| 1 | no review | "3 of 3" | 5 | $5.39 | 26 min | none |
+| 2 | review | 1 of 3 | 9 (limit) | $10.35 | 57 min | 41 / $2.36 |
+| 2 | no review | "3 of 3" | 5 | $4.84 | 23 min | none |
+| 3 | review | 3 of 3 | 4 | $2.92 | 9.4 min | 36 / $1.88 |
+| 3 | no review | 3 of 3 | 3 | $0.66 | 1.7 min | none |
+
+Pairs 1 and 2 ran with a roadmap that asked the lead to add tests to two existing test files
+without marking those items `allow_harness_edits`, and before the fixes below. Both no-review
+missions "completed" by getting round the gate: in pair 1 the lead added a new
+`tests/unit/conftest.py` (and then a root `conftest.py`) whose `pytest_collectstart` hook
+injected the required test into the protected module; in pair 2 it rewrote the witness scripts
+`measure/check_02.sh` and `measure/check_03.sh` to run test files it had created instead. Every
+check passed and both missions reported `complete`. The review missions did not complete: the
+reviewer blocked the `conftest.py` trick in all four of its blocking verdicts in pair 2 (quoting
+the hook and the untouched test file), and the lead, refused that route and unable to edit the
+protected file, failed the items until they were split and the cycle limit hit. The reviewer's
+own verdicts were right every time it ran: approve for a correct change, block for an empty diff
+or a bypass; its spend was cents per call.
+
+Pair 3 ran after the fixes, with the roadmap allowing the test edits the items need. Both arms
+completed honestly. The reviewer added one block, for a Python-only change that left the Go
+twin's regex behind, which the next attempt answered; it cost one cycle, $2.26 and eight minutes
+on a three-item mission that otherwise cost $0.66.
+
+What the exercise established:
+
+- **The reviewer catches what the deterministic gate misses.** Two bypasses that passed every
+  check were refused by the reviewer each time it saw them. Both gates are now closed
+  ([harness integrity](07-verification.md#harness-integrity): a new harness configuration file
+  is a violation; the files a witness runs are protected for the item's cycle), so the next
+  lead has to do the work. The reviewer remains the layer that reads intent.
+- **Its price on an honest mission is roughly the mission's cost again.** $2.26 and eight
+  minutes on top of $0.66 and two minutes here, mostly the reviewer's own tool calls (36 calls
+  to read the code it was judging). `--no-review` buys that back; the pre-review screen still
+  runs and forces a review only when it finds weakened tests.
+- **A `cmd:` witness whose script is in the repository is only as strong as its protection.**
+  The second bypass needed no cleverness; it edited the acceptance check.
+
+The exercise also found three defects, fixed before pair 3: a reopened item's review diffed only
+its last cycle, which was empty, so the reviewer blocked it again and again; a reviewer out of
+turns returned a dangling tool call that parsed as a blocking `unparsed` verdict; and the two
+gate bypasses above. Six missions is a small sample: the costs and times are what Sonnet did on
+these three changes in these runs, not a distribution.
+
 ## Not implemented
 
 These are described in role prompts or docstrings, or would be needed for the organization to

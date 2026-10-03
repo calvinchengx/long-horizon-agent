@@ -134,6 +134,12 @@ check named after the witness string:
 | `cmd:<shell command>` | `sh -c <command>` | exit 0 |
 | `trusted:<name>` (alias `ci:<name>`) | the operator's command `<name>` from `LHA_TRUSTED_CHECKS`, outside the sandbox | exit 0 |
 
+The files a witness runs are protected for the item's cycle as if they were harness files: the
+script tokens of a `cmd:` witness (`cmd:sh measure/check.sh` protects `measure/check.sh`) and
+the file part of a `pytest:` node id. A witness the agent can rewrite proves nothing: a
+measurement mission edited its witness scripts to run test files it had chosen instead of the
+protected ones. The item's `allow_harness_edits` lifts this with the rest of the integrity check.
+
 Witness syntax is validated when a checklist is imported (Go test names must be identifiers,
 package patterns and pytest node ids may not contain shell metacharacters or start with `-`). A
 witness that cannot be turned into a check at run time, for example `trusted:e2e` when no `e2e`

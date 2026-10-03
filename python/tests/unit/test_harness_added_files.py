@@ -46,3 +46,23 @@ def test_the_screen_flags_a_new_harness_file() -> None:
         screen_diff("--- /dev/null\n+++ b/tests/test_new.py\n@@\n+def test_new():\n+    assert 1\n")
         == []
     )
+
+
+def test_witness_scripts_are_protected_like_harness_files(tmp_path: Path) -> None:
+    """A measurement lead rewrote `measure/check_02.sh` to run a test file of its choosing."""
+    from lha.verify.witnesses import witness_paths
+
+    assert witness_paths(["cmd:sh measure/check.sh", "pytest:tests/unit/test_a.py::test_x"]) == (
+        "measure/check.sh",
+        "tests/unit/test_a.py",
+    )
+    (tmp_path / "measure").mkdir()
+    (tmp_path / "measure" / "check.sh").write_text("exit 0\n", encoding="utf-8")
+    globs = witness_paths(["cmd:sh measure/check.sh"])
+    before, plain_before = snapshot_harness(tmp_path, globs), snapshot_harness(tmp_path)
+    (tmp_path / "measure" / "check.sh").write_text("exit 0  # weakened\n", encoding="utf-8")
+    assert harness_violations(before, snapshot_harness(tmp_path, globs)) == [
+        "modified: measure/check.sh"
+    ]
+    # Without the witness glob the script is not a harness file at all.
+    assert harness_violations(plain_before, snapshot_harness(tmp_path)) == []

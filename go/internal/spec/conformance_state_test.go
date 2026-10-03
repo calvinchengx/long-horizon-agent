@@ -23,6 +23,10 @@ func TestHarnessFiles(t *testing.T) {
 			After      map[string]string `json:"after"`
 			Violations []string          `json:"violations"`
 		} `json:"violations"`
+		WitnessPaths []struct {
+			Witnesses []string `json:"witnesses"`
+			Paths     []string `json:"paths"`
+		} `json:"witness_paths"`
 	}
 	Load(t, "verify/harness_files.json", &s)
 	if len(s.Cases) == 0 {
@@ -44,6 +48,11 @@ func TestHarnessFiles(t *testing.T) {
 	for _, c := range s.Violations {
 		if got := verify.HarnessViolations(c.Before, c.After); !reflect.DeepEqual(got, c.Violations) {
 			t.Errorf("%s: %q, want %q", c.Name, got, c.Violations)
+		}
+	}
+	for _, c := range s.WitnessPaths {
+		if got := verify.WitnessPaths(c.Witnesses); !reflect.DeepEqual(got, c.Paths) {
+			t.Errorf("WitnessPaths(%q) = %q, want %q", c.Witnesses, got, c.Paths)
 		}
 	}
 }

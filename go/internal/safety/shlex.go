@@ -17,6 +17,9 @@ import (
 // starts a comment that also swallows the terminating newline, runs of punctuation characters form
 // one token ("&&", ";;", "|&"...), and an empty quoted string yields an empty token. The two
 // ValueError cases ("No closing quotation", "No escaped character") are returned as errors.
+// ShellLex splits script like Python's shlex.split (posix mode).
+func ShellLex(script string) ([]string, error) { return shellLex(script) }
+
 func shellLex(script string) ([]string, error) {
 	l := &lexer{in: []rune(script), state: ' '}
 	var tokens []string

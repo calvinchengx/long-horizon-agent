@@ -2,7 +2,9 @@ package verify
 
 import (
 	"fmt"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -249,3 +251,51 @@ func ItemChecks(item contracts.ChecklistItem, trusted map[string][]string) ([]co
 
 // pyStrip is Python's str.strip() (Unicode whitespace plus \x1c-\x1f).
 func pyStrip(s string) string { return strings.TrimFunc(s, pyIsSpace) }
+
+var (
+	pathTokenRE    = regexp.MustCompile(`^[A-Za-z0-9_.][A-Za-z0-9_./-]*$`)
+	scriptSuffixes = []string{".sh", ".bash", ".py", ".js", ".ts", ".mjs", ".cjs", ".rb", ".pl", ".ps1"}
+)
+
+// WitnessPaths lists the repository-relative files an item's witnesses run, to protect like
+// harness files (python: witness_paths). A cmd: witness that runs a committed script or a
+// pytest: node id's file proves the item only while the agent cannot rewrite it: a measurement
+// mission edited its witness scripts to point at tests it chose.
+func WitnessPaths(witnesses []string) []string {
+	out := []string{}
+	add := func(p string) {
+		if p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	for _, witness := range witnesses {
+		scheme, rest, err := splitWitness(witness)
+		if err != nil {
+			continue
+		}
+		switch scheme {
+		case "pytest":
+			path, _, _ := strings.Cut(rest, "::")
+			add(pyStrip(path))
+		case "cmd":
+			tokens, err := safety.ShellLex(rest)
+			if err != nil {
+				continue
+			}
+			for _, token := range tokens {
+				token = strings.TrimPrefix(token, "./")
+				if !pathTokenRE.MatchString(token) || strings.HasPrefix(token, "-") {
+					continue
+				}
+				script := false
+				for _, suffix := range scriptSuffixes {
+					script = script || strings.HasSuffix(token, suffix)
+				}
+				if strings.Contains(token, "/") || script {
+					add(token)
+				}
+			}
+		}
+	}
+	return out
+}
