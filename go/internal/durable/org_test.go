@@ -269,6 +269,20 @@ func TestParallelWaveWithResearchAndReviewCompletes(t *testing.T) {
 	if err != nil || len(owners.Snapshot()) != 0 {
 		t.Fatalf("owners %v %v", owners.Snapshot(), err)
 	}
+	// The implementers' tool calls reached the shared event record, tagged with their role.
+	events, err := openTestStore(t, acts, work).ReadMissionEvents(context.Background(), inp.MissionID, 0, 10_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	for _, e := range events {
+		if e.Kind == "tool_call" && e.Payload["role"] == "implementer" && e.Payload["tool"] == "write_file" {
+			writes++
+		}
+	}
+	if writes != 2 {
+		t.Fatalf("%d implementer writes in %+v", writes, events)
+	}
 }
 
 // recorder is a scripted model that keeps every prompt it was sent.

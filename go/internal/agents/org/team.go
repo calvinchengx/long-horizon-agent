@@ -44,7 +44,7 @@ func ErrorSummary(err error) string {
 
 // ResearchFanout investigates queries in parallel with the researcher role (or role, when
 // non-nil): one result per query, failures marked with Error.
-func ResearchFanout(ctx context.Context, model contracts.ModelProvider, dispatcher contracts.ToolDispatcher, tctx contracts.ToolContext, queries []string, role *agents.RoleSpec) ([]SubAgentResult, error) {
+func ResearchFanout(ctx context.Context, model contracts.ModelProvider, dispatcher contracts.ToolDispatcher, tctx contracts.ToolContext, queries []string, role *agents.RoleSpec, recorder *obs.TraceRecorder, cycleID string) ([]SubAgentResult, error) {
 	spec := agents.Roles["researcher"]
 	if role != nil {
 		spec = *role
@@ -59,7 +59,7 @@ func ResearchFanout(ctx context.Context, model contracts.ModelProvider, dispatch
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i], errs[i] = NewSubAgent(spec, model, dispatcher, 0).Run(ctx, query, tctx, "")
+			results[i], errs[i] = NewSubAgent(spec, model, dispatcher, 0).WithRecorder(recorder, cycleID).Run(ctx, query, tctx, "")
 		}()
 	}
 	wg.Wait()

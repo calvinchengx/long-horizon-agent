@@ -22,6 +22,7 @@ from lha.agents.subagent import SubAgent, SubAgentResult
 from lha.contracts.model import ModelProvider
 from lha.contracts.tools import ToolContext, ToolDispatcher
 from lha.governor.metering import BudgetExceeded
+from lha.obs.events import TraceRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +42,19 @@ async def research_fanout(
     ctx: ToolContext,
     queries: list[str],
     role: RoleSpec | None = None,
+    recorder: TraceRecorder | None = None,
+    cycle_id: str = "",
 ) -> list[SubAgentResult]:
     """Investigate ``queries`` in parallel; one result per query, failures marked with ``error``."""
     role = role or ROLES["researcher"]
     if role.allow_mutating:
         raise ValueError(f"research fan-out requires a read-only role; {role.name!r} can mutate")
-    agents = [SubAgent(role=role, model=model, dispatcher=dispatcher) for _ in queries]
+    agents = [
+        SubAgent(
+            role=role, model=model, dispatcher=dispatcher, recorder=recorder, cycle_id=cycle_id
+        )
+        for _ in queries
+    ]
     outcomes = await asyncio.gather(
         *(
             agent.run(objective=query, ctx=ctx)

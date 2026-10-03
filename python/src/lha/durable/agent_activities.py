@@ -37,6 +37,8 @@ from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.ids import idempotency_key
 from lha.model import build_provider
+from lha.obs.events import TraceRecorder
+from lha.persistence.event_log import MissionEventLog
 from lha.persistence.store import StoreUnavailableError, open_store
 from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
@@ -112,7 +114,18 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
         prefix = f"sub:{inp.role_name}"
     spend_key = idempotency_key(inp.mission_id, prefix)
     LedgerSink(store, inp.mission_id, key_prefix=prefix).attach(meter)
-    agent = SubAgent(role=role, model=model, dispatcher=dispatcher)
+    # The sub-agent's tool calls go to the shared event record (mission_events).
+    recorder = TraceRecorder()
+    events = MissionEventLog(store)
+    recorder.listeners.append(events.add)
+    events.start()
+    agent = SubAgent(
+        role=role,
+        model=model,
+        dispatcher=dispatcher,
+        recorder=recorder,
+        cycle_id=inp.cycle_id or "",
+    )
     try:
         result = await _with_heartbeat(
             agent.run(
@@ -137,6 +150,7 @@ async def run_subagent(inp: SubAgentInput) -> SubAgentOutput:
                 )
         finally:
             meter.on_record = None
+            await events.aclose()  # before the store closes; best effort, never raises
             await store.close()
     return SubAgentOutput(
         role=result.role, brief=result.brief, tool_calls=result.tool_calls, turns=result.turns

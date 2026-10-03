@@ -361,7 +361,7 @@ class _MissionRun:
                 memory=self.services.memory,
                 system_one=self.services.system_one,
             )
-            self.reviewer = Reviewer(self.review_model, self.read_tools)
+            self.reviewer = Reviewer(self.review_model, self.read_tools, recorder=self.recorder)
             # Integration is gated exactly like a Lead cycle would be for the same item: the
             # mission checks plus the item's witnesses (``_item_checks``), on the lead verifier
             # (trusted checks run outside the sandbox).
@@ -550,6 +550,8 @@ class _MissionRun:
             dispatcher=self.read_tools,
             ctx=self.ctx,
             queries=[q for _, q in queries],
+            recorder=self.recorder,
+            cycle_id=self._cycle_id(self.cycles + 1),
         )
         briefs: dict[str, list[str]] = {item.id: [] for item in items}
         failed: dict[str, list[str]] = {item.id: [] for item in items}
@@ -709,6 +711,7 @@ class _MissionRun:
             diff=diff[:_REVIEW_DIFF_CAP],
             criteria=screen_criteria(findings, item.description),
             ctx=self.ctx,
+            cycle_id=cycle_id,
         )
         self.recorder.record(
             "review",
@@ -869,6 +872,7 @@ class _MissionRun:
             mission_checks=self.mission_checks,
             objective=objective,
             extra=extra,
+            recorder=self.recorder,
             lease=lease_handler(
                 self.leases,
                 writer=run.writer,

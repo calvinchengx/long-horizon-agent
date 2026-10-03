@@ -23,6 +23,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
@@ -93,14 +94,17 @@ func roleModel(factory ModelFactory, role string, settings *config.Settings, sna
 
 // attachLedger hooks the meter to the persistent cost ledger with python's key prefix
 // ("<prefix>:<workflow id>:<activity id>@<attempt>"); the returned func detaches and closes it.
-func (a *Activities) attachLedger(ctx context.Context, settings *config.Settings, workdir, missionID string, meter *governor.CostMeter, prefix string) (func(), error) {
+// attachLedger hooks meter to the persistent cost ledger and returns a recorder whose events go to
+// the shared event record (mission_events; python: _attach_ledger); detach closes both.
+func (a *Activities) attachLedger(ctx context.Context, settings *config.Settings, workdir, missionID string, meter *governor.CostMeter, prefix string) (func(), *obs.TraceRecorder, error) {
 	store, err := a.openStore(ctx, settings, workdir)
 	if err != nil {
 		if errors.Is(err, ErrStoreUnavailable) {
-			return nil, configError(fmt.Sprintf("cannot open the mission store: %v", err), err)
+			return nil, nil, configError(fmt.Sprintf("cannot open the mission store: %v", err), err)
 		}
-		return nil, err
+		return nil, nil, err
 	}
+	recorder, closeEvents := recorderFor(store)
 	if activity.IsActivity(ctx) {
 		info := activity.GetInfo(ctx)
 		prefix = fmt.Sprintf("%s:%s:%s@%d", prefix, info.WorkflowExecution.ID, info.ActivityID, info.Attempt)
@@ -108,8 +112,23 @@ func (a *Activities) attachLedger(ctx context.Context, settings *config.Settings
 	meter.SetHook(newLedgerHook(store, missionID, prefix))
 	return func() {
 		meter.SetHook(nil)
+		closeEvents() // before the store closes; best effort, never fails
 		_ = store.Close(context.Background())
-	}, nil
+	}, recorder, nil
+}
+
+// recorderFor is a recorder whose events go to store's shared event record when store is backed
+// by the mission store (a test fake is not), with the function that flushes and stops it.
+func recorderFor(store Store) (*obs.TraceRecorder, func()) {
+	recorder := obs.NewTraceRecorder(nil)
+	backed, ok := store.(persistenceBacked)
+	if !ok {
+		return recorder, func() {}
+	}
+	events := persistence.NewMissionEventLog(backed.Persistence())
+	recorder.AddListener(events.Add)
+	events.Start()
+	return recorder, func() { events.Close(context.Background()) }
 }
 
 func spentOn(meter *governor.CostMeter, cycleID string) float64 {
@@ -452,7 +471,7 @@ func (a *Activities) RunImplementer(ctx context.Context, inp ImplementerInput) (
 		return ImplementerOutput{}, configError(fmt.Sprintf("cannot build the model: %v", err), err)
 	}
 	closeModel := func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
-	detach, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "impl")
+	detach, recorder, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "impl")
 	if err != nil {
 		closeModel()
 		return ImplementerOutput{}, err
@@ -502,7 +521,7 @@ func (a *Activities) RunImplementer(ctx context.Context, inp ImplementerInput) (
 			return struct{}{}, org.ImplementInWorktree(ctx, run, org.ImplementOptions{
 				Settings: settings, Workdir: inp.Workdir, Base: inp.BaseSHA, Ownership: ownership,
 				Model: meter.Wrap(inner, "implementer"), Gate: gate, AllowEgress: nil, MissionID: inp.MissionID,
-				MissionChecks: checks, Objective: objective, Extra: extra, Lease: lease,
+				MissionChecks: checks, Objective: objective, Extra: extra, Lease: lease, Recorder: recorder,
 			})
 		})
 		return err
@@ -686,7 +705,7 @@ func (a *Activities) integrateBranch(ctx context.Context, inp IntegrateInput) (C
 		if err != nil {
 			return nil, configError(fmt.Sprintf("cannot build the model: %v", err), err)
 		}
-		detach, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "split")
+		detach, _, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "split")
 		if err != nil {
 			_ = agent.CloseProvider(context.WithoutCancel(ctx), inner)
 			return nil, err
@@ -793,7 +812,7 @@ func (a *Activities) reflect(ctx context.Context, settings *config.Settings, inp
 		return nil
 	}
 	closeModel := func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
-	detach, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "reflect")
+	detach, _, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "reflect")
 	if err != nil {
 		closeModel()
 		return err
@@ -949,7 +968,7 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		}
 		return CycleResult{}, err
 	}
-	detach, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "review")
+	detach, recorder, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "review")
 	if err != nil {
 		_ = session.Close(context.WithoutCancel(ctx))
 		closeModel()
@@ -966,7 +985,7 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 			detach()
 		}()
 		return withHeartbeat(ctx, a.heartbeatEvery(), reviewID, func() (agents.ReviewResult, error) {
-			return org.NewReviewer(meter.Wrap(inner, "reviewer"), tools).Review(ctx, pyfmt.Head(diff, reviewDiffCap), criteria,
+			return org.NewReviewer(meter.Wrap(inner, "reviewer"), tools).WithRecorder(recorder, inp.CycleID).Review(ctx, pyfmt.Head(diff, reviewDiffCap), criteria,
 				contracts.ToolContext{MissionID: inp.MissionID, Session: session})
 		})
 	}()
@@ -1097,6 +1116,7 @@ func (a *Activities) runSubAgent(ctx context.Context, inp SubAgentInput) (SubAge
 	}
 	spendKey := IdempotencyKey(inp.MissionID, prefix)
 	meter.SetHook(newLedgerHook(store, inp.MissionID, prefix))
+	recorder, closeEvents := recorderFor(store) // the sub-agent's tool calls -> mission_events
 	result, err := func() (org.SubAgentResult, error) {
 		defer func() {
 			_ = session.Close(context.WithoutCancel(ctx))
@@ -1107,10 +1127,11 @@ func (a *Activities) runSubAgent(ctx context.Context, inp SubAgentInput) (SubAge
 				}
 			}
 			meter.SetHook(nil)
+			closeEvents()
 			_ = store.Close(context.WithoutCancel(ctx))
 		}()
 		return withHeartbeat(ctx, a.heartbeatEvery(), "subagent:"+inp.RoleName, func() (org.SubAgentResult, error) {
-			return org.NewSubAgent(role, meter.Wrap(inner, inp.RoleName), dispatcher, 0).Run(ctx, inp.Objective,
+			return org.NewSubAgent(role, meter.Wrap(inner, inp.RoleName), dispatcher, 0).WithRecorder(recorder, inp.CycleID).Run(ctx, inp.Objective,
 				contracts.ToolContext{MissionID: inp.MissionID, Session: session}, "")
 		})
 	}()

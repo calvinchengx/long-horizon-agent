@@ -44,6 +44,7 @@ from lha.coordination.leases import LeaseDecision, LeaseHandler
 from lha.coordination.ownership import FileOwnershipMap, OwnershipViolation, writer_for_item
 from lha.coordination.ticket import TaskContract, Ticket, TicketStatus
 from lha.execution.tools import DecisionBuffer, with_decision_tool, with_lease_tool
+from lha.obs.events import TraceRecorder
 from lha.obs.otel import agent_span
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
@@ -285,6 +286,7 @@ async def implement_in_worktree(
     extra: str,
     lease: LeaseHandler | None = None,
     on_summary: Callable[[str], None] | None = None,
+    recorder: TraceRecorder | None = None,
 ) -> None:
     """Run one implementer in its own worktree; verify there; commit on its branch.
 
@@ -320,7 +322,11 @@ async def implement_in_worktree(
         if lease is not None:
             guarded = with_lease_tool(guarded, lease)
         implementer = Implementer(
-            model, with_decision_tool(guarded, buffer), max_turns=settings.max_turns_per_cycle
+            model,
+            with_decision_tool(guarded, buffer),
+            max_turns=settings.max_turns_per_cycle,
+            recorder=recorder,
+            cycle_id=run.cycle_id,
         )
         with agent_span("implement", mission_id=mission_id, item=run.item.id):
             result = await implementer.run(

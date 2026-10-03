@@ -16,6 +16,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
@@ -57,6 +58,16 @@ type SubAgent struct {
 	model      contracts.ModelProvider
 	dispatcher contracts.ToolDispatcher
 	maxTurns   int
+	// Every tool call is recorded like the lead's, with the role (mission_events).
+	recorder *obs.TraceRecorder
+	cycleID  string
+}
+
+// WithRecorder records the sub-agent's tool calls under cycleID (python: SubAgent(recorder=...,
+// cycle_id=...)).
+func (s *SubAgent) WithRecorder(recorder *obs.TraceRecorder, cycleID string) *SubAgent {
+	s.recorder, s.cycleID = recorder, cycleID
+	return s
 }
 
 // NewSubAgent returns a sub-agent for role (maxTurns <= 0: the role's MaxTurns).
@@ -96,13 +107,23 @@ func SubAgentMessages(role agents.RoleSpec, specs []contracts.ToolSpec, objectiv
 }
 
 func (s *SubAgent) dispatch(ctx context.Context, call contracts.ToolCall, tctx contracts.ToolContext, allowed map[string]bool) contracts.ToolResult {
+	var result contracts.ToolResult
 	if !allowed[call.Name] {
-		return contracts.Failure(fmt.Sprintf("tool %s is not available to the %s role", contracts.PyRepr(call.Name), s.role.Name))
+		result = contracts.Failure(fmt.Sprintf("tool %s is not available to the %s role", contracts.PyRepr(call.Name), s.role.Name))
+	} else {
+		if call.Arguments == nil {
+			call.Arguments = map[string]any{}
+		}
+		result = s.dispatcher.Dispatch(ctx, call, tctx)
 	}
-	if call.Arguments == nil {
-		call.Arguments = map[string]any{}
+	if s.recorder != nil {
+		fields := []obs.Field{obs.F("tool", call.Name), obs.F("ok", result.OK), obs.F("role", s.role.Name)}
+		if !result.OK {
+			fields = append(fields, obs.F("error", agent.ToolErrorDetail(result)))
+		}
+		s.recorder.Record("tool_call", tctx.MissionID, s.cycleID, fields...)
 	}
-	return s.dispatcher.Dispatch(ctx, call, tctx)
+	return result
 }
 
 func observationOf(r contracts.ToolResult) string {
@@ -199,6 +220,12 @@ func NewImplementer(model contracts.ModelProvider, dispatcher contracts.ToolDisp
 	return &Implementer{agent: NewSubAgent(agents.Roles["implementer"], model, dispatcher, maxTurns)}
 }
 
+// WithRecorder records the implementer's tool calls under cycleID.
+func (i *Implementer) WithRecorder(recorder *obs.TraceRecorder, cycleID string) *Implementer {
+	i.agent.WithRecorder(recorder, cycleID)
+	return i
+}
+
 // Run works objective.
 func (i *Implementer) Run(ctx context.Context, objective string, tctx contracts.ToolContext, extraContext string) (SubAgentResult, error) {
 	return i.agent.Run(ctx, objective, tctx, extraContext)
@@ -211,6 +238,13 @@ type Reviewer struct{ agent *SubAgent }
 // NewReviewer returns the Reviewer over a read-only dispatcher.
 func NewReviewer(model contracts.ModelProvider, dispatcher contracts.ToolDispatcher) *Reviewer {
 	return &Reviewer{agent: NewSubAgent(agents.Roles["reviewer"], model, dispatcher, 0)}
+}
+
+// WithRecorder records the reviewer's tool calls under cycleID (python: Reviewer(recorder=...)
+// and review(cycle_id=...)).
+func (r *Reviewer) WithRecorder(recorder *obs.TraceRecorder, cycleID string) *Reviewer {
+	r.agent.WithRecorder(recorder, cycleID)
+	return r
 }
 
 // Review reviews diff against criteria.

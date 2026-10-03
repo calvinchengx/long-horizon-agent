@@ -5,7 +5,7 @@ What LHA records about a mission and where it goes. The code is in
 
 | Signal | Local runs (`run-local`, `mission`, `orchestrate`) | Durable runs (`lha worker`) |
 |---|---|---|
-| Structured events (`TraceRecorder`) | yes, printed via structlog | no (memory events are logged via structlog in the worker) |
+| Structured events (`TraceRecorder`) | yes, printed via structlog and stored in `mission_events` | yes, from every cycle and organization activity, logged via structlog and stored in `mission_events` |
 | Git history + `.lha/` anchor | yes | yes, plus `gate_*` events for human gates |
 | Temporal event history | n/a | yes |
 | Mission row (`missions`) | yes | yes, written by `mission-start`, each cycle activity and the workflow (`record_mission_status`) |
@@ -22,6 +22,14 @@ cycle_id, data)` and `TraceRecorder`. `record()` redacts `data`, appends the eve
 list, and logs it through structlog at `info` level with the event kind as the message.
 `to_jsonl()` serializes the collected events one JSON object per line.
 
+Every run path also stores its events in the mission store's `mission_events` table (one row per
+event: `id`, `mission_id`, `cycle_id`, `ts`, `kind`, `payload`, `schema_version`), so a reader such
+as the [mission UI](27-mission-ui.md) needs no logs. A recorder listener hands each event to
+`MissionEventLog` ([`persistence/event_log.py`](../python/src/lha/persistence/event_log.py)), which
+writes them in batches about once a second and when the run ends. Writing is best effort: a failed
+write is logged and its batch dropped, never failing a cycle, and at most 10,000 events wait for a
+write (beyond that the oldest are dropped).
+
 `configure_logging(json_logs=False)` sets structlog to add the log level and an ISO timestamp and
 render with `ConsoleRenderer(colors=False)`; `json_logs=True` selects `JSONRenderer`. The local
 runners call it with the default, so CLI runs print console-format lines. No CLI option switches
@@ -33,7 +41,7 @@ Event kinds emitted today:
 |---|---|---|
 | `cycle_started` | `AgentLoop` | `item_id` |
 | `llm_turn` | `AgentLoop` | `model`, `output_tokens`, `stop_reason` |
-| `tool_call` | `AgentLoop` | `tool`, `ok`; a failed call adds `error`: the last 500 characters of its error and output (for `run_command`, the stderr tail), redacted like every event |
+| `tool_call` | `AgentLoop`; sub-agents (researchers, implementers and the reviewer) add `role` | `tool`, `ok`; a failed call adds `error`: the last 500 characters of its error and output (for `run_command`, the stderr tail), redacted like every event |
 | `turns_exhausted` | `AgentLoop` | `max_turns`, `tool_calls`: the cycle used every turn in `LHA_MAX_TURNS_PER_CYCLE` without signalling done (the verifier still runs) |
 | `invalid_reply` | `AgentLoop` | `reason` |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict`, `peak_rss_mb` (the process's peak resident memory, so growth over a long mission is visible) |

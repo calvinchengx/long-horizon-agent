@@ -12,6 +12,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/tools"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
@@ -225,6 +226,8 @@ type ImplementOptions struct {
 	Lease coordination.LeaseHandler
 	// OnSummary receives the implementer's brief.
 	OnSummary func(string)
+	// Recorder, when non-nil, records the implementer's tool calls (mission_events).
+	Recorder *obs.TraceRecorder
 }
 
 // ImplementInWorktree runs one implementer in its own worktree, verifies there and commits on
@@ -270,7 +273,8 @@ func ImplementInWorktree(ctx context.Context, run *ImplementerRun, o ImplementOp
 		if o.Lease != nil {
 			guarded = tools.WithLeaseTool(guarded, tools.LeaseHandler(o.Lease))
 		}
-		implementer := NewImplementer(o.Model, tools.WithDecisionTool(guarded, buffer), settings.MaxTurnsPerCycle)
+		implementer := NewImplementer(o.Model, tools.WithDecisionTool(guarded, buffer), settings.MaxTurnsPerCycle).
+			WithRecorder(o.Recorder, run.CycleID)
 		result, err := implementer.Run(ctx, o.Objective, contracts.ToolContext{MissionID: o.MissionID, Session: session}, o.Extra)
 		if err != nil {
 			return err

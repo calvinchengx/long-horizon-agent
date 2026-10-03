@@ -3,6 +3,7 @@ package org
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -17,6 +18,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/tools"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
@@ -72,7 +74,7 @@ func TestSubAgentUsesAToolThenFinishes(t *testing.T) {
 func TestResearchFanoutOneBriefPerQuery(t *testing.T) {
 	t.Parallel()
 	d, tctx := localTools(t, t.TempDir())
-	results, err := ResearchFanout(context.Background(), stub(), d, tctx, []string{"q1", "q2", "q3"}, nil)
+	results, err := ResearchFanout(context.Background(), stub(), d, tctx, []string{"q1", "q2", "q3"}, nil, nil, "")
 	if err != nil || len(results) != 3 {
 		t.Fatalf("%v %v", results, err)
 	}
@@ -81,16 +83,16 @@ func TestResearchFanoutOneBriefPerQuery(t *testing.T) {
 			t.Fatalf("%+v", r)
 		}
 	}
-	failed, err := ResearchFanout(context.Background(), broken{stub()}, d, tctx, []string{"q"}, nil)
+	failed, err := ResearchFanout(context.Background(), broken{stub()}, d, tctx, []string{"q"}, nil, nil, "")
 	if err != nil || failed[0].Error != "RuntimeError: model fell over" || failed[0].Brief != "" {
 		t.Fatalf("%+v %v", failed, err)
 	}
 	meter := governor.NewCostMeter(governor.NewCostLedger(), governor.NewBudgetGovernor(0.5, 10, false))
-	if _, err := ResearchFanout(context.Background(), meter.Wrap(pricey{}, "researcher"), d, tctx, []string{"q"}, nil); !errors.As(err, new(*governor.BudgetExceeded)) {
+	if _, err := ResearchFanout(context.Background(), meter.Wrap(pricey{}, "researcher"), d, tctx, []string{"q"}, nil, nil, ""); !errors.As(err, new(*governor.BudgetExceeded)) {
 		t.Fatalf("a budget refusal must stop the fan-out: %v", err)
 	}
 	lead := agents.Roles["lead"]
-	if _, err := ResearchFanout(context.Background(), stub(), d, tctx, []string{"q"}, &lead); !errors.Is(err, ErrMutatingResearchRole) {
+	if _, err := ResearchFanout(context.Background(), stub(), d, tctx, []string{"q"}, &lead, nil, ""); !errors.Is(err, ErrMutatingResearchRole) {
 		t.Fatal(err)
 	}
 }
@@ -972,5 +974,39 @@ func TestAnItemCannotRewriteItsOwnWitnessScript(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "measure", "check.sh")); string(data) != "exit 1\n" {
 		t.Fatalf("not reverted: %q", data)
+	}
+}
+
+// A sub-agent's tool calls are recorded like the lead's, with its role (python:
+// test_a_sub_agents_tool_calls_are_recorded_with_its_role).
+func TestASubAgentsToolCallsAreRecordedWithItsRole(t *testing.T) {
+	dir := t.TempDir()
+	_ = os.WriteFile(filepath.Join(dir, "a.txt"), []byte("x"), 0o644)
+	d, tctx := localTools(t, dir)
+	model := stub(actText("read_file", map[string]any{"path": "a.txt"}),
+		actText("read_file", map[string]any{"path": "missing.txt"}),
+		actText("write_file", map[string]any{"path": "b", "content": "y"}), doneTurn)
+	rec := obs.NewTraceRecorder(nil)
+	if _, err := NewSubAgent(agents.Roles["researcher"], model, d, 0).WithRecorder(rec, "c3").Run(context.Background(), "look", tctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	calls := []obs.TraceEvent{}
+	for _, e := range rec.Events() {
+		if e.Kind == "tool_call" {
+			calls = append(calls, e)
+		}
+	}
+	get := func(e obs.TraceEvent, k string) any { v, _ := e.Data.Get(k); return v }
+	if len(calls) != 3 || calls[0].CycleID != "c3" || get(calls[0], "tool") != "read_file" || get(calls[0], "ok") != true || get(calls[0], "role") != "researcher" {
+		t.Fatalf("%+v", calls)
+	}
+	if _, has := calls[0].Data.Get("error"); has {
+		t.Fatal(calls[0].Data)
+	}
+	if get(calls[1], "ok") != false || !strings.Contains(fmt.Sprint(get(calls[1], "error")), "cannot read") {
+		t.Fatal(calls[1].Data)
+	}
+	if get(calls[2], "tool") != "write_file" || !strings.Contains(fmt.Sprint(get(calls[2], "error")), "not available") {
+		t.Fatal(calls[2].Data)
 	}
 }

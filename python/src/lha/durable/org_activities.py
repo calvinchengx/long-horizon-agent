@@ -34,6 +34,7 @@ import dataclasses
 import json
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from temporalio import activity
@@ -105,7 +106,9 @@ from lha.execution.tools.toolset import build_run_dispatcher
 from lha.governor.metering import BudgetExceeded, CostMeter
 from lha.hitl.approvals import DeferredApprovalGate
 from lha.ids import idempotency_key
+from lha.obs.events import TraceRecorder
 from lha.obs.redact import redact_text
+from lha.persistence.event_log import MissionEventLog
 from lha.persistence.store import MissionStore, StoreUnavailableError, open_store
 from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
@@ -133,10 +136,20 @@ def _budget_error(exc: BudgetExceeded) -> ApplicationError:
     return ApplicationError(str(exc), type=ERROR_BUDGET_EXCEEDED, non_retryable=True)
 
 
+@dataclass
+class _Persisted:
+    """An activity's mission store, plus the recorder whose events go to ``mission_events``."""
+
+    store: MissionStore
+    recorder: TraceRecorder
+    events: MissionEventLog
+
+
 async def _attach_ledger(
     settings: Settings, workdir: str, mission_id: str, meter: CostMeter, prefix: str
-) -> MissionStore:
-    """Hook the meter to the persistent cost ledger; returns the store (close it)."""
+) -> _Persisted:
+    """Hook the meter to the persistent cost ledger and a recorder to the shared event record;
+    close the result with ``_close_store``."""
     try:
         store = await open_store(settings, workdir=workdir)
     except StoreUnavailableError as exc:
@@ -145,12 +158,17 @@ async def _attach_ledger(
         info = activity.info()
         prefix = f"{prefix}:{info.workflow_id}:{info.activity_id}@{info.attempt}"
     LedgerSink(store, mission_id, key_prefix=prefix).attach(meter)
-    return store
+    recorder = TraceRecorder()
+    events = MissionEventLog(store)
+    recorder.listeners.append(events.add)
+    events.start()
+    return _Persisted(store=store, recorder=recorder, events=events)
 
 
-async def _close_store(store: MissionStore, meter: CostMeter) -> None:
+async def _close_store(persisted: _Persisted, meter: CostMeter) -> None:
     meter.on_record = None
-    await store.close()
+    await persisted.events.aclose()  # before the store closes; best effort, never raises
+    await persisted.store.close()
 
 
 # --- plan_round -----------------------------------------------------------------------------
@@ -300,7 +318,7 @@ async def _run_implementer(
         except ValueError as exc:
             raise _config_error(f"cannot build the model: {exc}", exc) from exc
         try:
-            store = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "impl")
+            persisted = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "impl")
         except BaseException:
             await model.aclose()
             raise
@@ -346,6 +364,7 @@ async def _run_implementer(
                     mission_checks=checks,
                     objective=objective,
                     extra=extra,
+                    recorder=persisted.recorder,
                     lease=handler,
                 ),
                 f"implementer:{inp.item_id}",
@@ -367,7 +386,7 @@ async def _run_implementer(
                     ledger=meter.ledger,
                 )
             finally:
-                await _close_store(store, meter)
+                await _close_store(persisted, meter)
         run.leases = leases
         spent = sum(e.usd for e in meter.ledger.entries if e.cycle_id == inp.cycle_id)
         out = _output(run, inp, gate, spent)
@@ -501,7 +520,9 @@ async def _integrate_branch(
             except ValueError as exc:
                 raise _config_error(f"cannot build the model: {exc}", exc) from exc
             try:
-                store = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "split")
+                persisted = await _attach_ledger(
+                    settings, inp.workdir, inp.mission_id, meter, "split"
+                )
             except BaseException:
                 await model.aclose()
                 raise
@@ -526,7 +547,7 @@ async def _integrate_branch(
                         ledger=meter.ledger,
                     )
                 finally:
-                    await _close_store(store, meter)
+                    await _close_store(persisted, meter)
 
         # What ``lha orchestrate`` posts to its board during a round is committed here with the
         # integration checkpoint: each research brief and the implementer's summary.
@@ -629,7 +650,7 @@ async def _reflect(
         activity.logger.warning("reflection skipped: cannot build the model: %s", exc)
         return
     try:
-        store = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "reflect")
+        persisted = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "reflect")
     except BaseException:
         await model.aclose()
         raise
@@ -655,7 +676,7 @@ async def _reflect(
                 ledger=meter.ledger,
             )
         finally:
-            await _close_store(store, meter)
+            await _close_store(persisted, meter)
     await anchor.commit_anchor_update(
         Checkpoint(
             cycle_id=inp.cycle_id,
@@ -757,17 +778,18 @@ async def _review_cycle(
             await model.aclose()
             raise _config_error(f"cannot open the sandbox: {exc}", exc) from exc
         try:
-            store = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "review")
+            persisted = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "review")
         except BaseException:
             await session.close()
             await model.aclose()
             raise
         try:
             review = await _with_heartbeat(
-                Reviewer(model, tools).review(
+                Reviewer(model, tools, recorder=persisted.recorder).review(
                     diff=diff[:_REVIEW_DIFF_CAP],
                     criteria=screen_criteria(findings, item.description),
                     ctx=ToolContext(mission_id=inp.mission_id, session=session),
+                    cycle_id=inp.cycle_id,
                 ),
                 review_id,
             )
@@ -785,7 +807,7 @@ async def _review_cycle(
                     ledger=meter.ledger,
                 )
             finally:
-                await _close_store(store, meter)
+                await _close_store(persisted, meter)
         blocked = False
         if review.blocking:
             streak = _blocking_streak(await anchor.read_events(), inp.item_id) + 1

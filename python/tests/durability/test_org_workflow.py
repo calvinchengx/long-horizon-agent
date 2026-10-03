@@ -227,6 +227,18 @@ async def test_parallel_wave_with_research_and_review_completes(tmp_path: Path) 
     # Worktrees and branches are gone; the ownership map was released as items finished.
     assert not [b for b in git_ops.list_branches(work) if b.startswith("lha/")]
     assert (await GitMissionAnchor(work).read_ownership()).owners == {}
+    # The implementers' tool calls reached the shared event record, tagged with their role.
+    from lha.persistence.store import open_store
+
+    store = await open_store(SETTINGS, workdir=str(work))  # where the activities wrote
+    rows = await store.read_mission_events(mission_id=inp.mission_id, limit=10_000)
+    await store.close()
+    implementer_calls = [
+        r.payload["tool"]
+        for r in rows
+        if r.kind == "tool_call" and r.payload.get("role") == "implementer"
+    ]
+    assert implementer_calls.count("write_file") == 2, [(r.kind, r.payload) for r in rows]
 
 
 @pytest.mark.asyncio

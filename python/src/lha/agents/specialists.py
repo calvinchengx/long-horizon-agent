@@ -11,16 +11,28 @@ from lha.agents.roles import ROLES
 from lha.agents.subagent import SubAgent, SubAgentResult
 from lha.contracts.model import ModelProvider
 from lha.contracts.tools import ToolContext, ToolDispatcher
+from lha.obs.events import TraceRecorder
 
 
 class Implementer:
     """Works one file-disjoint checklist item with a scoped dispatcher."""
 
     def __init__(
-        self, model: ModelProvider, dispatcher: ToolDispatcher, *, max_turns: int | None = None
+        self,
+        model: ModelProvider,
+        dispatcher: ToolDispatcher,
+        *,
+        max_turns: int | None = None,
+        recorder: TraceRecorder | None = None,
+        cycle_id: str = "",
     ) -> None:
         self._agent = SubAgent(
-            role=ROLES["implementer"], model=model, dispatcher=dispatcher, max_turns=max_turns
+            role=ROLES["implementer"],
+            model=model,
+            dispatcher=dispatcher,
+            max_turns=max_turns,
+            recorder=recorder,
+            cycle_id=cycle_id,
         )
 
     async def run(

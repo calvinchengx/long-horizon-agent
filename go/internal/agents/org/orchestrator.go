@@ -627,7 +627,7 @@ func (r *missionRun) research(ctx context.Context, items []contracts.ChecklistIt
 	for i, q := range queries {
 		texts[i] = q.text
 	}
-	results, err := ResearchFanout(ctx, r.researchModel, r.readTools, r.tctx, texts, nil)
+	results, err := ResearchFanout(ctx, r.researchModel, r.readTools, r.tctx, texts, nil, r.recorder, r.cycleID(r.cycles+1))
 	if err != nil {
 		return nil, err
 	}
@@ -788,7 +788,7 @@ func (r *missionRun) review(ctx context.Context, item contracts.ChecklistItem, c
 	if !r.org.opts.DoReview && len(findings) == 0 {
 		return "approved", nil
 	}
-	review, err := r.reviewer.Review(ctx, pyfmt.Head(diff, reviewDiffCap), verify.ScreenCriteria(findings, item.Description), r.tctx)
+	review, err := r.reviewer.WithRecorder(r.recorder, cycleID).Review(ctx, pyfmt.Head(diff, reviewDiffCap), verify.ScreenCriteria(findings, item.Description), r.tctx)
 	if err != nil {
 		return "", err
 	}
@@ -936,7 +936,7 @@ func (r *missionRun) implement(ctx context.Context, run *ImplementerRun, base st
 	if err := ImplementInWorktree(ctx, run, ImplementOptions{
 		Settings: r.settings, Workdir: r.workdir, Base: base, Ownership: ownership,
 		Model: r.implementerModel, Gate: r.gate, AllowEgress: r.allowEgress, MissionID: r.missionID,
-		MissionChecks: r.checks, Objective: objective, Extra: extra,
+		MissionChecks: r.checks, Objective: objective, Extra: extra, Recorder: r.recorder,
 		Lease:     coordination.NewLeaseHandler(r.leases, run.Writer, run.CycleID, ownership, run.Leases),
 		OnSummary: func(s string) { summaries = append(summaries, s) },
 	}); err != nil {

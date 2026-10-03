@@ -13,11 +13,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from lha.agent.loop import parse_action
+from lha.agent.loop import parse_action, tool_error_detail
 from lha.agent.prompt import ACTION_INSTRUCTIONS, render_tools
 from lha.agents.roles import RoleSpec
 from lha.contracts.model import ModelMessage, ModelProvider, ToolCall
 from lha.contracts.tools import ToolContext, ToolDispatcher, ToolResult, ToolSpec
+from lha.obs.events import TraceRecorder
 from lha.obs.otel import traced_dispatch
 
 _OBSERVATION_CAP = 4000
@@ -54,10 +55,15 @@ class SubAgent:
         model: ModelProvider,
         dispatcher: ToolDispatcher,
         max_turns: int | None = None,
+        recorder: TraceRecorder | None = None,
+        cycle_id: str = "",
     ) -> None:
         self._role = role
         self._model = model
         self._dispatcher = dispatcher
+        # Every tool call is recorded like the lead's, with the role (mission_events).
+        self._recorder = recorder
+        self._cycle_id = cycle_id
         self._max_turns = max_turns or role.max_turns
 
     def _role_permits(self, spec: ToolSpec) -> bool:
@@ -71,14 +77,34 @@ class SubAgent:
 
     async def _dispatch(self, call: ToolCall, ctx: ToolContext, allowed: set[str]) -> ToolResult:
         if call.name not in allowed:
-            return ToolResult.failure(
+            result = ToolResult.failure(
                 f"tool {call.name!r} is not available to the {self._role.name} role"
             )
-        return await traced_dispatch(self._dispatcher, call, ctx)
+        else:
+            result = await traced_dispatch(self._dispatcher, call, ctx)
+        if self._recorder is not None:
+            detail = {} if result.ok else {"error": tool_error_detail(result)}
+            self._recorder.record(
+                "tool_call",
+                mission_id=ctx.mission_id,
+                cycle_id=self._cycle_id,
+                tool=call.name,
+                ok=result.ok,
+                role=self._role.name,
+                **detail,
+            )
+        return result
 
     async def run(
-        self, *, objective: str, ctx: ToolContext, extra_context: str = ""
+        self,
+        *,
+        objective: str,
+        ctx: ToolContext,
+        extra_context: str = "",
+        cycle_id: str | None = None,
     ) -> SubAgentResult:
+        if cycle_id is not None:
+            self._cycle_id = cycle_id
         specs = self.visible_specs()
         allowed = {s.name for s in specs}
         system = (

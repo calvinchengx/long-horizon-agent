@@ -18,6 +18,7 @@ from lha.agents.roles import ROLES
 from lha.agents.subagent import SubAgent
 from lha.contracts.model import ModelProvider
 from lha.contracts.tools import ToolContext, ToolDispatcher
+from lha.obs.events import TraceRecorder
 
 _DIFF_CAP = 8000
 
@@ -107,13 +108,24 @@ def parse_review(text: str) -> tuple[str, bool, list[str], list[str]]:
 class Reviewer:
     """Adversarial, fresh-context diff review."""
 
-    def __init__(self, model: ModelProvider, dispatcher: ToolDispatcher) -> None:
-        self._agent = SubAgent(role=ROLES["reviewer"], model=model, dispatcher=dispatcher)
+    def __init__(
+        self,
+        model: ModelProvider,
+        dispatcher: ToolDispatcher,
+        *,
+        recorder: TraceRecorder | None = None,
+    ) -> None:
+        self._agent = SubAgent(
+            role=ROLES["reviewer"], model=model, dispatcher=dispatcher, recorder=recorder
+        )
 
-    async def review(self, *, diff: str, criteria: str, ctx: ToolContext) -> ReviewResult:
+    async def review(
+        self, *, diff: str, criteria: str, ctx: ToolContext, cycle_id: str = ""
+    ) -> ReviewResult:
         result = await self._agent.run(
             objective=_REVIEW_OBJECTIVE,
             ctx=ctx,
+            cycle_id=cycle_id,
             extra_context=f"Acceptance criteria: {criteria}\n\nDIFF:\n{diff[:_DIFF_CAP]}",
         )
         verdict, blocking, issues, advisory = parse_review(result.final_text or result.brief)
