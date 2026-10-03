@@ -295,8 +295,9 @@ class MeteredModel(ModelProvider):
         """Meter work that spends outside ``complete()`` (a whole ``claude -p`` session).
 
         Authorized with ``worst_case_usd`` like any call; afterwards the cost the work itself
-        reported (``Usage.reported_cost_usd``) is recorded. Work that reported nothing (killed
-        on a timeout) is charged its full ``worst_case_usd``: conservative, never $0.
+        reported (``Usage.reported_cost_usd``) is recorded. Work that reported nothing (a killed
+        session whose models have no price) is charged its full ``worst_case_usd``:
+        conservative, never $0.
         ``run`` returns its result and the usage to record.
         """
         with span(f"invoke_agent {self.name}", self._span_attributes("invoke_agent")) as traced:

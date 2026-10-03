@@ -27,7 +27,13 @@ from lha.contracts.model import ModelMessage, ToolCall, Usage
 from lha.contracts.state import Checklist, ChecklistItem
 from lha.contracts.verify import checks_from_commands
 from lha.model import build_provider
-from lha.model.claude_code import ClaudeCodeError, ClaudeCodeModel, call_budget_usd, parse_result
+from lha.model.claude_code import (
+    ClaudeCodeError,
+    ClaudeCodeModel,
+    SessionProgress,
+    call_budget_usd,
+    parse_result,
+)
 from lha.model.pricing import ModelPrice
 from lha.model.retry import is_retryable
 
@@ -49,6 +55,23 @@ if log:
 mode = os.environ.get("FAKE_CLAUDE_MODE", "text")
 
 
+STREAM = "stream-json" in args
+
+
+# One streamed assistant turn: its usage, and a tool call when ``tool`` is set.
+def turn(n, tool=None, model="claude-sonnet-4-6"):
+    if not STREAM:
+        return
+    content = [{"type": "text", "text": "thinking"}]
+    if tool:
+        content.append({"type": "tool_use", "id": f"tu-{n}", "name": tool, "input": {}})
+    message = {"id": f"msg-{n}", "model": model, "role": "assistant", "content": content,
+               "usage": {"input_tokens": 100, "output_tokens": 1000,
+                         "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0}}
+    print(json.dumps({"type": "assistant", "message": message, "session_id": "sess-1"}),
+          flush=True)
+
+
 def result(text, cost=0.01, **extra):
     out = {
         "type": "result", "subtype": "success", "is_error": False, "result": text,
@@ -64,12 +87,20 @@ def result(text, cost=0.01, **extra):
     print(json.dumps(out))
 
 
+if STREAM:
+    print(json.dumps({"type": "system", "subtype": "init", "session_id": "sess-1"}), flush=True)
 if mode == "text":
+    turn(1)
     result(os.environ.get("FAKE_CLAUDE_REPLY", '{"done": true, "summary": "ok"}'))
 elif mode == "auth":
     result("Failed to authenticate: OAuth session expired", cost=0, is_error=True)
 elif mode == "budget":
     result("", cost=0.9, subtype="error_max_budget_usd", is_error=True)
+elif mode == "hang":  # streams two turns, then never finishes
+    import time
+    turn(1, tool="mcp__lha__read_file")
+    turn(2, tool="mcp__lha__write_file", model=os.environ.get("FAKE_CLAUDE_MODEL", "claude-sonnet-4-6"))
+    time.sleep(600)
 elif mode == "mcp":
     config = json.loads(args[args.index("--mcp-config") + 1])["mcpServers"]["lha"]
     seq = [0]
@@ -93,7 +124,8 @@ elif mode == "mcp":
     names = [t["name"] for t in rpc("tools/list")["result"]["tools"]]
     calls = json.loads(os.environ.get("FAKE_CLAUDE_CALLS", "[]"))
     texts = []
-    for name, arguments in calls:
+    for n, (name, arguments) in enumerate(calls, start=1):
+        turn(n, tool=f"mcp__lha__{name}")
         reply = rpc("tools/call", {"name": name, "arguments": arguments})["result"]
         texts.append(reply["content"][0]["text"])
     result(json.dumps({"tools": names, "texts": texts}), cost=0.42)
@@ -190,7 +222,7 @@ async def test_model_runs_a_tool_less_turn_through_the_cli(
     (call,) = _calls(tmp_path)
     argv = call["argv"]
     assert isinstance(argv, list)
-    assert argv[:3] == ["-p", "--output-format", "json"]
+    assert argv[:4] == ["-p", "--output-format", "stream-json", "--verbose"]
     assert argv[argv.index("--tools") + 1] == ""  # every built-in tool off
     assert argv[argv.index("--model") + 1] == "sonnet"
     assert argv[argv.index("--max-budget-usd") + 1] == "2.0000"
@@ -510,6 +542,101 @@ async def test_a_capped_session_is_still_verified_and_charged(
     assert summary.completed  # the work in the workdir passed, though the session hit its cap
     assert summary.total_usd == pytest.approx(0.9)
     assert "error_max_budget_usd" in summary.trace_jsonl  # the session event says why it stopped
+
+
+# Each fake turn is 100 input and 1000 output tokens; at claude-sonnet-4-6 prices ($3/$15 per MTok)
+# that is $0.0153.
+_TURN_USD = 100 / 1e6 * 3.0 + 1000 / 1e6 * 15.0
+
+
+@pytest.mark.asyncio
+async def test_a_session_killed_at_its_timeout_is_charged_what_it_spent(
+    fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "hang")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "hello.txt").write_text("already here\n")
+    summary = await run_mission_local(
+        workdir=str(ws),
+        title="Hello",
+        description="Write hello.txt",
+        checklist=_checklist(),
+        checks=checks_from_commands([["test", "-f", "hello.txt"]]),
+        settings=_engine_settings(fake_claude, claude_code_timeout_s=3),
+    )
+    assert summary.completed  # the work in the workdir is still verified
+    assert summary.total_usd == pytest.approx(2 * _TURN_USD)  # its two turns, not the $1 cap
+    events = [json.loads(line) for line in summary.trace_jsonl.splitlines()]
+    progress = [e["data"] for e in events if e["kind"] == "session_progress"]
+    assert progress == [
+        {"turns": 1, "tool_calls": 1, "tool": "mcp__lha__read_file", "spent_usd": 0.0153},
+        {"turns": 2, "tool_calls": 2, "tool": "mcp__lha__write_file", "spent_usd": 0.0306},
+    ]
+    (session,) = [e["data"] for e in events if e["kind"] == "claude_code_session"]
+    assert "did not finish within 3s" in str(session["stopped"])
+
+
+@pytest.mark.asyncio
+async def test_a_killed_session_on_an_unpriced_model_is_charged_its_cap(
+    fake_claude: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_CLAUDE_MODE", "hang")
+    monkeypatch.setenv("FAKE_CLAUDE_MODEL", "claude-unreleased-9")
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "hello.txt").write_text("already here\n")
+    summary = await run_mission_local(
+        workdir=str(ws),
+        title="Hello",
+        description="Write hello.txt",
+        checklist=_checklist(),
+        checks=checks_from_commands([["test", "-f", "hello.txt"]]),
+        settings=_engine_settings(fake_claude, claude_code_timeout_s=3),
+    )
+    assert summary.total_usd == pytest.approx(1.0)  # the session's cap: its spend has no price
+    events = [json.loads(line) for line in summary.trace_jsonl.splitlines()]
+    progress = [e["data"] for e in events if e["kind"] == "session_progress"]
+    assert [p["spent_usd"] for p in progress] == [0.0153, None]
+
+
+def test_session_progress_counts_each_turn_and_tool_once() -> None:
+    progress = SessionProgress()
+    assert progress.spent_usd is None  # nothing streamed: unknown, so the cap is charged, not $0
+    usage = {
+        "input_tokens": 100,
+        "output_tokens": 1000,
+        "cache_creation_input_tokens": 2000,
+        "cache_creation": {"ephemeral_1h_input_tokens": 2000},
+    }
+    text = {"type": "text", "text": "x"}
+    tool = {"type": "tool_use", "id": "tu-1", "name": "Read"}
+
+    def event(msg_id: str, block: dict[str, object]) -> dict[str, object]:
+        message = {
+            "id": msg_id,
+            "model": "claude-sonnet-4-6-20260101",
+            "usage": usage,
+            "content": [block],
+        }
+        return {"type": "assistant", "message": message, "session_id": "s-9"}
+
+    # Claude Code streams each content block of a message as its own event, usage repeated.
+    assert progress.observe(event("m1", text)) is True
+    assert progress.observe(event("m1", tool)) is True  # a tool call is news
+    assert progress.observe(event("m1", tool)) is False  # the same block again is not
+    assert progress.observe({"type": "system", "subtype": "init"}) is False
+    assert (progress.turns, progress.tool_calls, progress.tool) == (1, 1, "Read")
+    assert progress.session_id == "s-9"
+    # 100 input + 2000 one-hour cache writes (x2) + 1000 output, at $3/$15 per MTok.
+    assert progress.spent_usd == pytest.approx((100 + 4000) / 1e6 * 3 + 1000 / 1e6 * 15)
+    total = progress.usage(provider="p", fallback_model="sonnet")
+    assert (total.input_tokens, total.output_tokens, total.cache_creation_1h_input_tokens) == (
+        100,
+        1000,
+        2000,
+    )
+    assert total.reported_cost_usd == progress.spent_usd and total.model.startswith("claude-")
 
 
 def test_native_mode_denies_history_publishing_and_the_web() -> None:

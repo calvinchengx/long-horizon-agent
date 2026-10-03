@@ -126,6 +126,33 @@
    ],
    "additionalProperties": false
   },
+  "session_progress": {
+   "type": "object",
+   "properties": {
+    "turns": {
+     "type": "integer"
+    },
+    "tool_calls": {
+     "type": "integer"
+    },
+    "tool": {
+     "type": "string"
+    },
+    "spent_usd": {
+     "type": [
+      "number",
+      "null"
+     ]
+    }
+   },
+   "required": [
+    "spent_usd",
+    "tool",
+    "tool_calls",
+    "turns"
+   ],
+   "additionalProperties": false
+  },
   "claude_code_session": {
    "type": "object",
    "properties": {
@@ -1264,6 +1291,106 @@
    "data": {
     "max_turns": 3,
     "tool_calls": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": 0.5
+   },
+   "valid": true
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "spent_usd": 0.5,
+    "tool": "s",
+    "tool_calls": 3,
+    "turns": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": 0.5,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": "s",
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3.5,
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": "s",
+    "tool": "s",
+    "spent_usd": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3.5,
+    "tool": "s",
+    "spent_usd": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": 7,
+    "spent_usd": 0.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": "s"
    },
    "valid": false
   },
@@ -3482,6 +3609,16 @@
     "trigger": "done",
     "verdict": "passed",
     "checks": []
+   },
+   "valid": true
+  },
+  {
+   "kind": "session_progress",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": null
    },
    "valid": true
   }

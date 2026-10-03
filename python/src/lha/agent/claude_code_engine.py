@@ -21,7 +21,12 @@ before it stops. LHA still verifies again after the session; ``verify`` never ma
 
 Budget: the session is authorized up front with ``LHA_CLAUDE_CODE_MAX_BUDGET_USD`` as its worst
 case, or what is left of the budget when that is less (also passed as ``--max-budget-usd``), and
-the ``total_cost_usd`` Claude Code reports is recorded in the mission's ledger.
+the ``total_cost_usd`` Claude Code reports is recorded in the mission's ledger. A session killed at
+its timeout reports no total: it is charged the tokens it streamed so far, priced
+(``SessionProgress.spent_usd``), or its whole cap when a model it used has no price.
+
+Progress: ``on_progress`` sees each turn and tool call as the session makes it (``stream-json``);
+the lead loop records them as ``session_progress`` events.
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ from lha.model.claude_code import (
     DEFAULT_MODEL,
     ClaudeCodeError,
     ClaudeCodeResult,
+    ClaudeCodeTimeout,
+    SessionProgress,
     base_args,
     call_budget_usd,
     run_claude,
@@ -185,6 +192,7 @@ class ClaudeCodeEngine:
         dispatch: Dispatch,
         verify: Verify,
         meter: ModelProvider | None = None,
+        on_progress: Callable[[SessionProgress], None] | None = None,
     ) -> EngineRun:
         """One session on ``messages`` (system + task) in ``cwd``; metered through ``meter``."""
         system = "\n\n".join(m.content for m in messages if m.role == "system")
@@ -206,10 +214,13 @@ class ClaudeCodeEngine:
                         timeout_s=self._timeout_s,
                         provider=self.name,
                         fallback_model=self._model,
+                        on_progress=on_progress,
                     )
-                except TimeoutError as exc:
-                    # The work so far is still in the workdir: verify it rather than drop it.
-                    return self._stopped(str(exc), used), Usage(provider=self.name)
+                except ClaudeCodeTimeout as exc:
+                    # The work so far is still in the workdir: verify it rather than drop it, and
+                    # charge what the session spent (its cap when a model has no price).
+                    spent = exc.progress.usage(provider=self.name, fallback_model=self._model)
+                    return self._stopped(str(exc), used), spent
                 except ClaudeCodeError as exc:
                     if exc.subtype is None or not exc.subtype.startswith("error_max"):
                         raise

@@ -20,6 +20,12 @@ applies to it. Before a call runs, its worst case is ``LHA_CLAUDE_CODE_MAX_BUDGE
 left of the budget when that is less (``call_budget_usd``); the same amount is passed to the CLI
 as ``--max-budget-usd``.
 
+Progress: the CLI runs with ``--output-format stream-json``, so each model turn arrives as it
+happens. ``SessionProgress`` follows the turns, the tools called and the tokens spent so far,
+priced with ``lha.model.pricing``; the final ``result`` line is the same object
+``--output-format json`` prints. A session killed at its timeout raises ``ClaudeCodeTimeout``
+carrying that progress, so it is charged what it spent rather than its whole cap.
+
 Failures: a result with ``is_error`` raises ``ClaudeCodeError``; rate limits, overload and 5xx
 are marked retryable (``lha.model.retry.is_retryable``), authentication and usage errors are not.
 """
@@ -27,11 +33,15 @@ are marked retryable (``lha.model.retry.is_retryable``), authentication and usag
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 import json
 import os
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
+
+import structlog
 
 from lha.contracts.model import ModelMessage, ModelProvider, TurnResult, Usage
 from lha.model.health import ModelHealth
@@ -43,6 +53,8 @@ DEFAULT_MODEL = "default"
 # Transient API failures worth another try (rate limit, overload, server errors, timeouts).
 _TRANSIENT_MARKERS = ("rate limit", "rate_limit", "overloaded", "529", "timeout", "timed out")
 _STDERR_TAIL = 2000
+# The longest stream-json line read (a tool result can be large; asyncio's default is 64 KiB).
+_STREAM_LINE_LIMIT = 64 * 1024 * 1024
 # Environment variables that make a child ``claude`` think it runs nested inside Claude Code.
 _NESTED_ENV = ("CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT")
 
@@ -67,8 +79,112 @@ class ClaudeCodeError(RuntimeError):
 
 
 @dataclass
+class SessionProgress:
+    """A running ``claude -p`` session's progress, from its ``stream-json`` output.
+
+    ``spent_usd`` prices the tokens of every model turn so far; it is ``None`` before the first
+    turn and while a turn's model has no price (``lha.model.pricing``), so a session whose spend
+    cannot be seen is charged its cap, never $0. It can be below what Claude Code reports at the end,
+    which also counts calls it makes outside the conversation.
+    """
+
+    turns: int = 0
+    tool_calls: int = 0
+    tool: str = ""  # the last tool called
+    session_id: str = ""
+    _messages: dict[str, tuple[str, dict[str, object]]] = field(default_factory=dict)
+    _tool_ids: set[str] = field(default_factory=set)
+
+    def observe(self, event: dict[str, object]) -> bool:
+        """Take one stream-json event; True when it began a turn or called a tool."""
+        session = event.get("session_id")
+        if isinstance(session, str) and session:
+            self.session_id = session
+        message = event.get("message")
+        if event.get("type") != "assistant" or not isinstance(message, dict):
+            return False
+        changed = False
+        msg_id = str(message.get("id") or f"anonymous-{len(self._messages)}")
+        if msg_id not in self._messages:
+            self.turns += 1
+            changed = True
+        usage = message.get("usage")
+        model = message.get("model")
+        self._messages[msg_id] = (
+            model if isinstance(model, str) else "",
+            usage if isinstance(usage, dict) else {},
+        )
+        content = message.get("content")
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            block_id = str(block.get("id") or f"anonymous-{len(self._tool_ids)}")
+            if block_id not in self._tool_ids:
+                self._tool_ids.add(block_id)
+                self.tool_calls += 1
+                self.tool = str(block.get("name") or "")
+                changed = True
+        return changed
+
+    def usage(self, *, provider: str, fallback_model: str) -> Usage:
+        """The tokens so far as one ``Usage``, with ``spent_usd`` as its reported cost."""
+        total = Usage(provider=provider, model=fallback_model)
+        for model, raw in self._messages.values():
+            turn = _turn_usage(raw, model=model or fallback_model, provider=provider)
+            total = total.model_copy(
+                update={
+                    "input_tokens": total.input_tokens + turn.input_tokens,
+                    "output_tokens": total.output_tokens + turn.output_tokens,
+                    "cache_read_input_tokens": total.cache_read_input_tokens
+                    + turn.cache_read_input_tokens,
+                    "cache_creation_input_tokens": total.cache_creation_input_tokens
+                    + turn.cache_creation_input_tokens,
+                    "cache_creation_1h_input_tokens": total.cache_creation_1h_input_tokens
+                    + turn.cache_creation_1h_input_tokens,
+                    "model": turn.model or total.model,
+                }
+            )
+        return total.model_copy(update={"reported_cost_usd": self.spent_usd})
+
+    @property
+    def spent_usd(self) -> float | None:
+        if not self._messages:
+            return None
+        cost = 0.0
+        for model, raw in self._messages.values():
+            price = lookup_claude_price(model)
+            if price is None:
+                return None
+            cost += price.cost(_turn_usage(raw, model=model, provider=""))
+        return round(cost, 6)
+
+
+def _turn_usage(raw: dict[str, object], *, model: str, provider: str) -> Usage:
+    breakdown = raw.get("cache_creation")
+    return Usage(
+        input_tokens=_int(raw.get("input_tokens")),
+        output_tokens=_int(raw.get("output_tokens")),
+        cache_read_input_tokens=_int(raw.get("cache_read_input_tokens")),
+        cache_creation_input_tokens=_int(raw.get("cache_creation_input_tokens")),
+        cache_creation_1h_input_tokens=_int(breakdown.get("ephemeral_1h_input_tokens"))
+        if isinstance(breakdown, dict)
+        else 0,
+        model=model,
+        provider=provider,
+    )
+
+
+class ClaudeCodeTimeout(TimeoutError):
+    """A ``claude -p`` session ran past its timeout and was killed (retryable)."""
+
+    def __init__(self, message: str, *, progress: SessionProgress) -> None:
+        super().__init__(message)
+        self.progress = progress
+
+
+@dataclass
 class ClaudeCodeResult:
-    """The parsed ``--output-format json`` result of one ``claude -p`` run."""
+    """The parsed result of one ``claude -p`` run (the last line of its stream-json output)."""
 
     text: str
     usage: Usage
@@ -102,7 +218,7 @@ def _is_transient(data: dict[str, object], text: str) -> bool:
 
 
 def parse_result(stdout: str, *, provider: str, fallback_model: str) -> ClaudeCodeResult:
-    """Parse the JSON ``claude -p --output-format json`` printed; raise on an error result."""
+    """Parse a ``claude -p`` result object (its last stream-json line); raise on an error result."""
     try:
         data = json.loads(stdout)
     except json.JSONDecodeError as exc:
@@ -177,11 +293,12 @@ def call_budget_usd(configured: float, remaining: float) -> float:
 
 
 def base_args(*, model: str, max_budget_usd: float) -> list[str]:
-    """Flags every LHA ``claude -p`` call shares: JSON out, no saved session, a spend cap."""
+    """Flags every LHA ``claude -p`` call shares: streamed JSON, no saved session, a spend cap."""
     args = [
         "-p",
         "--output-format",
-        "json",
+        "stream-json",
+        "--verbose",  # stream-json requires it with -p
         "--no-session-persistence",
         "--disable-slash-commands",
         "--max-budget-usd",
@@ -201,11 +318,13 @@ async def run_claude(
     timeout_s: float,
     provider: str,
     fallback_model: str,
+    on_progress: Callable[[SessionProgress], None] | None = None,
 ) -> ClaudeCodeResult:
-    """Run ``binary *args`` with ``prompt`` on stdin and parse its JSON result.
+    """Run ``binary *args`` with ``prompt`` on stdin and parse its streamed result.
 
-    The prompt goes on stdin, never argv, so its size is not limited by the OS. A run past
-    ``timeout_s`` is killed and raises ``TimeoutError`` (retryable).
+    The prompt goes on stdin, never argv, so its size is not limited by the OS. ``on_progress``
+    is called with the session's progress whenever a turn begins or a tool is called. A run past
+    ``timeout_s`` is killed and raises ``ClaudeCodeTimeout`` (retryable) with its progress.
     """
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -216,24 +335,62 @@ async def run_claude(
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,
             env=child_env(),
+            limit=_STREAM_LINE_LIMIT,
         )
     except OSError as exc:
         raise ClaudeCodeError(
             f"cannot run {binary!r}: {exc}. Install Claude Code or set LHA_CLAUDE_CODE_BIN."
         ) from exc
+    assert proc.stdin is not None and proc.stdout is not None and proc.stderr is not None
+    stdin, stdout, stderr = proc.stdin, proc.stdout, proc.stderr
+    progress = SessionProgress()
+    result_line = ""
+    other = ""  # the last output that was not a stream-json event
+
+    async def _feed() -> None:
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            stdin.write(prompt.encode())
+            await stdin.drain()
+            stdin.close()
+
+    async def _read() -> None:
+        nonlocal result_line, other
+        async for raw in stdout:
+            line = raw.decode(errors="replace").strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                other = line[-500:]
+                continue
+            if not isinstance(event, dict):
+                other = line[-500:]
+            elif event.get("type") == "result":
+                result_line = line
+            elif progress.observe(event) and on_progress is not None:
+                try:
+                    on_progress(progress)
+                except Exception as exc:  # observing a session must never fail it
+                    structlog.get_logger("lha.model").warning(
+                        "session_progress_failed", error=f"{type(exc).__name__}: {exc}"
+                    )
+
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(prompt.encode()), timeout=timeout_s
+        _, err_bytes, _ = await asyncio.wait_for(
+            asyncio.gather(_feed(), stderr.read(), _read()), timeout=timeout_s
         )
+        await proc.wait()
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise TimeoutError(f"claude -p did not finish within {timeout_s:.0f}s") from None
-    out = stdout.decode(errors="replace").strip()
-    if proc.returncode != 0 and not out.startswith("{"):
-        err = stderr.decode(errors="replace")[-_STDERR_TAIL:]
-        raise ClaudeCodeError(f"claude -p exited {proc.returncode}: {err or out[-500:]}")
-    return parse_result(out, provider=provider, fallback_model=fallback_model)
+        raise ClaudeCodeTimeout(
+            f"claude -p did not finish within {timeout_s:.0f}s", progress=progress
+        ) from None
+    if not result_line:
+        err = err_bytes.decode(errors="replace")[-_STDERR_TAIL:]
+        raise ClaudeCodeError(f"claude -p exited {proc.returncode}: {err or other}")
+    return parse_result(result_line, provider=provider, fallback_model=fallback_model)
 
 
 def render_transcript(messages: list[ModelMessage]) -> str:

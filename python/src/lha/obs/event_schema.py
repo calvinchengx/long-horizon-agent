@@ -96,6 +96,15 @@ EVENT_KINDS: dict[str, JSONSchema] = {
     "tool_call": _payload({"tool": STRING, "ok": BOOLEAN}, {"role": STRING, "error": STRING}),
     "invalid_reply": REASON,
     "turns_exhausted": _payload({"max_turns": INTEGER, "tool_calls": INTEGER}),
+    # spent_usd is null while a model the session used has no price.
+    "session_progress": _payload(
+        {
+            "turns": INTEGER,
+            "tool_calls": INTEGER,
+            "tool": STRING,
+            "spent_usd": {"type": ["number", "null"]},
+        }
+    ),
     "claude_code_session": _payload(
         {"turns": INTEGER, "tool_calls": INTEGER, "session_id": STRING, "stopped": STRING}
     ),

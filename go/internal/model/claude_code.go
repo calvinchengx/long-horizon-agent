@@ -7,12 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"math"
 	"os"
 	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -35,6 +37,12 @@ import (
 //     lead replies with the JSON actions the agent prompt asks for and LHA executes them.
 //   - agent.ClaudeCodeEngine (LHA_LEAD_ENGINE=claude_code): a whole lead cycle is one claude -p
 //     session with LHA's tools served over MCP (agent/mcpbridge).
+//
+// Progress: the CLI runs with --output-format stream-json, so each model turn arrives as it
+// happens. SessionProgress follows the turns, the tools called and the tokens spent so far,
+// priced with the price table; a session killed at its timeout returns a
+// *ClaudeCodeTimeoutError carrying that progress, so it is charged what it spent rather than its
+// whole cap.
 //
 // Cost: the ledger records the total_cost_usd Claude Code reports (Usage.ReportedCostUSD). On a
 // subscription that is the API-equivalent cost, not a bill, but the budget ceiling still applies
@@ -73,16 +81,20 @@ func (e *ClaudeCodeError) Error() string { return e.Message }
 // Retryable reports whether the failure is transient (python: the retryable attribute).
 func (e *ClaudeCodeError) Retryable() bool { return e.IsRetryable }
 
-// ClaudeCodeTimeoutError is a claude -p run killed after its timeout (python: TimeoutError). It
-// is retryable, like any timeout.
-type ClaudeCodeTimeoutError struct{ Message string }
+// ClaudeCodeTimeoutError is a claude -p run killed after its timeout (python: ClaudeCodeTimeout).
+// It is retryable, like any timeout, and carries the session's progress until the kill.
+type ClaudeCodeTimeoutError struct {
+	Message  string
+	Progress *SessionProgress
+}
 
 func (e *ClaudeCodeTimeoutError) Error() string { return e.Message }
 
 // Retryable is always true: a timeout is transient.
 func (e *ClaudeCodeTimeoutError) Retryable() bool { return true }
 
-// ClaudeCodeResult is the parsed --output-format json result of one claude -p run.
+// ClaudeCodeResult is the parsed result of one claude -p run (the last line of its stream-json
+// output).
 type ClaudeCodeResult struct {
 	Text       string
 	Usage      contracts.Usage
@@ -200,7 +212,7 @@ func claudeCodeTransient(data *pyfmt.OrderedMap, text string) bool {
 	return false
 }
 
-// ParseClaudeCodeResult parses the JSON claude -p --output-format json printed; an error result
+// ParseClaudeCodeResult parses a claude -p result object (its last stream-json line); an error result
 // returns a *ClaudeCodeError.
 func ParseClaudeCodeResult(stdout, provider, fallbackModel string) (ClaudeCodeResult, error) {
 	decoded, err := pyfmt.DecodeOrdered([]byte(stdout))
@@ -300,13 +312,14 @@ func CallBudgetUSD(configured, remaining float64) float64 {
 	return math.Min(configured, remaining)
 }
 
-// ClaudeCodeBaseArgs are the flags every LHA claude -p call shares: JSON out, no saved session, a
-// spend cap.
+// ClaudeCodeBaseArgs are the flags every LHA claude -p call shares: streamed JSON, no saved
+// session, a spend cap.
 func ClaudeCodeBaseArgs(model string, maxBudgetUSD float64) []string {
 	args := []string{
 		"-p",
 		"--output-format",
-		"json",
+		"stream-json",
+		"--verbose", // stream-json requires it with -p
 		"--no-session-persistence",
 		"--disable-slash-commands",
 		"--max-budget-usd",
@@ -327,7 +340,12 @@ type ClaudeCodeRun struct {
 	TimeoutS      float64
 	Provider      string
 	FallbackModel string
+	// OnProgress is called with the session's progress whenever a turn begins or a tool is called.
+	OnProgress func(*SessionProgress)
 }
+
+// claudeStreamLineLimit is the longest stream-json line read (a tool result can be large).
+const claudeStreamLineLimit = 64 << 20
 
 // pyOSErrorText renders a failed exec as Python's OSError str() ("[Errno 2] No such file or
 // directory: 'claude'").
@@ -349,15 +367,17 @@ func pyOSErrorText(binary string, err error) string {
 	return fmt.Sprintf("[Errno %d] %s: %s", int(errno), msg, contracts.PyRepr(binary))
 }
 
-// RunClaude runs Binary Args with Prompt on stdin and parses its JSON result. A run past TimeoutS
-// is killed and returns a *ClaudeCodeTimeoutError (retryable).
+// RunClaude runs Binary Args with Prompt on stdin and parses its streamed result. OnProgress sees
+// each turn and tool call as it happens. A run past TimeoutS is killed and returns a
+// *ClaudeCodeTimeoutError (retryable) carrying its progress.
 func RunClaude(ctx context.Context, r ClaudeCodeRun) (ClaudeCodeResult, error) {
 	cmd := exec.Command(r.Binary, r.Args...)
 	cmd.Dir = r.Cwd
 	cmd.Env = ClaudeCodeChildEnv(nil)
 	cmd.Stdin = strings.NewReader(r.Prompt)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	stream := &claudeStream{progress: &SessionProgress{}, onProgress: r.OnProgress}
+	var stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = stream, &stderr
 	// A grandchild holding the pipes open must not keep us waiting after the kill.
 	cmd.WaitDelay = 5 * time.Second
 	if err := cmd.Start(); err != nil {
@@ -375,13 +395,18 @@ func RunClaude(ctx context.Context, r ClaudeCodeRun) (ClaudeCodeResult, error) {
 	case <-timer.C:
 		_ = cmd.Process.Kill()
 		<-done
-		return ClaudeCodeResult{}, &ClaudeCodeTimeoutError{Message: fmt.Sprintf("claude -p did not finish within %.0fs", r.TimeoutS)}
+		stream.mu.Lock()
+		defer stream.mu.Unlock()
+		return ClaudeCodeResult{}, &ClaudeCodeTimeoutError{
+			Message:  fmt.Sprintf("claude -p did not finish within %.0fs", r.TimeoutS),
+			Progress: stream.progress,
+		}
 	case <-ctx.Done():
 		_ = cmd.Process.Kill()
 		<-done
 		return ClaudeCodeResult{}, ctx.Err()
 	}
-	out := pyfmt.PyStrip(strings.ToValidUTF8(stdout.String(), "�"))
+	stream.flush()
 	code := 0
 	var exitErr *exec.ExitError
 	if errors.As(waitErr, &exitErr) {
@@ -389,17 +414,88 @@ func RunClaude(ctx context.Context, r ClaudeCodeRun) (ClaudeCodeResult, error) {
 		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 			code = -int(ws.Signal()) // Python's returncode for a signal
 		}
-	} else if waitErr != nil {
+	} else if waitErr != nil && !errors.Is(waitErr, exec.ErrWaitDelay) {
 		return ClaudeCodeResult{}, &ClaudeCodeError{Message: fmt.Sprintf("claude -p failed: %v", waitErr)}
 	}
-	if code != 0 && !strings.HasPrefix(out, "{") {
-		errText := pyfmt.Tail(strings.ToValidUTF8(stderr.String(), "�"), claudeCodeStderrTail)
+	if stream.result == "" {
+		errText := pyfmt.Tail(strings.ToValidUTF8(stderr.String(), "\uFFFD"), claudeCodeStderrTail)
 		if errText == "" {
-			errText = pyfmt.Tail(out, 500)
+			errText = stream.other
 		}
 		return ClaudeCodeResult{}, &ClaudeCodeError{Message: fmt.Sprintf("claude -p exited %d: %s", code, errText)}
 	}
-	return ParseClaudeCodeResult(out, r.Provider, r.FallbackModel)
+	return ParseClaudeCodeResult(stream.result, r.Provider, r.FallbackModel)
+}
+
+// claudeStream is claude -p's stdout: it splits stream-json lines as they arrive, follows the
+// session's progress and keeps the result line.
+type claudeStream struct {
+	mu         sync.Mutex
+	pending    []byte
+	skipping   bool // inside a line longer than claudeStreamLineLimit
+	progress   *SessionProgress
+	onProgress func(*SessionProgress)
+	result     string // the "result" event's line
+	other      string // the last output that was not a stream-json event
+}
+
+func (c *claudeStream) Write(b []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	rest := b
+	for len(rest) > 0 {
+		i := bytes.IndexByte(rest, '\n')
+		if i < 0 {
+			if !c.skipping {
+				c.pending = append(c.pending, rest...)
+				if len(c.pending) > claudeStreamLineLimit {
+					c.pending, c.skipping = nil, true
+				}
+			}
+			break
+		}
+		if !c.skipping {
+			c.line(append(c.pending, rest[:i]...))
+		}
+		c.pending, c.skipping = nil, false
+		rest = rest[i+1:]
+	}
+	return len(b), nil
+}
+
+// flush handles a last line without a newline.
+func (c *claudeStream) flush() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.pending) > 0 && !c.skipping {
+		c.line(c.pending)
+	}
+	c.pending = nil
+}
+
+func (c *claudeStream) line(raw []byte) {
+	line := pyfmt.PyStrip(strings.ToValidUTF8(string(raw), "\uFFFD"))
+	if line == "" {
+		return
+	}
+	decoded, err := pyfmt.DecodeOrdered([]byte(line))
+	event, ok := decoded.(*pyfmt.OrderedMap)
+	if err != nil || !ok {
+		c.other = pyfmt.Tail(line, 500)
+		return
+	}
+	if omGet(event, "type") == "result" {
+		c.result = line
+		return
+	}
+	if c.progress.Observe(event) && c.onProgress != nil {
+		defer func() { // observing a session must never fail it
+			if p := recover(); p != nil {
+				slog.Default().Warn("session_progress_failed", "error", fmt.Sprint(p))
+			}
+		}()
+		c.onProgress(c.progress)
+	}
 }
 
 // RenderTranscript is the non-system messages as one prompt, ending with a request for the next

@@ -9,7 +9,7 @@ that keep that UI independent of which LHA implementation runs a mission.
 Watching the multi-day fabric-emulator mission (October 2026) took `git log`, the anchor's
 `checklist.json`, SQL on the cost ledger, `temporal workflow describe`, `docker ps` and `pgrep`, and
 still could not answer the main question: what the agent was doing during a 45-minute cycle. Three
-gaps sit underneath any UI:
+gaps sat underneath any UI (Phase 0 below closed them):
 
 - A durable cycle records no tool calls. The cycle activity runs without a trace recorder, so the
   worker log had nothing and the cycle event only counted them (70).
@@ -123,7 +123,7 @@ Work items:
 3. Record `verify` events: what asked for the run (`done`, the session's `verify` tool, or the end
    of the cycle), the verdict and each check. Done.
 4. Stream a `claude_code` session (`stream-json`): `session_progress` events while it runs, and a
-   killed session charged the last spend it reported instead of its whole cap.
+   killed session charged the spend it streamed instead of its whole cap. Done.
 
 Python first, then Go, with spec cases for both. Phase 0 is useful without any UI: `lha
 mission-report` and plain SQL can read it.

@@ -167,7 +167,7 @@ needs no API key. It comes in two strengths, and you can use both at once.
 
 **The model backend** (`LHA_MODEL_BACKEND=claude_code`,
 [`model/claude_code.py`](../python/src/lha/model/claude_code.py)). Each model turn is one
-`claude -p --output-format json` call with every built-in tool switched off (`--tools ""`). The
+`claude -p --output-format stream-json` call with every built-in tool switched off (`--tools ""`). The
 conversation goes in on stdin, the system prompt with `--system-prompt`, and the lead replies with
 the same JSON actions it uses with any other backend. The planner, replanner and every other role
 work unchanged. `LHA_MODEL_NAME` is passed as `--model` (`sonnet`, `opus`, or a full model id);
@@ -212,9 +212,15 @@ once it has spent $5. Afterwards the ledger records the `total_cost_usd` Claude 
 Claude Code checks the cap between API calls, so one call can overshoot it by a single turn. On a
 subscription, that figure is the API-equivalent cost, not a bill, but the budget ceiling still
 applies to it: raise `LHA_BUDGET_USD_CEILING` for long missions. A session killed at
-`LHA_CLAUDE_CODE_TIMEOUT_S` (default 3600 s) reports no cost and is charged its full cap. A session
-that stops at its cap or timeout is not wasted: whatever it left in the workdir is verified like
-any other attempt.
+`LHA_CLAUDE_CODE_TIMEOUT_S` (default 3600 s) reports no total, so it is charged the tokens it
+streamed until then, at the model's price; when it streamed no turn, or a model it used has no
+price, it is charged its full cap. That figure can be slightly below what Claude Code would have reported, which also
+counts calls it makes outside the conversation. A session that stops at its cap or timeout is not
+wasted: whatever it left in the workdir is verified like any other attempt.
+
+**Progress.** Every call streams (`--output-format stream-json`), so the lead engine records a
+`session_progress` event as each turn begins and each tool is called: turns so far, tool calls,
+the last tool, and the spend so far ([observability](16-observability.md)).
 
 **Failures.** An expired login or a bad flag fails the call (and the cycle) without retries; rate
 limits, overload and 5xx answers are retried with backoff like any other backend. Run `claude`

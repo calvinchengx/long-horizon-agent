@@ -50,6 +50,7 @@ field is added there first.
 | `invalid_reply` | `AgentLoop` | `reason` |
 | `verify` | `AgentLoop` | `trigger` (`done`: the lead signalled done; `tool`: a `claude_code` session called `verify`; `cycle`: the cycle ended with edits not yet verified), `verdict`, `checks` (each `name`, `passed`, `exit_code`, `gating`, `timed_out`, `duration_s`). The harness-integrity check is added afterwards and shows in the `checkpoint` verdict |
 | `checkpoint` | `AgentLoop` | `head_sha`, `verified`, `verdict`, `peak_rss_mb` (the process's peak resident memory, so growth over a long mission is visible) |
+| `session_progress` | `AgentLoop` (the `claude_code` lead engine, while the session runs) | `turns`, `tool_calls`, `tool` (the last one called), `spent_usd` (its tokens so far at the model's price; `null` while a model it used has no price). One per turn or tool call, from `--output-format stream-json` |
 | `claude_code_session` | `AgentLoop` (the `claude_code` lead engine) | `turns`, `tool_calls`, `session_id`, `stopped` |
 | `code_map` | `AgentLoop` (`LHA_CODE_MAP=ripwire`) | `item_id`, `mode` (`trace` or `task`), `ok`, `exit_code`, `timed_out`, `bytes`, `duration_s`, `fell_back`, `error` ([24-large-missions.md](24-large-missions.md#optional-a-code-map-each-cycle)) |
 | `system_one` | `AgentLoop` (stall triage, `LHA_SYSTEM_ONE_BACKEND`) | `use`, `item_id`, `model`, `answer`, `confidence`, `probabilities`, `threshold`, `action`, `error`; also committed to `.lha/events.ndjson` ([25-system-one.md](25-system-one.md)) |

@@ -3,6 +3,7 @@ package model
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model/claudecodetest"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
 // Ported from python/tests/unit/test_claude_code.py (the parsing and model-backend half; the
@@ -131,7 +133,7 @@ func TestClaudeCodeRunsAToolLessTurnThroughTheCLI(t *testing.T) {
 		t.Fatalf("calls: %d", len(calls))
 	}
 	argv := calls[0].Argv
-	if strings.Join(argv[:3], " ") != "-p --output-format json" {
+	if strings.Join(argv[:4], " ") != "-p --output-format stream-json --verbose" {
 		t.Fatalf("argv %q", argv)
 	}
 	checks := map[string]string{"--tools": "", "--model": "sonnet", "--max-budget-usd": "2.0000", "--system-prompt": "SYSTEM PROMPT"}
@@ -319,5 +321,43 @@ func TestACallIsCappedAtWhatIsLeftOfTheBudget(t *testing.T) {
 	}
 	if got, _ := m.EstimateCostUSD(big); got != 5 { // the original is unchanged
 		t.Fatal(got)
+	}
+}
+
+func TestSessionProgressCountsEachTurnAndToolOnce(t *testing.T) {
+	event := func(msgID, block string) *pyfmt.OrderedMap {
+		raw := `{"type": "assistant", "session_id": "s-9", "message": {"id": "` + msgID + `",
+			"model": "claude-sonnet-4-6-20260101", "content": [` + block + `],
+			"usage": {"input_tokens": 100, "output_tokens": 1000, "cache_creation_input_tokens": 2000,
+				"cache_creation": {"ephemeral_1h_input_tokens": 2000}}}}`
+		decoded, err := pyfmt.DecodeOrdered([]byte(raw))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return decoded.(*pyfmt.OrderedMap)
+	}
+	text, tool := `{"type": "text", "text": "x"}`, `{"type": "tool_use", "id": "tu-1", "name": "Read"}`
+	init, _ := pyfmt.DecodeOrdered([]byte(`{"type": "system", "subtype": "init"}`))
+	p := &SessionProgress{}
+	if _, ok := p.SpentUSD(); ok { // nothing streamed: unknown, so the cap is charged, not $0
+		t.Fatal("spend known before the first turn")
+	}
+	// Claude Code streams each content block of a message as its own event, usage repeated.
+	if !p.Observe(event("m1", text)) || !p.Observe(event("m1", tool)) || p.Observe(event("m1", tool)) ||
+		p.Observe(init.(*pyfmt.OrderedMap)) {
+		t.Fatalf("%+v", p)
+	}
+	if p.Turns != 1 || p.ToolCalls != 1 || p.Tool != "Read" || p.SessionID != "s-9" {
+		t.Fatalf("%+v", p)
+	}
+	// 100 input + 2000 one-hour cache writes (x2) + 1000 output, at $3/$15 per MTok.
+	want := float64(100+4000)/1e6*3 + 1000.0/1e6*15
+	if usd, ok := p.SpentUSD(); !ok || math.Abs(usd-want) > 1e-9 {
+		t.Fatalf("spent %v %v", usd, ok)
+	}
+	u := p.Usage("p", "sonnet")
+	if u.InputTokens != 100 || u.OutputTokens != 1000 || u.CacheCreation1hInputTokens != 2000 ||
+		u.ReportedCostUSD == nil || !strings.HasPrefix(u.Model, "claude-") {
+		t.Fatalf("%+v", u)
 	}
 }

@@ -14,8 +14,9 @@ type ExternalWork func(ctx context.Context) (contracts.Usage, error)
 //
 // It is authorized with worstCaseUSD like any call (plus in-flight reservations; a refusal
 // returns a *BudgetExceeded without running it); afterwards the cost the work reported
-// (Usage.ReportedCostUSD) is recorded. Work that reported nothing (killed on a timeout) is
-// charged its full worstCaseUSD: conservative, never $0. Work that fails records nothing.
+// (Usage.ReportedCostUSD) is recorded. Work that reported nothing (a killed session whose models
+// have no price) is charged its full worstCaseUSD: conservative, never $0. Work that fails records
+// nothing.
 func (mm *MeteredModel) RunExternal(ctx context.Context, worstCaseUSD float64, run ExternalWork) error {
 	worst := worstCaseUSD
 	return mm.meter.RunExternal(ctx, &worst, mm.Role, run)

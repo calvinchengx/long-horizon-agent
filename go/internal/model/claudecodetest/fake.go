@@ -9,8 +9,12 @@
 // path (argv, bridge, dispatcher, verifier, checkpoint, ledger) is real; only the model is
 // scripted.
 //
-// Environment (the same as the Python fake): FAKE_CLAUDE_MODE (text | auth | budget | mcp, plus
-// the Go-only sleep and crash), FAKE_CLAUDE_LOG (append {"argv", "stdin", "cwd"} per run),
+// With --output-format stream-json it streams like the real CLI: an init event, one assistant
+// turn per tool call (100 input and 1000 output tokens of FAKE_CLAUDE_MODEL, default
+// claude-sonnet-4-6), then the result.
+//
+// Environment (the same as the Python fake): FAKE_CLAUDE_MODE (text | auth | budget | mcp | hang,
+// plus the Go-only sleep and crash), FAKE_CLAUDE_LOG (append {"argv", "stdin", "cwd"} per run),
 // FAKE_CLAUDE_REPLY (text mode's result), FAKE_CLAUDE_CALLS ([[name, arguments], ...]) and
 // FAKE_CLAUDE_LOGGED_IN ("0": auth status reports logged out).
 package claudecodetest
@@ -102,8 +106,23 @@ func run(args []string) int {
 	if mode != "mcp" {
 		logCall(call)
 	}
+	for _, a := range args {
+		if a == "stream-json" {
+			streaming = true
+		}
+	}
+	emit(map[string]any{"type": "system", "subtype": "init", "session_id": "sess-1"})
 	switch mode {
+	case "hang": // streams two turns, then never finishes
+		turn(1, "mcp__lha__read_file", "claude-sonnet-4-6")
+		m := os.Getenv("FAKE_CLAUDE_MODEL")
+		if m == "" {
+			m = "claude-sonnet-4-6"
+		}
+		turn(2, "mcp__lha__write_file", m)
+		time.Sleep(10 * time.Minute)
 	case "text":
+		turn(1, "", "claude-sonnet-4-6")
 		reply, ok := os.LookupEnv("FAKE_CLAUDE_REPLY")
 		if !ok {
 			reply = `{"done": true, "summary": "ok"}`
@@ -138,6 +157,31 @@ func logCall(call Call) {
 		_, _ = f.Write(append(line, '\n'))
 		_ = f.Close()
 	}
+}
+
+// streaming is set when the fake was asked for --output-format stream-json.
+var streaming bool
+
+// emit prints one stream-json event (nothing when not streaming).
+func emit(event map[string]any) {
+	if !streaming {
+		return
+	}
+	raw, _ := json.Marshal(event)
+	fmt.Println(string(raw))
+}
+
+// turn streams one assistant turn: its usage, and a tool call when tool is set.
+func turn(n int, tool, model string) {
+	content := []any{map[string]any{"type": "text", "text": "thinking"}}
+	if tool != "" {
+		content = append(content, map[string]any{"type": "tool_use", "id": fmt.Sprintf("tu-%d", n), "name": tool, "input": map[string]any{}})
+	}
+	emit(map[string]any{"type": "assistant", "session_id": "sess-1", "message": map[string]any{
+		"id": fmt.Sprintf("msg-%d", n), "model": model, "role": "assistant", "content": content,
+		"usage": map[string]any{"input_tokens": 100, "output_tokens": 1000,
+			"cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+	}})
 }
 
 func result(text string, cost float64, extra map[string]any) {
@@ -234,11 +278,12 @@ func mcp(call Call) error {
 		}
 	}
 	texts := []string{}
-	for _, c := range calls {
+	for n, c := range calls {
 		var name string
 		var arguments map[string]any
 		_ = json.Unmarshal(c[0], &name)
 		_ = json.Unmarshal(c[1], &arguments)
+		turn(n+1, "mcp__lha__"+name, "claude-sonnet-4-6")
 		reply, err := rpc("tools/call", map[string]any{"name": name, "arguments": arguments}, false)
 		if err != nil {
 			return err

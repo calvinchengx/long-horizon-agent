@@ -414,3 +414,64 @@ func (d decisionSpecs) Specs() []contracts.ToolSpec {
 	return append(d.Dispatcher.Specs(), contracts.ToolSpec{Name: "record_decision", Description: "Record a decision.",
 		Parameters: map[string]any{"type": "object", "properties": map[string]any{"decision": map[string]any{"type": "string"}}}})
 }
+
+// Each fake turn is 100 input and 1000 output tokens; at claude-sonnet-4-6 prices ($3/$15 per
+// MTok) that is $0.0153.
+const fakeTurnUSD = 100/1e6*3.0 + 1000/1e6*15.0
+
+// hangRun runs a session that streams two turns and never finishes, killed after 3s.
+func hangRun(t *testing.T) (MissionSummary, []map[string]any) {
+	t.Helper()
+	bin, _ := claudecodetest.Install(t)
+	t.Setenv("FAKE_CLAUDE_MODE", "hang")
+	ws := filepath.Join(t.TempDir(), "ws")
+	if err := os.MkdirAll(ws, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "hello.txt"), []byte("already here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	summary := engineRun(t, ws, engineSettings(t, bin, "LHA_CLAUDE_CODE_TIMEOUT_S=3"), helloChecklist(), nil)
+	var progress []map[string]any
+	for _, line := range strings.Split(summary.TraceJSONL, "\n") {
+		var e struct {
+			Kind string         `json:"kind"`
+			Data map[string]any `json:"data"`
+		}
+		if json.Unmarshal([]byte(line), &e) == nil && e.Kind == "session_progress" {
+			progress = append(progress, e.Data)
+		}
+	}
+	return summary, progress
+}
+
+func TestASessionKilledAtItsTimeoutIsChargedWhatItSpent(t *testing.T) {
+	summary, progress := hangRun(t)
+	if !summary.Completed { // the work in the workdir is still verified
+		t.Fatalf("%+v", summary)
+	}
+	if d := summary.TotalUSD - 2*fakeTurnUSD; d > 1e-9 || d < -1e-9 { // its two turns, not the $1 cap
+		t.Fatalf("total %v", summary.TotalUSD)
+	}
+	want := []map[string]any{
+		{"turns": 1.0, "tool_calls": 1.0, "tool": "mcp__lha__read_file", "spent_usd": 0.0153},
+		{"turns": 2.0, "tool_calls": 2.0, "tool": "mcp__lha__write_file", "spent_usd": 0.0306},
+	}
+	if !reflect.DeepEqual(progress, want) {
+		t.Fatalf("progress %v", progress)
+	}
+	if !strings.Contains(summary.TraceJSONL, "did not finish within 3s") {
+		t.Fatal(summary.TraceJSONL)
+	}
+}
+
+func TestAKilledSessionOnAnUnpricedModelIsChargedItsCap(t *testing.T) {
+	t.Setenv("FAKE_CLAUDE_MODEL", "claude-unreleased-9")
+	summary, progress := hangRun(t)
+	if d := summary.TotalUSD - 1.0; d > 1e-9 || d < -1e-9 { // the session's cap: its spend has no price
+		t.Fatalf("total %v", summary.TotalUSD)
+	}
+	if len(progress) != 2 || progress[0]["spent_usd"] != 0.0153 || progress[1]["spent_usd"] != nil {
+		t.Fatalf("progress %v", progress)
+	}
+}

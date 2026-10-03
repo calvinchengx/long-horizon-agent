@@ -279,6 +279,8 @@ def _sample(schema: dict[str, Any], *, full: bool = True) -> Any:
     if "enum" in schema:
         return schema["enum"][0]
     kind = schema["type"]
+    if isinstance(kind, list):  # nullable: the non-null type
+        kind = kind[0]
     if kind == "object":
         props: dict[str, Any] = schema.get("properties", {})
         if not props:
@@ -342,6 +344,11 @@ def export_mission_events() -> None:
         },
         {"kind": "tool_call", "data": {"tool": "grep", "ok": None}, "valid": False},
         {"kind": "verify", "data": {**_sample(EVENT_KINDS["verify"]), "checks": []}, "valid": True},
+        {
+            "kind": "session_progress",
+            "data": {**_sample(EVENT_KINDS["session_progress"]), "spent_usd": None},
+            "valid": True,
+        },
     ]
     for case in cases:
         valid = not event_errors(case["kind"], case["data"])

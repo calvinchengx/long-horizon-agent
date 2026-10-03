@@ -9,6 +9,7 @@ import (
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
@@ -409,6 +410,14 @@ func (l *AgentLoop) engineSession(ctx context.Context, act *acting, messages []c
 		Dispatch: dispatch,
 		Verify:   verifyFn,
 		Meter:    l.opts.Model,
+		OnProgress: func(p *model.SessionProgress) {
+			var spent any // null while a model the session used has no price
+			if usd, ok := p.SpentUSD(); ok {
+				spent = usd
+			}
+			l.emit("session_progress", cs.missionID, cs.cycleID, obs.F("turns", p.Turns),
+				obs.F("tool_calls", p.ToolCalls), obs.F("tool", p.Tool), obs.F("spent_usd", spent))
+		},
 	})
 	if err != nil {
 		return err

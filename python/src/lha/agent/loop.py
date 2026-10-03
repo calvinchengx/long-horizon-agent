@@ -540,6 +540,15 @@ class AgentLoop:
             dispatch=dispatch,
             verify=verify,
             meter=self._model,
+            on_progress=lambda p: self._emit(
+                "session_progress",
+                mission_id,
+                cycle_id,
+                turns=p.turns,
+                tool_calls=p.tool_calls,
+                tool=p.tool,
+                spent_usd=p.spent_usd,
+            ),
         )
         acting.tool_calls = run.tool_calls
         acting.tools_used = run.tools_used

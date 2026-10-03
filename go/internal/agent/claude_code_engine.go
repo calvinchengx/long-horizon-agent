@@ -248,6 +248,8 @@ type EngineRequest struct {
 	Verify   EngineVerify
 	// Meter meters the session when it is a *governor.MeteredModel (else it runs unmetered).
 	Meter contracts.ModelProvider
+	// OnProgress sees each turn and tool call as the session makes it (stream-json).
+	OnProgress func(*model.SessionProgress)
 }
 
 // Run is one session on req.Messages in req.Cwd, metered through req.Meter. A refused budget
@@ -280,14 +282,18 @@ func (e *ClaudeCodeEngine) Run(ctx context.Context, req EngineRequest) (EngineRu
 		}
 		result, err := model.RunClaude(ctx, model.ClaudeCodeRun{
 			Args: e.args(bridge, system, budget), Prompt: prompt, Binary: e.binary, Cwd: req.Cwd,
-			TimeoutS: e.timeoutS, Provider: e.name, FallbackModel: e.model,
+			TimeoutS: e.timeoutS, Provider: e.name, FallbackModel: e.model, OnProgress: req.OnProgress,
 		})
 		_ = bridge.Close()
 		if err != nil {
 			// The work so far is still in the workdir: verify it rather than drop it.
 			var timeout *model.ClaudeCodeTimeoutError
 			if errors.As(err, &timeout) {
+				// Charged what the session spent (its cap when a model has no price).
 				run = e.stopped(err.Error(), used)
+				if timeout.Progress != nil {
+					return timeout.Progress.Usage(e.name, e.model), nil
+				}
 				return contracts.Usage{Provider: e.name}, nil
 			}
 			var failed *model.ClaudeCodeError
