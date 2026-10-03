@@ -838,6 +838,50 @@ def test_system_one_labels() -> None:
         assert to_jsonl(rows) == case["jsonl"], case["name"]
 
 
+def test_system_one_gold() -> None:
+    from lha.systemone.gold import (
+        GoldError,
+        check_gold,
+        judge_named,
+        parse_gold,
+        render_scorecards,
+        score,
+        to_jsonl,
+    )
+
+    spec = _load("systemone/gold.json")
+    for case in spec["parse_errors"]:
+        try:
+            parse_gold(case["text"], name="gold.jsonl")
+            error = None
+        except GoldError as exc:
+            error = str(exc)
+        assert error == case["error"], case["name"]
+    for case in spec["checks"]:
+        rows = parse_gold(case["text"], name="gold.jsonl")
+        assert len(rows) == case["rows"], case["name"]
+        assert check_gold(rows) == case["errors"], case["name"]
+        assert to_jsonl(rows) == case["jsonl"], case["name"]
+    rows = parse_gold(spec["scored"]["text"], name="gold.jsonl")
+    for judged in spec["scored"]["judges"]:
+        cards = score(rows, judge_named(judged["judge"]))
+        assert [
+            {
+                "source": c.source,
+                "rows": c.rows,
+                "judged": c.judged,
+                "agree": c.agree,
+                "tp": c.tp,
+                "fp": c.fp,
+                "fn": c.fn,
+                "tn": c.tn,
+                "disagreements": c.disagreements,
+            }
+            for c in cards
+        ] == judged["cards"], judged["judge"]
+        assert render_scorecards(cards, judged["judge"]) == judged["report"], judged["judge"]
+
+
 def test_mission_report() -> None:
     from lha.contracts.state import Checklist, ChecklistItem, EventRecord, MissionSpec
     from lha.ops.report import ReportInput, render_report

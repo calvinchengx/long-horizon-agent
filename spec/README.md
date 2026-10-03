@@ -38,6 +38,7 @@ the matching package is ported; it runs every file below.
 | `memory/recall.json` | episodic lines, search terms, and the memory blocks recalled for a fixture ([`python/tests/unit/memory_spec_fixture.py`](../python/tests/unit/memory_spec_fixture.py)) |
 | `memory/voyage.json` | the Voyage embedder's batching, request bodies (documents and queries), response parsing and errors, and probe status messages |
 | `systemone/authority.json` | the invariant that a System One answer can only narrow what happens: triage's action for every answer (including options never offered and ones naming an authority-widening outcome), and that reranking only reorders and drops |
+| `systemone/gold.json` | gold evaluation rows (`lha eval`): parse and check errors, and the `recorded` and `screen` judges' scorecards and report, byte for byte |
 | `systemone/labels.json` | the label rows `lha labels export` derives from an anchor's events and the store's gates (sources, labels, who judged, redacted inputs, gate/approval de-duplication, diff capping) and their exact JSON Lines bytes |
 
 ## Changing behaviour

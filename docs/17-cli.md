@@ -34,6 +34,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`gates`](#lha-gates) | list recorded human gates: question, options, reminders, decision, who and when | the mission store |
 | [`mission-report`](#lha-mission-report) | one page about a mission: items, verdicts, reviews, gates, spend, commits | a mission workspace and/or the mission store |
 | [`labels export`](#lha-labels-export) | export a mission's gate answers, tool approvals, verifier and review verdicts as JSON Lines labels | a mission workspace and/or the mission store |
+| [`eval check`, `eval run`](#lha-eval) | validate gold evaluation sets, and score a judge against them | gold `.jsonl` files |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
@@ -360,6 +361,35 @@ terminal approver's. One row per gate: an event repeated by a retried activity c
 reminders only raise the count of an open gate, and a closed gate stays closed. The anchor's
 `gate_*` events and the workflow history remain the complete record. It reads the same store as
 [`missions`](#lha-missions).
+
+## `lha eval`
+
+```
+lha eval check FILES...
+lha eval run FILES... [--judge recorded|screen]
+```
+
+Gold evaluation sets ([25-system-one.md](25-system-one.md#gold-evaluation-sets),
+[`eval/gold/`](../eval/gold/README.md)): `lha labels export` rows with a `gold` judgment
+(`label`, `by`, `note`) and `tags`. `check` reads every file (exit `2` at the first line that is
+not a schema-1 label row with a usable `gold`, or when a gold label is outside its source's
+vocabulary or a judgment appears twice, each error on stderr) and prints
+`<n> gold rows (<n> gate, <n> tool_approval, <n> verifier, <n> review) in <k> file(s)`. `run`
+scores a judge and prints one block per source present:
+
+```
+judge: recorded
+verifier: 52 rows, 52 judged, 40 agree (0.77); failed: precision 1.00, recall 0.59 (tp 17, fp 0, fn 12, tn 23)
+  mission_c61985f91887 c3 02: judged passed, gold failed [conftest-injection,bypass,pair-1] (pair 1, no review: ...)
+review: 21 rows, 21 judged, 15 agree (0.71); block: precision 1.00, recall 0.71 (tp 10, fp 0, fn 4, tn 7)
+total: 73 rows, 73 judged, 55 agree (0.75)
+```
+
+`judged` counts the rows the judge answered (`<source>: <n> rows, 0 judged (the judge abstains)`
+otherwise); precision and recall are of the source's refusing label (`reject`, `failed`,
+`block`), `n/a` when undefined. `--judge recorded` (default) scores the label the mission
+recorded; `--judge screen` re-runs the pre-review screen on each review row's `diff` and
+abstains elsewhere. An unknown judge exits `2`. Both implementations print the same report.
 
 ## `lha mission-report`
 

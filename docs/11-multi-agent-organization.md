@@ -423,6 +423,10 @@ What the exercise established:
 - **A `cmd:` witness whose script is in the repository is only as strong as its protection.**
   The second bypass needed no cleverness; it edited the acceptance check.
 
+The ten missions' 73 judgments are the first gold evaluation set,
+[`eval/gold/review-and-verifier-2026-10-02.jsonl`](../eval/gold/README.md), with the label each
+should have had ([25-system-one.md](25-system-one.md#gold-evaluation-sets)).
+
 The exercise also found three defects, fixed before pair 3: a reopened item's review diffed only
 its last cycle, which was empty, so the reviewer blocked it again and again; a reviewer out of
 turns returned a dangling tool call that parsed as a blocking `unparsed` verdict; and the two

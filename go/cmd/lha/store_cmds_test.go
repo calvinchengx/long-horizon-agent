@@ -14,6 +14,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/spec"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
@@ -480,6 +481,46 @@ func TestMissionReport(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 	if r := runCLI(t, nil, "mission-report", "--workdir", filepath.Join(dir, "none")); r.code != 2 || !strings.HasPrefix(r.stderr, "error: no mission anchor at ") {
+		t.Fatalf("%+v", r)
+	}
+}
+
+// lha eval check / run on the committed gold sets, with Python's output (python: test_gold.py).
+func TestEvalCheckAndRun(t *testing.T) {
+	dir := cleanEnv(t)
+	sets, err := filepath.Glob(filepath.Join(spec.Dir(), "..", "eval", "gold", "*.jsonl"))
+	if err != nil || len(sets) == 0 {
+		t.Fatalf("no gold sets: %v", err)
+	}
+	checked := runCLI(t, nil, append([]string{"eval", "check"}, sets...)...)
+	if checked.code != 0 || !strings.HasPrefix(checked.stdout, "73 gold rows (0 gate, 0 tool_approval, 52 verifier, 21 review) in 1 file") {
+		t.Fatalf("%+v", checked)
+	}
+	ran := runCLI(t, nil, append([]string{"eval", "run", "--judge", "screen"}, sets...)...)
+	if ran.code != 0 || !strings.HasPrefix(ran.stdout, "judge: screen\nverifier: 52 rows, 0 judged (the judge abstains)\n") || !strings.Contains(ran.stdout, "review: 21 rows, 21 judged") {
+		t.Fatalf("%+v", ran)
+	}
+	if r := runCLI(t, nil, "eval", "run", "--judge", "oracle", sets[0]); r.code != 2 || !strings.Contains(r.stderr, "error: unknown --judge 'oracle'; expected recorded, screen") {
+		t.Fatalf("%+v", r)
+	}
+	bad := filepath.Join(dir, "bad.jsonl")
+	_ = os.WriteFile(bad, []byte(`{"schema": 1, "source": "gate"}`+"\n"), 0o644)
+	if r := runCLI(t, nil, "eval", "check", bad); r.code != 2 || !strings.Contains(r.stderr, bad+":1: 'gold' must be an object") {
+		t.Fatalf("%+v", r)
+	}
+	dup := filepath.Join(dir, "dup.jsonl")
+	row := `{"schema": 1, "source": "verifier", "label": "passed", "mission_id": "m", "cycle_id": "c1", "item_id": "01", "gold": {"label": "passed", "by": "me"}}` + "\n"
+	_ = os.WriteFile(dup, []byte(row+row), 0o644)
+	if r := runCLI(t, nil, "eval", "check", dup); r.code != 2 || !strings.Contains(r.stderr, "duplicate of") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "eval", "check", filepath.Join(dir, "missing.jsonl")); r.code != 2 {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "eval"); r.code != 2 || !strings.Contains(r.stdout, "Commands:") {
+		t.Fatalf("%+v", r)
+	}
+	if r := runCLI(t, nil, "eval", "bogus"); r.code != 2 || !strings.Contains(r.stderr, "No such command 'bogus'") {
 		t.Fatalf("%+v", r)
 	}
 }
