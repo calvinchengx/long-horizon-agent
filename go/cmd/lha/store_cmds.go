@@ -487,6 +487,91 @@ func (c *cli) labelsCmd(args []string) error {
 	return nil
 }
 
+const evalHelp = "Gold evaluation sets: check them, and score a judge against them."
+
+const evalCheckHelp = "Check gold files: every line a schema-1 label row with a 'gold' judgment inside its\n" +
+	"source's vocabulary, no judgment recorded twice. Prints the row counts; exit 2 on the first\n" +
+	"bad file."
+
+const evalRunHelp = "Score a judge against gold files: per source, agreement with the gold labels and the\n" +
+	"precision and recall of its refusing label, then every disagreement."
+
+// evalCmd is python's lha eval (lha.systemone.gold): check and run.
+func (c *cli) evalCmd(args []string) error {
+	usage := fmt.Sprintf("Usage: lha eval [OPTIONS] COMMAND [ARGS]...\n\n%s\n\nCommands:\n  %-8s %s\n  %-8s %s\n",
+		evalHelp, "check", evalCheckHelp, "run", evalRunHelp)
+	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
+		fmt.Fprint(c.stdout, usage)
+		if len(args) == 0 {
+			return &exitError{code: 2} // typer's no_args_is_help
+		}
+		return nil
+	}
+	switch args[0] {
+	case "check":
+		fs := c.newFlags("eval check", evalCheckHelp)
+		files, err := c.parseInterleaved(fs, args[1:], 1<<30)
+		if err != nil {
+			return err
+		}
+		rows, err := c.loadGold(files)
+		if err != nil {
+			return err
+		}
+		plural := "s"
+		if len(files) == 1 {
+			plural = ""
+		}
+		fmt.Fprintf(c.stdout, "%s in %d file%s\n", systemone.CountBySource(rows), len(files), plural)
+		return nil
+	case "run":
+		fs := c.newFlags("eval run", evalRunHelp)
+		judgeName := fs.String("judge", "recorded", "recorded (the label the mission recorded) or screen (the pre-review screen re-run on each review row's diff).")
+		files, err := c.parseInterleaved(fs, args[1:], 1<<30)
+		if err != nil {
+			return err
+		}
+		judge, err := systemone.JudgeNamed(*judgeName)
+		if err != nil {
+			return fail(2, "unknown --judge %s; expected %s", contracts.PyRepr(*judgeName), strings.Join(systemone.Judges, ", "))
+		}
+		rows, err := c.loadGold(files)
+		if err != nil {
+			return err
+		}
+		fmt.Fprint(c.stdout, systemone.RenderScorecards(systemone.ScoreGold(rows, judge), *judgeName))
+		return nil
+	}
+	return &exitError{code: 2, message: "Usage: lha eval [OPTIONS] COMMAND [ARGS]...\nTry 'lha eval --help' for help.\n\n" +
+		"Error: No such command " + pyQuote(args[0]) + "."}
+}
+
+// loadGold is python's _load_gold: every gold row in files; a bad line or set exits 2.
+func (c *cli) loadGold(files []string) ([]systemone.GoldRow, error) {
+	if len(files) == 0 {
+		return nil, &exitError{code: 2, message: "Usage: lha eval check [OPTIONS] FILES...\nTry 'lha eval check --help' for help.\n\nError: Missing argument 'FILES...'."}
+	}
+	rows := []systemone.GoldRow{}
+	for _, name := range files {
+		data, err := os.ReadFile(name)
+		if err != nil {
+			return nil, fail(2, "cannot read %s: %v", contracts.PyRepr(name), err)
+		}
+		parsed, err := systemone.ParseGold(string(data), name)
+		if err != nil {
+			return nil, fail(2, "%s", err.Error())
+		}
+		rows = append(rows, parsed...)
+	}
+	if errs := systemone.CheckGold(rows); len(errs) > 0 {
+		for _, e := range errs {
+			fmt.Fprintln(c.stderr, "error: "+e)
+		}
+		return nil, &exitError{code: 2}
+	}
+	return rows, nil
+}
+
 const missionReportHelp = "One page about a mission: items and their status, the cycles' verdicts, reviews and\n" +
 	"screens, the human gates, the spend and the commits, from the anchor and the mission store.\n\n" +
 	"Reads the anchor at WORKDIR and, for the mission it names (or MISSION_ID), the store's\n" +

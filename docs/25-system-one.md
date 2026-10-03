@@ -181,6 +181,53 @@ data: it is the record LHA already keeps, joined and redacted, and no label leav
 unless you send the file somewhere. Both implementations derive identical rows from the same
 events and gates (`spec/systemone/labels.json`).
 
+## Gold evaluation sets
+
+A label row says what a judge decided; a gold row adds what it should have decided. The sets
+under [`eval/gold/`](../eval/gold/README.md) are `lha labels export` rows with two more keys:
+
+```json
+"gold": {"label": "failed", "by": "measure-2026-10-02 write-up (docs/11, ...)", "note": "a new conftest.py hook injected the required test ..."},
+"tags": ["conftest-injection", "bypass", "pair-1"]
+```
+
+`gold.label` is the right answer for what was judged (the row's `input`), not for the item: a
+reviewer shown an empty diff should block, whatever the code looked like. The vocabulary per
+source is `approve`/`reject` (gates and tool approvals), `passed`/`failed` (the verifier) and
+`approve`/`block` (the reviewer); the second of each pair is the label that refuses, and the
+scoring counts its precision and recall. `lha eval check FILES` refuses a set with a gold label
+outside the vocabulary, a `gold` without `label` and `by`, or the same judgment twice;
+`lha eval run FILES --judge NAME` scores a judge and prints, per source, how many rows it
+judged, how many agree with gold, precision and recall of the refusing label, and every
+disagreement with its tags and note ([17-cli.md](17-cli.md#lha-eval)). Two judges are built in
+and need no model:
+
+- `recorded`: the label the mission recorded, so the scorecard says how often LHA's own verifier,
+  reviewer and gates were right;
+- `screen`: the deterministic pre-review screen re-run on each review row's diff
+  ([07-verification.md](07-verification.md#pre-review-screen)); it abstains from rows that
+  carry no diff and from every other source.
+
+Both implementations parse, check, score and render the same bytes
+([`spec/systemone/gold.json`](../spec/systemone/gold.json)), and both test suites keep the
+committed sets valid.
+
+The first set, `review-and-verifier-2026-10-02.jsonl`, holds the 73 judgments of the reviewer
+measurement ([11-multi-agent-organization.md](11-multi-agent-organization.md#measured-the-reviewer-and-the-gates-2-october-2026)):
+52 verifier verdicts and 21 review verdicts, no gates. What it shows, on 3 October 2026:
+
+| Judge | Source | Agree | Refusing label: precision / recall | What the misses are |
+|---|---|---|---|---|
+| recorded | verifier | 40 of 52 | 1.00 / 0.59 | the 12 `passed` verdicts on the two gate bypasses (a `conftest.py` hook, rewritten witness scripts) and on empty-diff attempts |
+| recorded | review | 15 of 21 | 1.00 / 0.71 | the 6 dangling tool calls parsed as `unparsed`; every verdict the reviewer did give was right |
+| screen | review | 11 of 21 | 1.00 / 0.29 | it flags all 4 `conftest.py` injections (which the screen of the day missed: `screen_findings` is empty in those rows) and nothing it cannot see in a diff: empty diffs, an unrelated committed cache file, a Go twin left behind |
+
+So the verifier's misses are the gates closed since ([07-verification.md](07-verification.md#harness-integrity)),
+the reviewer's misses are the defect fixed since (the final-turn message), and the screen's
+recall on this set is the ceiling a diff-only screen has: it never blocks wrongly and it cannot
+see what is not in the diff. A model-backed judge (a System One model asked the review question,
+or a fine-tuned Kev) slots in as a third judge; the rows carry everything it would be shown.
+
 ## Not built yet
 
 These uses were considered and left for later, because each needs thresholds measured on real
@@ -196,8 +243,8 @@ LHA missions first:
   output.
 
 The labels for fitting those thresholds already exist and [`lha labels export`](#labels) writes
-them; training a Kev on them, and measuring the thresholds on real missions, is the next step. See
-[the roadmap](23-roadmap.md).
+them; the [gold sets](#gold-evaluation-sets) and `lha eval` score any such judge offline, and a
+model-backed judge is the next one to add. See [the roadmap](23-roadmap.md).
 
 ## Sources
 

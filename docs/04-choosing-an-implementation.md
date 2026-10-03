@@ -18,7 +18,7 @@ process can observe:
 
 | Surface | Shared definition |
 |---|---|
-| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has every command: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `memory reembed`, `objects prune`, `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit` and `mission-abort`, including `mission-start`'s durable organization options. |
+| CLI | The `lha` commands and flags (see [CLI](17-cli.md)). The Go CLI has every command: `version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `labels export`, `eval check`, `eval run`, `mission-report`, `db migrate`, `memory reembed`, `objects prune`, `worker`, `mission-start`, `mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit` and `mission-abort`, including `mission-start`'s durable organization options. |
 | Settings | The `LHA_*` environment variables and `.env` file, with the same names and defaults ([`python/src/lha/config.py`](../python/src/lha/config.py), [`go/internal/config/`](../go/internal/config/)) |
 | Mission anchor | The `.lha/` files and their JSON shapes ([the mission anchor](06-mission-anchor.md)) |
 | Mission store | The SQLite file (same tables, migration ids and JSON columns) and the Postgres schema in [`db/migrations/`](../db/migrations/), with the same `schema_migrations` bookkeeping |

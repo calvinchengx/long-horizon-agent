@@ -62,6 +62,7 @@ var commandHelp = []struct{ name, help string }{
 	{"memory", memoryHelp},
 	{"objects", objectsHelp},
 	{"labels", labelsHelp},
+	{"eval", evalHelp},
 	{"worker", "Run a Temporal worker that serves missions (requires a Temporal server)."},
 	{"mission-start", "Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."},
 	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action), steering notes and gate events."},
@@ -169,6 +170,8 @@ func (c *cli) run(args []string) int {
 		err = c.objectsCmd(rest)
 	case "labels":
 		err = c.labelsCmd(rest)
+	case "eval":
+		err = c.evalCmd(rest)
 	case "worker":
 		err = c.worker(rest)
 	case "mission-start":

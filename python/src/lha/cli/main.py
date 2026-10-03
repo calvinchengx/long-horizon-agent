@@ -35,6 +35,10 @@ objects_app = typer.Typer(help="ClaimCheck object store maintenance.", no_args_i
 app.add_typer(objects_app, name="objects")
 labels_app = typer.Typer(help="Labels for fitting System One thresholds.", no_args_is_help=True)
 app.add_typer(labels_app, name="labels")
+eval_app = typer.Typer(
+    help="Gold evaluation sets: check them, and score a judge against them.", no_args_is_help=True
+)
+app.add_typer(eval_app, name="eval")
 
 
 @app.callback()
@@ -524,6 +528,61 @@ def export(
         Path(out).write_text(text, encoding="utf-8")
     counts = ", ".join(f"{sum(1 for r in rows if r.source == s)} {s}" for s in SOURCES)
     typer.echo(f"{len(rows)} labels ({counts})", err=True)
+
+
+def _load_gold(files: list[str]) -> list[Any]:
+    """Every gold row in ``files`` (``lha eval``); a bad line or set exits 2."""
+    from pathlib import Path
+
+    from lha.systemone.gold import GoldError, check_gold, parse_gold
+
+    rows: list[Any] = []
+    for name in files:
+        try:
+            text = Path(name).read_text(encoding="utf-8")
+        except OSError as exc:
+            _fail(f"cannot read {name!r}: {exc}")
+        try:
+            rows += parse_gold(text, name=name)
+        except GoldError as exc:
+            _fail(str(exc))
+    errors = check_gold(rows)
+    if errors:
+        for line in errors:
+            typer.echo(f"error: {line}", err=True)
+        raise typer.Exit(2)
+    return rows
+
+
+@eval_app.command()
+def check(files: list[str] = typer.Argument(..., help="Gold JSON Lines files.")) -> None:
+    """Check gold files: every line a schema-1 label row with a 'gold' judgment inside its
+    source's vocabulary, no judgment recorded twice. Prints the row counts; exit 2 on the first
+    bad file."""
+    from lha.systemone.gold import count_by_source
+
+    rows = _load_gold(files)
+    plural = "" if len(files) == 1 else "s"
+    typer.echo(f"{count_by_source(rows)} in {len(files)} file{plural}")
+
+
+@eval_app.command()
+def run(
+    files: list[str] = typer.Argument(..., help="Gold JSON Lines files."),
+    judge: str = typer.Option(
+        "recorded",
+        help="recorded (the label the mission recorded) or screen (the pre-review screen "
+        "re-run on each review row's diff).",
+    ),
+) -> None:
+    """Score a judge against gold files: per source, agreement with the gold labels and the
+    precision and recall of its refusing label, then every disagreement."""
+    from lha.systemone.gold import JUDGES, judge_named, render_scorecards, score
+
+    if judge not in JUDGES:
+        _fail(f"unknown --judge {judge!r}; expected {', '.join(JUDGES)}")
+    rows = _load_gold(files)
+    typer.echo(render_scorecards(score(rows, judge_named(judge)), judge), nl=False)
 
 
 @app.command(name="mission-report")
