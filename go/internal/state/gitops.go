@@ -487,14 +487,30 @@ func dirty(ctx context.Context, cwd string) (bool, error) {
 	return pyStrip(out) != "", err
 }
 
-// CommitMembers commits every member's changes inside the member (add -A there) and returns the
-// paths that got a commit. The workspace's own add -A then records the new gitlinks.
+// CommitIdentity is the user.name / user.email the repository at cwd commits with, falling back
+// to the identity InitRepo sets (a member clone has no identity of its own).
+func CommitIdentity(ctx context.Context, cwd string) (name, email string) {
+	name, _ = RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, "config", "user.name")
+	email, _ = RunGitWith(ctx, cwd, RunOptions{NoCheck: true}, "config", "user.email")
+	if name = pyStrip(name); name == "" {
+		name = "LHA Agent"
+	}
+	if email = pyStrip(email); email == "" {
+		email = "agent@lha.local"
+	}
+	return name, email
+}
+
+// CommitMembers commits every member's changes inside the member (add -A there, with the
+// workspace's commit identity) and returns the paths that got a commit. The workspace's own
+// add -A then records the new gitlinks.
 func CommitMembers(ctx context.Context, cwd, message string) ([]string, error) {
 	members, err := MemberPaths(ctx, cwd)
 	if err != nil {
 		return nil, err
 	}
 	committed := []string{}
+	var identity []string
 	for _, path := range members {
 		member := filepath.Join(cwd, path)
 		isDirty, err := dirty(ctx, member)
@@ -504,10 +520,14 @@ func CommitMembers(ctx context.Context, cwd, message string) ([]string, error) {
 		if !isDirty {
 			continue
 		}
+		if identity == nil {
+			name, email := CommitIdentity(ctx, cwd)
+			identity = []string{"-c", "user.name=" + name, "-c", "user.email=" + email}
+		}
 		if _, err := RunGit(ctx, member, "add", "-A"); err != nil {
 			return nil, err
 		}
-		if _, err := RunGit(ctx, member, "commit", "-q", "-m", message); err != nil {
+		if _, err := RunGit(ctx, member, append(identity, "commit", "-q", "-m", message)...); err != nil {
 			return nil, err
 		}
 		committed = append(committed, path)

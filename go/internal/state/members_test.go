@@ -135,7 +135,7 @@ func TestResetAndDiscardReachIntoMembers(t *testing.T) {
 	}
 	writeFile(t, filepath.Join(ws, "svc", "extra.txt"), "e\n")
 	must(RunGit(ctx, filepath.Join(ws, "svc"), "add", "-A"))
-	must(RunGit(ctx, filepath.Join(ws, "svc"), "commit", "-q", "-m", "stray"))
+	must(RunGit(ctx, filepath.Join(ws, "svc"), "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "stray"))
 	recorded := must(RunGit(ctx, ws, "rev-parse", "HEAD:svc"))
 	if err := ResetToHead(ctx, ws); err != nil {
 		t.Fatal(err)

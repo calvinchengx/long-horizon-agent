@@ -135,7 +135,9 @@ def test_reset_and_discard_reach_into_members(tmp_path: Path) -> None:
     # A member moved past the recorded commit is brought back to it.
     (ws / "svc" / "extra.txt").write_text("e\n", encoding="utf-8")
     git_ops.run_git(ws / "svc", "add", "-A")
-    git_ops.run_git(ws / "svc", "commit", "-q", "-m", "stray")
+    git_ops.run_git(
+        ws / "svc", "-c", "user.name=t", "-c", "user.email=t@x", "commit", "-q", "-m", "stray"
+    )
     recorded = git_ops.run_git(ws, "rev-parse", "HEAD:svc")
     git_ops.reset_to_head(ws)
     assert git_ops.head_sha(ws / "svc") == recorded and not (ws / "svc" / "extra.txt").exists()

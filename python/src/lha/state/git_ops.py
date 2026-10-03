@@ -365,16 +365,29 @@ def _dirty(cwd: str | Path) -> bool:
     return bool(run_git(cwd, "status", "--porcelain", "--untracked-files=all").strip())
 
 
+def commit_identity(cwd: str | Path) -> tuple[str, str]:
+    """The ``user.name`` / ``user.email`` the repository at ``cwd`` commits with, falling back to
+    the identity ``init_repo`` sets (a member clone has no identity of its own)."""
+    name = run_git(cwd, "config", "user.name", check=False).strip() or "LHA Agent"
+    email = run_git(cwd, "config", "user.email", check=False).strip() or "agent@lha.local"
+    return name, email
+
+
 def commit_members(cwd: str | Path, message: str) -> list[str]:
-    """Commit every member's changes inside the member (``add -A`` there); return the paths that
-    got a commit. The workspace's own ``add -A`` then records the new gitlinks."""
+    """Commit every member's changes inside the member (``add -A`` there, with the workspace's
+    commit identity); return the paths that got a commit. The workspace's own ``add -A`` then
+    records the new gitlinks."""
     committed: list[str] = []
+    identity: list[str] = []
     for path in member_paths(cwd):
         member = Path(cwd) / path
         if not _dirty(member):
             continue
+        if not identity:
+            name, email = commit_identity(cwd)
+            identity = ["-c", f"user.name={name}", "-c", f"user.email={email}"]
         run_git(member, "add", "-A")
-        run_git(member, "commit", "-q", "-m", message)
+        run_git(member, *identity, "commit", "-q", "-m", message)
         committed.append(path)
     return committed
 
