@@ -227,6 +227,7 @@ class GitMissionAnchor:
         return SituationSnapshot(
             head_sha=git_ops.head_sha(self.workdir),
             recent_commits=git_ops.log_oneline(self.workdir, 10),
+            members=git_ops.member_paths(self.workdir),
             mission=self._read_mission(),
             progress_summary=self._read_anchor_file(PROGRESS_FILE) or "",
             open_items=[i for i in checklist.items if i.is_open],

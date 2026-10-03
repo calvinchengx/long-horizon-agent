@@ -69,10 +69,8 @@ func DiffSince(ctx context.Context, workdir, base, head string) string {
 	if base == "" || head == "" || base == head {
 		return "(no new commits)"
 	}
-	// --no-ext-diff: the hardening config sets diff.external to an empty string, and git would
-	// otherwise try to run it and die, leaving the reviewer an empty diff.
-	diff, _ := state.RunGitWith(ctx, workdir, state.RunOptions{NoCheck: true},
-		"diff", "--no-ext-diff", base+".."+head, "--", ".", ":(exclude).lha")
+	// Members of a multi-repo workspace have their own changes expanded (state.DiffRange).
+	diff := state.DiffRange(ctx, workdir, base, head, ".lha")
 	if diff == "" {
 		return "(empty diff)"
 	}

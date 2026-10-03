@@ -539,6 +539,7 @@ func (e EventRecord) MarshalJSON() ([]byte, error) {
 type SituationSnapshot struct {
 	HeadSHA         string           `json:"head_sha"`
 	RecentCommits   []string         `json:"recent_commits"`
+	Members         []string         `json:"members"` // member repositories of a multi-repo workspace
 	Mission         *MissionSpec     `json:"mission"`
 	ProgressSummary string           `json:"progress_summary"`
 	OpenItems       []ChecklistItem  `json:"open_items"`
@@ -556,6 +557,7 @@ func (s SituationSnapshot) MarshalJSON() ([]byte, error) {
 	type alias SituationSnapshot
 	a := alias(s)
 	a.RecentCommits = orEmpty(a.RecentCommits)
+	a.Members = orEmpty(a.Members)
 	if a.OpenItems == nil {
 		a.OpenItems = []ChecklistItem{}
 	}

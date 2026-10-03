@@ -524,3 +524,81 @@ func TestEvalCheckAndRun(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+// lha workspace init builds a repository of members with Python's output (python: test_multi_repo.py).
+func TestWorkspaceInit(t *testing.T) {
+	dir := cleanEnv(t)
+	ctx := context.Background()
+	mk := func(name string) string {
+		path := filepath.Join(dir, "upstream", name)
+		if err := state.InitRepo(ctx, path); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.WriteFile(filepath.Join(path, "README.md"), []byte("# "+name+"\n"), 0o644)
+		if _, err := state.CommitAll(ctx, path, "init"); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	svc, lib := mk("svc.git"), mk("lib")
+	ws := filepath.Join(dir, "ws")
+	r := runCLI(t, nil, "workspace", "init", ws, "--repo", svc, "--repo", "lib="+lib+"@main")
+	lines := strings.Split(strings.TrimRight(r.stdout, "\n"), "\n")
+	if r.code != 0 || len(lines) != 3 || !strings.HasPrefix(lines[0], "svc <- "+svc+" (") ||
+		!strings.HasPrefix(lines[1], "lib <- "+lib+"@main (") || lines[2] != "workspace "+ws+": 2 members" {
+		t.Fatalf("%+v", r)
+	}
+	members, _ := state.MemberPaths(ctx, ws)
+	if strings.Join(members, ",") != "lib,svc" {
+		t.Fatalf("members %v", members)
+	}
+	log, _ := state.LogOneline(ctx, ws, 1)
+	if !strings.HasSuffix(log[0], "lha: workspace members svc, lib") {
+		t.Fatalf("log %v", log)
+	}
+	again := runCLI(t, nil, "workspace", "init", ws, "--repo", mk("docs"), "--repo", filepath.Join(ws, "svc"))
+	if again.code != 0 || !strings.Contains(again.stderr, "svc: already a member, kept") || !strings.Contains(again.stdout, "3 members") {
+		t.Fatalf("%+v", again)
+	}
+	for _, tc := range []struct {
+		args []string
+		code int
+		want string
+	}{
+		{[]string{"workspace", "init", filepath.Join(dir, "nope"), "--repo", "a=", "--repo", "x"}, 2, "missing a URL"},
+		{[]string{"workspace", "init", filepath.Join(dir, "nope"), "--repo", "a=x", "--repo", "a=y"}, 2, "error: --repo names repeat: a"},
+		{[]string{"workspace", "init", filepath.Join(dir, "nope")}, 2, "Missing option '--repo'"},
+		{[]string{"workspace", "init", "--repo", "x"}, 2, "Missing argument 'DIRECTORY'"},
+		{[]string{"workspace", "init", filepath.Join(dir, "ws2"), "--repo", filepath.Join(dir, "absent")}, 1, "cannot add member 'absent'"},
+		{[]string{"workspace", "bogus"}, 2, "No such command 'bogus'"},
+	} {
+		r := runCLI(t, nil, tc.args...)
+		if r.code != tc.code || !strings.Contains(r.stderr, tc.want) {
+			t.Fatalf("%v: %+v", tc.args, r)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "nope")); err == nil {
+		t.Fatal("a refused init created the directory")
+	}
+	refused := runCLI(t, nil, "mission-start", "--task", "x", "--max-parallel", "2", "--workdir", ws)
+	if refused.code != 2 || !strings.Contains(refused.stderr, "is a multi-repo workspace (members: docs, lib, svc)") {
+		t.Fatalf("%+v", refused)
+	}
+}
+
+func TestParseMemberSpec(t *testing.T) {
+	for _, tc := range []struct{ spec, name, url, ref string }{
+		{"git@host:org/svc.git", "svc", "git@host:org/svc.git", ""},
+		{"https://h/x/lib.git@v2", "lib", "https://h/x/lib.git", "v2"},
+		{"api=https://h/x/y@main", "api", "https://h/x/y", "main"},
+		{"/tmp/repos/thing/", "thing", "/tmp/repos/thing/", ""},
+	} {
+		name, url, ref, err := parseMemberSpec(tc.spec)
+		if err != nil || name != tc.name || url != tc.url || ref != tc.ref {
+			t.Fatalf("%q -> %q %q %q %v", tc.spec, name, url, ref, err)
+		}
+	}
+	if _, _, _, err := parseMemberSpec("..=/x"); err == nil {
+		t.Fatal("'..' accepted as a name")
+	}
+}

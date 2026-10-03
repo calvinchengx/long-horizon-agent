@@ -16,6 +16,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -113,6 +114,20 @@ func ValidateGitLink(worktree, expectedCommonDir string) (GitLink, error) {
 		return GitLink{}, linkErr("%s: gitdir %s is not a directory", dotgit, target)
 	}
 	common := target
+	if !isFile(filepath.Join(target, "commondir")) {
+		// A submodule-style separate git dir: a whole repository of its own. Git records the
+		// member it belongs to as core.worktree; the pointer must lead back to this work tree.
+		if setting, found := coreWorktree(target); found && resolveRel(target, setting) != root {
+			return GitLink{}, linkErr("%s: gitdir %s does not link back to this work tree", dotgit, target)
+		} else if !found && filepath.Base(filepath.Dir(target)) == "modules" {
+			return GitLink{}, linkErr("%s: gitdir %s does not link back to this work tree", dotgit, target)
+		}
+		// The enclosing repository's own .git (a member re-pointed at its workspace): git would
+		// treat this directory as that repository's work tree and rewrite its index.
+		if filepath.Base(target) == ".git" && isWithin(root, filepath.Dir(target)) && root != filepath.Dir(target) {
+			return GitLink{}, linkErr("%s: gitdir %s is the enclosing repository", dotgit, target)
+		}
+	}
 	if isFile(filepath.Join(target, "commondir")) {
 		value, err := readTrimmed(filepath.Join(target, "commondir"))
 		if err != nil {
@@ -144,6 +159,31 @@ func ValidateGitLink(worktree, expectedCommonDir string) (GitLink, error) {
 		}
 	}
 	return GitLink{GitDir: target, CommonDir: common}, nil
+}
+
+var coreWorktreeRE = regexp.MustCompile(`^\s*worktree\s*=\s*(.*?)\s*$`)
+
+// coreWorktree is core.worktree from <gitDir>/config (git sets it on a submodule's git dir,
+// pointing back at the member); found is false when the file has none.
+func coreWorktree(gitDir string) (string, bool) {
+	data, err := os.ReadFile(filepath.Join(gitDir, "config"))
+	if err != nil {
+		return "", false
+	}
+	section := ""
+	for _, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section = strings.ToLower(strings.TrimSpace(line[1 : len(line)-1]))
+			continue
+		}
+		if section == "core" {
+			if m := coreWorktreeRE.FindStringSubmatch(raw); m != nil {
+				return strings.Trim(m[1], "\""), true
+			}
+		}
+	}
+	return "", false
 }
 
 // CheckGitLinkPath validates <worktree>/.git when it is a file or a symlink; a directory (or

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import shlex
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
 
 import typer
@@ -39,6 +40,10 @@ eval_app = typer.Typer(
     help="Gold evaluation sets: check them, and score a judge against them.", no_args_is_help=True
 )
 app.add_typer(eval_app, name="eval")
+workspace_app = typer.Typer(
+    help="Multi-repo workspaces: one mission over several repositories.", no_args_is_help=True
+)
+app.add_typer(workspace_app, name="workspace")
 
 
 @app.callback()
@@ -295,6 +300,95 @@ def vendor(
             f"{item.url} -> {into}/{item.path} ({item.bytes} bytes, sha256 {item.sha256[:12]})"
         )
     typer.echo(f"manifest: {into}/MANIFEST.json")
+
+
+_REPO_HELP = (
+    "A member repository: URL or local path, optionally NAME=URL and @REF "
+    "(e.g. svc=git@host:org/svc.git@v2); repeatable."
+)
+
+
+def parse_member_spec(spec: str) -> tuple[str, str, str]:
+    """``[NAME=]URL[@REF]`` -> ``(name, url, ref)``; the name defaults to the URL's last path
+    component without ``.git``. ``ValueError`` names what is wrong."""
+    text = spec.strip()
+    name, sep, rest = text.partition("=")
+    if not sep or "/" in name or ":" in name:
+        name, rest = "", text
+    url, ref = rest, ""
+    at = rest.rfind("@")
+    if at > 0 and "/" not in rest[at:] and ":" not in rest[at:]:
+        url, ref = rest[:at], rest[at + 1 :]
+    url = url.strip()
+    if not url:
+        raise ValueError(f"--repo {spec!r}: missing a URL or path")
+    if not name:
+        name = url.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]
+        name = name[:-4] if name.endswith(".git") else name
+    name = name.strip()
+    if not name or name in (".", "..") or "/" in name or name.startswith("."):
+        raise ValueError(f"--repo {spec!r}: {name!r} is not a usable member name")
+    return name, url, ref.strip()
+
+
+@workspace_app.command()
+def init(
+    directory: str = typer.Argument(..., help="The workspace directory (created if missing)."),
+    repo: list[str] = typer.Option(..., "--repo", help=_REPO_HELP),
+) -> None:
+    """Create (or extend) a multi-repo workspace: a git repository holding each --repo as a
+    git submodule ("member"), committed as one workspace commit.
+
+    Point a mission's --workdir at it: the anchor and every checkpoint live in the workspace,
+    each member's changes are committed inside the member first, checks and witnesses run from
+    the workspace root (`cmd:sh -c 'cd svc && make test'`), and the reviewer sees each member's
+    own diff. Parallel waves (--max-parallel) do not run across members.
+    """
+    from lha.state import git_ops
+
+    try:
+        specs = [parse_member_spec(s) for s in repo]
+    except ValueError as exc:
+        _fail(str(exc))
+    names = [n for n, _, _ in specs]
+    if len(set(names)) != len(names):
+        _fail(f"--repo names repeat: {', '.join(sorted({n for n in names if names.count(n) > 1}))}")
+    root = Path(directory)
+    if (root / ".lha").is_dir():
+        _fail(f"{directory!r} already anchors a mission; members are added before a mission starts")
+    git_ops.init_repo(root)
+    existing = set(git_ops.member_paths(root))
+    added: list[str] = []
+    for name, url, ref in specs:
+        if name in existing:
+            typer.echo(f"{name}: already a member, kept", err=True)
+            continue
+        try:
+            git_ops.add_member(root, url, name, ref=ref)
+        except git_ops.GitError as exc:
+            _fail(f"cannot add member {name!r} from {url!r}: {exc}", code=1)
+        sha = git_ops.head_sha(root / name)[:12]
+        typer.echo(f"{name} <- {url}{'@' + ref if ref else ''} ({sha})")
+        added.append(name)
+    if added:
+        git_ops.commit_all(root, f"lha: workspace members {', '.join(added)}")
+    members = git_ops.member_paths(root)
+    typer.echo(f"workspace {directory}: {len(members)} member{'s' if len(members) != 1 else ''}")
+
+
+def _refuse_parallel_waves_on_a_workspace(workdir: str, max_parallel: int) -> None:
+    """Parallel waves run implementers in git worktrees of the workspace, which do not carry its
+    members; a multi-repo workspace is worked serially."""
+    from lha.state import git_ops
+
+    if max_parallel >= 2 and Path(workdir).is_dir():
+        members = git_ops.member_paths(workdir)
+        if members:
+            _fail(
+                f"--max-parallel {max_parallel}: {workdir!r} is a multi-repo workspace (members: "
+                f"{', '.join(members)}); parallel waves do not run across members, use "
+                "--max-parallel 1"
+            )
 
 
 async def _with_store[T](fn: Callable[[MissionStore], Awaitable[T]]) -> T:
@@ -1025,6 +1119,7 @@ def mission_start(
     check_commands = resolve_check_commands(check, no_default_checks)
     imported = _load_checklist_file(checklist_file) if checklist_file else None
     workdir = os.path.abspath(workdir)  # the worker may run from another directory
+    _refuse_parallel_waves_on_a_workspace(workdir, max_parallel)
     gate_settings = get_settings()
     default_choice = (deadlock_default or gate_settings.deadlock_gate_default).strip().lower()
     if default_choice not in DEADLOCK_DEFAULTS:

@@ -331,15 +331,124 @@ def head_sha(cwd: str | Path) -> str:
     return run_git(cwd, "rev-parse", "HEAD")
 
 
+# --- member repositories (a multi-repo workspace) -------------------------------------------
+# A workspace repository may hold other repositories as git submodules ("members", docs/24).
+# The anchor and every harness commit live in the workspace; a member's changes are committed in
+# the member first (on whatever branch it has checked out) and the workspace commit records the
+# new gitlink. A member is one of HEAD's gitlinks whose ``.git`` is a validated pointer file
+# (``git_link``: into the workspace's ``.git/modules/``, linking back to the member); a directory
+# the agent turned into a repository is not a member and is left alone.
+_GITLINK_MODE = "160000"
+
+
+def member_paths(cwd: str | Path) -> list[str]:
+    """The workspace's member repositories: HEAD's gitlinks that are checked out, in tree order."""
+    if not has_commits(cwd):
+        return []
+    out = run_git(cwd, "ls-tree", "-r", "-z", "HEAD")
+    members: list[str] = []
+    for entry in out.split("\0"):
+        if not entry:
+            continue
+        meta, _, path = entry.partition("\t")
+        if meta.split(" ")[0] == _GITLINK_MODE and (Path(cwd) / path / ".git").is_file():
+            members.append(path)
+    return members
+
+
+def is_workspace(cwd: str | Path) -> bool:
+    """Whether ``cwd`` is a multi-repo workspace (has at least one member)."""
+    return bool(member_paths(cwd))
+
+
+def _dirty(cwd: str | Path) -> bool:
+    return bool(run_git(cwd, "status", "--porcelain", "--untracked-files=all").strip())
+
+
+def commit_members(cwd: str | Path, message: str) -> list[str]:
+    """Commit every member's changes inside the member (``add -A`` there); return the paths that
+    got a commit. The workspace's own ``add -A`` then records the new gitlinks."""
+    committed: list[str] = []
+    for path in member_paths(cwd):
+        member = Path(cwd) / path
+        if not _dirty(member):
+            continue
+        run_git(member, "add", "-A")
+        run_git(member, "commit", "-q", "-m", message)
+        committed.append(path)
+    return committed
+
+
+def reset_members(cwd: str | Path, *, keep: tuple[str, ...] = RESET_KEEP, ignored: bool) -> None:
+    """Return every member to the commit the workspace's ``HEAD`` records for it (``reset
+    --hard`` to that sha on the member's current branch, then ``clean``; ``ignored`` cleans the
+    ignored files too, keeping ``keep``)."""
+    for path in member_paths(cwd):
+        sha = run_git(cwd, "rev-parse", f"HEAD:{path}")
+        member = Path(cwd) / path
+        run_git(member, "reset", "--hard", "--quiet", sha)
+        if ignored:
+            excludes = [arg for p in keep for arg in ("-e", p)]
+            run_git(member, "clean", "-ffdxq", *excludes)
+        else:
+            run_git(member, "clean", "-fdq")
+
+
+def add_member(cwd: str | Path, url: str, name: str, *, ref: str = "") -> None:
+    """``git submodule add`` ``url`` at ``name`` (checked out at ``ref`` when given) in the
+    workspace repository ``cwd``. A local directory is allowed as a source."""
+    args = ["submodule", "add", "--quiet"]
+    if Path(url).is_dir():  # a local repository: git refuses the file transport by default
+        args = ["-c", "protocol.file.allow=always", *args]
+    run_git(cwd, *args, "--", url, name)
+    if ref:
+        run_git(Path(cwd) / name, "checkout", "--quiet", ref)
+        run_git(cwd, "add", "--", name)
+
+
+def diff_range(cwd: str | Path, base: str, head: str, *, exclude: tuple[str, ...] = ()) -> str:
+    """``git diff base..head`` of the workspace with each member's own changes expanded: for a
+    member whose gitlink moved, the member's diff follows with its paths prefixed by the member
+    path, so a reviewer sees the code, not two commit ids. ``--no-ext-diff``: the hardening
+    config sets ``diff.external`` to an empty string. ``exclude`` are workspace pathspecs."""
+    pathspec = [".", *(f":(exclude){p}" for p in exclude)]
+    parts = [run_git(cwd, "diff", "--no-ext-diff", f"{base}..{head}", "--", *pathspec, check=False)]
+    for path in member_paths(cwd):
+        old = run_git(cwd, "rev-parse", "--quiet", "--verify", f"{base}:{path}", check=False)
+        new = run_git(cwd, "rev-parse", "--quiet", "--verify", f"{head}:{path}", check=False)
+        if not new or old == new:
+            continue
+        member = Path(cwd) / path
+        member_range = f"{old}..{new}" if old else new
+        parts.append(
+            run_git(
+                member,
+                "diff",
+                "--no-ext-diff",
+                f"--src-prefix=a/{path}/",
+                f"--dst-prefix=b/{path}/",
+                *([member_range] if old else [_EMPTY_TREE, new]),
+                check=False,
+            )
+        )
+    return "\n".join(p for p in parts if p)
+
+
+_EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"  # git's empty tree: a new member's base
+
+
 def commit_all(cwd: str | Path, message: str, *, force_paths: tuple[str, ...] = ()) -> str:
     """Stage everything and commit; return the resulting HEAD sha.
 
     ``force_paths`` are additionally staged with ``git add -f`` so they are committed even when
     the repository's ``.gitignore`` excludes them (e.g. the harness's own ``.lha/`` anchor files).
+    In a multi-repo workspace each member's changes are committed inside the member first
+    (``commit_members``) so the workspace commit records the new gitlinks.
 
     If there is nothing to commit, this is a no-op that returns the current HEAD (so callers
     can treat "checkpoint with no changes" as benign and idempotent).
     """
+    commit_members(cwd, message)
     run_git(cwd, "add", "-A")
     existing = [p for p in force_paths if (Path(cwd) / p).exists()]
     if existing:
@@ -419,6 +528,7 @@ def reset_to_head(cwd: str | Path, *, keep: tuple[str, ...] = RESET_KEEP) -> Non
     run_git(cwd, "reset", "--hard", "--quiet", "HEAD")
     excludes = [arg for path in keep for arg in ("-e", path)]
     run_git(cwd, "clean", "-ffdxq", *excludes)
+    reset_members(cwd, keep=keep, ignored=True)
 
 
 def discard_changes(cwd: str | Path) -> None:
@@ -431,6 +541,7 @@ def discard_changes(cwd: str | Path) -> None:
         return
     run_git(cwd, "reset", "--hard", "--quiet", "HEAD")
     run_git(cwd, "clean", "-fdq")
+    reset_members(cwd, ignored=False)
 
 
 def list_branches(cwd: str | Path, *, include_remote: bool = False) -> list[str]:

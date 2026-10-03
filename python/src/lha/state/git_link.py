@@ -12,6 +12,7 @@ Dependency-free so both ``lha.state.git_ops`` and ``lha.execution`` can use it.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -84,6 +85,15 @@ def validate(worktree: str | Path, *, expected_common_dir: str | Path | None = N
             raise GitLinkError(f"{dotgit}: gitdir {target} does not link back to this work tree")
     else:  # a submodule-style separate git dir: a whole repository of its own
         common = target
+        worktree_setting = _core_worktree(target)
+        if worktree_setting is not None and _resolve_rel(target, worktree_setting) != root:
+            raise GitLinkError(f"{dotgit}: gitdir {target} does not link back to this work tree")
+        if worktree_setting is None and target.parent.name == "modules":
+            raise GitLinkError(f"{dotgit}: gitdir {target} does not link back to this work tree")
+        # The enclosing repository's own .git (a member re-pointed at its workspace): git would
+        # treat this directory as that repository's work tree and rewrite its index.
+        if target.name == ".git" and root.is_relative_to(target.parent) and root != target.parent:
+            raise GitLinkError(f"{dotgit}: gitdir {target} is the enclosing repository")
     if not (common / "HEAD").is_file() or not (common / "objects").is_dir():
         raise GitLinkError(f"{dotgit}: {common} is not a git repository")
     for path in (target, common):
@@ -94,6 +104,27 @@ def validate(worktree: str | Path, *, expected_common_dir: str | Path | None = N
             f"{dotgit}: points at repository {common}, expected {Path(expected_common_dir).resolve()}"
         )
     return GitLink(git_dir=target, common_dir=common)
+
+
+_CORE_WORKTREE_RE = re.compile(r"^\s*worktree\s*=\s*(.*?)\s*$")
+
+
+def _core_worktree(git_dir: Path) -> str | None:
+    """``core.worktree`` from ``<git_dir>/config`` (git sets it on a submodule's git dir, pointing
+    back at the member), or ``None`` when the file has none."""
+    try:
+        text = (git_dir / "config").read_text(errors="replace")
+    except OSError:
+        return None
+    section = ""
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1].strip().lower()
+            continue
+        if section == "core" and (m := _CORE_WORKTREE_RE.match(raw)):
+            return m.group(1).strip('"')
+    return None
 
 
 def check(worktree: str | Path, *, expected_common_dir: str | Path | None = None) -> None:

@@ -462,8 +462,10 @@ agent wrote may make that git execute code:
 - **The `.git` pointer is re-validated.** Before every harness git invocation, a `.git` that is a
   file must be a single `gitdir: <path>` line naming an existing git dir outside the work tree.
   For a linked worktree that git dir must sit under `<common>/worktrees/`, its `commondir` must
-  lead to that repository and its `gitdir` back-link to this `.git`. A symlinked `.git` is
-  refused. Before an implementer's branch is committed (`commit_worktree`), the worktree's common
+  lead to that repository and its `gitdir` back-link to this `.git`. For a member of a multi-repo
+  workspace (a submodule) that git dir's `core.worktree` must link back to the member, and a
+  pointer at the enclosing repository's own `.git`, or at a `modules/` git dir without that
+  back-link, is refused. A symlinked `.git` is refused. Before an implementer's branch is committed (`commit_worktree`), the worktree's common
   dir must also be the mission repository's. Anything else is refused with a `GitError` naming the
   problem before git runs, and the attempt fails closed
   ([git_link.py](../python/src/lha/state/git_link.py), `go/internal/state/gitlink.go`).

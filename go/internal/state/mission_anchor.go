@@ -183,6 +183,9 @@ func (a *GitMissionAnchor) ReadSituationalAwareness(ctx context.Context) (contra
 	if snap.RecentCommits, err = LogOneline(ctx, a.workdir, 10); err != nil {
 		return snap, err
 	}
+	if snap.Members, err = MemberPaths(ctx, a.workdir); err != nil {
+		return snap, err
+	}
 	if snap.Mission, err = a.ReadMission(ctx); err != nil {
 		return snap, err
 	}

@@ -206,6 +206,12 @@ def build_messages(
         )
     recent = "\n".join(snapshot.recent_commits[:10]) or "(none yet)"
     user = f"Active checklist item: [{item.id}] {item.description}\n\n"
+    if snapshot.members:
+        user += (
+            "This workspace holds member repositories (git submodules), each a repository of "
+            "its own with its own tests and tooling; paths below are relative to the workspace "
+            f"root: {', '.join(snapshot.members)}\n\n"
+        )
     if item.witnesses:
         listed = "\n".join(_witness_line(w) for w in item.witnesses)
         user += (
