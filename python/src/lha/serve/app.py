@@ -19,7 +19,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hmac
+import html
 import json
+import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import asdict, dataclass, field
@@ -772,20 +774,68 @@ async def not_found(request: Request) -> Response:
     raise ApiError(404, "not_found", f"no route {request.url.path}")
 
 
-async def index(request: Request) -> Response:
-    """The start-up URL (``/?token=...``): sets the token cookie the UI's reads use."""
+#: The UI bundle (built from ui/ by ui/bundle.sh; the Go server embeds the same files).
+UI_DIR = Path(__file__).parent / "ui"
+_TOKEN_META = '<meta name="lha-token" content="" />'
+_ASSET_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
+#: The page and its assets come from this server only; nothing may frame it; the start-up URL's
+#: token never leaves in a Referer.
+_PAGE_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "
+        "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+_SIGN_IN = (
+    "<!doctype html><title>LHA</title><p>Open the URL <code>lha serve</code> printed "
+    "(it carries the token) to use this page.</p>"
+)
+
+
+async def app_page(request: Request) -> Response:
+    """The UI (``/``, ``/missions/...``): the start-up URL's ``?token=`` sets the cookie; the page
+    carries the token for the UI's writes (X-LHA-Token), only to a browser that already has it."""
     app = _app(request)
-    token = request.query_params.get("token", "")
     try:
-        if not hmac.compare_digest(token.encode(), app.token.encode()):
-            _guard(request, write=False)  # no token in the URL: the cookie must already be set
-        else:
-            _guard_host(request)
+        _guard_host(request)
     except ApiError as exc:
         return _error(exc.status, exc.code, exc.message)
-    response = HTMLResponse("<!doctype html><title>LHA</title><p>lha serve is running.</p>")
-    response.set_cookie("lha_token", app.token, httponly=True, samesite="strict", path="/")
+    from_url = request.query_params.get("token", "")
+    url_ok = bool(from_url) and hmac.compare_digest(from_url.encode(), app.token.encode())
+    cookie = request.cookies.get("lha_token", "")
+    if not url_ok and not hmac.compare_digest(cookie.encode(), app.token.encode()):
+        return HTMLResponse(_SIGN_IN, status_code=401, headers=_PAGE_HEADERS)
+    index = UI_DIR / "index.html"
+    page = index.read_text(encoding="utf-8") if index.is_file() else _SIGN_IN
+    page = page.replace(
+        _TOKEN_META, f'<meta name="lha-token" content="{html.escape(app.token)}" />'
+    )
+    response = HTMLResponse(page, headers={**_PAGE_HEADERS, "Cache-Control": "no-store"})
+    if url_ok:
+        response.set_cookie("lha_token", app.token, httponly=True, samesite="strict", path="/")
     return response
+
+
+async def asset(request: Request) -> Response:
+    """A file of the UI bundle; its name carries its content hash, so it is cached for good."""
+    try:
+        _guard_host(request)
+    except ApiError as exc:
+        return _error(exc.status, exc.code, exc.message)
+    name = request.path_params["name"]
+    path = UI_DIR / "assets" / name
+    if not _ASSET_NAME.match(name) or not path.is_file():
+        return _error(404, "not_found", f"no asset {name!r}")
+    kind = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}.get(
+        path.suffix, "application/octet-stream"
+    )
+    return Response(
+        path.read_bytes(),
+        media_type=kind,
+        headers={**_PAGE_HEADERS, "Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 #: Every API route (method, path, handler); a test checks they are exactly spec/serve/openapi.json.
@@ -817,7 +867,9 @@ def create_app(app: App) -> Starlette:
 
     routes = [Route(path, handler, methods=[method]) for method, path, handler in API_ROUTES]
     routes += [
-        Route("/", index, methods=["GET"]),
+        Route("/", app_page, methods=["GET"]),
+        Route("/missions/{rest:path}", app_page, methods=["GET"]),
+        Route("/assets/{name}", asset, methods=["GET"]),
         Route("/api/{rest:path}", not_found, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
     ]
     starlette = Starlette(routes=routes, lifespan=lifespan)

@@ -394,12 +394,39 @@ def test_case(server: Server, case: dict[str, Any]) -> None:
         _check_signal(expect["signal"])
 
 
-def test_the_server_answers_cookie_reads_set_by_the_startup_url(server: Server) -> None:
-    """The start-up URL sets the token cookie the UI's reads use (SameSite=Strict, HttpOnly)."""
-    resp = httpx.get(f"{server.base}/?token={TOKEN}", headers={"Host": server.host}, timeout=10)
+def test_the_startup_url_signs_the_browser_in_and_serves_the_ui(server: Server) -> None:
+    """The UI is served by every implementation alike (spec/serve/README.md, "The UI")."""
+    host = {"Host": server.host}
+    resp = httpx.get(f"{server.base}/?token={TOKEN}", headers=host, timeout=10)
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
     cookie = resp.headers.get("set-cookie", "")
     assert f"lha_token={TOKEN}" in cookie
     assert "samesite=strict" in cookie.lower() and "httponly" in cookie.lower()
+    # The page carries the token for the UI's writes, and its headers keep it in this origin.
+    assert f'<meta name="lha-token" content="{TOKEN}"' in resp.text
+    assert resp.headers["referrer-policy"] == "no-referrer"
+    assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
+    assert resp.headers["cache-control"] == "no-store"
+    assets = re.findall(r'(?:src|href)="(/assets/[^"]+)"', resp.text)
+    assert any(a.endswith(".js") for a in assets) and any(a.endswith(".css") for a in assets)
+    for path in assets:
+        got = httpx.get(server.base + path, headers=host, timeout=10)
+        assert got.status_code == 200 and got.content
+        assert got.headers["content-type"].startswith(
+            "text/javascript" if path.endswith(".js") else "text/css"
+        )
+        assert "immutable" in got.headers["cache-control"]
+    # A deep link works with the cookie; without the token or cookie the page has no token.
+    cookies = {"lha_token": TOKEN}
+    deep = httpx.get(f"{server.base}/missions/mission_local", headers=host, cookies=cookies)
+    assert deep.status_code == 200 and f'content="{TOKEN}"' in deep.text
+    anonymous = httpx.get(f"{server.base}/missions/mission_local", headers=host, timeout=10)
+    assert anonymous.status_code == 401 and TOKEN not in anonymous.text
+    wrong = httpx.get(f"{server.base}/?token=not-the-token", headers=host, timeout=10)
+    assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
+    foreign = httpx.get(f"{server.base}/?token={TOKEN}", headers={"Host": "evil.example:80"})
+    assert foreign.status_code == 403 and TOKEN not in foreign.text
+    assert httpx.get(f"{server.base}/assets/nope.js", headers=host).status_code == 404
 
 
 def test_the_server_registers_exactly_the_documented_routes() -> None:

@@ -507,8 +507,10 @@ interrupted, and prints the start-up URL first:
 lha serve: http://127.0.0.1:8765/?token=...
 ```
 
-Opening that URL sets the token cookie the UI's reads use; every other request needs the token as
-the `X-LHA-Token` header, and every write needs the header. The server refuses a `Host` that is not
+Opening that URL in a browser shows the mission UI ([`ui/`](../ui/README.md)): every mission,
+and for each its live state, open gate, checklist, timeline, gates and spend, with the controls
+for a durable mission. It sets the token cookie the UI's reads use; any other client sends the
+token as the `X-LHA-Token` header, and every write needs the header. The server refuses a `Host` that is not
 its own loopback address.
 
 | Option | Default | Meaning |

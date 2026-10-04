@@ -1,0 +1,23 @@
+{
+  "name": "lha-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "The LHA mission UI: a static bundle every implementation's lha serve embeds (docs/27-mission-ui.md).",
+  "scripts": {
+    "gen": "openapi-typescript ../spec/serve/openapi.json -o src/api.gen.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "dev": "vite"
+  },
+  "dependencies": {
+    "preact": "^10.29.8",
+    "preact-iso": "^2.12.2"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6"
+  }
+}

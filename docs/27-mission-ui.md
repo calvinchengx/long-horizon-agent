@@ -163,6 +163,11 @@ Performance rules, because the cost is in how the server gets its data, not in t
 
 ## Phase 2: the web UI
 
+Status: built ([`ui/`](../ui/README.md)), served by both implementations at the start-up URL:
+the missions list, and per mission its live state, open-gate banner (answered with a name),
+steering, snooze and abort, the checklist, the live timeline, gates and spend. About 15 KB of
+gzipped JavaScript. Still to come: dependency view, per-item attempts and diffs, spend charts.
+
 Pages: missions (status, items done out of total, spend against the ceiling, last activity, parked
 or waiting badges); one mission (checklist with dependencies, attempts and status, live timeline,
 gates, spend rate and an estimated finish, a link into Temporal's UI); one item (description,

@@ -49,6 +49,22 @@ jobs:
       - name: Lint the UI API contract
         run: npx --yes @redocly/cli@2.14.0 lint ../spec/serve/openapi.json
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # The UI's types come from the contract and both servers embed its build: rebuilt from
+      # source here, nothing may differ from what is committed (ui/README.md).
+      - name: The UI bundle matches its source
+        working-directory: ui
+        run: |
+          npm ci
+          ./bundle.sh
+          changed="$(git status --porcelain -- . ../python/src/lha/serve/ui ../go/internal/serve/ui)"
+          if [ -n "$changed" ]; then echo "rebuild the UI (ui/bundle.sh) and commit:"; echo "$changed"; exit 1; fi
+
       # Every case in spec/serve/cases.json against this implementation's `lha serve`, with
       # Temporal unreachable (the fake-workflow run follows the dev server below).
       - name: UI API conformance (no Temporal)

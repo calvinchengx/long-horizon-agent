@@ -19,13 +19,17 @@ import (
 	"bytes"
 	"context"
 	"crypto/subtle"
+	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -154,7 +158,9 @@ func (s *Server) Handler() http.Handler {
 		}
 		writeError(w, fail(404, "not_found", "no route %s", req.URL.Path))
 	})
-	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /{$}", s.appPage)
+	mux.HandleFunc("GET /missions/", s.appPage)
+	mux.HandleFunc("GET /assets/{name}", s.asset)
 	return mux
 }
 
@@ -211,21 +217,80 @@ func (s *Server) guard(r *http.Request, write bool) error {
 	return nil
 }
 
-// index is the start-up URL (/?token=...): it sets the token cookie the UI's reads use.
-func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	var err error
-	if s.validToken(r.URL.Query().Get("token")) {
-		err = s.guardHost(r)
-	} else {
-		err = s.guard(r, false) // no token in the URL: the cookie must already be set
-	}
-	if err != nil {
+// uiFiles is the UI bundle (built from ui/ by ui/bundle.sh; the Python server ships the same files).
+//
+//go:embed ui
+var uiFiles embed.FS
+
+const tokenMeta = `<meta name="lha-token" content="" />`
+
+var assetName = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// pageHeaders: the page and its assets come from this server only; nothing may frame it; the
+// start-up URL's token never leaves in a Referer.
+func pageHeaders(w http.ResponseWriter) {
+	h := w.Header()
+	h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; "+
+		"connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
+const signIn = "<!doctype html><title>LHA</title><p>Open the URL <code>lha serve</code> printed " +
+	"(it carries the token) to use this page.</p>"
+
+// appPage is the UI (/, /missions/...): the start-up URL's ?token= sets the cookie; the page carries
+// the token for the UI's writes (X-LHA-Token), only to a browser that already has it.
+func (s *Server) appPage(w http.ResponseWriter, r *http.Request) {
+	if err := s.guardHost(r); err != nil {
 		writeError(w, err)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "lha_token", Value: s.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	fromURL := r.URL.Query().Get("token")
+	urlOK := fromURL != "" && s.validToken(fromURL)
+	cookieOK := false
+	if c, err := r.Cookie("lha_token"); err == nil {
+		cookieOK = s.validToken(c.Value)
+	}
+	pageHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = io.WriteString(w, "<!doctype html><title>LHA</title><p>lha serve is running.</p>")
+	if !urlOK && !cookieOK {
+		w.WriteHeader(401)
+		_, _ = io.WriteString(w, signIn)
+		return
+	}
+	page := signIn
+	if raw, err := uiFiles.ReadFile("ui/index.html"); err == nil {
+		page = string(raw)
+	}
+	page = strings.Replace(page, tokenMeta, `<meta name="lha-token" content="`+html.EscapeString(s.Token)+`" />`, 1)
+	w.Header().Set("Cache-Control", "no-store")
+	if urlOK {
+		http.SetCookie(w, &http.Cookie{Name: "lha_token", Value: s.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	}
+	_, _ = io.WriteString(w, page)
+}
+
+// asset is a file of the UI bundle; its name carries its content hash, so it is cached for good.
+func (s *Server) asset(w http.ResponseWriter, r *http.Request) {
+	if err := s.guardHost(r); err != nil {
+		writeError(w, err)
+		return
+	}
+	name := r.PathValue("name")
+	raw, err := uiFiles.ReadFile("ui/assets/" + name)
+	if !assetName.MatchString(name) || err != nil {
+		writeError(w, fail(404, "not_found", "no asset %s", contracts.PyRepr(name)))
+		return
+	}
+	kind := map[string]string{".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}[path.Ext(name)]
+	if kind == "" {
+		kind = "application/octet-stream"
+	}
+	pageHeaders(w)
+	w.Header().Set("Content-Type", kind)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(raw)
 }
 
 // --- parameters --------------------------------------------------------------------------------
