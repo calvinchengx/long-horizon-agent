@@ -113,6 +113,19 @@
       }
     },
     {
+      "name": "an undocumented path without a token",
+      "operation": "",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/nope",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
       "name": "list missions",
       "operation": "listMissions",
       "request": {
@@ -123,7 +136,7 @@
         "status": 200,
         "body": {
           "missions": {
-            "$len": 4
+            "$len": 6
           }
         }
       }
@@ -307,8 +320,8 @@
           "live": {
             "status": "RUNNING",
             "cycles": 3,
-            "open_question": null,
-            "resume_at": null,
+            "open_question": "Which database should the API use?",
+            "resume_at": "2026-10-04T00:05:00.500000+00:00",
             "pending_edits": 0,
             "gate": {
               "gate_id": "g9",
@@ -320,11 +333,49 @@
               "request": {
                 "tool": "run_command"
               }
+            },
+            "steer_notes": []
+          }
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "live state is reused for a few seconds",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "live": {
+            "cycles": 3,
+            "gate": {
+              "gate_id": "g9"
             }
           }
         }
       },
       "temporal": "running"
+    },
+    {
+      "name": "a durable mission whose workflow is gone",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_gone"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "durable": true,
+          "items": null,
+          "live": null,
+          "live_error": "$any"
+        }
+      }
     },
     {
       "name": "an unknown mission",
@@ -920,6 +971,18 @@
       }
     },
     {
+      "name": "the checklist of an anchor without a checklist",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_gone/items"
+      },
+      "expect": {
+        "status": 404,
+        "error": "anchor_unavailable"
+      }
+    },
+    {
       "name": "an item's cycles, spend and events",
       "operation": "getItem",
       "request": {
@@ -1144,6 +1207,26 @@
       }
     },
     {
+      "name": "an item with more events than a page",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_busy/items/01"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "cycles": [
+            "c1"
+          ],
+          "events": {
+            "$len": 200
+          },
+          "events_total": 1001
+        }
+      }
+    },
+    {
       "name": "listEvents: no token",
       "operation": "listEvents",
       "request": {
@@ -1243,6 +1326,40 @@
             {
               "role": "reviewer",
               "cycle_id": "c2"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "groups of equal spend in key order",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_gone/costs"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "summary": {
+            "calls": 2,
+            "known_usd": 0,
+            "unknown_cost_calls": 2
+          },
+          "by_role": [
+            {
+              "key": "lead",
+              "unknown_cost_calls": 1
+            },
+            {
+              "key": "reviewer",
+              "unknown_cost_calls": 1
+            }
+          ],
+          "by_model": [
+            {
+              "key": "local-model",
+              "calls": 2
             }
           ]
         }
@@ -1389,6 +1506,134 @@
       "expect": {
         "status": 422,
         "error": "invalid_request"
+      }
+    },
+    {
+      "name": "the stream from a Last-Event-ID that is not an id",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "headers": {
+          "Last-Event-ID": "abc"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "the stream replays more than a page",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "mission_id": "mission_busy",
+          "after": "0"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "mission_event": {
+            "$len": 501
+          }
+        }
+      }
+    },
+    {
+      "name": "a quiet stream sends keepalives",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "mission_id": "mission_finished"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "keepalive": true
+        }
+      }
+    },
+    {
+      "name": "the stream delivers events recorded while it is open",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "mission_id": "mission_elsewhere"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "append": [
+            {
+              "mission_id": "mission_elsewhere",
+              "cycle_id": "c1",
+              "kind": "cycle_started",
+              "payload": {
+                "item_id": "01"
+              }
+            },
+            {
+              "mission_id": "mission_local",
+              "cycle_id": "c9",
+              "kind": "cycle_started",
+              "payload": {
+                "item_id": "02"
+              }
+            },
+            {
+              "mission_id": "mission_elsewhere",
+              "cycle_id": "c1",
+              "kind": "tool_call",
+              "payload": {
+                "tool": "read_file",
+                "ok": true
+              }
+            }
+          ],
+          "mission_event": [
+            {
+              "kind": "cycle_started",
+              "mission_id": "mission_elsewhere"
+            },
+            {
+              "kind": "tool_call",
+              "mission_id": "mission_elsewhere"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the stream announces a mission whose row changed",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream"
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "touch": {
+            "mission_id": "mission_elsewhere",
+            "status": "DEGRADED_PARK"
+          },
+          "mission": [
+            {
+              "mission_id": "mission_elsewhere",
+              "status": "DEGRADED_PARK"
+            }
+          ]
+        }
       }
     },
     {
@@ -1864,6 +2109,23 @@
       }
     },
     {
+      "name": "decision: not one of the open gate's options",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "retry",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      },
+      "temporal": "running"
+    },
+    {
       "name": "decision: sent to the workflow",
       "operation": "decideGate",
       "request": {
@@ -1884,6 +2146,46 @@
           "arg": {
             "decision": "approve",
             "by": "alice"
+          }
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "decision: once answered, the gate no longer limits the decision",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "retry",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 202,
+        "signal": {
+          "name": "human_decision_v2",
+          "arg": {
+            "decision": "retry",
+            "by": "alice"
+          }
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "live state after the gate is answered",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "live": {
+            "gate": null
           }
         }
       },
@@ -2118,19 +2420,291 @@
       }
     },
     {
-      "name": "decision: not one of the open gate's options",
+      "name": "steer: a body that is not an object",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": [
+          "note"
+        ]
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "steer: an unexpected field",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": {
+          "note": "x",
+          "urgent": true
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: an edit without its id",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "remove"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: a field of the wrong type",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "edit",
+              "id": "01",
+              "notes": 5
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: a list holding a non-string",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "edit",
+              "id": "01",
+              "witnesses": [
+                "cmd:true",
+                3
+              ]
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: a flag that is not a boolean",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "edit",
+              "id": "01",
+              "allow_harness_edits": "yes"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: an unexpected field in an edit",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "reopen",
+              "id": "01",
+              "why": "x"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: a name too long",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "reopen",
+              "id": "01"
+            }
+          ],
+          "by": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "decision: not a decision",
       "operation": "decideGate",
       "request": {
         "method": "POST",
         "path": "/api/v1/missions/mission_durable/decision",
         "body": {
-          "decision": "retry",
+          "decision": "maybe",
           "by": "alice"
         }
       },
       "expect": {
         "status": 422,
         "error": "invalid_request"
+      }
+    },
+    {
+      "name": "snooze: a body that is not JSON",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/snooze",
+        "body": "$not-json"
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: an unexpected field",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "reopen",
+              "id": "01"
+            }
+          ],
+          "note": "x"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "decision: a body that is not an object",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": "approve"
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "steer: the workflow is gone",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_gone/steer",
+        "body": {
+          "note": "x"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "checklist-edits: the workflow is gone",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_gone/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "block",
+              "id": "01"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "decision: the workflow is gone",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_gone/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "abort: the workflow is gone",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_gone/abort",
+        "body": {}
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
       },
       "temporal": "running"
     },

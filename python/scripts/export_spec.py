@@ -373,8 +373,10 @@ def _serve_items(*items: tuple[str, str, str, list[str], dict[str, Any]]) -> lis
 def export_serve_fixture() -> None:
     """Missions of every shape the API distinguishes, with one recorded event of every kind.
 
-    ``anchor`` names an entry of ``anchors`` the runner initializes as the mission's workdir;
-    ``workdir`` (no anchor) is recorded as is, a path that does not exist.
+    ``anchor`` names an entry of ``anchors`` the runner initializes as the mission's workdir, or is
+    ``"$broken"``: a workdir whose ``.lha/checklist.json`` does not parse; ``workdir`` (no anchor) is
+    recorded as is, a path that does not exist. ``bulk_events`` are ``count`` copies of an event,
+    recorded after ``events``.
     """
     contract = json.loads((SPEC / "obs/mission_events.json").read_text())
     samples: dict[str, Any] = {}
@@ -426,6 +428,16 @@ def export_serve_fixture() -> None:
         }
         for n, (c, k, p) in enumerate(item_events)
     ]
+    # A busy mission: more events than one page of every reader (1000), all about its item 01.
+    events.append(
+        {
+            "mission_id": "mission_busy",
+            "cycle_id": "c1",
+            "kind": "cycle_started",
+            "payload": {"item_id": "01"},
+            "ts": _SERVE_TS.format(56),
+        }
+    )
     failure = "exit 1: tests/test_api.py::test_list FAILED"
     _write(
         "serve/fixture.json",
@@ -446,6 +458,11 @@ def export_serve_fixture() -> None:
                         ),
                         ("04", "Document it", "todo", ["02", "03"], {"witnesses": ["cmd:true"]}),
                     ),
+                },
+                "busy": {
+                    "title": "Busy mission",
+                    "description": "A mission with many events",
+                    "items": _serve_items(("01", "One long step", "in_progress", [], {})),
                 },
                 "durable": {
                     "title": "Durable mission",
@@ -491,6 +508,22 @@ def export_serve_fixture() -> None:
                     "anchor": None,
                     "workdir": "/nonexistent/lha-serve-fixture",
                 },
+                {
+                    "mission_id": "mission_gone",
+                    "title": "Durable mission whose workflow is gone",
+                    "description": "",
+                    "status": "RUNNING",
+                    "workflow_id": "mission:mission_gone",
+                    "anchor": "$broken",
+                },
+                {
+                    "mission_id": "mission_busy",
+                    "title": "Busy mission",
+                    "description": "A mission with many events",
+                    "status": "RUNNING",
+                    "workflow_id": None,
+                    "anchor": "busy",
+                },
             ],
             "costs": [
                 {
@@ -519,6 +552,24 @@ def export_serve_fixture() -> None:
                     "input_tokens": 2000,
                     "output_tokens": 400,
                     "usd": 0.012,
+                },
+                {
+                    "mission_id": "mission_gone",
+                    "cycle_id": "c1",
+                    "role": "reviewer",
+                    "model": "local-model",
+                    "input_tokens": 10,
+                    "output_tokens": 1,
+                    "usd": None,
+                },
+                {
+                    "mission_id": "mission_gone",
+                    "cycle_id": "c1",
+                    "role": "lead",
+                    "model": "local-model",
+                    "input_tokens": 10,
+                    "output_tokens": 1,
+                    "usd": None,
                 },
                 {
                     "mission_id": "mission_durable",
@@ -575,6 +626,16 @@ def export_serve_fixture() -> None:
                 },
             ],
             "events": events,
+            "bulk_events": [
+                {
+                    "mission_id": "mission_busy",
+                    "cycle_id": "c1",
+                    "kind": "tool_call",
+                    "payload": {"tool": "read_file", "ok": True},
+                    "ts": _SERVE_TS.format(57),
+                    "count": 1000,
+                }
+            ],
         },
     )
 

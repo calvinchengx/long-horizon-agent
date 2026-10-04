@@ -154,21 +154,17 @@ class Mcp:
             "client": ("127.0.0.1", 0),
             "server": ("127.0.0.1", 0),
         }
-        sent = False
+        incoming = iter([{"type": "http.request", "body": raw, "more_body": False}])
         status, chunks = 500, []
 
         async def receive() -> Message:
-            nonlocal sent
-            if sent:
-                return {"type": "http.disconnect"}
-            sent = True
-            return {"type": "http.request", "body": raw, "more_body": False}
+            return next(incoming, {"type": "http.disconnect"})
 
         async def send(message: Message) -> None:
             nonlocal status
             if message["type"] == "http.response.start":
                 status = message["status"]
-            elif message["type"] == "http.response.body":
+            else:  # http.response.body: a route's JSON, in one or more parts
                 chunks.append(message.get("body", b""))
 
         await self._asgi(scope, receive, send)
@@ -189,12 +185,17 @@ def _query_value(name: str, value: Any) -> str:
 
 
 async def serve_stdio(mcp: Mcp, out: TextIO) -> None:
-    """Newline-delimited JSON-RPC on stdin, one response per line on ``out``, until stdin ends."""
+    """Newline-delimited JSON-RPC on stdin, one response per line on ``out``, until stdin ends.
+
+    stdin is read without a thread, so Ctrl-C ends the server even while it waits for a line."""
     import asyncio
 
-    loop = asyncio.get_running_loop()
+    reader = asyncio.StreamReader(limit=8 * 1024 * 1024)
+    await asyncio.get_running_loop().connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(reader), sys.stdin
+    )
     while True:
-        line = await loop.run_in_executor(None, sys.stdin.buffer.readline)
+        line = await reader.readline()
         if not line:
             return
         if not line.strip():

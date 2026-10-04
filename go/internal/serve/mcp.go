@@ -57,12 +57,10 @@ type MCPSpec struct {
 	NotTools        map[string]string `json:"not_tools"`
 }
 
-// MCP is the parsed mcp.json.
+// MCP is the parsed mcp.json (TestServeMCPToolsAreTheSpecsAndMapOntoRoutes checks it parses).
 var MCP = func() MCPSpec {
 	var spec MCPSpec
-	if err := json.Unmarshal(mcpJSON, &spec); err != nil {
-		panic(fmt.Sprintf("serve: mcp.json: %v", err))
-	}
+	_ = json.Unmarshal(mcpJSON, &spec)
 	return spec
 }()
 
@@ -287,22 +285,37 @@ func (s *Server) mcpEndpoint(w http.ResponseWriter, r *http.Request) {
 }
 
 // ServeMCPStdio answers newline-delimited JSON-RPC from in on out, one response per line, until
-// in ends (lha mcp).
+// in ends or ctx is done (lha mcp: Ctrl-C ends it even while it waits for a line).
 func (s *Server) ServeMCPStdio(ctx context.Context, in io.Reader, out io.Writer) error {
-	scanner := bufio.NewScanner(in)
-	scanner.Buffer(make([]byte, 64*1024), 8<<20)
+	lines := make(chan []byte)
+	var scanErr error
+	go func() {
+		scanner := bufio.NewScanner(in)
+		scanner.Buffer(make([]byte, 64*1024), 8<<20)
+		for scanner.Scan() {
+			lines <- bytes.Clone(scanner.Bytes())
+		}
+		scanErr = scanner.Err()
+		close(lines)
+	}()
 	enc := json.NewEncoder(out)
 	enc.SetEscapeHTML(false)
-	for scanner.Scan() {
-		line := bytes.TrimSpace(scanner.Bytes())
-		if len(line) == 0 {
-			continue
-		}
-		if response := s.handleMCP(ctx, line); response != nil {
-			if err := enc.Encode(response); err != nil {
-				return err
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case line, open := <-lines:
+			if !open {
+				return scanErr
+			}
+			if line = bytes.TrimSpace(line); len(line) == 0 {
+				continue
+			}
+			if response := s.handleMCP(ctx, line); response != nil {
+				if err := enc.Encode(response); err != nil {
+					return err
+				}
 			}
 		}
 	}
-	return scanner.Err()
 }

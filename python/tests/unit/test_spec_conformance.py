@@ -1101,8 +1101,8 @@ def test_every_ui_api_operation_and_status_has_a_case() -> None:
         assert case.get("temporal") in (None, "absent", "running"), case["name"]
         if "error" in case["expect"]:
             assert case["expect"]["error"] in codes, case["name"]
-        if not case["operation"]:  # an undocumented path: refused like any unknown resource
-            assert status == "404" and not any(
+        if not case["operation"]:  # an undocumented path: guarded, then refused as unknown
+            assert status in ("401", "404") and not any(
                 _path_matches(t, case["request"]["path"]) for _, t, _ in operations.values()
             )
             continue
@@ -1122,7 +1122,9 @@ def test_every_ui_api_operation_and_status_has_a_case() -> None:
     fixture = _load("serve/fixture.json")
     kinds = set(json.loads((SPEC / "obs/mission_events.json").read_text())["kinds"])
     assert {e["kind"] for e in fixture["events"]} >= kinds, "the fixture lacks an event kind"
-    assert all(m["anchor"] in (None, *fixture["anchors"]) for m in fixture["missions"])
+    assert all(m["anchor"] in (None, "$broken", *fixture["anchors"]) for m in fixture["missions"])
+    missions = {m["mission_id"] for m in fixture["missions"]}
+    assert all(b["mission_id"] in missions and b["count"] > 0 for b in fixture["bulk_events"])
     assert {c["mission_id"] for c in fixture["costs"]} <= {
         m["mission_id"] for m in fixture["missions"]
     }
@@ -1179,6 +1181,7 @@ def test_every_operation_is_an_mcp_tool_or_refused_and_every_tool_has_a_case() -
         for c in cases
         if isinstance(c["request"]["body"], dict)
         and c["request"]["body"].get("method") == "tools/call"
+        and isinstance(c["request"]["body"].get("params"), dict)
     ]
     answered = {name for name, expect in called if expect.get("result", {}).get("isError") is False}
     assert answered == set(tools), f"no successful call of: {sorted(set(tools) - answered)}"

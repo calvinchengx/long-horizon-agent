@@ -1,7 +1,8 @@
 """A fake mission workflow for the UI API conformance runner (``test_serve_contract.py``).
 
 It answers the mission workflow's queries (the wire contract, docs/19-wire-contract.md) with fixed
-state and records every signal it receives, so the runner can check what a server sent without a
+state, as an older worker would (it has no ``steer_notes`` query), clears its gate once a decision
+arrives, and records every signal it receives, so the runner can check what a server sent without a
 worker or a model. Run as ``python -m tests.serve.fake_mission <temporal address>``: it starts the
 workflow as ``mission:mission_durable``, prints ``ready`` and serves until killed.
 """
@@ -20,6 +21,10 @@ from temporalio.worker import Worker
 TASK_QUEUE = "lha-serve-conformance"
 WORKFLOW_ID = "mission:mission_durable"
 SIGNALS_QUERY = "conformance_signals"
+
+#: When the fake sleeps until (``resume_at``): 2026-10-04T00:05:00.500000+00:00.
+RESUME_AT = 1791072300.5
+OPEN_QUESTION = "Which database should the API use?"
 
 #: The open gate the fake reports (``gate_v1``; ``lha.durable.types.GateView``).
 GATE: dict[str, Any] = {
@@ -46,8 +51,8 @@ GATE: dict[str, Any] = {
 class FakeMission:
     def __init__(self) -> None:
         self.signals: list[list[Any]] = []
-        self.notes: list[str] = []
         self.edits = 0
+        self.gate_open = True
 
     @workflow.run
     async def run(self) -> None:
@@ -56,7 +61,6 @@ class FakeMission:
     @workflow.signal(name="steer_v1")
     def steer(self, note: str) -> None:
         self.signals.append(["steer_v1", note])
-        self.notes.append(note)
 
     @workflow.signal(name="snooze_v1")
     def snooze(self, seconds: int) -> None:
@@ -74,6 +78,7 @@ class FakeMission:
     @workflow.signal(name="human_decision_v2")
     def decide(self, decision: dict[str, Any]) -> None:
         self.signals.append(["human_decision_v2", decision])
+        self.gate_open = False
 
     @workflow.query(name="status_v1")
     def status(self) -> str:
@@ -84,8 +89,8 @@ class FakeMission:
         return 3
 
     @workflow.query(name="gate_v1")
-    def gate(self) -> dict[str, Any]:
-        return GATE
+    def gate(self) -> dict[str, Any] | None:
+        return GATE if self.gate_open else None
 
     @workflow.query(name="gate_log_v1")
     def gate_log(self) -> list[str]:
@@ -93,15 +98,11 @@ class FakeMission:
 
     @workflow.query(name="open_question")
     def open_question(self) -> str | None:
-        return None
+        return OPEN_QUESTION
 
     @workflow.query(name="resume_at")
     def resume_at(self) -> float | None:
-        return None
-
-    @workflow.query(name="steer_notes")
-    def steer_notes(self) -> list[str]:
-        return list(self.notes)
+        return RESUME_AT
 
     @workflow.query(name="pending_edits")
     def pending_edits(self) -> int:

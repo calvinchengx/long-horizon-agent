@@ -121,6 +121,11 @@ jobs:
       - name: Coverage (floor)
         run: uv run coverage report
 
+      # The UI API's server and MCP (lha.serve) are covered completely, by the conformance runs
+      # above and tests/unit/test_serve_internals.py.
+      - name: Coverage (lha serve, 100%)
+        run: uv run coverage report --include='src/lha/serve/*' --fail-under=100
+
   go:
     runs-on: ubuntu-latest
     defaults:
@@ -224,14 +229,33 @@ jobs:
 
       # Every case in spec/serve/cases.json and mcp_cases.json against the Go `lha serve` and
       # `lha mcp` (the same black-box runner the Python server passes), with Temporal unreachable,
-      # then with the fake mission workflow.
+      # then with the fake mission workflow. The binary is built for coverage: with
+      # internal/serve's own tests (paths no case can reach), internal/serve must be covered
+      # completely.
       - name: UI API conformance (Go server)
+        env:
+          GOCOVERDIR: ${{ runner.temp }}/serve-cover
         run: |
-          go build -o "$RUNNER_TEMP/lha-go" ./cmd/lha
+          mkdir -p "$GOCOVERDIR"
+          go build -cover -covermode=atomic -coverpkg=./internal/serve,./cmd/lha -o "$RUNNER_TEMP/lha-go" ./cmd/lha
           cd ../python
           export LHA_SERVE_CMD="$RUNNER_TEMP/lha-go serve" LHA_MCP_CMD="$RUNNER_TEMP/lha-go mcp"
           uv run pytest -q tests/serve
           LHA_SERVE_TEMPORAL=127.0.0.1:7233 uv run pytest -q tests/serve
+
+      - name: Coverage (internal/serve, 100%)
+        env:
+          COVER: ${{ runner.temp }}/serve-cover
+        run: |
+          go test -count=1 -covermode=atomic -coverpkg=./internal/serve ./internal/serve -args -test.gocoverdir="$COVER"
+          pkg=github.com/calvinchengx/long-horizon-agent/go/internal/serve
+          total=$(go tool covdata percent -i="$COVER" -pkg="$pkg" | awk '{print $(NF-2)}')
+          echo "internal/serve: $total"
+          if [ "$total" != "100.0%" ]; then
+            go tool covdata textfmt -i="$COVER" -pkg="$pkg" -o "$RUNNER_TEMP/serve.cover"
+            go tool cover -func="$RUNNER_TEMP/serve.cover" | awk '$3 != "100.0%"'
+            exit 1
+          fi
 
   python-services-integration:
     # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker

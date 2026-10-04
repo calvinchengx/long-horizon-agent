@@ -71,6 +71,26 @@
     }
    ]
   },
+  "busy": {
+   "title": "Busy mission",
+   "description": "A mission with many events",
+   "items": [
+    {
+     "id": "01",
+     "description": "One long step",
+     "status": "in_progress",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    }
+   ]
+  },
   "durable": {
    "title": "Durable mission",
    "description": "A mission a worker runs",
@@ -142,6 +162,22 @@
    "workflow_id": null,
    "anchor": null,
    "workdir": "/nonexistent/lha-serve-fixture"
+  },
+  {
+   "mission_id": "mission_gone",
+   "title": "Durable mission whose workflow is gone",
+   "description": "",
+   "status": "RUNNING",
+   "workflow_id": "mission:mission_gone",
+   "anchor": "$broken"
+  },
+  {
+   "mission_id": "mission_busy",
+   "title": "Busy mission",
+   "description": "A mission with many events",
+   "status": "RUNNING",
+   "workflow_id": null,
+   "anchor": "busy"
   }
  ],
  "costs": [
@@ -171,6 +207,24 @@
    "input_tokens": 2000,
    "output_tokens": 400,
    "usd": 0.012
+  },
+  {
+   "mission_id": "mission_gone",
+   "cycle_id": "c1",
+   "role": "reviewer",
+   "model": "local-model",
+   "input_tokens": 10,
+   "output_tokens": 1,
+   "usd": null
+  },
+  {
+   "mission_id": "mission_gone",
+   "cycle_id": "c1",
+   "role": "lead",
+   "model": "local-model",
+   "input_tokens": 10,
+   "output_tokens": 1,
+   "usd": null
   },
   {
    "mission_id": "mission_durable",
@@ -716,6 +770,28 @@
     "base": "8d41c0a"
    },
    "ts": "2026-10-04T00:00:59.000000+00:00"
+  },
+  {
+   "mission_id": "mission_busy",
+   "cycle_id": "c1",
+   "kind": "cycle_started",
+   "payload": {
+    "item_id": "01"
+   },
+   "ts": "2026-10-04T00:00:56.000000+00:00"
+  }
+ ],
+ "bulk_events": [
+  {
+   "mission_id": "mission_busy",
+   "cycle_id": "c1",
+   "kind": "tool_call",
+   "payload": {
+    "tool": "read_file",
+    "ok": true
+   },
+   "ts": "2026-10-04T00:00:57.000000+00:00",
+   "count": 1000
   }
  ]
 }

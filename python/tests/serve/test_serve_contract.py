@@ -21,9 +21,11 @@ import json
 import os
 import re
 import shlex
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -81,7 +83,12 @@ async def _seed(root: Path, db: Path) -> None:
     try:
         for mission in FIXTURE["missions"]:
             workdir = mission.get("workdir")
-            if mission["anchor"] is not None:
+            if mission["anchor"] == "$broken":  # an anchor whose checklist does not parse
+                path = root / mission["mission_id"]
+                (path / ".lha").mkdir(parents=True)
+                (path / ".lha" / "checklist.json").write_text("{not json")
+                workdir = str(path.resolve())
+            elif mission["anchor"] is not None:
                 anchor = FIXTURE["anchors"][mission["anchor"]]
                 path = root / mission["anchor"]
                 path.mkdir()
@@ -120,6 +127,11 @@ async def _seed(root: Path, db: Path) -> None:
                 for e in FIXTURE["events"]
             ]
         )
+        for bulk in FIXTURE["bulk_events"]:
+            event = MissionEvent(
+                bulk["mission_id"], bulk["cycle_id"], bulk["kind"], bulk["payload"], ts=bulk["ts"]
+            )
+            await store.append_mission_events([event] * bulk["count"])
     finally:
         await store.close()
 
@@ -169,6 +181,7 @@ def server(tmp_path_factory: pytest.TempPathFactory, fake_workflow: None) -> Ite
     env.update(
         LHA_SQLITE_PATH=str(db),
         LHA_SERVE_TOKEN=TOKEN,
+        LHA_SERVE_KEEPALIVE_S="1",
         LHA_TEMPORAL_ADDRESS=TEMPORAL or f"127.0.0.1:{_free_port()}",  # nothing listens there
     )
     proc = subprocess.Popen(
@@ -190,7 +203,7 @@ def server(tmp_path_factory: pytest.TempPathFactory, fake_workflow: None) -> Ite
     try:
         yield Server(match.group(1), proc, env)
     finally:
-        proc.terminate()
+        proc.send_signal(signal.SIGINT)  # Ctrl-C: a clean shutdown
         try:
             _, err = proc.communicate(timeout=10)
         except subprocess.TimeoutExpired:
@@ -302,9 +315,38 @@ def _send(server: Server, request: dict[str, Any]) -> httpx.Response:
     )
 
 
-def _read_stream(server: Server, request: dict[str, Any], want: int) -> list[dict[str, Any]]:
-    """The first ``want`` ``mission_event`` messages (each as {"id", **data}), within 10s."""
-    messages: list[dict[str, Any]] = []
+def _wanted(expected: Any) -> int:
+    return expected["$len"] if isinstance(expected, dict) else len(expected)
+
+
+async def _record(db: str, stream: dict[str, Any]) -> None:
+    """What a stream case records while its stream is open: events, or a changed mission row."""
+    store = SqliteStore(Path(db))
+    await store.open()
+    try:
+        if "append" in stream:
+            await store.append_mission_events(
+                [
+                    MissionEvent(e["mission_id"], e["cycle_id"], e["kind"], e["payload"])
+                    for e in stream["append"]
+                ]
+            )
+        if "touch" in stream:
+            row = await store.get_mission(stream["touch"]["mission_id"])
+            assert row is not None
+            await store.upsert_mission(
+                mission_id=row.mission_id, title=row.title, status=stream["touch"]["status"]
+            )
+    finally:
+        await store.close()
+
+
+def _read_stream(server: Server, request: dict[str, Any], stream: dict[str, Any]) -> dict[str, Any]:
+    """The stream's first ``mission_event`` and ``mission`` messages (as many as ``stream``
+    expects, each ``mission_event`` as {"id", **data}) and whether a keepalive came, within 10s."""
+    got: dict[str, Any] = {"mission_event": [], "mission": [], "keepalive": False}
+    want_events = _wanted(stream.get("mission_event", []))
+    want_missions = _wanted(stream.get("mission", []))
     deadline = time.monotonic() + 10
     url = server.base + request["path"]
     with httpx.stream(
@@ -312,11 +354,14 @@ def _read_stream(server: Server, request: dict[str, Any], want: int) -> list[dic
     ) as resp:
         assert resp.status_code == 200, resp.read()
         assert resp.headers["content-type"].startswith("text/event-stream")
+        if "append" in stream or "touch" in stream:
+            db = server.env["LHA_SQLITE_PATH"]
+            threading.Timer(0.5, lambda: asyncio.run(_record(db, stream))).start()
         event, data, ident = "", [], ""
         for line in resp.iter_lines():
             if line.startswith(":"):
-                continue
-            if line.startswith("event:"):
+                got["keepalive"] = True
+            elif line.startswith("event:"):
                 event = line[6:].strip()
             elif line.startswith("data:"):
                 data.append(line[5:].lstrip())
@@ -333,13 +378,25 @@ def _read_stream(server: Server, request: dict[str, Any], want: int) -> list[dic
                         {"events": [payload], "next_after": payload["id"]},
                     )
                     assert not errors, errors
-                    messages.append(payload)
-                    if len(messages) >= want:
-                        break
+                    got["mission_event"].append(payload)
+                elif event == "mission" and data:
+                    summary = json.loads("\n".join(data))
+                    assert not ident, "a mission message has no id"
+                    errors = _schema_errors(
+                        "listMissions", 200, "application/json", {"missions": [summary]}
+                    )
+                    assert not errors, errors
+                    got["mission"].append(summary)
                 event, data, ident = "", [], ""
+            if (
+                len(got["mission_event"]) >= want_events
+                and len(got["mission"]) >= want_missions
+                and (got["keepalive"] or not stream.get("keepalive"))
+            ):
+                break
             if time.monotonic() > deadline:
                 break
-    return messages
+    return got
 
 
 async def _signals() -> tuple[list[list[Any]], str]:
@@ -371,8 +428,15 @@ def _check_signal(expected: dict[str, Any]) -> None:
 
 
 def _ordered(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Every case, with the abort that ends the fake workflow last."""
-    return sorted(cases, key=lambda c: c["expect"].get("signal", {}).get("name") == "$cancel")
+    """Every case, with those that record events or change a mission, then the abort that ends
+    the fake workflow, last."""
+
+    def key(case: dict[str, Any]) -> tuple[bool, bool]:
+        stream = case["expect"].get("stream", {})
+        cancels = case["expect"].get("signal", {}).get("name") == "$cancel"
+        return ("append" in stream or "touch" in stream, cancels)
+
+    return sorted(cases, key=key)
 
 
 # --- MCP (spec/serve/mcp.json, mcp_cases.json) --------------------------------------------------
@@ -392,7 +456,10 @@ class Stdio:
 
     def send(self, body: Any) -> None:
         assert self.proc.stdin is not None
-        line = "{not json" if body == "$not-json" else json.dumps(body)
+        line = (
+            {"$not-json": "{not json", "$blank": "  "}.get(body) if isinstance(body, str) else None
+        )
+        line = json.dumps(body) if line is None else line
         self.proc.stdin.write(line + "\n")
         self.proc.stdin.flush()
 
@@ -532,8 +599,9 @@ def test_case(server: Server, case: dict[str, Any]) -> None:
         pytest.skip(f"needs Temporal {case['temporal']}")
     expect = case["expect"]
     if "stream" in expect:
-        want = expect["stream"]["mission_event"]
-        got = _read_stream(server, case["request"], len(want))
+        stream = expect["stream"]
+        got = _read_stream(server, case["request"], stream)
+        want = {k: stream[k] for k in ("mission_event", "mission", "keepalive") if k in stream}
         errors = _subset(want, got)
         assert not errors, errors
         return
@@ -584,6 +652,8 @@ def test_the_startup_url_signs_the_browser_in_and_serves_the_ui(server: Server) 
     assert wrong.status_code == 401 and "set-cookie" not in wrong.headers
     foreign = httpx.get(f"{server.base}/?token={TOKEN}", headers={"Host": "evil.example:80"})
     assert foreign.status_code == 403 and TOKEN not in foreign.text
+    evil = {"Host": "evil.example:80"}
+    assert httpx.get(server.base + assets[0], headers=evil, timeout=10).status_code == 403
     assert httpx.get(f"{server.base}/assets/nope.js", headers=host).status_code == 404
 
 
@@ -595,3 +665,40 @@ def test_the_server_registers_exactly_the_documented_routes() -> None:
         (method.upper(), template) for template, ops in API["paths"].items() for method in ops
     }
     assert {(method, path) for method, path, _ in API_ROUTES} == documented
+
+
+def test_the_server_binds_to_loopback_only(server: Server) -> None:
+    """``--host`` other than loopback is refused before anything listens (exit 2)."""
+    proc = subprocess.run(
+        [*_server_command(), "--host", "0.0.0.0", "--port", "0"],
+        env=server.env,
+        cwd=Path(__file__).resolve().parents[2],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 2, (proc.stdout, proc.stderr)
+    assert "loopback" in proc.stderr
+
+
+def test_lha_mcp_stops_on_ctrl_c(server: Server) -> None:
+    """Ctrl-C ends ``lha mcp`` cleanly, while it waits for a message."""
+    proc = subprocess.Popen(
+        _mcp_command(),
+        env=server.env,
+        cwd=Path(__file__).resolve().parents[2],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    assert proc.stdin is not None and proc.stdout is not None
+    proc.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n")
+    proc.stdin.flush()
+    assert json.loads(proc.stdout.readline())["id"] == 1  # it is up and reading
+    proc.send_signal(signal.SIGINT)
+    try:
+        assert proc.wait(timeout=10) == 0
+    finally:
+        proc.kill()
+        proc.communicate()

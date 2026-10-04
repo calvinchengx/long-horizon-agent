@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import secrets
 import socket
 import sys
@@ -41,10 +42,8 @@ def serve(
         finally:
             await store.close()
 
-    try:
+    with contextlib.suppress(KeyboardInterrupt):  # Ctrl-C: a clean stop
         asyncio.run(_main())
-    except KeyboardInterrupt:
-        sys.exit(0)
 
 
 def mcp_stdio(settings: Settings) -> None:
@@ -64,7 +63,5 @@ def mcp_stdio(settings: Settings) -> None:
         finally:
             await store.close()
 
-    try:
+    with contextlib.suppress(KeyboardInterrupt):  # Ctrl-C: a clean stop
         asyncio.run(_main())
-    except KeyboardInterrupt:
-        sys.exit(0)

@@ -30,6 +30,11 @@ It is written before server code; a server is built to pass it.
   case and every protocol method a case; each implementation's copy of `mcp.json` is current.
   The runner plays every MCP case over the server's `/mcp` and over `lha mcp`, and checks each
   tool result's `structuredContent` against its operation's response schema.
+- **The servers' code, completely**: CI fails unless the conformance runs, plus each
+  implementation's own tests of what no case can reach (a failing store, a client gone
+  mid-stream, a Temporal error other than "no such workflow"), cover every line and branch of
+  Python's `lha.serve` and every statement of Go's `internal/serve`. The Go binary under test is
+  built with `-cover`. A new implementation adds the same gate for its server.
 - **No breaking change**: within a major version (`info.version`) the API only grows. CI runs
   `check-breaking.sh <base>` (oasdiff) against the previous commit's or a pull request's base's
   contract; removing or renaming anything a client reads, or requiring anything new, fails it.
@@ -44,11 +49,18 @@ The runner starts the server with `<command> --host 127.0.0.1 --port 0` and this
 | `LHA_SQLITE_PATH` | the seeded mission store (`LHA_POSTGRES_DSN` is unset) |
 | `LHA_SERVE_TOKEN` | the token to accept (otherwise the server makes a random one) |
 | `LHA_TEMPORAL_ADDRESS` | Temporal: unreachable, or a dev server running the fake workflow |
+| `LHA_SERVE_KEEPALIVE_S` | how long a quiet stream waits before it sends a comment (default 15; the runner sets 1) |
 
 Its first line on stdout is `lha serve: http://127.0.0.1:<port>/?token=<token>`. It answers MCP at
 `POST /mcp` (the token as `X-LHA-Token` or `Authorization: Bearer`). The stdio server
 (`LHA_MCP_CMD`, e.g. `lha mcp`) gets the same environment, reads JSON-RPC messages one per line on
-stdin, writes one response per line on stdout, and exits when stdin closes.
+stdin, writes one response per line on stdout, and exits when stdin closes or on Ctrl-C. Both
+stop cleanly (exit 0) on Ctrl-C, and `--host` other than loopback exits 2.
+
+The fixture's missions cover each shape the API distinguishes: a local run, a durable mission (the
+fake workflow), a finished one, one whose anchor is on another host, one whose workflow no longer
+exists and whose anchor's checklist does not parse (`"anchor": "$broken"`), and one with more
+events than a page (`bulk_events`: `count` copies of an event, recorded after `events`).
 
 ## Cases
 
@@ -69,7 +81,10 @@ stdin, writes one response per line on stdout, and exits when stdin closes.
 - `expect.error` is the `error.code` of an error response.
 - `expect.signal`: the signal the fake workflow must have received (`{"name": "$cancel"}`: the
   workflow was cancelled).
-- `expect.stream`: the first `mission_event` messages of a Server-Sent Events stream, in order.
+- `expect.stream`: what a Server-Sent Events stream sends first: `mission_event` messages, in
+  order (or `{"$len": n}`), `mission` messages, and `keepalive: true` for a comment. With
+  `append` (events) or `touch` (`{"mission_id", "status"}`), the runner records those events or
+  changes that mission's row once the stream is open; those cases run last.
 - `temporal`: run only with Temporal `absent` or the fake workflow `running`; no value runs in both.
 
 ## MCP

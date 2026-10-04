@@ -97,6 +97,9 @@ For the UI API (Phase 1), contract first:
   is a tool or refused, the gate answer and abort are refused, every tool has a successful case in
   `spec/serve/mcp_cases.json`, and each implementation's embedded copy is current; the same runner
   plays every case over each server's `/mcp` and its `lha mcp`. Done.
+- The servers' code is covered completely, in CI: every line and branch of Python's `lha.serve`
+  and every statement of Go's `internal/serve`, by the conformance runs (the Go binary built with
+  `-cover`) and small unit tests of what no case can reach. Done.
 
 ## Phase 0: `mission_events`, the shared event record
 

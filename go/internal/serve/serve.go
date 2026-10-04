@@ -59,7 +59,7 @@ const (
 	liveTTL                = 3 * time.Second // a mission's live state is reused this long
 	temporalRetry          = 5 * time.Second // a failed connection is not retried sooner
 	temporalConnectTimeout = 3 * time.Second
-	keepalive              = 15 * time.Second
+	keepaliveDefault       = "15" // seconds a quiet stream waits before a comment (LHA_SERVE_KEEPALIVE_S)
 	pollEvents             = 500 * time.Millisecond
 	pollMissions           = 2 * time.Second
 	streamQueue            = 1000
@@ -104,8 +104,9 @@ type Server struct {
 	Port     int
 	Version  string // the lha version /api/v1/health reports
 
-	temporal temporalState
-	hub      *hub
+	temporal  temporalState
+	hub       *hub
+	keepalive time.Duration
 }
 
 // Route is one API route (a test checks they are exactly spec/serve/openapi.json's operations).
@@ -135,6 +136,11 @@ var Routes = []Route{
 
 // Start begins following the store (the shared event reader); call it before serving.
 func (s *Server) Start(ctx context.Context) error {
+	secs, err := strconv.ParseFloat(cmp.Or(os.Getenv("LHA_SERVE_KEEPALIVE_S"), keepaliveDefault), 64)
+	if err != nil || secs <= 0 {
+		return fmt.Errorf("LHA_SERVE_KEEPALIVE_S must be a positive number of seconds")
+	}
+	s.keepalive = time.Duration(secs * float64(time.Second))
 	s.hub = newHub(s)
 	return s.hub.start(ctx)
 }
@@ -288,11 +294,8 @@ func (s *Server) asset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	kind := map[string]string{".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}[path.Ext(name)]
-	if kind == "" {
-		kind = "application/octet-stream"
-	}
 	pageHeaders(w)
-	w.Header().Set("Content-Type", kind)
+	w.Header().Set("Content-Type", cmp.Or(kind, "application/octet-stream"))
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	_, _ = w.Write(raw)
 }
@@ -342,18 +345,10 @@ func items(ctx context.Context, row *persistence.MissionRow) []map[string]any {
 	if err != nil {
 		return nil
 	}
+	// Each item as the JSON object it is in the anchor (plain fields: this cannot fail).
 	out := make([]map[string]any, 0, len(checklist.Items))
-	for _, item := range checklist.Items {
-		raw, err := json.Marshal(item)
-		if err != nil {
-			return nil
-		}
-		var m map[string]any
-		if err := json.Unmarshal(raw, &m); err != nil {
-			return nil
-		}
-		out = append(out, m)
-	}
+	raw, _ := json.Marshal(checklist.Items)
+	_ = json.Unmarshal(raw, &out)
 	return out
 }
 
@@ -817,7 +812,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) error {
 			}
 		}
 	}
-	ticker := time.NewTicker(keepalive)
+	ticker := time.NewTicker(s.keepalive)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1217,10 +1212,6 @@ func temporalError(err error) error {
 	var notFound *serviceerror.NotFound
 	if errors.As(err, &notFound) {
 		return fail(409, "finished", "the mission's workflow is not running")
-	}
-	var e *apiError
-	if errors.As(err, &e) {
-		return e
 	}
 	return fail(503, "temporal_unavailable", "%s", pyfmt.Head(err.Error(), 500))
 }

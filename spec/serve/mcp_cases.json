@@ -94,6 +94,16 @@
       }
     },
     {
+      "name": "stdio: a blank line is skipped",
+      "request": {
+        "body": "$blank"
+      },
+      "expect": {
+        "no_response": true
+      },
+      "transport": "stdio"
+    },
+    {
       "name": "ping",
       "request": {
         "body": {
@@ -395,6 +405,111 @@
       }
     },
     {
+      "name": "params that are not an object",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 201,
+          "method": "tools/call",
+          "params": [
+            "list_missions"
+          ]
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "a boolean query argument is sent as true or false",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 202,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": true
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "invalid_request"
+      }
+    },
+    {
+      "name": "a whole number sent as a float",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 203,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": 2.0
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "missions": {
+              "$len": 2
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "a fractional number",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 204,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": 2.5
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "invalid_request"
+      }
+    },
+    {
+      "name": "a query argument that is neither a string nor a number",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 205,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": [
+                1
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
       "name": "server_health",
       "request": {
         "body": {
@@ -462,7 +577,7 @@
           "isError": false,
           "structuredContent": {
             "missions": {
-              "$len": 4
+              "$len": 6
             }
           }
         }

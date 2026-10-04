@@ -74,7 +74,7 @@ func TestServeFixtureEventsMatchTheirSchemas(t *testing.T) {
 	Load(t, "serve/fixture.json", &fixture)
 	var contract eventContract
 	Load(t, "obs/mission_events.json", &contract)
-	events := fixture["events"].([]any)
+	events := append(fixture["events"].([]any), fixture["bulk_events"].([]any)...)
 	seen := map[string]bool{}
 	for _, raw := range events {
 		e := raw.(map[string]any)
@@ -131,7 +131,11 @@ func TestServeMCPToolsAreTheSpecsAndMapOntoRoutes(t *testing.T) {
 		if body["method"] != "tools/call" {
 			continue
 		}
-		name, _ := body["params"].(map[string]any)["name"].(string)
+		params, _ := body["params"].(map[string]any)
+		name, isName := params["name"].(string)
+		if !isName {
+			continue // a malformed call: the protocol's error, not a tool
+		}
 		if !refused[name] && !slices.ContainsFunc(serve.MCP.Tools, func(t serve.MCPTool) bool { return t.Name == name }) {
 			t.Errorf("case %v: no tool %s", c["name"], name)
 		}

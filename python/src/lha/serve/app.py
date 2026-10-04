@@ -21,10 +21,11 @@ import contextlib
 import hmac
 import html
 import json
+import os
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -55,6 +56,7 @@ LIVE_TTL_S = 3.0
 #: How long Temporal stays "unavailable" after a failed connection before it is tried again.
 TEMPORAL_RETRY_S = 5.0
 TEMPORAL_CONNECT_TIMEOUT_S = 3.0
+#: How often a quiet stream sends a comment, so proxies keep it open (``LHA_SERVE_KEEPALIVE_S``).
 KEEPALIVE_S = 15.0
 POLL_EVENTS_S = 0.5
 POLL_MISSIONS_S = 2.0
@@ -112,24 +114,27 @@ class Temporal:
     async def client(self) -> Any:
         """The connected client; ``ApiError`` 503 when Temporal is unreachable."""
         async with self._lock:
-            if self._client is not None:
-                return self._client
-            if time.monotonic() - self._failed_at < TEMPORAL_RETRY_S:
-                raise ApiError(503, "temporal_unavailable", self._error)
-            from lha.durable.worker import connect_client
+            await self._connect()
+        return self._client
 
-            try:
-                self._client = await asyncio.wait_for(
-                    connect_client(self._settings), TEMPORAL_CONNECT_TIMEOUT_S
-                )
-            except Exception as exc:
-                self._failed_at = time.monotonic()
-                self._error = (
-                    f"Temporal at {self._settings.temporal_address} is unreachable: "
-                    f"{type(exc).__name__}: {exc}"
-                )[:500]
-                raise ApiError(503, "temporal_unavailable", self._error) from None
-            return self._client
+    async def _connect(self) -> None:
+        if self._client is not None:
+            return
+        if time.monotonic() - self._failed_at < TEMPORAL_RETRY_S:
+            raise ApiError(503, "temporal_unavailable", self._error)
+        from lha.durable.worker import connect_client
+
+        try:
+            self._client = await asyncio.wait_for(
+                connect_client(self._settings), TEMPORAL_CONNECT_TIMEOUT_S
+            )
+        except Exception as exc:
+            self._failed_at = time.monotonic()
+            self._error = (
+                f"Temporal at {self._settings.temporal_address} is unreachable: "
+                f"{type(exc).__name__}: {exc}"
+            )[:500]
+            raise ApiError(503, "temporal_unavailable", self._error) from None
 
     async def status(self) -> str:
         try:
@@ -190,11 +195,9 @@ async def _query_live(handle: Any) -> dict[str, Any]:
     }
 
 
-def _open_gate(gate: Any) -> dict[str, Any]:
-    g = gate if isinstance(gate, dict) else asdict(gate)
+def _open_gate(g: dict[str, Any]) -> dict[str, Any]:
+    """The ``gate_v1`` query's answer (a JSON object: ``lha.durable.types.GateView``)."""
     request = g.get("request")
-    if request is not None and not isinstance(request, dict):
-        request = asdict(request)
     return {
         "gate_id": str(g.get("gate_id", "")),
         "kind": str(g.get("kind", "")),
@@ -233,9 +236,8 @@ def _counts(items: list[dict[str, Any]] | None) -> dict[str, int] | None:
     if items is None:
         return None
     counts = {"total": len(items), "todo": 0, "in_progress": 0, "blocked": 0, "done": 0, "split": 0}
-    for item in items:
-        if item["status"] in counts:
-            counts[item["status"]] += 1
+    for item in items:  # a ChecklistItem's status is one of these
+        counts[item["status"]] += 1
     return counts
 
 
@@ -288,6 +290,9 @@ class App:
     store: MissionStore
     token: str
     port: int = 0
+    keepalive_s: float = field(
+        default_factory=lambda: float(os.environ.get("LHA_SERVE_KEEPALIVE_S") or KEEPALIVE_S)
+    )
     temporal: Temporal = field(init=False)
     hub: EventHub = field(init=False)
 
@@ -360,10 +365,10 @@ class EventHub:
             cursor = rows[-1].id
 
     async def stop(self) -> None:
-        if self._task is not None:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
+        assert self._task is not None, "stop() follows start()"
+        self._task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await self._task
 
     def subscribe(self, mission_id: str | None) -> _Subscriber:
         sub = _Subscriber(mission_id, asyncio.Queue(maxsize=STREAM_QUEUE))
@@ -396,8 +401,8 @@ class EventHub:
                 if time.monotonic() - last_missions >= POLL_MISSIONS_S:
                     last_missions = time.monotonic()
                     await self._missions()
-                if len(rows) < 500:
-                    await asyncio.sleep(POLL_EVENTS_S)
+                # A full page: more are waiting, so read on at once.
+                await asyncio.sleep(POLL_EVENTS_S if len(rows) < 500 else 0)
             except asyncio.CancelledError:
                 raise
             except Exception:  # a store hiccup: keep following
@@ -676,22 +681,8 @@ async def stream(request: Request) -> Response:
                         sent = row.id
                     if len(rows) < 500:
                         break
-            while True:
-                try:
-                    message = await asyncio.wait_for(sub.queue.get(), KEEPALIVE_S)
-                except TimeoutError:
-                    yield ": keepalive\n\n"
-                    continue
-                if message is None:
-                    return  # dropped for falling behind: the client resumes
-                kind, data = message
-                if kind == "mission_event":
-                    if data["id"] <= sent:
-                        continue
-                    sent = data["id"]
-                    yield _sse(kind, data, data["id"])
-                else:
-                    yield _sse(kind, data, None)
+            async for chunk in _follow(sub, sent, app.keepalive_s):
+                yield chunk
         finally:
             app.hub.unsubscribe(sub)
 
@@ -700,6 +691,27 @@ async def stream(request: Request) -> Response:
         media_type="text/event-stream",
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
+
+
+async def _follow(sub: _Subscriber, sent: int, keepalive_s: float) -> AsyncIterator[str]:
+    """A stream's live part: the hub's messages for ``sub``, skipping events already sent (a
+    replay and the hub can both carry one), a keepalive comment when quiet, until dropped."""
+    while True:
+        try:
+            message = await asyncio.wait_for(sub.queue.get(), keepalive_s)
+        except TimeoutError:
+            yield ": keepalive\n\n"
+            continue
+        if message is None:
+            return  # dropped for falling behind: the client resumes
+        kind, data = message
+        if kind == "mission_event":
+            if data["id"] <= sent:
+                continue
+            sent = data["id"]
+            yield _sse(kind, data, data["id"])
+        else:
+            yield _sse(kind, data, None)
 
 
 def _sse(event: str, data: dict[str, Any], ident: int | None) -> str:
@@ -734,16 +746,23 @@ async def _durable(request: Request) -> tuple[App, MissionRow]:
     return app, row
 
 
+def _temporal_error(exc: Any) -> ApiError:
+    """A Temporal RPC error as the API's: no such workflow is 409, anything else 503."""
+    from temporalio.service import RPCStatusCode
+
+    if exc.status == RPCStatusCode.NOT_FOUND:
+        return ApiError(409, "finished", "the mission's workflow is not running")
+    return ApiError(503, "temporal_unavailable", f"{exc}"[:500])
+
+
 async def _signal(app: App, row: MissionRow, name: str, arg: Any) -> Response:
-    from temporalio.service import RPCError, RPCStatusCode
+    from temporalio.service import RPCError
 
     client = await app.temporal.client()
     try:
         await client.get_workflow_handle(row.workflow_id).signal(name, arg)
     except RPCError as exc:
-        if exc.status == RPCStatusCode.NOT_FOUND:
-            raise ApiError(409, "finished", "the mission's workflow is not running") from None
-        raise ApiError(503, "temporal_unavailable", f"{exc}"[:500]) from None
+        raise _temporal_error(exc) from None
     app.temporal.forget(row.workflow_id or "")
     return JSONResponse({"accepted": True}, status_code=202)
 
@@ -817,6 +836,8 @@ async def edit_checklist(request: Request) -> Response:
 
 @_route(write=True)
 async def decide(request: Request) -> Response:
+    from temporalio.service import RPCError
+
     from lha.durable.signals import QUERY_GATE, SIGNAL_HUMAN_DECISION_V2
 
     app, row = await _durable(request)
@@ -830,8 +851,8 @@ async def decide(request: Request) -> Response:
     client = await app.temporal.client()
     try:
         gate = await _optional_query(client.get_workflow_handle(row.workflow_id), QUERY_GATE)
-    except Exception as exc:
-        raise ApiError(503, "temporal_unavailable", f"{exc}"[:500]) from None
+    except RPCError as exc:
+        raise _temporal_error(exc) from None
     if gate:
         options = _open_gate(gate)["options"]
         if decision not in options:
@@ -845,7 +866,7 @@ async def decide(request: Request) -> Response:
 
 @_route(write=True)
 async def abort(request: Request) -> Response:
-    from temporalio.service import RPCError, RPCStatusCode
+    from temporalio.service import RPCError
 
     app, row = await _durable(request)
     body = await _body(request)
@@ -854,9 +875,7 @@ async def abort(request: Request) -> Response:
     try:
         await client.get_workflow_handle(row.workflow_id).cancel()
     except RPCError as exc:
-        if exc.status == RPCStatusCode.NOT_FOUND:
-            raise ApiError(409, "finished", "the mission's workflow is not running") from None
-        raise ApiError(503, "temporal_unavailable", f"{exc}"[:500]) from None
+        raise _temporal_error(exc) from None
     app.temporal.forget(row.workflow_id or "")
     return JSONResponse({"accepted": True}, status_code=202)
 
