@@ -46,7 +46,14 @@ from typing import Protocol, runtime_checkable
 
 from lha.contracts.sandbox import SandboxSession
 from lha.contracts.verify import Check, CheckResult, VerificationResult, Verifier
-from lha.state.git_ops import GitError, has_commits, run_git, run_git_env, toplevel
+from lha.state.git_ops import (
+    GitError,
+    has_commits,
+    run_git,
+    run_git_env,
+    toplevel,
+    worktree_lock,
+)
 from lha.verify.verifier import OUTPUT_TAIL_CHARS, clip_output_tail
 
 CANDIDATE_MESSAGE = "lha: candidate commit for trusted checks"
@@ -204,9 +211,7 @@ class CommandTrustedRunner:
         home = Path(tempfile.mkdtemp(prefix="lha-trusted-home-")).resolve()
         try:
             try:
-                await asyncio.to_thread(
-                    run_git, root, "worktree", "add", "--detach", str(worktree), commit
-                )
+                await asyncio.to_thread(_add_worktree, root, worktree, commit)
             except GitError as exc:
                 return _failed(
                     check, f"[trusted] could not create worktree: {exc}", started=started
@@ -281,8 +286,13 @@ def _kill_tree(pid: int, kill: Callable[[], None]) -> None:
             kill()
 
 
+def _add_worktree(root: Path, worktree: Path, commit: str) -> None:
+    with worktree_lock(root):
+        run_git(root, "worktree", "add", "--detach", str(worktree), commit)
+
+
 def _remove_worktree(root: Path, worktree: Path) -> None:
-    with contextlib.suppress(GitError):
+    with contextlib.suppress(GitError), worktree_lock(root):
         run_git(root, "worktree", "remove", "--force", str(worktree), check=False)
         run_git(root, "worktree", "prune", check=False)
     shutil.rmtree(worktree, ignore_errors=True)

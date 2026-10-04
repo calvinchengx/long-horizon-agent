@@ -9,8 +9,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
 
 // Ported from python/tests/unit/test_mutation_gate.py (the verifier half).
@@ -168,5 +170,35 @@ func TestTheMutationCheckFailsClosed(t *testing.T) {
 	}
 	if events := gate.DrainEvents(); len(events) != 1 || events[0].Kind != "inner-event" {
 		t.Fatal(events)
+	}
+}
+
+// A trusted check's worktree add and remove take the repository's worktree lock, like an
+// implementer's (agents/org TestWorktreeOperationsWaitForTheRepositorysWorktreeLock).
+func TestTrustedWorktreesWaitForTheRepositorysWorktreeLock(t *testing.T) {
+	repo := gitRepo(t)
+	worktree := filepath.Join(t.TempDir(), "trusted")
+	for _, step := range []struct {
+		name string
+		op   func()
+	}{
+		{"add", func() {
+			if err := addWorktree(context.Background(), repo, worktree, "HEAD"); err != nil {
+				t.Error(err)
+			}
+		}},
+		{"remove", func() { removeWorktree(repo, worktree) }},
+	} {
+		done := make(chan struct{})
+		unlock := state.WorktreeLock(context.Background(), repo)
+		go func() { step.op(); close(done) }()
+		select {
+		case <-done:
+			unlock()
+			t.Fatalf("%s ran while the lock was held", step.name)
+		case <-time.After(500 * time.Millisecond):
+		}
+		unlock()
+		<-done
 	}
 }

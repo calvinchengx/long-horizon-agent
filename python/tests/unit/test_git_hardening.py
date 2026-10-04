@@ -303,3 +303,32 @@ def test_operator_git_env_does_not_leak_into_harness_git(
 def test_safe_home_is_recreated_when_removed() -> None:
     shutil.rmtree(git_ops._safe_home())
     assert Path(git_ops._safe_home()).is_dir()
+
+
+def test_every_worktree_operation_waits_for_the_repositorys_worktree_lock(tmp_path: Path) -> None:
+    # git does not make worktree add, remove and prune safe to run at once on one repository: a
+    # prune deletes the admin directory of a worktree an add is still creating, and an add can
+    # read another's half-written one ("failed to read .git/worktrees/..."); CI saw it once with
+    # two parallel implementers. So each one holds the repository's lock while git runs.
+    import threading
+
+    from lha.agents.integrator import remove_worktree
+    from lha.verify.trusted import _add_worktree, _remove_worktree
+
+    repo = _repo(tmp_path / "r")
+    existing = add_worktree(repo, branch="lha/implementer-01/c1", base="HEAD")
+    detached = tmp_path / "trusted"
+    operations = {
+        "add": lambda: add_worktree(repo, branch="lha/implementer-02/c2", base="HEAD"),
+        "remove": lambda: remove_worktree(repo, path=existing, branch="lha/implementer-01/c1"),
+        "trusted add": lambda: _add_worktree(repo, detached, "HEAD"),
+        "trusted remove": lambda: _remove_worktree(repo, detached),
+    }
+    for name, operation in operations.items():
+        done = threading.Event()
+        worker = threading.Thread(target=lambda op=operation, ev=done: (op(), ev.set()))
+        with git_ops.worktree_lock(repo):
+            worker.start()
+            assert not done.wait(0.5), f"{name} ran while the lock was held"
+        assert done.wait(30), f"{name} never finished"
+        worker.join()

@@ -29,10 +29,13 @@ so nothing in it (nor anything in the operator's environment) may make git execu
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
 import tempfile
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 from lha.state import git_link
@@ -527,6 +530,26 @@ def common_dir(cwd: str | Path) -> Path:
     out = run_git(cwd, "rev-parse", "--git-common-dir")
     path = Path(out)
     return (path if path.is_absolute() else Path(cwd) / path).resolve()
+
+
+_WORKTREE_LOCKS: dict[Path, threading.Lock] = {}
+_WORKTREE_LOCKS_GUARD = threading.Lock()
+
+
+@contextlib.contextmanager
+def worktree_lock(cwd: str | Path) -> Iterator[None]:
+    """Hold the repository's worktree lock: one ``git worktree`` add, remove or prune at a time.
+
+    git does not make them safe to run concurrently on one repository: a ``prune`` deletes the
+    admin directory of a worktree another ``add`` is still creating, and that ``add`` fails
+    (``failed to read .git/worktrees/...``). Parallel implementers and trusted checks share one
+    repository, so every worktree operation in this process takes this lock.
+    """
+    key = common_dir(cwd)
+    with _WORKTREE_LOCKS_GUARD:
+        lock = _WORKTREE_LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        yield
 
 
 def reset_to_head(cwd: str | Path, *, keep: tuple[str, ...] = RESET_KEEP) -> None:

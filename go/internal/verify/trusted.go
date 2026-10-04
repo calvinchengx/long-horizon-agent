@@ -220,7 +220,7 @@ func (r *CommandTrustedRunner) Run(ctx context.Context, check contracts.Check, w
 		worktree = dir
 	}
 	defer removeWorktree(root, worktree)
-	if _, err := state.RunGit(ctx, root, "worktree", "add", "--detach", worktree, commit); err != nil {
+	if err := addWorktree(ctx, root, worktree, commit); err != nil {
 		return failedCheck(check, "[trusted] could not create worktree: "+err.Error(), started, false), nil
 	}
 	absWorkdir, _ := filepath.Abs(workdir)
@@ -328,10 +328,19 @@ func trimLeftNewlines(s string) string {
 	return s
 }
 
+func addWorktree(ctx context.Context, root, worktree, commit string) error {
+	unlock := state.WorktreeLock(ctx, root)
+	defer unlock()
+	_, err := state.RunGit(ctx, root, "worktree", "add", "--detach", worktree, commit)
+	return err
+}
+
 func removeWorktree(root, worktree string) {
 	ctx := context.Background()
+	unlock := state.WorktreeLock(ctx, root)
 	_, _ = state.RunGitWith(ctx, root, state.RunOptions{NoCheck: true}, "worktree", "remove", "--force", worktree)
 	_, _ = state.RunGitWith(ctx, root, state.RunOptions{NoCheck: true}, "worktree", "prune")
+	unlock()
 	_ = os.RemoveAll(worktree)
 }
 

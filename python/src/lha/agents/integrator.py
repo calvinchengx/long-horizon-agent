@@ -49,16 +49,18 @@ def add_worktree(workdir: str | Path, *, branch: str, base: str) -> Path:
     if path.exists():
         remove_worktree(workdir, path=path, branch=branch)
     path.parent.mkdir(parents=True, exist_ok=True)
-    git_ops.run_git(workdir, "worktree", "add", "--quiet", "-B", branch, str(path), base)
+    with git_ops.worktree_lock(workdir):
+        git_ops.run_git(workdir, "worktree", "add", "--quiet", "-B", branch, str(path), base)
     return path
 
 
 def remove_worktree(workdir: str | Path, *, path: Path, branch: str | None = None) -> None:
     """Remove a worktree (and its branch); tolerant of half-created state."""
-    git_ops.run_git(workdir, "worktree", "remove", "--force", str(path), check=False)
-    if path.exists():
-        shutil.rmtree(path, ignore_errors=True)
-    git_ops.run_git(workdir, "worktree", "prune", check=False)
+    with git_ops.worktree_lock(workdir):
+        git_ops.run_git(workdir, "worktree", "remove", "--force", str(path), check=False)
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+        git_ops.run_git(workdir, "worktree", "prune", check=False)
     if branch:
         git_ops.run_git(workdir, "branch", "-D", branch, check=False)
 
@@ -69,7 +71,8 @@ def prune_worktrees(workdir: str | Path) -> None:
     if root.exists():
         for child in sorted(root.iterdir()):
             remove_worktree(workdir, path=child)
-    git_ops.run_git(workdir, "worktree", "prune", check=False)
+    with git_ops.worktree_lock(workdir):
+        git_ops.run_git(workdir, "worktree", "prune", check=False)
     for branch in git_ops.list_branches(workdir):
         if branch.startswith(BRANCH_PREFIX):
             git_ops.run_git(workdir, "branch", "-D", branch, check=False)

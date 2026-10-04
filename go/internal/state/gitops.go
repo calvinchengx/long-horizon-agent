@@ -741,6 +741,34 @@ func GitDir(ctx context.Context, cwd string) (string, error) {
 	return RunGit(ctx, cwd, "rev-parse", "--absolute-git-dir")
 }
 
+var (
+	worktreeLocksMu sync.Mutex
+	worktreeLocks   = map[string]*sync.Mutex{}
+)
+
+// WorktreeLock takes the repository's worktree lock and returns its release: one git worktree add,
+// remove or prune at a time (python: git_ops.worktree_lock).
+//
+// git does not make them safe to run concurrently on one repository: a prune deletes the admin
+// directory of a worktree another add is still creating, and that add fails ("failed to read
+// .git/worktrees/..."). Parallel implementers and trusted checks share one repository, so every
+// worktree operation in this process takes this lock. Without a repository it locks on cwd.
+func WorktreeLock(ctx context.Context, cwd string) func() {
+	key, err := CommonDir(ctx, cwd)
+	if err != nil {
+		key = resolvePath(cwd)
+	}
+	worktreeLocksMu.Lock()
+	lock, ok := worktreeLocks[key]
+	if !ok {
+		lock = &sync.Mutex{}
+		worktreeLocks[key] = lock
+	}
+	worktreeLocksMu.Unlock()
+	lock.Lock()
+	return lock.Unlock
+}
+
 // CommonDir returns the resolved shared repository directory (GitDir for all but a linked
 // worktree).
 func CommonDir(ctx context.Context, cwd string) (string, error) {

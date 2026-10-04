@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
@@ -1034,4 +1035,52 @@ func TestAFailedResearcherIsRecordedAndTheItemStillRuns(t *testing.T) {
 	if len(failed) != 2 || failed[0].Data["item"] != "01" || !strings.Contains(fmt.Sprint(failed[0].Data["error"]), "researcher down") {
 		t.Fatalf("%+v", failed)
 	}
+}
+
+// waitsForTheLock reports that op did not run while the repository's worktree lock was held, and
+// ran once it was released (python: test_every_worktree_operation_waits_for_the_repositorys_worktree_lock).
+func waitsForTheLock(t *testing.T, repo, name string, op func()) {
+	t.Helper()
+	done := make(chan struct{})
+	unlock := state.WorktreeLock(context.Background(), repo)
+	go func() { op(); close(done) }()
+	select {
+	case <-done:
+		unlock()
+		t.Fatalf("%s ran while the lock was held", name)
+	case <-time.After(500 * time.Millisecond):
+	}
+	unlock()
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		t.Fatalf("%s never finished", name)
+	}
+}
+
+// git does not make worktree add, remove and prune safe to run at once on one repository: a prune
+// deletes the admin directory of a worktree an add is still creating ("failed to read
+// .git/worktrees/..."; CI saw it once with two parallel implementers). Each holds the lock.
+func TestWorktreeOperationsWaitForTheRepositorysWorktreeLock(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	base, err := state.NewGitMissionAnchor(dir).Initialize(ctx, "T", "D", contracts.Checklist{SchemaVersion: 1, Items: []contracts.ChecklistItem{contracts.NewChecklistItem("01", "x")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := AddWorktree(ctx, dir, "lha/implementer-01/c1", base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitsForTheLock(t, dir, "add", func() {
+		if _, err := AddWorktree(ctx, dir, "lha/implementer-02/c2", base); err != nil {
+			t.Error(err)
+		}
+	})
+	waitsForTheLock(t, dir, "remove", func() { RemoveWorktree(ctx, dir, existing, "lha/implementer-01/c1") })
+	waitsForTheLock(t, dir, "prune", func() {
+		if err := PruneWorktrees(ctx, dir); err != nil {
+			t.Error(err)
+		}
+	})
 }

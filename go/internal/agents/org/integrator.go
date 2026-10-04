@@ -65,6 +65,8 @@ func AddWorktree(ctx context.Context, workdir, branch, base string) (string, err
 	if err := os.MkdirAll(root, 0o777); err != nil {
 		return "", err
 	}
+	unlock := state.WorktreeLock(ctx, workdir)
+	defer unlock()
 	if _, err := state.RunGit(ctx, workdir, "worktree", "add", "--quiet", "-B", branch, path, base); err != nil {
 		return "", err
 	}
@@ -74,11 +76,13 @@ func AddWorktree(ctx context.Context, workdir, branch, base string) (string, err
 // RemoveWorktree removes a worktree (and its branch, when given); tolerant of half-created state.
 func RemoveWorktree(ctx context.Context, workdir, path, branch string) {
 	ctx = context.WithoutCancel(ctx)
+	unlock := state.WorktreeLock(ctx, workdir)
 	gitNoCheck(ctx, workdir, "worktree", "remove", "--force", path)
 	if _, err := os.Stat(path); err == nil {
 		_ = os.RemoveAll(path)
 	}
 	gitNoCheck(ctx, workdir, "worktree", "prune")
+	unlock()
 	if branch != "" {
 		gitNoCheck(ctx, workdir, "branch", "-D", branch)
 	}
@@ -101,7 +105,9 @@ func PruneWorktrees(ctx context.Context, workdir string) error {
 			RemoveWorktree(ctx, workdir, filepath.Join(root, name), "")
 		}
 	}
+	unlock := state.WorktreeLock(ctx, workdir)
 	gitNoCheck(ctx, workdir, "worktree", "prune")
+	unlock()
 	branches, err := state.ListBranches(ctx, workdir, false)
 	if err != nil {
 		return err
