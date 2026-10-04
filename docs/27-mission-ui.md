@@ -77,16 +77,20 @@ Enforced today, for the behavioural cases in [`spec/`](../spec/README.md):
 
 For the UI API (Phase 1), contract first:
 
-- `spec/serve/openapi.yaml` (OpenAPI 3.1) is written and reviewed before any server code, and is
-  the only definition of the API, including a JSON Schema for every `mission_events` kind sent
-  over the event stream.
-- One black-box runner exercises any implementation's `lha serve` over HTTP: data-driven cases in
-  `spec/serve/cases/` (fixture state, request, expected status and body), plus validation of every
-  response against the OpenAPI schemas.
+- `spec/serve/openapi.json` (OpenAPI 3.1, JSON so every implementation reads it with its
+  standard library) is written before any server code, and is the only definition of the API.
+  Its `MissionEvent` payloads `$ref` the per-kind schemas in `spec/obs/mission_events.json`.
+  Done.
+- One black-box runner (`python/tests/serve`) exercises any implementation's `lha serve` over
+  HTTP: the cases in `spec/serve/cases.json` against the store and anchors in
+  `spec/serve/fixture.json`, with every response validated against the OpenAPI schemas. CI runs
+  it against the Python and the Go server, with Temporal unreachable and with a fake mission
+  workflow. Done.
 - CI fails unless every operation, every documented status code and every event kind has a case,
-  and unless every route a server registers is in the spec (no undocumented endpoints).
-- The UI's TypeScript types are generated from the spec (with a drift check), the spec is linted,
-  and a breaking change against `main` fails CI unless the API version changes.
+  and unless every route a server registers is in the spec (no undocumented endpoints). Done.
+- The spec is linted (Redocly) in CI. Done. The UI's TypeScript types are generated from the spec
+  with a drift check (Phase 2, with the UI), and a breaking change against `main` fails CI unless
+  the API version changes (next).
 
 ## Phase 0: `mission_events`, the shared event record
 
@@ -130,20 +134,28 @@ mission-report` and plain SQL can read it.
 
 ## Phase 1: `lha serve`, the UI API
 
-- Reads: `GET /api/v1/missions`, `/missions/{id}` (store row, plus Temporal's status for a durable
-  mission, plus the anchor's summary), `/missions/{id}/items`, `/items/{item}` (attempts, witnesses
-  with their run commands and latest results, last failure, commits, diffs including failed attempts
-  under `refs/lha/attempts/`), `/missions/{id}/timeline?since=`, `/costs`, `/gates`.
-- Live: `GET /api/v1/events` (Server-Sent Events, resumable with `Last-Event-ID`).
-- Controls (durable missions): steer, snooze, edit the checklist, abort (a workflow cancellation),
-  and answer a gate with the person's name (`--as`, sent as `human_decision_v2`).
-- Contract: an OpenAPI document and fixtures in `spec/serve/`; every implementation's server is
-  tested against them.
+Status: both implementations serve the contract below and pass every case. Item detail (attempts,
+witnesses, diffs) and per-role cost breakdowns are additive operations still to come.
+
+- Reads: `GET /api/v1/health`; `/api/v1/missions` (each with its spend, item counts and last
+  event); `/missions/{id}` (plus its description, workdir, and for a running durable mission its
+  workflow's live state: status, cycles, open gate, open question, wake time, steering notes,
+  pending edits); `/missions/{id}/items` (the anchor's checklist); `/missions/{id}/events?after=`
+  (recorded events, paged forward by id); `/missions/{id}/costs`; `/missions/{id}/gates`.
+- Live: `GET /api/v1/stream` (Server-Sent Events, resumable with `Last-Event-ID`): `mission_event`
+  messages, and a `mission` message when a mission's row changes.
+- Controls (durable missions): `POST` `steer`, `snooze`, `checklist-edits`, `decision` (with the
+  person's name, sent as `human_decision_v2`) and `abort` (a workflow cancellation). A local run is
+  `409 not_durable`, a finished mission `409 finished`, Temporal unreachable `503`.
+- Still to come, as additive operations: item detail (attempts, witnesses with their latest
+  results, diffs including failed attempts under `refs/lha/attempts/`) and costs by role.
+- Contract: [`spec/serve/`](../spec/serve/README.md); every implementation's server is tested
+  against it.
 
 Performance rules, because the cost is in how the server gets its data, not in the framework:
 
-- One shared reader per server follows `mission_events`, the anchor and the gate rows by cursor and
-  fans out to every client; no per-client polling of the store or of git.
+- One shared reader per server follows `mission_events` by cursor and the mission rows, and fans
+  out to every client; no per-client polling of the store or of git.
 - Temporal status is fetched at most every few seconds per mission and shared, never per request
   (a query can make the worker replay the workflow).
 - Commits and diffs are cached by commit hash; git never runs per request.

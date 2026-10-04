@@ -65,6 +65,7 @@ var commandHelp = []struct{ name, help string }{
 	{"eval", evalHelp},
 	{"workspace", workspaceHelp},
 	{"worker", "Run a Temporal worker that serves missions (requires a Temporal server)."},
+	{"serve", "Serve the mission UI's API (spec/serve/openapi.json) on loopback."},
 	{"mission-start", "Plan (or import) a checklist, initialize the anchor, and start a durable MissionWorkflow."},
 	{"mission-status", "Query a mission's status, cycles, sleep, open gate (+ pending action), steering notes and gate events."},
 	{"mission-approve", "Resolve an open human gate on a mission with a decision."},
@@ -177,6 +178,8 @@ func (c *cli) run(args []string) int {
 		err = c.workspaceCmd(rest)
 	case "worker":
 		err = c.worker(rest)
+	case "serve":
+		err = c.serve(rest)
 	case "mission-start":
 		err = c.missionStart(rest)
 	case "mission-status":

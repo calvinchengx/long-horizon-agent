@@ -1063,3 +1063,66 @@ def test_every_spec_file_is_indexed_in_the_readme() -> None:
         if f"`{p.relative_to(SPEC).as_posix()}`" not in readme
     ]
     assert not missing, f"add to spec/README.md: {missing}"
+
+
+# --- the UI API (spec/serve): every operation, status and event kind has a case ----------------
+def _path_matches(template: str, path: str) -> bool:
+    import re
+
+    pattern = "^" + re.sub(r"\\\{[^/]+\\\}", "[^/]+", re.escape(template)) + "$"
+    return re.match(pattern, path) is not None
+
+
+def test_every_ui_api_operation_and_status_has_a_case() -> None:
+    api = _load("serve/openapi.json")
+    assert api["openapi"] == "3.1.0" and api["info"]["version"] == "1.0.0"
+    assert api["servers"][0]["url"].startswith("http://127.0.0.1:")
+    declared_tags = {t["name"] for t in api["tags"]}
+    operations: dict[str, tuple[str, str, set[str]]] = {}
+    for template, methods in api["paths"].items():
+        for method, op in methods.items():
+            assert set(op["tags"]) <= declared_tags, op["operationId"]
+            assert op["security"], f"{op['operationId']} must require the token"
+            operations[op["operationId"]] = (method.upper(), template, set(op["responses"]))
+    schemas = api["components"]["schemas"]
+    assert {"token_header", "token_cookie"} == set(api["components"]["securitySchemes"])
+    codes = set(schemas["Error"]["properties"]["error"]["properties"]["code"]["enum"])
+
+    cases = _load("serve/cases.json")
+    assert cases["description"]
+    names, covered = set(), set()
+    for case in cases["cases"]:
+        assert case["name"] not in names, f"duplicate case {case['name']!r}"
+        names.add(case["name"])
+        status = str(case["expect"]["status"])
+        assert case.get("temporal") in (None, "absent", "running"), case["name"]
+        if "error" in case["expect"]:
+            assert case["expect"]["error"] in codes, case["name"]
+        if not case["operation"]:  # an undocumented path: refused like any unknown resource
+            assert status == "404" and not any(
+                _path_matches(t, case["request"]["path"]) for _, t, _ in operations.values()
+            )
+            continue
+        method, template, statuses = operations[case["operation"]]
+        assert case["request"]["method"] == method, case["name"]
+        assert _path_matches(template, case["request"]["path"]), case["name"]
+        assert status in statuses, f"{case['name']}: {status} is not documented"
+        covered.add((case["operation"], status))
+    missing = sorted(
+        f"{op} {status}"
+        for op, (_, _, statuses) in operations.items()
+        for status in statuses
+        if (op, status) not in covered
+    )
+    assert not missing, f"no case for: {missing}"
+
+    fixture = _load("serve/fixture.json")
+    kinds = set(json.loads((SPEC / "obs/mission_events.json").read_text())["kinds"])
+    assert {e["kind"] for e in fixture["events"]} >= kinds, "the fixture lacks an event kind"
+    assert all(m["anchor"] in (None, *fixture["anchors"]) for m in fixture["missions"])
+    assert {c["mission_id"] for c in fixture["costs"]} <= {
+        m["mission_id"] for m in fixture["missions"]
+    }
+    assert {g["mission_id"] for g in fixture["gates"]} <= {
+        m["mission_id"] for m in fixture["missions"]
+    }

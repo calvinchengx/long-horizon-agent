@@ -15,6 +15,9 @@ the matching package is ported; it runs every file below.
 | `safety/egress.json` | host normalization (IDNA 2008), URL parsing, public-address checks, allow-list |
 | `obs/redact.json` | secret redaction in free text and secret-looking keys |
 | `obs/mission_events.json` | every trace event kind's payload schema (`mission_events` rows), with payloads each schema accepts or rejects; every implementation's test suite records events only of these shapes and every kind at least once |
+| `serve/openapi.json` | the UI API every implementation's `lha serve` provides (OpenAPI 3.1; [serve/README.md](serve/README.md)) |
+| `serve/cases.json` | the UI API's conformance cases: a request and its expected status, error and body, run against any implementation's server |
+| `serve/fixture.json` | the mission store rows and anchors the UI API's cases run against |
 | `contracts/check_names.json` | verification check names derived from argv, and de-duplication |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, status transitions |
 | `state/checklist_edit.json` | operator edit batches (`lha mission-edit`): the resulting checklist and summary lines, or the exact refusal with the checklist unchanged; the `(witness: ...)` description suffix; the next item id |

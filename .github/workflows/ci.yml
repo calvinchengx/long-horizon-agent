@@ -21,8 +21,8 @@ jobs:
           enable-cache: true
           cache-dependency-glob: python/uv.lock
 
-      - name: Sync (core + dev + e2b SDK)
-        run: uv sync --locked --extra e2b
+      - name: Sync (core + dev + e2b SDK + serve)
+        run: uv sync --locked --extra e2b --extra serve
 
       - name: Ruff (lint)
         run: uv run ruff check .
@@ -44,6 +44,15 @@ jobs:
         run: |
           uv run python scripts/export_spec.py > /dev/null
           git diff --exit-code -- ../spec
+
+      # The UI API contract (spec/serve/openapi.json) is a valid OpenAPI 3.1 document.
+      - name: Lint the UI API contract
+        run: npx --yes @redocly/cli@2.14.0 lint ../spec/serve/openapi.json
+
+      # Every case in spec/serve/cases.json against this implementation's `lha serve`, with
+      # Temporal unreachable (the fake-workflow run follows the dev server below).
+      - name: UI API conformance (no Temporal)
+        run: uv run pytest -q --cov --cov-append --cov-report= --cov-fail-under=0 tests/serve
 
       # The Temporal CLI, a pinned release verified by its checksum: `temporal server start-dev` is
       # a real server (the time-skipping test server lacks DescribeTaskQueue, which the
@@ -83,6 +92,12 @@ jobs:
         run: uv run pytest -q --cov --cov-append --cov-report= --cov-fail-under=0 tests/durability tests/load
         timeout-minutes: 12
 
+      # The controls and live state, against a fake mission workflow on the dev server.
+      - name: UI API conformance (fake mission workflow)
+        env:
+          LHA_SERVE_TEMPORAL: 127.0.0.1:7233
+        run: uv run pytest -q --cov --cov-append --cov-report= --cov-fail-under=0 tests/serve
+
       # Unit + durability + load coverage, gated by fail_under in pyproject.toml (one floor). The
       # pytest steps above pass --cov-fail-under=0: pytest-cov would otherwise apply the floor to
       # the unit share alone, before the durability tests append theirs.
@@ -111,9 +126,9 @@ jobs:
           enable-cache: true
           cache-dependency-glob: python/uv.lock
 
-      - name: Sync Python (core + dev)
+      - name: Sync Python (core + dev + serve)
         working-directory: python
-        run: uv sync --locked
+        run: uv sync --locked --extra serve
 
       - name: gofmt
         run: |
@@ -177,6 +192,16 @@ jobs:
         env:
           LHA_TRACE_AUDIT_CHECK: ${{ runner.temp }}/trace-audit
         run: go test -count=1 -run TestTraceAudit ./internal/spec
+
+      # Every case in spec/serve/cases.json against the Go `lha serve` (the same black-box runner
+      # the Python server passes), with Temporal unreachable, then with the fake mission workflow.
+      - name: UI API conformance (Go server)
+        run: |
+          go build -o "$RUNNER_TEMP/lha-go" ./cmd/lha
+          cd ../python
+          LHA_SERVE_CMD="$RUNNER_TEMP/lha-go serve" uv run pytest -q tests/serve
+          LHA_SERVE_CMD="$RUNNER_TEMP/lha-go serve" LHA_SERVE_TEMPORAL=127.0.0.1:7233 \
+            uv run pytest -q tests/serve
 
   python-services-integration:
     # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker

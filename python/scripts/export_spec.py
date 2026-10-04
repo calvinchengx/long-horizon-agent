@@ -359,6 +359,189 @@ def export_mission_events() -> None:
     )
 
 
+# --- serve/fixture: the store and anchors the UI API's conformance cases run against -----------
+_SERVE_TS = "2026-10-04T00:00:{:02d}.000000+00:00"
+
+
+def _serve_items(*items: tuple[str, str, str, list[str], dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        ChecklistItem(id=i, description=d, status=s, depends_on=deps, **extra).model_dump()  # type: ignore[arg-type]
+        for i, d, s, deps, extra in items
+    ]
+
+
+def export_serve_fixture() -> None:
+    """Missions of every shape the API distinguishes, with one recorded event of every kind.
+
+    ``anchor`` names an entry of ``anchors`` the runner initializes as the mission's workdir;
+    ``workdir`` (no anchor) is recorded as is, a path that does not exist.
+    """
+    contract = json.loads((SPEC / "obs/mission_events.json").read_text())
+    samples: dict[str, Any] = {}
+    for case in contract["cases"]:
+        if case["valid"] and case["kind"] not in samples:
+            samples[case["kind"]] = case["data"]
+    events = [
+        {
+            "mission_id": "mission_local",
+            "cycle_id": "c1" if n % 2 else "",
+            "kind": kind,
+            "payload": samples[kind],
+            "ts": _SERVE_TS.format(n),
+        }
+        for n, kind in enumerate(sorted(EVENT_KINDS))
+    ]
+    events += [
+        {
+            "mission_id": "mission_durable",
+            "cycle_id": "c1",
+            "kind": "cycle_started",
+            "payload": {"item_id": "01"},
+            "ts": _SERVE_TS.format(50),
+        },
+        {
+            "mission_id": "mission_durable",
+            "cycle_id": "c1",
+            "kind": "tool_call",
+            "payload": {"tool": "read_file", "ok": True},
+            "ts": _SERVE_TS.format(51),
+        },
+    ]
+    failure = "exit 1: tests/test_api.py::test_list FAILED"
+    _write(
+        "serve/fixture.json",
+        {
+            "anchors": {
+                "local": {
+                    "title": "Local mission",
+                    "description": "A local run of four items",
+                    "items": _serve_items(
+                        ("01", "Add the list endpoint", "done", [], {"verified_by": ["pytest"]}),
+                        ("02", "Add paging", "in_progress", ["01"], {"attempts": 1}),
+                        (
+                            "03",
+                            "Add filters (witness: cmd:true)",
+                            "blocked",
+                            [],
+                            {"attempts": 3, "consecutive_failures": 3, "last_failure": failure},
+                        ),
+                        ("04", "Document it", "todo", ["02", "03"], {"witnesses": ["cmd:true"]}),
+                    ),
+                },
+                "durable": {
+                    "title": "Durable mission",
+                    "description": "A mission a worker runs",
+                    "items": _serve_items(
+                        ("01", "First step", "done", [], {}),
+                        ("02", "Second step", "todo", ["01"], {}),
+                    ),
+                },
+            },
+            "missions": [
+                {
+                    "mission_id": "mission_local",
+                    "title": "Local mission",
+                    "description": "A local run of four items",
+                    "status": "RUNNING",
+                    "workflow_id": None,
+                    "anchor": "local",
+                },
+                {
+                    "mission_id": "mission_durable",
+                    "title": "Durable mission",
+                    "description": "A mission a worker runs",
+                    "status": "RUNNING",
+                    "workflow_id": "mission:mission_durable",
+                    "anchor": "durable",
+                },
+                {
+                    "mission_id": "mission_finished",
+                    "title": "Finished durable mission",
+                    "description": "",
+                    "status": "DONE",
+                    "workflow_id": "mission:mission_finished",
+                    "anchor": None,
+                    "workdir": None,
+                },
+                {
+                    "mission_id": "mission_elsewhere",
+                    "title": "Run on another host",
+                    "description": "",
+                    "status": "RUNNING",
+                    "workflow_id": None,
+                    "anchor": None,
+                    "workdir": "/nonexistent/lha-serve-fixture",
+                },
+            ],
+            "costs": [
+                {
+                    "mission_id": "mission_local",
+                    "cycle_id": "c1",
+                    "role": "lead",
+                    "model": "claude-sonnet-4-6",
+                    "input_tokens": 1000,
+                    "output_tokens": 200,
+                    "usd": 0.006,
+                },
+                {
+                    "mission_id": "mission_local",
+                    "cycle_id": "c1",
+                    "role": "reviewer",
+                    "model": "local-model",
+                    "input_tokens": 500,
+                    "output_tokens": 50,
+                    "usd": None,
+                },
+                {
+                    "mission_id": "mission_durable",
+                    "cycle_id": "c1",
+                    "role": "lead",
+                    "model": "claude-sonnet-4-6",
+                    "input_tokens": 2000,
+                    "output_tokens": 400,
+                    "usd": 0.012,
+                },
+            ],
+            "gates": [
+                {
+                    "mission_id": "mission_durable",
+                    "gate_id": "g1",
+                    "kind": "tool_call",
+                    "event": "opened",
+                    "at": _SERVE_TS.format(52),
+                    "question": "Run `git push review HEAD`?",
+                    "options": ["approve", "reject"],
+                    "default_action": "reject",
+                    "deadline": "2026-10-05T00:00:52.000000+00:00",
+                    "risk": "irreversible",
+                    "request": {"tool": "run_command", "fingerprint": "f1"},
+                },
+                {
+                    "mission_id": "mission_durable",
+                    "gate_id": "g1",
+                    "kind": "tool_call",
+                    "event": "resolved",
+                    "at": _SERVE_TS.format(53),
+                    "decision": "approve",
+                    "resolved_by": "alice",
+                },
+                {
+                    "mission_id": "mission_durable",
+                    "gate_id": "g2",
+                    "kind": "deadlock",
+                    "event": "opened",
+                    "at": _SERVE_TS.format(54),
+                    "question": "Item 02 keeps failing. Retry, abort, or mark it impossible?",
+                    "options": ["retry", "abort", "impossible"],
+                    "default_action": "retry",
+                    "deadline": "2026-10-05T00:00:54.000000+00:00",
+                },
+            ],
+            "events": events,
+        },
+    )
+
+
 # --- contracts/verify check names ------------------------------------------------------------
 
 _COMMANDS = [
@@ -3851,6 +4034,7 @@ def main() -> None:
     export_egress()
     export_redact()
     export_mission_events()
+    export_serve_fixture()
     export_check_names()
     export_checklist()
     export_checklist_edit()

@@ -112,6 +112,8 @@ _OPTIONAL_MODULES = {
     "docker": "the 'sandbox' extra (lha[sandbox])",
     "e2b_code_interpreter": "the 'e2b' extra (lha[e2b])",
     "psycopg": "the 'postgres' extra (lha[postgres])",
+    "starlette": "the 'serve' extra (lha[serve])",
+    "uvicorn": "the 'serve' extra (lha[serve])",
 }
 
 
@@ -1035,6 +1037,36 @@ def worker() -> None:
         _fail(str(exc))
     except RuntimeError as exc:  # LHA_WORKER_PROMOTE could not promote this build
         _fail(str(exc), code=1)
+
+
+@app.command()
+def serve(
+    host: str = typer.Option(
+        "127.0.0.1", help="Loopback address to bind (127.0.0.1 or localhost)."
+    ),
+    port: int = typer.Option(8765, min=0, max=65535, help="Port (0 picks a free one)."),
+) -> None:
+    """Serve the mission UI's API (spec/serve/openapi.json) on loopback.
+
+    Prints the start-up URL with its token first; LHA_SERVE_TOKEN fixes the token (otherwise it is
+    random). Reads the mission store (`lha config`), each mission's anchor, and Temporal for
+    durable missions. Needs the `serve` extra (`uv sync --extra serve`).
+    """
+    import os
+
+    try:
+        import uvicorn  # noqa: F401
+
+        import lha.serve.app  # noqa: F401
+        from lha.serve import serve as run_server
+    except ModuleNotFoundError as exc:
+        _fail_missing_module(exc)
+    try:
+        run_server(
+            get_settings(), host=host, port=port, token=os.environ.get("LHA_SERVE_TOKEN", "")
+        )
+    except (ValueError, OSError) as exc:
+        _fail(str(exc))
 
 
 @app.command(name="mission-start")

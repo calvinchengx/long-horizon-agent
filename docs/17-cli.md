@@ -37,6 +37,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`labels export`](#lha-labels-export) | export a mission's gate answers, tool approvals, verifier and review verdicts as JSON Lines labels | a mission workspace and/or the mission store |
 | [`eval check`, `eval run`](#lha-eval) | validate gold evaluation sets, and score a judge against them | gold `.jsonl` files |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
+| [`serve`](#lha-serve) | serve the mission UI's API on loopback | the mission store; Temporal for durable missions' live state and controls; the `serve` extra (Python) |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
 | [`mission-approve`](#lha-mission-approve) | answer the open gate (a queued irreversible action, or the deadlock gate) | Temporal |
@@ -496,6 +497,31 @@ pair exits `2`, and a failed `LHA_WORKER_PROMOTE` exits `1`. The model, sandbox,
 trusted checks, protected paths, replanning limits and budget used by durable missions come from
 this process's settings. See
 [14-running-on-temporal.md](14-running-on-temporal.md).
+
+## `lha serve`
+
+Serves the UI API ([`spec/serve/openapi.json`](../spec/serve/openapi.json)) on loopback until
+interrupted, and prints the start-up URL first:
+
+```text
+lha serve: http://127.0.0.1:8765/?token=...
+```
+
+Opening that URL sets the token cookie the UI's reads use; every other request needs the token as
+the `X-LHA-Token` header, and every write needs the header. The server refuses a `Host` that is not
+its own loopback address.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--host` | `127.0.0.1` | `127.0.0.1` or `localhost`; anything else exits `2` |
+| `--port` | `8765` | `0` picks a free port |
+
+`LHA_SERVE_TOKEN` fixes the token (otherwise it is random). The server reads the mission store
+(`lha config` shows which), each mission's anchor at the `workdir` its run recorded, and, for a
+durable mission, its workflow's queries; the controls send the workflow's signals, as the
+`mission-*` commands do. Both implementations' servers pass the same cases
+([`spec/serve/README.md`](../spec/serve/README.md)), and either one shows missions the other's runs
+record. The Python server needs the `serve` extra (`uv sync --extra serve`).
 
 ## `lha mission-start`
 

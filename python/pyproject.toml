@@ -29,6 +29,10 @@ observability = ["opentelemetry-sdk>=1.25", "opentelemetry-exporter-otlp-proto-h
 sandbox = ["docker>=7.1"]
 # The e2b sandbox (LHA_SANDBOX=e2b): remote Firecracker microVMs; also needs an E2B API key.
 e2b = ["e2b-code-interpreter>=1.0"]
+serve = [
+    "starlette>=0.46",
+    "uvicorn>=0.34",
+]
 
 [project.scripts]
 lha = "lha.cli.main:main"
@@ -43,6 +47,7 @@ dev = [
     # The tracing tests exercise the real OpenTelemetry SDK (the `observability` extra).
     "opentelemetry-sdk>=1.25",
     "opentelemetry-exporter-otlp-proto-http>=1.25",
+    "jsonschema>=4.26.0",
 ]
 mutation = [
     "mutmut>=3.8",
@@ -60,6 +65,10 @@ packages = ["src/lha"]
 [tool.coverage.run]
 source = ["src/lha"]
 branch = true
+# Measure Python subprocesses too: the UI API runner (tests/serve) drives a real `lha serve`.
+patch = ["subprocess"]
+# ... and save their data when they are stopped with SIGTERM (uvicorn re-raises it on exit).
+sigterm = true
 
 [tool.coverage.report]
 show_missing = true

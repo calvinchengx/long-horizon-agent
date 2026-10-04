@@ -1,0 +1,1823 @@
+{
+  "description": "The UI API's conformance cases (spec/serve/README.md). Each runs against fixture.json; `temporal` limits a case to a server with Temporal unreachable (`absent`) or with the fake mission workflow running (`running`). Body expectations are subsets.",
+  "cases": [
+    {
+      "name": "health",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "api_version": "1.0.0",
+          "store": {
+            "backend": "sqlite",
+            "degraded_reason": ""
+          }
+        }
+      }
+    },
+    {
+      "name": "health with the cookie",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health",
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "name": "health reports an unreachable Temporal",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "temporal": "unavailable"
+        }
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "health reports a reachable Temporal",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "temporal": "connected"
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "no token",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "a wrong token",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health",
+        "auth": "wrong"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "a foreign Host (DNS rebinding)",
+      "operation": "getHealth",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/health",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "an undocumented path",
+      "operation": "",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/nope"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "list missions",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "missions": {
+            "$len": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "a mission's summary counts its items and spend",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "missions": {
+            "$contains": [
+              {
+                "mission_id": "mission_local",
+                "durable": false,
+                "workflow_id": null,
+                "items": {
+                  "total": 4,
+                  "todo": 1,
+                  "in_progress": 1,
+                  "blocked": 1,
+                  "done": 1,
+                  "split": 0
+                },
+                "spend": {
+                  "calls": 2,
+                  "known_usd": 0.006,
+                  "unknown_cost_calls": 1,
+                  "input_tokens": 1500,
+                  "output_tokens": 250
+                },
+                "last_event": {
+                  "id": 36,
+                  "kind": "verify",
+                  "ts": "2026-10-04T00:00:35.000000+00:00"
+                }
+              },
+              {
+                "mission_id": "mission_elsewhere",
+                "items": null,
+                "last_event": null
+              },
+              {
+                "mission_id": "mission_durable",
+                "durable": true,
+                "workflow_id": "mission:mission_durable",
+                "last_event": {
+                  "id": 38
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list missions, limited",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions",
+        "query": {
+          "limit": "1"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "missions": {
+            "$len": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "a limit below 1",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions",
+        "query": {
+          "limit": "0"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "a limit that is not a number",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions",
+        "query": {
+          "limit": "ten"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "a local mission",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "mission_id": "mission_local",
+          "title": "Local mission",
+          "description": "A local run of four items",
+          "status": "RUNNING",
+          "durable": false,
+          "workdir": "$any",
+          "live": null,
+          "live_error": null,
+          "items": {
+            "total": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "a finished durable mission has no live state",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_finished"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "durable": true,
+          "status": "DONE",
+          "workdir": null,
+          "items": null,
+          "live": null,
+          "live_error": null
+        }
+      }
+    },
+    {
+      "name": "a durable mission without Temporal",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "durable": true,
+          "live": null,
+          "live_error": "$any"
+        }
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "a durable mission's live state",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "durable": true,
+          "live_error": null,
+          "live": {
+            "status": "RUNNING",
+            "cycles": 3,
+            "open_question": null,
+            "resume_at": null,
+            "pending_edits": 0,
+            "gate": {
+              "gate_id": "g9",
+              "kind": "tool_call",
+              "options": [
+                "approve",
+                "reject"
+              ],
+              "request": {
+                "tool": "run_command"
+              }
+            }
+          }
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "an unknown mission",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "a mission over the cookie",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local",
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 200
+      }
+    },
+    {
+      "name": "a mission's checklist",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "items": [
+            {
+              "id": "01",
+              "status": "done",
+              "verified_by": [
+                "pytest"
+              ]
+            },
+            {
+              "id": "02",
+              "status": "in_progress",
+              "depends_on": [
+                "01"
+              ],
+              "attempts": 1
+            },
+            {
+              "id": "03",
+              "status": "blocked",
+              "consecutive_failures": 3,
+              "last_failure": "exit 1: tests/test_api.py::test_list FAILED"
+            },
+            {
+              "id": "04",
+              "status": "todo",
+              "depends_on": [
+                "02",
+                "03"
+              ],
+              "witnesses": [
+                "cmd:true"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an anchor on another host",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_elsewhere/items"
+      },
+      "expect": {
+        "status": 404,
+        "error": "anchor_unavailable"
+      }
+    },
+    {
+      "name": "a mission with no workdir recorded",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_finished/items"
+      },
+      "expect": {
+        "status": 404,
+        "error": "anchor_unavailable"
+      }
+    },
+    {
+      "name": "items of an unknown mission",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope/items"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "every recorded event, each matching its kind's schema",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "query": {
+          "limit": "1000"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "events": {
+            "$len": 36
+          },
+          "next_after": 36
+        }
+      }
+    },
+    {
+      "name": "a page of events",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "query": {
+          "limit": "2"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 1,
+              "mission_id": "mission_local",
+              "cycle_id": "",
+              "kind": "check_quarantined",
+              "ts": "2026-10-04T00:00:00.000000+00:00",
+              "schema_version": 1
+            },
+            {
+              "id": 2,
+              "cycle_id": "c1",
+              "kind": "checkpoint"
+            }
+          ],
+          "next_after": 2
+        }
+      }
+    },
+    {
+      "name": "the next page",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "query": {
+          "after": "34",
+          "limit": "5"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 35
+            },
+            {
+              "id": 36
+            }
+          ],
+          "next_after": 36
+        }
+      }
+    },
+    {
+      "name": "past the last event",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "query": {
+          "after": "36"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "events": [],
+          "next_after": 36
+        }
+      }
+    },
+    {
+      "name": "only the mission's own events",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/events"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 37,
+              "kind": "cycle_started",
+              "payload": {
+                "item_id": "01"
+              }
+            },
+            {
+              "id": 38,
+              "kind": "tool_call"
+            }
+          ],
+          "next_after": 38
+        }
+      }
+    },
+    {
+      "name": "events of an unknown mission",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope/events"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "a negative cursor",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "query": {
+          "after": "-1"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "a limit above 1000",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "query": {
+          "limit": "5000"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "a mission's spend",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/costs"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "summary": {
+            "calls": 2,
+            "known_usd": 0.006,
+            "unknown_cost_calls": 1,
+            "input_tokens": 1500,
+            "output_tokens": 250
+          },
+          "calls": [
+            {
+              "role": "reviewer",
+              "model": "local-model",
+              "usd": null,
+              "cycle_id": "c1"
+            },
+            {
+              "role": "lead",
+              "usd": 0.006,
+              "input_tokens": 1000,
+              "output_tokens": 200
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the most recent call only",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/costs",
+        "query": {
+          "limit": "1"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "summary": {
+            "calls": 2
+          },
+          "calls": [
+            {
+              "role": "reviewer"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a mission with no spend",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_elsewhere/costs"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "summary": {
+            "calls": 0,
+            "known_usd": 0,
+            "unknown_cost_calls": 0
+          },
+          "calls": []
+        }
+      }
+    },
+    {
+      "name": "costs of an unknown mission",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope/costs"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "a costs limit below 1",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/costs",
+        "query": {
+          "limit": "0"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "a mission's gates, most recently opened first",
+      "operation": "listGates",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/gates"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "gates": [
+            {
+              "gate_id": "g2",
+              "kind": "deadlock",
+              "status": "OPEN",
+              "options": [
+                "retry",
+                "abort",
+                "impossible"
+              ],
+              "decision": null,
+              "resolved_by": null,
+              "resolved_at": ""
+            },
+            {
+              "gate_id": "g1",
+              "kind": "tool_call",
+              "status": "RESOLVED",
+              "decision": "approve",
+              "resolved_by": "alice",
+              "risk": "irreversible",
+              "request": {
+                "tool": "run_command",
+                "fingerprint": "f1"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a mission with no gates",
+      "operation": "listGates",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/gates"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "gates": []
+        }
+      }
+    },
+    {
+      "name": "gates of an unknown mission",
+      "operation": "listGates",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope/gates"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "a gates limit below 1",
+      "operation": "listGates",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/gates",
+        "query": {
+          "limit": "0"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "listMissions: no token",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "listMissions: a foreign Host",
+      "operation": "listMissions",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "getMission: no token",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "getMission: a foreign Host",
+      "operation": "getMission",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "listItems: no token",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "listItems: a foreign Host",
+      "operation": "listItems",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "listEvents: no token",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "listEvents: a foreign Host",
+      "operation": "listEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/events",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "listCosts: no token",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/costs",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "listCosts: a foreign Host",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/costs",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "listGates: no token",
+      "operation": "listGates",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/gates",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "listGates: a foreign Host",
+      "operation": "listGates",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/gates",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "the stream replays from a cursor",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "mission_id": "mission_durable",
+          "after": "0"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "mission_event": [
+            {
+              "id": 37,
+              "kind": "cycle_started"
+            },
+            {
+              "id": 38,
+              "kind": "tool_call"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the stream resumes after Last-Event-ID",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "mission_id": "mission_local",
+          "after": "0"
+        },
+        "headers": {
+          "Last-Event-ID": "35"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "mission_event": [
+            {
+              "id": 36,
+              "kind": "verify"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the stream over the cookie",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "mission_id": "mission_durable",
+          "after": "37"
+        },
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 200,
+        "stream": {
+          "mission_event": [
+            {
+              "id": 38
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "the stream without a token",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "the stream from a foreign Host",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "the stream from a negative cursor",
+      "operation": "streamEvents",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/stream",
+        "query": {
+          "after": "-5"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "steer: sent to the workflow",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        }
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": true
+        },
+        "signal": {
+          "name": "steer_v1",
+          "arg": "Prefer small commits."
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "steer: Temporal unreachable",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        }
+      },
+      "expect": {
+        "status": 503,
+        "error": "temporal_unavailable"
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "steer: a local mission has no control channel",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_local/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "not_durable"
+      }
+    },
+    {
+      "name": "steer: a finished mission",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_finished/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      }
+    },
+    {
+      "name": "steer: an unknown mission",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_nope/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        }
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "steer: the cookie alone cannot write",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        },
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "steer: a foreign Host",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": {
+          "note": "  Prefer small commits.  "
+        },
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "steer: an invalid body",
+      "operation": "steerMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/steer",
+        "body": {
+          "note": "   "
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "snooze: sent to the workflow",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/snooze",
+        "body": {
+          "seconds": 600
+        }
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": true
+        },
+        "signal": {
+          "name": "snooze_v1",
+          "arg": 600
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "snooze: Temporal unreachable",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/snooze",
+        "body": {
+          "seconds": 600
+        }
+      },
+      "expect": {
+        "status": 503,
+        "error": "temporal_unavailable"
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "snooze: a local mission has no control channel",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_local/snooze",
+        "body": {
+          "seconds": 600
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "not_durable"
+      }
+    },
+    {
+      "name": "snooze: a finished mission",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_finished/snooze",
+        "body": {
+          "seconds": 600
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      }
+    },
+    {
+      "name": "snooze: an unknown mission",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_nope/snooze",
+        "body": {
+          "seconds": 600
+        }
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "snooze: the cookie alone cannot write",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/snooze",
+        "body": {
+          "seconds": 600
+        },
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "snooze: a foreign Host",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/snooze",
+        "body": {
+          "seconds": 600
+        },
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "snooze: an invalid body",
+      "operation": "snoozeMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/snooze",
+        "body": {
+          "seconds": -1
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "checklist-edits: sent to the workflow",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        }
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": true
+        },
+        "signal": {
+          "name": "checklist_edit_v1",
+          "arg": {
+            "edits": [
+              {
+                "op": "add",
+                "description": "Write docs (witness: cmd:true)"
+              },
+              {
+                "op": "block",
+                "id": "02"
+              }
+            ],
+            "by": "bob"
+          }
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "checklist-edits: Temporal unreachable",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        }
+      },
+      "expect": {
+        "status": 503,
+        "error": "temporal_unavailable"
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "checklist-edits: a local mission has no control channel",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_local/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "not_durable"
+      }
+    },
+    {
+      "name": "checklist-edits: a finished mission",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_finished/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      }
+    },
+    {
+      "name": "checklist-edits: an unknown mission",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_nope/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        }
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "checklist-edits: the cookie alone cannot write",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        },
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "checklist-edits: a foreign Host",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "add",
+              "description": "Write docs (witness: cmd:true)"
+            },
+            {
+              "op": "block",
+              "id": "02"
+            }
+          ],
+          "by": "bob"
+        },
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "checklist-edits: an invalid body",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": []
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "decision: sent to the workflow",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": true
+        },
+        "signal": {
+          "name": "human_decision_v2",
+          "arg": {
+            "decision": "approve",
+            "by": "alice"
+          }
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "decision: Temporal unreachable",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 503,
+        "error": "temporal_unavailable"
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "decision: a local mission has no control channel",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_local/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "not_durable"
+      }
+    },
+    {
+      "name": "decision: a finished mission",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_finished/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      }
+    },
+    {
+      "name": "decision: an unknown mission",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_nope/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "decision: the cookie alone cannot write",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        },
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "decision: a foreign Host",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "approve",
+          "by": "alice"
+        },
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "decision: an invalid body",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "approve",
+          "by": ""
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "abort: sent to the workflow",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/abort",
+        "body": {}
+      },
+      "expect": {
+        "status": 202,
+        "body": {
+          "accepted": true
+        },
+        "signal": {
+          "name": "$cancel"
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "abort: Temporal unreachable",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/abort",
+        "body": {}
+      },
+      "expect": {
+        "status": 503,
+        "error": "temporal_unavailable"
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "abort: a local mission has no control channel",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_local/abort",
+        "body": {}
+      },
+      "expect": {
+        "status": 409,
+        "error": "not_durable"
+      }
+    },
+    {
+      "name": "abort: a finished mission",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_finished/abort",
+        "body": {}
+      },
+      "expect": {
+        "status": 409,
+        "error": "finished"
+      }
+    },
+    {
+      "name": "abort: an unknown mission",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_nope/abort",
+        "body": {}
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "abort: the cookie alone cannot write",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/abort",
+        "body": {},
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "abort: a foreign Host",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/abort",
+        "body": {},
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "abort: a body that is not JSON",
+      "operation": "abortMission",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/abort",
+        "body": "$not-json"
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "decision: not one of the open gate's options",
+      "operation": "decideGate",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/decision",
+        "body": {
+          "decision": "retry",
+          "by": "alice"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "checklist-edits: an unknown op",
+      "operation": "editChecklist",
+      "request": {
+        "method": "POST",
+        "path": "/api/v1/missions/mission_durable/checklist-edits",
+        "body": {
+          "edits": [
+            {
+              "op": "rename",
+              "id": "01"
+            }
+          ]
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    }
+  ]
+}

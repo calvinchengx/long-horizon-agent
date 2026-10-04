@@ -1,0 +1,2801 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "LHA mission API",
+    "version": "1.0.0",
+    "description": "The API every LHA implementation's `lha serve` provides, and the only thing the mission UI and MCP clients depend on (docs/27-mission-ui.md). Any implementation's server reads any implementation's missions: it reads the mission store, the `.lha/` anchor, `mission_events` and the Temporal wire contract only.\n\nThe server binds to 127.0.0.1 and refuses a request whose `Host` is not its own loopback address. Every request needs the token printed at start-up: as the `X-LHA-Token` header, or (reads only) the `lha_token` cookie the UI's start-up URL sets. No CORS.\n\nCompatibility: within `/api/v1`, changes are additive only (new paths, new optional fields, new event kinds). A client ignores fields and event kinds it does not know.",
+    "license": {
+      "name": "MIT",
+      "identifier": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "variables": {
+        "port": {
+          "default": "8765"
+        }
+      }
+    }
+  ],
+  "tags": [
+    {
+      "name": "meta",
+      "description": "The server itself."
+    },
+    {
+      "name": "missions",
+      "description": "Reads: the mission store, the anchor and the recorded events."
+    },
+    {
+      "name": "live",
+      "description": "Server-Sent Events."
+    },
+    {
+      "name": "controls",
+      "description": "Signals to a durable mission's workflow (the wire contract)."
+    }
+  ],
+  "paths": {
+    "/api/v1/health": {
+      "get": {
+        "operationId": "getHealth",
+        "summary": "Which implementation serves, and whether its dependencies are reachable",
+        "tags": [
+          "meta"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The server and its dependencies.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions": {
+      "get": {
+        "operationId": "listMissions",
+        "summary": "Missions, most recently updated first",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The missions.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "missions": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MissionSummary"
+                      }
+                    }
+                  },
+                  "required": [
+                    "missions"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}": {
+      "get": {
+        "operationId": "getMission",
+        "summary": "One mission: its row, spend, items, and live workflow state when durable",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MissionDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/items": {
+      "get": {
+        "operationId": "listItems",
+        "summary": "The mission's checklist, from its anchor",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The checklist items, in checklist order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ChecklistItem"
+                      }
+                    }
+                  },
+                  "required": [
+                    "items"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission (`not_found`), or its anchor cannot be read here (`anchor_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/events": {
+      "get": {
+        "operationId": "listEvents",
+        "summary": "The mission's recorded events after a cursor, oldest first",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0
+            },
+            "description": "Return events with an id greater than this (the previous page's `next_after`)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of events.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MissionEvent"
+                      }
+                    },
+                    "next_after": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "The cursor for the next page: the last event's id, or `after` when the page is empty."
+                    }
+                  },
+                  "required": [
+                    "events",
+                    "next_after"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/costs": {
+      "get": {
+        "operationId": "listCosts",
+        "summary": "The mission's cost ledger: totals and the most recent calls",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Totals and calls, most recent first.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {
+                      "$ref": "#/components/schemas/CostSummary"
+                    },
+                    "calls": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CostCall"
+                      }
+                    }
+                  },
+                  "required": [
+                    "calls",
+                    "summary"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/gates": {
+      "get": {
+        "operationId": "listGates",
+        "summary": "The mission's human gates, most recently opened first",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The gates.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "gates": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Gate"
+                      }
+                    }
+                  },
+                  "required": [
+                    "gates"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stream": {
+      "get": {
+        "operationId": "streamEvents",
+        "summary": "Live events as Server-Sent Events",
+        "tags": [
+          "live"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "description": "A Server-Sent Events stream. Each `mission_event` message carries one `MissionEvent` as `data`, with its id as the SSE `id`, so a reconnecting `EventSource` resumes after the last one it saw (`Last-Event-ID`). A `mission` message carries a `MissionSummary` when a mission's row changes (it has no id). A comment line is sent every 15 seconds so idle connections stay open. Every client is served by one shared reader; the stream never polls per client.",
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "Only this mission's messages."
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "description": "Start after this event id (default: only new events). `Last-Event-ID` wins when both are sent."
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The stream (never ends on its own).",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "`text/event-stream`: `event: mission_event` messages (data: a `MissionEvent`) and `event: mission` messages (data: a `MissionSummary`)."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/steer": {
+      "post": {
+        "operationId": "steerMission",
+        "summary": "Add a steering note to every following cycle's prompt (`steer_v1`)",
+        "description": "Sends the `steer_v1` signal, as `lha mission-steer` does. The note is trimmed; a note that is empty after trimming is refused (422).",
+        "tags": [
+          "controls"
+        ],
+        "security": [
+          {
+            "token_header": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "note": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  }
+                },
+                "required": [
+                  "note"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Sent to the mission's workflow; it applies the control at its next decision point.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The mission is not durable (a local run has no control channel), or it has finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporal is unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/snooze": {
+      "post": {
+        "operationId": "snoozeMission",
+        "summary": "Sleep before the next cycle, or wake (`snooze_v1`)",
+        "description": "Sends the `snooze_v1` signal, as `lha mission-snooze` does: the mission sleeps `seconds` before its next cycle; 0 wakes it.",
+        "tags": [
+          "controls"
+        ],
+        "security": [
+          {
+            "token_header": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 31536000
+                  }
+                },
+                "required": [
+                  "seconds"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Sent to the mission's workflow; it applies the control at its next decision point.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The mission is not durable (a local run has no control channel), or it has finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporal is unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/checklist-edits": {
+      "post": {
+        "operationId": "editChecklist",
+        "summary": "Edit the checklist as one atomic batch (`checklist_edit_v1`)",
+        "description": "Sends the `checklist_edit_v1` signal, as `lha mission-edit` does. The workflow validates the batch against the checklist before its next cycle; one bad edit refuses the whole batch.",
+        "tags": [
+          "controls"
+        ],
+        "security": [
+          {
+            "token_header": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "edits": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "$ref": "#/components/schemas/ChecklistEdit"
+                    }
+                  },
+                  "by": {
+                    "type": "string",
+                    "maxLength": 200,
+                    "description": "Who edits; recorded in the anchor's event."
+                  }
+                },
+                "required": [
+                  "edits"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Sent to the mission's workflow; it applies the control at its next decision point.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The mission is not durable (a local run has no control channel), or it has finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporal is unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/decision": {
+      "post": {
+        "operationId": "decideGate",
+        "summary": "Answer the open human gate, recording who answered (`human_decision_v2`)",
+        "description": "Sends the `human_decision_v2` signal, as `lha mission-approve --as` does. The decision must be one of the open gate's options (422 otherwise); with no gate open, any decision is held for the next gate. `by` is recorded on the gate row. Not available over MCP: an agent must not answer its own gates.",
+        "tags": [
+          "controls"
+        ],
+        "security": [
+          {
+            "token_header": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "decision": {
+                    "type": "string",
+                    "enum": [
+                      "approve",
+                      "reject",
+                      "retry",
+                      "abort",
+                      "impossible"
+                    ]
+                  },
+                  "by": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "by",
+                  "decision"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Sent to the mission's workflow; it applies the control at its next decision point.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The mission is not durable (a local run has no control channel), or it has finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporal is unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/missions/{mission_id}/abort": {
+      "post": {
+        "operationId": "abortMission",
+        "summary": "Abort the mission (a workflow cancellation)",
+        "description": "Cancels the mission's workflow, as `lha mission-abort` does. Not available over MCP.",
+        "tags": [
+          "controls"
+        ],
+        "security": [
+          {
+            "token_header": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Sent to the mission's workflow; it applies the control at its next decision point.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Accepted"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The mission is not durable (a local run has no control channel), or it has finished.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The request body is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Temporal is unreachable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "token_header": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-LHA-Token",
+        "description": "The token `lha serve` prints at start-up. Required for every write."
+      },
+      "token_cookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "lha_token",
+        "description": "Set (`SameSite=Strict`, `HttpOnly`) when the UI's start-up URL is opened. Accepted for reads only."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "unauthorized",
+                  "forbidden_host",
+                  "not_found",
+                  "anchor_unavailable",
+                  "not_durable",
+                  "finished",
+                  "invalid_request",
+                  "temporal_unavailable"
+                ]
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "Accepted": {
+        "type": "object",
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "const": true
+          }
+        },
+        "required": [
+          "accepted"
+        ],
+        "additionalProperties": false
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "api_version": {
+            "type": "string",
+            "description": "This document's `info.version`."
+          },
+          "implementation": {
+            "type": "string",
+            "description": "`python`, `go` or `rust`: which implementation serves. Informational only."
+          },
+          "lha_version": {
+            "type": "string"
+          },
+          "store": {
+            "type": "object",
+            "properties": {
+              "backend": {
+                "type": "string",
+                "enum": [
+                  "sqlite",
+                  "postgres"
+                ]
+              },
+              "degraded_reason": {
+                "type": "string",
+                "description": "Non-empty when a configured Postgres is unusable and SQLite is read instead."
+              }
+            },
+            "required": [
+              "backend",
+              "degraded_reason"
+            ],
+            "additionalProperties": false
+          },
+          "temporal": {
+            "type": "string",
+            "enum": [
+              "connected",
+              "unavailable",
+              "not_configured"
+            ]
+          }
+        },
+        "required": [
+          "api_version",
+          "implementation",
+          "lha_version",
+          "store",
+          "temporal"
+        ],
+        "additionalProperties": false
+      },
+      "CostSummary": {
+        "type": "object",
+        "properties": {
+          "calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "known_usd": {
+            "type": "number",
+            "minimum": 0
+          },
+          "unknown_cost_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "calls",
+          "input_tokens",
+          "known_usd",
+          "output_tokens",
+          "unknown_cost_calls"
+        ],
+        "additionalProperties": false,
+        "description": "Spend recorded in the cost ledger. `known_usd` sums the calls with a known cost; a call whose cost is unknown is counted, never valued at $0."
+      },
+      "ItemCounts": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "todo": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "in_progress": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "done": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "split": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "blocked",
+          "done",
+          "in_progress",
+          "split",
+          "todo",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "MissionSummary": {
+        "type": "object",
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "The store's status: `RUNNING`, `SLEEPING`, `WAITING_ON_HUMAN`, `DEGRADED_PARK`, `DONE`, `ABORTED`, `IMPOSSIBLE`, or a local run's status. A client shows an unknown status as it is."
+          },
+          "durable": {
+            "type": "boolean",
+            "description": "Run by a Temporal workflow (controls are available)."
+          },
+          "workflow_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "head_sha": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/CostSummary"
+          },
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ItemCounts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` when the anchor cannot be read here."
+          },
+          "last_event": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "ts": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "ts"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "created_at",
+          "durable",
+          "head_sha",
+          "items",
+          "last_event",
+          "mission_id",
+          "spend",
+          "status",
+          "title",
+          "updated_at",
+          "workflow_id"
+        ],
+        "additionalProperties": false
+      },
+      "MissionDetail": {
+        "type": "object",
+        "properties": {
+          "mission_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "The store's status: `RUNNING`, `SLEEPING`, `WAITING_ON_HUMAN`, `DEGRADED_PARK`, `DONE`, `ABORTED`, `IMPOSSIBLE`, or a local run's status. A client shows an unknown status as it is."
+          },
+          "durable": {
+            "type": "boolean",
+            "description": "Run by a Temporal workflow (controls are available)."
+          },
+          "workflow_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "head_sha": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "spend": {
+            "$ref": "#/components/schemas/CostSummary"
+          },
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ItemCounts"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` when the anchor cannot be read here."
+          },
+          "last_event": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "ts": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "ts"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "type": "string"
+          },
+          "workdir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the mission's anchor is, as recorded by its run."
+          },
+          "live": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/LiveState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The workflow's own state; `null` for a local run, a finished mission, or when Temporal is unreachable (see `live_error`)."
+          },
+          "live_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "created_at",
+          "description",
+          "durable",
+          "head_sha",
+          "items",
+          "last_event",
+          "live",
+          "live_error",
+          "mission_id",
+          "spend",
+          "status",
+          "title",
+          "updated_at",
+          "workdir",
+          "workflow_id"
+        ],
+        "additionalProperties": false,
+        "description": "A `MissionSummary` plus the mission's description, workdir and live workflow state."
+      },
+      "LiveState": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "cycles": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "gate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OpenGate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_question": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resume_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "When a sleeping mission wakes (ISO-8601 UTC)."
+          },
+          "steer_notes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "pending_edits": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "cycles",
+          "gate",
+          "open_question",
+          "pending_edits",
+          "resume_at",
+          "status",
+          "steer_notes"
+        ],
+        "additionalProperties": false,
+        "description": "The answers to the workflow's queries (the wire contract), fetched at most every few seconds per mission and shared."
+      },
+      "OpenGate": {
+        "type": "object",
+        "properties": {
+          "gate_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "tool_call",
+              "deadlock"
+            ]
+          },
+          "question": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default_action": {
+            "type": "string"
+          },
+          "opened_at": {
+            "type": "string"
+          },
+          "deadline": {
+            "type": "string"
+          },
+          "escalations_sent": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "next_escalation_at": {
+            "type": "string"
+          },
+          "recommended": {
+            "type": "string"
+          },
+          "request": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "tool": {
+                    "type": "string"
+                  },
+                  "arguments": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  },
+                  "fingerprint": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "arguments",
+                  "fingerprint",
+                  "reason",
+                  "tool"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The irreversible action awaiting approval (a `tool_call` gate)."
+          }
+        },
+        "required": [
+          "deadline",
+          "default_action",
+          "escalations_sent",
+          "gate_id",
+          "kind",
+          "next_escalation_at",
+          "opened_at",
+          "options",
+          "question",
+          "recommended",
+          "request"
+        ],
+        "additionalProperties": false
+      },
+      "ChecklistItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "todo",
+              "in_progress",
+              "blocked",
+              "done",
+              "split"
+            ]
+          },
+          "verified_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "last_failure": {
+            "type": "string"
+          },
+          "allow_harness_edits": {
+            "type": "boolean"
+          },
+          "witnesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "notes": {
+            "type": "string"
+          },
+          "schema_version": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "allow_harness_edits",
+          "attempts",
+          "consecutive_failures",
+          "depends_on",
+          "description",
+          "id",
+          "last_failure",
+          "notes",
+          "schema_version",
+          "status",
+          "verified_by",
+          "witnesses"
+        ],
+        "additionalProperties": false
+      },
+      "ChecklistEdit": {
+        "type": "object",
+        "required": [
+          "op"
+        ],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "add",
+              "remove",
+              "edit",
+              "reopen",
+              "block",
+              "unblock"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "witnesses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "after": {
+            "type": "string"
+          },
+          "allow_harness_edits": {
+            "type": "boolean"
+          },
+          "notes": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false,
+        "description": "One edit of a `checklist_edit_v1` batch (`spec/state/checklist_edit.json`): `add` takes a description; every other op takes the `id` of the item it changes."
+      },
+      "MissionEvent": {
+        "type": "object",
+        "required": [
+          "id",
+          "mission_id",
+          "cycle_id",
+          "ts",
+          "kind",
+          "payload",
+          "schema_version"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "mission_id": {
+            "type": "string"
+          },
+          "cycle_id": {
+            "type": "string"
+          },
+          "ts": {
+            "type": "string",
+            "description": "When it was recorded (ISO-8601 UTC)."
+          },
+          "kind": {
+            "type": "string",
+            "description": "The event kind. A client ignores kinds it does not know."
+          },
+          "payload": {
+            "type": "object"
+          },
+          "schema_version": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "description": "One row of `mission_events`. For every kind in `spec/obs/mission_events.json`, `payload` matches that kind's schema.",
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "check_quarantined"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/check_quarantined"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "checkpoint"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/checkpoint"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "claude_code_session"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/claude_code_session"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "code_map"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/code_map"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "cycle_started"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/cycle_started"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "deadlocked"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/deadlocked"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "decision_chain_invalid"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/decision_chain_invalid"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "governor_block"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/governor_block"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "integration"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/integration"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "invalid_reply"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/invalid_reply"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "lease"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/lease"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "llm_turn"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/llm_turn"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "loop_detected"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/loop_detected"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "memory_consolidated"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/memory_consolidated"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "memory_degraded"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/memory_degraded"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "memory_error"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/memory_error"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "memory_reembedded"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/memory_reembedded"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "model_unavailable"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/model_unavailable"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "ownership_released"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/ownership_released"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "ownership_violation"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/ownership_violation"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "parallel_wave"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/parallel_wave"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "quarantined_check_failed"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/quarantined_check_failed"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "reflection"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/reflection"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "research"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/research"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "research_failed"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/research_failed"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "resumed"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/resumed"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "review"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/review"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "review_reopened"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/review_reopened"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "review_screen"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/review_screen"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "sandbox_egress"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/sandbox_egress"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "session_progress"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/session_progress"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "skill_stored"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/skill_stored"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "system_one"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/system_one"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "tool_call"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/tool_call"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "turns_exhausted"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/turns_exhausted"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "verify"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/verify"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "CostCall": {
+        "type": "object",
+        "properties": {
+          "cycle_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "usd": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "`null` when the call's cost is unknown (never $0)."
+          },
+          "ts": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "cycle_id",
+          "input_tokens",
+          "model",
+          "output_tokens",
+          "role",
+          "ts",
+          "usd"
+        ],
+        "additionalProperties": false
+      },
+      "Gate": {
+        "type": "object",
+        "properties": {
+          "gate_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "`OPEN`, `ESCALATED` (a reminder was sent), `RESOLVED` or `DEFAULTED` (its deadline passed)."
+          },
+          "question": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "default_action": {
+            "type": "string"
+          },
+          "risk": {
+            "type": "string"
+          },
+          "deadline": {
+            "type": "string"
+          },
+          "decision": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resolved_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who answered (`human_decision_v2`), when known."
+          },
+          "reminders": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "request": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "opened_at": {
+            "type": "string"
+          },
+          "resolved_at": {
+            "type": "string",
+            "description": "When it was resolved or defaulted (`\"\"` while open)."
+          }
+        },
+        "required": [
+          "deadline",
+          "decision",
+          "default_action",
+          "gate_id",
+          "kind",
+          "opened_at",
+          "options",
+          "question",
+          "reminders",
+          "request",
+          "resolved_at",
+          "resolved_by",
+          "risk",
+          "status"
+        ],
+        "additionalProperties": false
+      }
+    }
+  }
+}

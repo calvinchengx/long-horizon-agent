@@ -1,0 +1,650 @@
+{
+ "anchors": {
+  "local": {
+   "title": "Local mission",
+   "description": "A local run of four items",
+   "items": [
+    {
+     "id": "01",
+     "description": "Add the list endpoint",
+     "status": "done",
+     "verified_by": [
+      "pytest"
+     ],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "Add paging",
+     "status": "in_progress",
+     "verified_by": [],
+     "depends_on": [
+      "01"
+     ],
+     "attempts": 1,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "03",
+     "description": "Add filters (witness: cmd:true)",
+     "status": "blocked",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 3,
+     "consecutive_failures": 3,
+     "last_failure": "exit 1: tests/test_api.py::test_list FAILED",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "04",
+     "description": "Document it",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "02",
+      "03"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "cmd:true"
+     ],
+     "notes": "",
+     "schema_version": 1
+    }
+   ]
+  },
+  "durable": {
+   "title": "Durable mission",
+   "description": "A mission a worker runs",
+   "items": [
+    {
+     "id": "01",
+     "description": "First step",
+     "status": "done",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "Second step",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [
+      "01"
+     ],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    }
+   ]
+  }
+ },
+ "missions": [
+  {
+   "mission_id": "mission_local",
+   "title": "Local mission",
+   "description": "A local run of four items",
+   "status": "RUNNING",
+   "workflow_id": null,
+   "anchor": "local"
+  },
+  {
+   "mission_id": "mission_durable",
+   "title": "Durable mission",
+   "description": "A mission a worker runs",
+   "status": "RUNNING",
+   "workflow_id": "mission:mission_durable",
+   "anchor": "durable"
+  },
+  {
+   "mission_id": "mission_finished",
+   "title": "Finished durable mission",
+   "description": "",
+   "status": "DONE",
+   "workflow_id": "mission:mission_finished",
+   "anchor": null,
+   "workdir": null
+  },
+  {
+   "mission_id": "mission_elsewhere",
+   "title": "Run on another host",
+   "description": "",
+   "status": "RUNNING",
+   "workflow_id": null,
+   "anchor": null,
+   "workdir": "/nonexistent/lha-serve-fixture"
+  }
+ ],
+ "costs": [
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "role": "lead",
+   "model": "claude-sonnet-4-6",
+   "input_tokens": 1000,
+   "output_tokens": 200,
+   "usd": 0.006
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "role": "reviewer",
+   "model": "local-model",
+   "input_tokens": 500,
+   "output_tokens": 50,
+   "usd": null
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c1",
+   "role": "lead",
+   "model": "claude-sonnet-4-6",
+   "input_tokens": 2000,
+   "output_tokens": 400,
+   "usd": 0.012
+  }
+ ],
+ "gates": [
+  {
+   "mission_id": "mission_durable",
+   "gate_id": "g1",
+   "kind": "tool_call",
+   "event": "opened",
+   "at": "2026-10-04T00:00:52.000000+00:00",
+   "question": "Run `git push review HEAD`?",
+   "options": [
+    "approve",
+    "reject"
+   ],
+   "default_action": "reject",
+   "deadline": "2026-10-05T00:00:52.000000+00:00",
+   "risk": "irreversible",
+   "request": {
+    "tool": "run_command",
+    "fingerprint": "f1"
+   }
+  },
+  {
+   "mission_id": "mission_durable",
+   "gate_id": "g1",
+   "kind": "tool_call",
+   "event": "resolved",
+   "at": "2026-10-04T00:00:53.000000+00:00",
+   "decision": "approve",
+   "resolved_by": "alice"
+  },
+  {
+   "mission_id": "mission_durable",
+   "gate_id": "g2",
+   "kind": "deadlock",
+   "event": "opened",
+   "at": "2026-10-04T00:00:54.000000+00:00",
+   "question": "Item 02 keeps failing. Retry, abort, or mark it impossible?",
+   "options": [
+    "retry",
+    "abort",
+    "impossible"
+   ],
+   "default_action": "retry",
+   "deadline": "2026-10-05T00:00:54.000000+00:00"
+  }
+ ],
+ "events": [
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "check_quarantined",
+   "payload": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "ts": "2026-10-04T00:00:00.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "checkpoint",
+   "payload": {
+    "head_sha": "s",
+    "verified": true,
+    "verdict": "passed",
+    "peak_rss_mb": 0.5
+   },
+   "ts": "2026-10-04T00:00:01.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "claude_code_session",
+   "payload": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "ts": "2026-10-04T00:00:02.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "code_map",
+   "payload": {
+    "item_id": "s",
+    "ok": true,
+    "mode": "trace",
+    "duration_s": 0.5,
+    "exit_code": 3,
+    "timed_out": true,
+    "bytes": 3,
+    "error": "s",
+    "fell_back": true
+   },
+   "ts": "2026-10-04T00:00:03.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "cycle_started",
+   "payload": {
+    "item_id": "s"
+   },
+   "ts": "2026-10-04T00:00:04.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "deadlocked",
+   "payload": {
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:05.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "decision_chain_invalid",
+   "payload": {
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:06.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "governor_block",
+   "payload": {
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:07.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "integration",
+   "payload": {
+    "item": "s",
+    "merged": true,
+    "branch": "s",
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:08.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "invalid_reply",
+   "payload": {
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:09.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "lease",
+   "payload": {
+    "writer": "s",
+    "path": "s",
+    "granted": true,
+    "why": "s"
+   },
+   "ts": "2026-10-04T00:00:10.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "llm_turn",
+   "payload": {
+    "model": "s",
+    "output_tokens": 3,
+    "stop_reason": "s"
+   },
+   "ts": "2026-10-04T00:00:11.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "loop_detected",
+   "payload": {
+    "item_id": "s"
+   },
+   "ts": "2026-10-04T00:00:12.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "memory_consolidated",
+   "payload": {
+    "episodes": 3,
+    "facts": 3,
+    "mode": "model"
+   },
+   "ts": "2026-10-04T00:00:13.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "memory_degraded",
+   "payload": {
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:14.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "memory_error",
+   "payload": {
+    "where": "s",
+    "error": "s"
+   },
+   "ts": "2026-10-04T00:00:15.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "memory_reembedded",
+   "payload": {
+    "count": 3,
+    "embedding_model": "s",
+    "embedding_version": "s"
+   },
+   "ts": "2026-10-04T00:00:16.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "model_unavailable",
+   "payload": {
+    "reason": "s"
+   },
+   "ts": "2026-10-04T00:00:17.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "ownership_released",
+   "payload": {
+    "paths": [
+     "s"
+    ]
+   },
+   "ts": "2026-10-04T00:00:18.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "ownership_violation",
+   "payload": {
+    "writer": "s",
+    "paths": [
+     "s"
+    ]
+   },
+   "ts": "2026-10-04T00:00:19.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "parallel_wave",
+   "payload": {
+    "items": [
+     "s"
+    ],
+    "base": "s"
+   },
+   "ts": "2026-10-04T00:00:20.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "quarantined_check_failed",
+   "payload": {
+    "check": "s",
+    "revision": "s",
+    "passes": 3,
+    "fails": 3
+   },
+   "ts": "2026-10-04T00:00:21.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "reflection",
+   "payload": {
+    "item": "s"
+   },
+   "ts": "2026-10-04T00:00:22.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "research",
+   "payload": {
+    "item": "s",
+    "n": 3,
+    "failed": 3
+   },
+   "ts": "2026-10-04T00:00:23.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "research_failed",
+   "payload": {
+    "item": "s",
+    "error": "s"
+   },
+   "ts": "2026-10-04T00:00:24.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "resumed",
+   "payload": {
+    "run": 3,
+    "cycle_offset": 3,
+    "board": 3
+   },
+   "ts": "2026-10-04T00:00:25.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "review",
+   "payload": {
+    "item": "s",
+    "blocking": true,
+    "verdict": "approve"
+   },
+   "ts": "2026-10-04T00:00:26.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "review_reopened",
+   "payload": {
+    "item": "s"
+   },
+   "ts": "2026-10-04T00:00:27.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "review_screen",
+   "payload": {
+    "item": "s",
+    "findings": 3,
+    "forced": true
+   },
+   "ts": "2026-10-04T00:00:28.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "sandbox_egress",
+   "payload": {
+    "decision": "allow",
+    "method": "s",
+    "host": "s",
+    "port": 3,
+    "detail": "s",
+    "count": 3
+   },
+   "ts": "2026-10-04T00:00:29.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "session_progress",
+   "payload": {
+    "turns": 3,
+    "tool_calls": 3,
+    "tool": "s",
+    "spent_usd": 0.5
+   },
+   "ts": "2026-10-04T00:00:30.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "skill_stored",
+   "payload": {
+    "skill_id": "s"
+   },
+   "ts": "2026-10-04T00:00:31.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "system_one",
+   "payload": {
+    "use": "s",
+    "item_id": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s"
+   },
+   "ts": "2026-10-04T00:00:32.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "tool_call",
+   "payload": {
+    "tool": "s",
+    "ok": true,
+    "role": "s",
+    "error": "s"
+   },
+   "ts": "2026-10-04T00:00:33.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
+   "kind": "turns_exhausted",
+   "payload": {
+    "max_turns": 3,
+    "tool_calls": 3
+   },
+   "ts": "2026-10-04T00:00:34.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
+   "kind": "verify",
+   "payload": {
+    "trigger": "done",
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "s",
+      "passed": true,
+      "exit_code": 3,
+      "gating": true,
+      "timed_out": true,
+      "duration_s": 0.5
+     }
+    ]
+   },
+   "ts": "2026-10-04T00:00:35.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c1",
+   "kind": "cycle_started",
+   "payload": {
+    "item_id": "01"
+   },
+   "ts": "2026-10-04T00:00:50.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c1",
+   "kind": "tool_call",
+   "payload": {
+    "tool": "read_file",
+    "ok": true
+   },
+   "ts": "2026-10-04T00:00:51.000000+00:00"
+  }
+ ]
+}
