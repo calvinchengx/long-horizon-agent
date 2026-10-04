@@ -29,6 +29,8 @@ SOURCES = (SOURCE_GATE, SOURCE_TOOL_APPROVAL, SOURCE_VERIFIER, SOURCE_REVIEW)
 
 #: Anchor event kinds the rows come from.
 RUN_EVENT = "orchestrate"
+#: Written by the anchor's initialization for `lha mission`, `run-local` and `mission-start`.
+MISSION_EVENT = "mission"
 CYCLE_EVENT = "cycle"
 TOOL_APPROVAL_EVENT = "tool_approval"
 REVIEW_EVENT = "review"
@@ -79,9 +81,10 @@ def to_jsonl(rows: Iterable[LabelRow]) -> str:
 
 
 def mission_id_of(events: Sequence[EventRecord]) -> str:
-    """The mission id the anchor's latest ``orchestrate`` event names (``""`` when none does)."""
+    """The mission id the anchor's latest ``orchestrate`` or ``mission`` event names (``""`` when
+    none does)."""
     for event in reversed(events):
-        if event.kind == RUN_EVENT:
+        if event.kind in (RUN_EVENT, MISSION_EVENT):
             return str(event.payload.get("mission_id") or "")
     return ""
 

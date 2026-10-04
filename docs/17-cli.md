@@ -428,8 +428,10 @@ line of its last failure, with the checklist's own verdict (complete, or deadloc
 cycles' verdicts, the review verdicts, how many screened diffs the pre-review screen flagged and
 how many reflections were written; the mission's gates as [`lha gates`](#lha-gates) prints them;
 and the [`lha costs`](#lha-costs) total. `MISSION_ID` defaults to the mission the anchor's latest
-`orchestrate` event names; without an anchor it is required and only the store is read. A
-`run-local` or `mission` workspace names no mission, so its store sections say so. Both
+`orchestrate` or `mission` event names (`lha orchestrate` writes the first, the anchor's
+initialization by `mission`, `run-local` and `mission-start` the second); without an anchor it
+is required and only the store is read. An anchor initialized before the `mission` event existed
+names no mission, so its store sections say so. Both
 implementations render the same bytes from the same inputs (`spec/state/report.json`).
 
 ```
@@ -475,7 +477,7 @@ kept. Every object has the same keys:
 
 | Option | Default | Meaning |
 |---|---|---|
-| `MISSION_ID` | the one the anchor's latest `orchestrate` event names | whose gates to read from the store; required when there is no anchor, in which case only the gates are exported |
+| `MISSION_ID` | the one the anchor's latest `orchestrate` or `mission` event names | whose gates to read from the store; required when there is no anchor, in which case only the gates are exported |
 | `--workdir DIR` | `.` | the mission workspace; without a `.lha/` directory only the store is read |
 | `--out FILE` | `-` (stdout) | where to write |
 | `--diffs` | off | add each reviewed `git diff base..head` (harness files excluded) to the review rows, cut to 20,000 characters |

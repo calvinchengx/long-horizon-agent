@@ -433,6 +433,57 @@ turns returned a dangling tool call that parsed as a blocking `unparsed` verdict
 gate bypasses above. Six missions is a small sample: the costs and times are what Sonnet did on
 these three changes in these runs, not a distribution.
 
+## Measured: the organization against the single loop (3 October 2026)
+
+Six missions on a clone of LHA's own repository at `main`, after the fixes above: the same Sonnet
+lead through Claude Code, 20 turns per cycle, the Docker sandbox, a $12 ceiling, nine cycles,
+memory on, and the same three small additions with their shell witnesses (the roadmap that lets
+items 02 and 03 edit the test files they name). Three pairs: one mission with the single-agent
+loop (`lha mission`) and one with the organization (`lha orchestrate --research 1 --review`: one
+read-only researcher per item, the pre-review screen and the independent reviewer). The run
+directory is `~/calvinchengx/lha-runs/measure-2026-10-03-org/`.
+
+| Pair | Arm | Items done | Cycles | Cost | Wall | Lead | Researchers | Reviewer |
+|---|---|---|---|---|---|---|---|---|
+| 1 | single | 3 of 3 | 3 | $1.27 | 3.4 min | $1.27 | none | none |
+| 1 | organization | 3 of 3 | 3 | $3.17 | 9.4 min | $1.08 | 20 calls, $0.75 | 27 calls, $1.22 |
+| 2 | single | 3 of 3 | 3 | $0.77 | 2.2 min | $0.77 | none | none |
+| 2 | organization | 3 of 3 | 3 | $3.45 | 10.9 min | $1.03 | 20 calls, $0.88 | 27 calls, $1.36 |
+| 3 | single | 3 of 3 | 3 | $0.78 | 2.2 min | $0.78 | none | none |
+| 3 | organization | 3 of 3 | 3 | $3.11 | 10.2 min | $0.99 | 20 calls, $0.75 | 27 calls, $1.27 |
+
+All eighteen items passed verification at the first attempt and every change is the honest one:
+each mission edited the source and the test files the items name, no test configuration was
+added, no witness script was touched, and the witnesses pass when re-run on the finished
+checkouts. The reviewer approved all nine diffs it saw and the screen flagged none.
+
+What the round shows:
+
+- **On work the lead gets right the first time, the organization buys nothing and costs about
+  3.5 times as much.** Mean cost $3.24 against $0.94, mean wall time 10.2 minutes against 2.6.
+  Both arms finished every item in three cycles.
+- **The researchers did not pay for themselves.** The organization's lead spent $1.03 a mission
+  on average against the single lead's $0.94, so twenty researcher calls ($0.79) saved the lead
+  nothing here; the single arm's first mission was the expensive outlier, not a pattern.
+- **The reviewer's price is steady**: 27 calls and about $1.28 a mission, nine calls an item, in
+  line with the 2 October round's honest pair ($1.88 for four reviews). It found nothing to
+  block because there was nothing to block.
+
+Read with the 2 October round, the picture is consistent: the reviewer earns its cost when the
+deterministic gates can be passed dishonestly or the change is subtly wrong (it refused both
+bypasses every time, and blocked a Python-only change that left the Go twin behind), and it is
+pure overhead on honest first-attempt work. So is research on items a strong lead can read its
+way into. The defaults follow from that: the single loop, `--no-review` with the screen forcing
+a review when tests are weakened, and researchers and the reviewer switched on for missions
+where a wrong-but-passing change is expensive or the checks are weaker than the acceptance
+criteria.
+
+What this does not show: three easy, independent items on one repository with one lead model.
+It says nothing about items that fail and need reflection, about parallel waves (an imported
+checklist declares no file ownership, so none ran), or about a weaker lead that research might
+help. The claim "the organization beats the single loop" is not supported by this measurement on
+this kind of work; on harder work it remains unmeasured.
+
 ## Not implemented
 
 These are described in role prompts or docstrings, or would be needed for the organization to

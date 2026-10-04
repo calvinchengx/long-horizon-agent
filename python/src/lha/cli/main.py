@@ -1213,6 +1213,7 @@ def mission_start(
             finally:
                 await aclose_provider(planner_model)
             planner_spend = list(meter.ledger.entries)
+        mission_id = new_id("mission")
         anchor = GitMissionAnchor(workdir)
         await anchor.initialize(
             title=mission_title,
@@ -1220,9 +1221,9 @@ def mission_start(
             items=checklist,
             references=references,
             ownership=ownership,
+            mission_id=mission_id,
         )
         client = await connect_client(settings)
-        mission_id = new_id("mission")
         # The mission row + the Planner's spend, written BEFORE the workflow starts so a status
         # the workflow records right away (e.g. SLEEPING for a scheduled start) is never
         # overwritten by this one. The cycle activities and the workflow record the rest.

@@ -56,6 +56,8 @@ CHECKLIST_FILE = "checklist.json"
 PROGRESS_FILE = "progress.md"
 DECISIONS_FILE = "decisions.ndjson"
 EVENTS_FILE = "events.ndjson"
+#: The event an initialization with a mission id writes (who this anchor belongs to in the store).
+MISSION_EVENT = "mission"
 OWNERSHIP_FILE = "ownership.json"
 # The harness-owned anchor files. They are force-added on every commit (when present) so a target
 # repo whose ``.gitignore`` excludes ``.lha/`` still gets them committed (otherwise reads would
@@ -108,11 +110,14 @@ class GitMissionAnchor:
         acceptance: str = "",
         references: list[str] | None = None,
         ownership: FileOwnershipMap | None = None,
+        mission_id: str = "",
     ) -> str:
         """Write the immutable mission spec + initial anchor and commit; reject broken plans.
 
         ``ownership``: the Planner's file-ownership map, persisted as ``.lha/ownership.json``
         (``None`` => no ownership file; ``read_ownership`` then returns an empty map).
+        ``mission_id``: recorded as a ``mission`` event in the initial commit, so the store's
+        rows for this anchor can be found later (``lha mission-report``, ``lha labels export``).
         """
         errors = items.dependency_errors()
         if errors:
@@ -123,7 +128,7 @@ class GitMissionAnchor:
             acceptance=acceptance,
             references=list(references or []),
         )
-        return await asyncio.to_thread(self._initialize_sync, spec, items, ownership)
+        return await asyncio.to_thread(self._initialize_sync, spec, items, ownership, mission_id)
 
     async def read_situational_awareness(self) -> SituationSnapshot:
         return await asyncio.to_thread(self._read_sync)
@@ -199,7 +204,11 @@ class GitMissionAnchor:
 
     # --- sync implementations (run in a thread) --------------------------------------
     def _initialize_sync(
-        self, spec: MissionSpec, items: Checklist, ownership: FileOwnershipMap | None
+        self,
+        spec: MissionSpec,
+        items: Checklist,
+        ownership: FileOwnershipMap | None,
+        mission_id: str = "",
     ) -> str:
         git_ops.init_repo(self.workdir)
         self.anchor.mkdir(parents=True, exist_ok=True)
@@ -216,7 +225,13 @@ class GitMissionAnchor:
         )
         # Create the append-only logs (empty).
         self._path(DECISIONS_FILE).write_text("", encoding="utf-8")
-        self._path(EVENTS_FILE).write_text("", encoding="utf-8")
+        started = (
+            EventRecord(kind=MISSION_EVENT, payload={"mission_id": mission_id}).model_dump_json()
+            + "\n"
+            if mission_id
+            else ""
+        )
+        self._path(EVENTS_FILE).write_text(started, encoding="utf-8")
         self._pending_events.clear()
         self._pending_decisions.clear()
         self._pending_ownership = None
