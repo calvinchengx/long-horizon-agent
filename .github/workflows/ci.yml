@@ -145,6 +145,18 @@ jobs:
       - name: go vet (windows)
         run: GOOS=windows go vet ./...
 
+      # The UI API only grows within a major version: a change that breaks a client of the
+      # previous commit's (or a pull request's base's) contract fails unless the major of
+      # info.version changes (spec/serve/check-breaking.sh, oasdiff).
+      - name: UI API has no breaking change
+        working-directory: .
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then exit 0; fi
+          git fetch --depth=1 origin "$BASE"
+          spec/serve/check-breaking.sh "$BASE"
+
       # The Temporal CLI, a pinned release verified by its checksum: `temporal server start-dev` is
       # a real server (the time-skipping test server lacks DescribeTaskQueue, which the
       # cross-language worker guard needs).

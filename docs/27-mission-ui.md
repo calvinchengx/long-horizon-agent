@@ -88,9 +88,10 @@ For the UI API (Phase 1), contract first:
   workflow. Done.
 - CI fails unless every operation, every documented status code and every event kind has a case,
   and unless every route a server registers is in the spec (no undocumented endpoints). Done.
-- The spec is linted (Redocly) in CI. Done. The UI's TypeScript types are generated from the spec
-  with a drift check (Phase 2, with the UI), and a breaking change against `main` fails CI unless
-  the API version changes (next).
+- The spec is linted (Redocly) in CI, and a breaking change against the previous commit (or a pull
+  request's base) fails CI unless the API's major version changes (`spec/serve/check-breaking.sh`,
+  oasdiff). Done. The UI's TypeScript types are generated from the spec with a drift check
+  (Phase 2, with the UI).
 
 ## Phase 0: `mission_events`, the shared event record
 
