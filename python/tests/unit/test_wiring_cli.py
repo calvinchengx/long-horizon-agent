@@ -192,8 +192,25 @@ def test_temporal_rpc_error_is_a_clean_cli_error(capsys: pytest.CaptureFixture[s
     assert capsys.readouterr().err == "error: workflow not found for ID: mission:m-nope\n"
 
 
-def test_main_hard_exits_only_temporal_client_commands(monkeypatch: pytest.MonkeyPatch) -> None:
-    """mission-* end via os._exit with the command's code (temporalio/sdk-python#300); others don't."""
+def test_every_command_that_starts_temporal_exits_without_finalization() -> None:
+    """A command whose code connects a Temporal client or runs a worker is in _TEMPORAL_COMMANDS
+    (temporalio/sdk-python#300): mission-edit and mission-steer were missing, and crashed."""
+    import inspect
+
+    temporal = {
+        info.name or info.callback.__name__.replace("_", "-")
+        for info in cli.app.registered_commands
+        if info.callback is not None
+        and any(
+            call in inspect.getsource(info.callback) for call in ("connect_client", "run_worker")
+        )
+    }
+    assert temporal == cli._TEMPORAL_COMMANDS
+
+
+def test_main_hard_exits_only_temporal_commands(monkeypatch: pytest.MonkeyPatch) -> None:
+    """mission-* and worker end via os._exit with the command's code
+    (temporalio/sdk-python#300); others don't."""
     import os
 
     exits: list[int] = []
@@ -207,7 +224,8 @@ def test_main_hard_exits_only_temporal_client_commands(monkeypatch: pytest.Monke
     monkeypatch.setattr(cli, "app", fake_app)
     cli.main(["mission-status", "m1"])
     cli.main(["--verbose", "mission-abort", "m1"])
-    assert exits == [0, 3] and flushed == [True, True]
+    cli.main(["worker"])  # e.g. refusing a task queue a Go worker polls
+    assert exits == [0, 3, 3] and flushed == [True, True, True]
     with pytest.raises(SystemExit):
-        cli.main(["config"])  # not a Temporal client command: normal exit, no os._exit
-    assert exits == [0, 3]
+        cli.main(["config"])  # not a Temporal command: normal exit, no os._exit
+    assert exits == [0, 3, 3]

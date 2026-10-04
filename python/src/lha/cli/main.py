@@ -1659,13 +1659,23 @@ def mission_abort(mission_id: str = typer.Argument(..., help="Mission id.")) -> 
     typer.echo(f"cancelled mission {mission_id}")
 
 
-# Short-lived Temporal client commands. The Temporal Python SDK's native runtime can call into
-# Python while the interpreter finalizes and abort the process ("Fatal Python error:
-# PyGILState_Release", temporalio/sdk-python#300, still open), after the command has already
-# succeeded. These commands therefore end without interpreter finalization, once tracing and the
-# standard streams are flushed, keeping the command's exit code.
-_TEMPORAL_CLIENT_COMMANDS = frozenset(
-    {"mission-start", "mission-status", "mission-approve", "mission-snooze", "mission-abort"}
+# Commands that start the Temporal Python SDK's native runtime. It can call into Python while the
+# interpreter finalizes and abort the process ("Fatal Python error: PyGILState_Release",
+# temporalio/sdk-python#300, still open), after the command has already finished: a mission-*
+# command that succeeded, or a worker that refused a Go-polled task queue. These commands
+# therefore end without interpreter finalization, once tracing and the standard streams are
+# flushed, keeping the command's exit code. (A test keeps the list complete.)
+_TEMPORAL_COMMANDS = frozenset(
+    {
+        "worker",
+        "mission-start",
+        "mission-status",
+        "mission-approve",
+        "mission-snooze",
+        "mission-steer",
+        "mission-edit",
+        "mission-abort",
+    }
 )
 
 
@@ -1676,7 +1686,7 @@ def main(argv: list[str] | None = None) -> None:
 
     args = sys.argv[1:] if argv is None else argv
     command = next((a for a in args if not a.startswith("-")), None)
-    if command not in _TEMPORAL_CLIENT_COMMANDS:
+    if command not in _TEMPORAL_COMMANDS:
         app(args=args, prog_name="lha")
         return
     try:
