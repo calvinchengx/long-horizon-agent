@@ -1,0 +1,923 @@
+{
+  "description": "The MCP conformance cases (spec/serve/README.md, MCP). Each runs against fixture.json over each transport (`lha serve`'s /mcp, and `lha mcp` on stdio) unless `transport` names one; `temporal` as in cases.json. `request.body` is the JSON-RPC message; `expect.result` and `expect.error` are subsets of the response's; `tool_error` is the `error.code` of a tool result with isError; `\"$spec\"` is mcp.json's tools as clients see them.",
+  "cases": [
+    {
+      "name": "initialize",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 1,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "conformance",
+              "version": "1"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "protocolVersion": "2025-06-18",
+          "capabilities": {
+            "tools": {
+              "listChanged": false
+            }
+          },
+          "serverInfo": {
+            "name": "lha",
+            "title": "LHA missions",
+            "version": "$any"
+          }
+        }
+      }
+    },
+    {
+      "name": "initialize: an older protocol version is answered with it",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "conformance",
+              "version": "1"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "protocolVersion": "2025-03-26"
+        }
+      }
+    },
+    {
+      "name": "initialize: an unknown protocol version is answered with the server's",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 3,
+          "method": "initialize",
+          "params": {
+            "protocolVersion": "1999-01-01",
+            "capabilities": {},
+            "clientInfo": {
+              "name": "conformance",
+              "version": "1"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "protocolVersion": "2025-06-18"
+        }
+      }
+    },
+    {
+      "name": "a notification has no response",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "method": "notifications/initialized"
+        }
+      },
+      "expect": {
+        "status": 202,
+        "no_response": true
+      }
+    },
+    {
+      "name": "ping",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 4,
+          "method": "ping"
+        }
+      },
+      "expect": {
+        "result": {}
+      }
+    },
+    {
+      "name": "tools/list is exactly spec/serve/mcp.json's tools",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 5,
+          "method": "tools/list"
+        }
+      },
+      "expect": {
+        "result": {
+          "tools": "$spec"
+        }
+      }
+    },
+    {
+      "name": "an unknown method",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 6,
+          "method": "resources/list"
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32601
+        }
+      }
+    },
+    {
+      "name": "a body that is not JSON",
+      "request": {
+        "body": "$not-json"
+      },
+      "expect": {
+        "status": 400,
+        "error": {
+          "code": -32700
+        },
+        "id": null
+      }
+    },
+    {
+      "name": "a batch (no longer part of MCP)",
+      "request": {
+        "body": [
+          {
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "ping"
+          }
+        ]
+      },
+      "expect": {
+        "status": 400,
+        "error": {
+          "code": -32600
+        },
+        "id": null
+      }
+    },
+    {
+      "name": "a message without jsonrpc 2.0",
+      "request": {
+        "body": {
+          "id": 8,
+          "method": "ping"
+        }
+      },
+      "expect": {
+        "status": 400,
+        "error": {
+          "code": -32600
+        }
+      }
+    },
+    {
+      "name": "no decide_gate tool: a gate answer, abort or re-plan is a human's",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 9,
+          "method": "tools/call",
+          "params": {
+            "name": "decide_gate",
+            "arguments": {
+              "mission_id": "mission_durable",
+              "decision": "approve",
+              "by": "agent"
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "no abort_mission tool: a gate answer, abort or re-plan is a human's",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 10,
+          "method": "tools/call",
+          "params": {
+            "name": "abort_mission",
+            "arguments": {
+              "mission_id": "mission_durable"
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "no edit_checklist tool: a gate answer, abort or re-plan is a human's",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 11,
+          "method": "tools/call",
+          "params": {
+            "name": "edit_checklist",
+            "arguments": {
+              "mission_id": "mission_durable",
+              "edits": [
+                {
+                  "op": "remove",
+                  "id": "02"
+                }
+              ]
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "an unknown tool",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 12,
+          "method": "tools/call",
+          "params": {
+            "name": "rm_rf",
+            "arguments": {}
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "a missing required argument",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 13,
+          "method": "tools/call",
+          "params": {
+            "name": "get_mission",
+            "arguments": {}
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "an unexpected argument",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 14,
+          "method": "tools/call",
+          "params": {
+            "name": "get_mission",
+            "arguments": {
+              "mission_id": "mission_local",
+              "verbose": true
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "arguments that are not an object",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 15,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": [
+              "x"
+            ]
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "a path argument that is not a string",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 16,
+          "method": "tools/call",
+          "params": {
+            "name": "get_mission",
+            "arguments": {
+              "mission_id": 5
+            }
+          }
+        }
+      },
+      "expect": {
+        "error": {
+          "code": -32602
+        }
+      }
+    },
+    {
+      "name": "a query argument of the wrong type is the API's to refuse",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 17,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": "ten"
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "invalid_request"
+      }
+    },
+    {
+      "name": "an argument the API refuses",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 18,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": 0
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "invalid_request"
+      }
+    },
+    {
+      "name": "server_health",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 19,
+          "method": "tools/call",
+          "params": {
+            "name": "server_health",
+            "arguments": {}
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "api_version": "1.1.0",
+            "store": {
+              "backend": "sqlite"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "list_missions",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 20,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions",
+            "arguments": {
+              "limit": 1
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "missions": {
+              "$len": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "list_missions without arguments",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 21,
+          "method": "tools/call",
+          "params": {
+            "name": "list_missions"
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "missions": {
+              "$len": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_mission",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 22,
+          "method": "tools/call",
+          "params": {
+            "name": "get_mission",
+            "arguments": {
+              "mission_id": "mission_local"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "mission_id": "mission_local",
+            "durable": false,
+            "items": {
+              "total": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "get_mission: an unknown mission is a tool error",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 23,
+          "method": "tools/call",
+          "params": {
+            "name": "get_mission",
+            "arguments": {
+              "mission_id": "mission_nope"
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "not_found"
+      }
+    },
+    {
+      "name": "list_items",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 24,
+          "method": "tools/call",
+          "params": {
+            "name": "list_items",
+            "arguments": {
+              "mission_id": "mission_local"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "items": {
+              "$len": 4
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "list_items: an anchor elsewhere",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 25,
+          "method": "tools/call",
+          "params": {
+            "name": "list_items",
+            "arguments": {
+              "mission_id": "mission_elsewhere"
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "anchor_unavailable"
+      }
+    },
+    {
+      "name": "get_item",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 26,
+          "method": "tools/call",
+          "params": {
+            "name": "get_item",
+            "arguments": {
+              "mission_id": "mission_durable",
+              "item_id": "02",
+              "limit": 2
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "item": {
+              "id": "02"
+            },
+            "cycles": [
+              "c2"
+            ],
+            "events": [
+              {
+                "id": 42
+              },
+              {
+                "id": 43
+              }
+            ],
+            "events_total": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "get_item: an item id is escaped into the path",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 27,
+          "method": "tools/call",
+          "params": {
+            "name": "get_item",
+            "arguments": {
+              "mission_id": "mission_local",
+              "item_id": "../01"
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "not_found"
+      }
+    },
+    {
+      "name": "list_events",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 28,
+          "method": "tools/call",
+          "params": {
+            "name": "list_events",
+            "arguments": {
+              "mission_id": "mission_local",
+              "after": 34,
+              "limit": 1
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "events": [
+              {
+                "id": 35
+              }
+            ],
+            "next_after": 35
+          }
+        }
+      }
+    },
+    {
+      "name": "list_costs",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 29,
+          "method": "tools/call",
+          "params": {
+            "name": "list_costs",
+            "arguments": {
+              "mission_id": "mission_durable"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "summary": {
+              "calls": 3
+            },
+            "by_model": [
+              {
+                "key": "claude-opus-4-6"
+              },
+              {
+                "key": "claude-sonnet-4-6"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "list_gates",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 30,
+          "method": "tools/call",
+          "params": {
+            "name": "list_gates",
+            "arguments": {
+              "mission_id": "mission_durable"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "gates": {
+              "$len": 2
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "steer_mission",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 31,
+          "method": "tools/call",
+          "params": {
+            "name": "steer_mission",
+            "arguments": {
+              "mission_id": "mission_durable",
+              "note": "Steered over MCP."
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "accepted": true
+          }
+        },
+        "signal": {
+          "name": "steer_v1",
+          "arg": "Steered over MCP."
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "steer_mission: Temporal unreachable",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 32,
+          "method": "tools/call",
+          "params": {
+            "name": "steer_mission",
+            "arguments": {
+              "mission_id": "mission_durable",
+              "note": "Steered over MCP."
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "temporal_unavailable"
+      },
+      "temporal": "absent"
+    },
+    {
+      "name": "steer_mission: a local mission",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 33,
+          "method": "tools/call",
+          "params": {
+            "name": "steer_mission",
+            "arguments": {
+              "mission_id": "mission_local",
+              "note": "x"
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "not_durable"
+      }
+    },
+    {
+      "name": "snooze_mission",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 34,
+          "method": "tools/call",
+          "params": {
+            "name": "snooze_mission",
+            "arguments": {
+              "mission_id": "mission_durable",
+              "seconds": 900
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "accepted": true
+          }
+        },
+        "signal": {
+          "name": "snooze_v1",
+          "arg": 900
+        }
+      },
+      "temporal": "running"
+    },
+    {
+      "name": "snooze_mission: a finished mission",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 35,
+          "method": "tools/call",
+          "params": {
+            "name": "snooze_mission",
+            "arguments": {
+              "mission_id": "mission_finished",
+              "seconds": 900
+            }
+          }
+        }
+      },
+      "expect": {
+        "tool_error": "finished"
+      }
+    },
+    {
+      "name": "http: the bearer token",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 36,
+          "method": "ping"
+        },
+        "auth": "bearer"
+      },
+      "expect": {
+        "status": 200,
+        "result": {}
+      },
+      "transport": "http"
+    },
+    {
+      "name": "http: no token",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 37,
+          "method": "ping"
+        },
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401
+      },
+      "transport": "http"
+    },
+    {
+      "name": "http: a wrong token",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 38,
+          "method": "ping"
+        },
+        "auth": "wrong"
+      },
+      "expect": {
+        "status": 401
+      },
+      "transport": "http"
+    },
+    {
+      "name": "http: the cookie alone cannot call tools",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 39,
+          "method": "ping"
+        },
+        "auth": "cookie"
+      },
+      "expect": {
+        "status": 401
+      },
+      "transport": "http"
+    },
+    {
+      "name": "http: a foreign Host",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 40,
+          "method": "ping"
+        },
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403
+      },
+      "transport": "http"
+    },
+    {
+      "name": "http: GET opens no stream",
+      "request": {
+        "body": null,
+        "method": "GET"
+      },
+      "expect": {
+        "status": 405
+      },
+      "transport": "http"
+    }
+  ]
+}

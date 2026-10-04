@@ -45,3 +45,26 @@ def serve(
         asyncio.run(_main())
     except KeyboardInterrupt:
         sys.exit(0)
+
+
+def mcp_stdio(settings: Settings) -> None:
+    """``lha mcp``: spec/serve/mcp.json's tools on stdin and stdout until stdin ends. Everything
+    else that would print goes to stderr: stdout carries only the protocol."""
+    from lha.persistence.store import open_store
+    from lha.serve.app import App, create_app
+    from lha.serve.mcp import serve_stdio
+
+    out, sys.stdout = sys.stdout, sys.stderr
+
+    async def _main() -> None:
+        store = await open_store(settings)
+        try:
+            app = App(settings=settings, store=store, token=secrets.token_urlsafe(24))
+            await serve_stdio(create_app(app).state.mcp, out)
+        finally:
+            await store.close()
+
+    try:
+        asyncio.run(_main())
+    except KeyboardInterrupt:
+        sys.exit(0)

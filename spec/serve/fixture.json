@@ -171,6 +171,24 @@
    "input_tokens": 2000,
    "output_tokens": 400,
    "usd": 0.012
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c2",
+   "role": "lead",
+   "model": "claude-opus-4-6",
+   "input_tokens": 3000,
+   "output_tokens": 600,
+   "usd": 0.05
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c2",
+   "role": "reviewer",
+   "model": "claude-sonnet-4-6",
+   "input_tokens": 800,
+   "output_tokens": 100,
+   "usd": 0.004
   }
  ],
  "gates": [
@@ -645,6 +663,59 @@
     "ok": true
    },
    "ts": "2026-10-04T00:00:51.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c2",
+   "kind": "cycle_started",
+   "payload": {
+    "item_id": "02"
+   },
+   "ts": "2026-10-04T00:00:55.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c2",
+   "kind": "tool_call",
+   "payload": {
+    "tool": "run_command",
+    "ok": false,
+    "error": "exit 1"
+   },
+   "ts": "2026-10-04T00:00:56.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c2",
+   "kind": "review",
+   "payload": {
+    "item": "02",
+    "blocking": true,
+    "verdict": "block"
+   },
+   "ts": "2026-10-04T00:00:57.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "",
+   "kind": "loop_detected",
+   "payload": {
+    "item_id": "02"
+   },
+   "ts": "2026-10-04T00:00:58.000000+00:00"
+  },
+  {
+   "mission_id": "mission_durable",
+   "cycle_id": "c1",
+   "kind": "parallel_wave",
+   "payload": {
+    "items": [
+     "01",
+     "02"
+    ],
+    "base": "8d41c0a"
+   },
+   "ts": "2026-10-04T00:00:59.000000+00:00"
   }
  ]
 }

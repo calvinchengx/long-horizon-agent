@@ -72,6 +72,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/missions/{mission_id}/items/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One checklist item: its dependents, its cycles, their spend and the events about it
+         * @description An event is about the item when its payload's `item_id` or `item` is the item's id, its `items` holds the id, or it was recorded in one of the item's cycles. The item's cycles are the (non-empty) `cycle_id`s of the events whose `item_id` or `item` is the item's id, in the order first recorded; `spend` sums the cost ledger's calls in those cycles.
+         */
+        get: operations["getItem"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/missions/{mission_id}/events": {
         parameters: {
             query?: never;
@@ -96,7 +116,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The mission's cost ledger: totals and the most recent calls */
+        /** The mission's cost ledger: totals, totals by role and by model, and the most recent calls */
         get: operations["listCosts"];
         put?: never;
         post?: never;
@@ -438,6 +458,16 @@ export interface components {
             opened_at: string;
             /** @description When it was resolved or defaulted (`""` while open). */
             resolved_at: string;
+        };
+        /** @description The spend of the calls sharing a role or a model, summed like `CostSummary`. */
+        CostGroup: {
+            /** @description The role or model. */
+            key: string;
+            calls: number;
+            known_usd: number;
+            unknown_cost_calls: number;
+            input_tokens: number;
+            output_tokens: number;
         };
         check_quarantined: {
             check: string;
@@ -830,6 +860,80 @@ export interface operations {
             };
         };
     };
+    getItem: {
+        parameters: {
+            query?: {
+                /** @description How many of the item's events to return: the most recent ones. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The mission id (`lha missions`). */
+                mission_id: string;
+                /** @description The checklist item id. */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item and what was recorded about it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        item: components["schemas"]["ChecklistItem"];
+                        /** @description The ids of the items that depend on this one, in checklist order. */
+                        dependents: string[];
+                        cycles: string[];
+                        spend: components["schemas"]["CostSummary"];
+                        /** @description The most recent `limit` events about the item, oldest first. */
+                        events: components["schemas"]["MissionEvent"][];
+                        /** @description How many events are about the item. */
+                        events_total: number;
+                    };
+                };
+            };
+            /** @description No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The `Host` header is not this server's loopback address (DNS rebinding). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such mission or item (`not_found`), or the mission's anchor cannot be read here (`anchor_unavailable`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A query parameter is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listEvents: {
         parameters: {
             query?: {
@@ -920,6 +1024,10 @@ export interface operations {
                     "application/json": {
                         summary: components["schemas"]["CostSummary"];
                         calls: components["schemas"]["CostCall"][];
+                        /** @description The whole ledger summed by role: the largest known spend first, then by role. */
+                        by_role: components["schemas"]["CostGroup"][];
+                        /** @description The whole ledger summed by model: the largest known spend first, then by model. */
+                        by_model: components["schemas"]["CostGroup"][];
                     };
                 };
             };

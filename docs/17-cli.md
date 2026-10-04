@@ -38,6 +38,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`eval check`, `eval run`](#lha-eval) | validate gold evaluation sets, and score a judge against them | gold `.jsonl` files |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`serve`](#lha-serve) | serve the mission UI's API on loopback | the mission store; Temporal for durable missions' live state and controls; the `serve` extra (Python) |
+| [`mcp`](#lha-mcp) | serve the missions to an MCP client on stdin and stdout | as `serve` |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
 | [`mission-approve`](#lha-mission-approve) | answer the open gate (a queued irreversible action, or the deadlock gate) | Temporal |
@@ -531,6 +532,23 @@ durable mission, its workflow's queries; the controls send the workflow's signal
 `mission-*` commands do. Both implementations' servers pass the same cases
 ([`spec/serve/README.md`](../spec/serve/README.md)), and either one shows missions the other's runs
 record. The Python server needs the `serve` extra (`uv sync --extra serve`).
+
+The server also answers MCP at `/mcp`, with the same tools as [`lha mcp`](#lha-mcp); a client
+sends the token as `Authorization: Bearer <token>` or `X-LHA-Token`.
+
+## `lha mcp`
+
+Serves the missions to an MCP client on stdin and stdout (newline-delimited JSON-RPC) until stdin
+closes; nothing else is written to stdout. The tools are the UI API's operations
+([`spec/serve/mcp.json`](../spec/serve/mcp.json)): list missions, a mission's status, checklist,
+one item's history, timeline, costs and gates, and steer or snooze a durable mission. None answers
+a gate, aborts or edits the checklist: those are a human's (`mission-approve`, `mission-abort`,
+`mission-edit`, or the UI). It reads what `lha serve` reads and needs no token: the client started
+it.
+
+```bash
+claude mcp add lha -- lha mcp
+```
 
 ## `lha mission-start`
 

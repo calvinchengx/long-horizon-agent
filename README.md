@@ -44,7 +44,9 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
   prompt, and appends design decisions to a hash-chained log (`lha decisions --verify`).
 - **A mission UI.** `lha serve` (in either implementation) shows every mission in a browser:
   live state, the checklist, a timeline of what each cycle did, spend, and the human gates, which
-  you answer there with your name ([mission UI](docs/27-mission-ui.md)).
+  you answer there with your name ([mission UI](docs/27-mission-ui.md)). An MCP client gets the
+  same reads, steer and snooze (`claude mcp add lha -- lha mcp`), but never the gate answers or
+  abort.
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/mission-ui-mission-dark.png">

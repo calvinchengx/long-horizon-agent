@@ -4,9 +4,10 @@ import {
   ApiError,
   follow,
   type ChecklistItem,
-  type CostCall,
-  type CostSummary,
+  type CostGroup,
+  type Costs as CostsData,
   type Gate,
+  type ItemDetail,
   type MissionDetail,
   type MissionEvent,
 } from "./api";
@@ -341,11 +342,64 @@ function Checklist({ id }: { id: string }) {
                   <pre>{it.last_failure}</pre>
                 </details>
               )}
+              <ItemHistory id={id} itemId={it.id} />
             </div>
           </li>
         ))}
       </ol>
     </Section>
+  );
+}
+
+/** An item's cycles, their spend and the events about it, loaded when opened. */
+function ItemHistory({ id, itemId }: { id: string; itemId: string }) {
+  const [detail, setDetail] = useState<ItemDetail | null>(null);
+  const [error, setError] = useState("");
+  const now = useTick();
+  const load = (e: Event) => {
+    if ((e.currentTarget as HTMLDetailsElement).open && !detail)
+      api.item(id, itemId).then(setDetail, (err) => setError(String(err.message)));
+  };
+  return (
+    <details class="history" onToggle={load}>
+      <summary>history</summary>
+      {error && <p class="error">{error}</p>}
+      {!detail && !error && <p class="dim">Loading…</p>}
+      {detail && (
+        <>
+          <p class="facts">
+            <span class="fact">
+              {detail.cycles.length ? `cycles ${detail.cycles.join(", ")}` : "no cycle yet"}
+            </span>
+            <span class="fact">
+              <b>{usd(detail.spend.known_usd)}</b> over {detail.spend.calls} calls
+              {detail.spend.unknown_cost_calls > 0 && <span class="dim"> (+{detail.spend.unknown_cost_calls} unknown)</span>}
+            </span>
+            {detail.dependents.length > 0 && <span class="fact dim">needed by {detail.dependents.join(", ")}</span>}
+          </p>
+          {detail.events.length === 0 ? (
+            <p class="dim">Nothing recorded about this item yet.</p>
+          ) : (
+            <ol class="timeline">
+              {[...detail.events].reverse().map((e) => {
+                const d = describe(e);
+                return (
+                  <li key={e.id} class={`tone-${d.tone}`}>
+                    <time title={e.ts}>{ago(e.ts, now)}</time>
+                    <span class="cycle">{e.cycle_id}</span>
+                    <span class="label">{d.label}</span>
+                    <span class="text">{d.text}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+          {detail.events_total > detail.events.length && (
+            <p class="dim">The latest {detail.events.length} of {detail.events_total} events.</p>
+          )}
+        </>
+      )}
+    </details>
   );
 }
 
@@ -381,54 +435,71 @@ function Gates({ id }: { id: string }) {
 }
 
 function Costs({ id }: { id: string }) {
-  const [data, setData] = useState<{ summary: CostSummary; calls: CostCall[] } | null>(null);
+  const [data, setData] = useState<CostsData | null>(null);
   useEffect(() => {
     api.costs(id, 500).then(setData);
   }, [id]);
-  const byRole = useMemo(() => {
-    const roles = new Map<string, { usd: number; calls: number }>();
-    for (const c of data?.calls ?? []) {
-      const r = roles.get(c.role || "lead") ?? { usd: 0, calls: 0 };
-      r.usd += c.usd ?? 0;
-      r.calls += 1;
-      roles.set(c.role || "lead", r);
-    }
-    return [...roles.entries()].sort((a, b) => b[1].usd - a[1].usd);
-  }, [data]);
   if (!data) return <p class="dim">Loading costs…</p>;
   const s = data.summary;
   return (
-    <Section title="Spend">
-      <p class="facts">
-        <span class="fact"><b>{usd(s.known_usd)}</b> over {s.calls} calls</span>
-        {s.unknown_cost_calls > 0 && <span class="fact">{s.unknown_cost_calls} calls of unknown cost</span>}
-        <span class="fact dim">{s.input_tokens.toLocaleString()} tokens in · {s.output_tokens.toLocaleString()} out</span>
-      </p>
-      {byRole.length > 0 && (
+    <>
+      <Section title="Spend">
         <p class="facts">
-          {byRole.map(([role, r]) => (
-            <span class="fact" key={role}>{role}: {usd(r.usd)} <span class="dim">({r.calls})</span></span>
-          ))}
-          {data.calls.length < s.calls && <span class="fact dim">(the latest {data.calls.length} calls)</span>}
+          <span class="fact"><b>{usd(s.known_usd)}</b> over {s.calls} calls</span>
+          {s.unknown_cost_calls > 0 && <span class="fact">{s.unknown_cost_calls} calls of unknown cost</span>}
+          <span class="fact dim">{s.input_tokens.toLocaleString()} tokens in · {s.output_tokens.toLocaleString()} out</span>
         </p>
-      )}
-      <table>
-        <thead>
-          <tr><th>When</th><th>Cycle</th><th>Role</th><th>Model</th><th class="num">Tokens in/out</th><th class="num">Cost</th></tr>
-        </thead>
-        <tbody>
-          {data.calls.map((c, i) => (
-            <tr key={i}>
-              <td title={c.ts}>{new Date(c.ts).toLocaleString()}</td>
-              <td>{c.cycle_id}</td>
-              <td>{c.role || "lead"}</td>
-              <td>{c.model}</td>
-              <td class="num">{c.input_tokens.toLocaleString()} / {c.output_tokens.toLocaleString()}</td>
-              <td class="num">{c.usd == null ? <span class="dim">unknown</span> : usd(c.usd)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </Section>
+        {s.calls > 0 && (
+          <div class="breakdowns">
+            <Breakdown title="By role" groups={data.by_role} total={s.known_usd} />
+            <Breakdown title="By model" groups={data.by_model} total={s.known_usd} />
+          </div>
+        )}
+      </Section>
+      <Section title={data.calls.length < s.calls ? `The latest ${data.calls.length} calls` : "Calls"}>
+        <table>
+          <thead>
+            <tr><th>When</th><th>Cycle</th><th>Role</th><th>Model</th><th class="num">Tokens in/out</th><th class="num">Cost</th></tr>
+          </thead>
+          <tbody>
+            {data.calls.map((c, i) => (
+              <tr key={i}>
+                <td title={c.ts}>{new Date(c.ts).toLocaleString()}</td>
+                <td>{c.cycle_id}</td>
+                <td>{c.role || "lead"}</td>
+                <td>{c.model}</td>
+                <td class="num">{c.input_tokens.toLocaleString()} / {c.output_tokens.toLocaleString()}</td>
+                <td class="num">{c.usd == null ? <span class="dim">unknown</span> : usd(c.usd)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+    </>
+  );
+}
+
+function Breakdown({ title, groups, total }: { title: string; groups: CostGroup[]; total: number }) {
+  return (
+    <table class="breakdown">
+      <thead>
+        <tr><th>{title}</th><th class="num">Calls</th><th class="num">Cost</th><th class="share" /></tr>
+      </thead>
+      <tbody>
+        {groups.map((g) => (
+          <tr key={g.key}>
+            <td>{g.key || "lead"}</td>
+            <td class="num">{g.calls.toLocaleString()}</td>
+            <td class="num">
+              {usd(g.known_usd)}
+              {g.unknown_cost_calls > 0 && <span class="dim" title="calls whose cost is unknown"> +{g.unknown_cost_calls}?</span>}
+            </td>
+            <td class="share">
+              <span class="bar"><span class="fill" style={{ width: `${total ? Math.round((g.known_usd / total) * 100) : 0}%` }} /></span>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

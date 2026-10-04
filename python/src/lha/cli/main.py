@@ -1069,6 +1069,23 @@ def serve(
         _fail(str(exc))
 
 
+@app.command()
+def mcp() -> None:
+    """Serve the missions to an MCP client on stdin and stdout (spec/serve/mcp.json).
+
+    The tools read missions and steer or snooze one; none answers a gate, aborts or edits the
+    checklist. Reads the mission store (`lha config`), each mission's anchor, and Temporal for
+    durable missions. `lha serve` answers the same tools at /mcp. Needs the `serve` extra.
+    """
+    try:
+        import starlette  # noqa: F401
+
+        from lha.serve import mcp_stdio
+    except ModuleNotFoundError as exc:
+        _fail_missing_module(exc)
+    mcp_stdio(get_settings())
+
+
 @app.command(name="mission-start")
 def mission_start(
     task: str = typer.Option(

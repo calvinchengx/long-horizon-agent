@@ -17,6 +17,7 @@ package serve
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/subtle"
 	"embed"
@@ -30,6 +31,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -48,7 +50,7 @@ import (
 )
 
 // APIVersion is spec/serve/openapi.json's info.version.
-const APIVersion = "1.0.0"
+const APIVersion = "1.1.0"
 
 // Implementation names this implementation in /api/v1/health.
 const Implementation = "go"
@@ -119,6 +121,7 @@ var Routes = []Route{
 	{"GET", "/api/v1/missions", (*Server).listMissions, false},
 	{"GET", "/api/v1/missions/{mission_id}", (*Server).getMission, false},
 	{"GET", "/api/v1/missions/{mission_id}/items", (*Server).listItems, false},
+	{"GET", "/api/v1/missions/{mission_id}/items/{item_id}", (*Server).getItem, false},
 	{"GET", "/api/v1/missions/{mission_id}/events", (*Server).listEvents, false},
 	{"GET", "/api/v1/missions/{mission_id}/costs", (*Server).listCosts, false},
 	{"GET", "/api/v1/missions/{mission_id}/gates", (*Server).listGates, false},
@@ -161,6 +164,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.appPage)
 	mux.HandleFunc("GET /missions/", s.appPage)
 	mux.HandleFunc("GET /assets/{name}", s.asset)
+	mux.HandleFunc("POST /mcp", s.mcpEndpoint)
 	return mux
 }
 
@@ -556,6 +560,156 @@ func (s *Server) listEvents(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// ledgerAll is "all of a mission's cost ledger" for the routes that sum it.
+const ledgerAll = 1_000_000
+
+func (s *Server) getItem(w http.ResponseWriter, r *http.Request) error {
+	limit, err := intParam(r, "limit", 200, 1, 1000)
+	if err != nil {
+		return err
+	}
+	row, err := s.mission(r.Context(), r.PathValue("mission_id"))
+	if err != nil {
+		return err
+	}
+	its := items(r.Context(), row)
+	if its == nil {
+		return fail(404, "anchor_unavailable", "the anchor at %s cannot be read here", contracts.PyRepr(row.Workdir))
+	}
+	itemID := r.PathValue("item_id")
+	var item map[string]any
+	dependents := []string{}
+	for _, it := range its {
+		if it["id"] == itemID {
+			item = it
+		}
+		deps, _ := it["depends_on"].([]any)
+		if slices.Contains(deps, any(itemID)) {
+			dependents = append(dependents, it["id"].(string))
+		}
+	}
+	if item == nil {
+		return fail(404, "not_found", "no item %s in %s", contracts.PyRepr(itemID), contracts.PyRepr(row.MissionID))
+	}
+	events, err := s.allEvents(r.Context(), row.MissionID)
+	if err != nil {
+		return err
+	}
+	ledger, err := s.Store.ListCosts(r.Context(), row.MissionID, ledgerAll)
+	if err != nil {
+		return err
+	}
+	cycles := []string{}
+	for _, e := range events {
+		if e.CycleID != "" && !slices.Contains(cycles, e.CycleID) && slices.Contains(named(e.Payload, false), itemID) {
+			cycles = append(cycles, e.CycleID)
+		}
+	}
+	var about []persistence.EventRow
+	for _, e := range events {
+		if slices.Contains(cycles, e.CycleID) || slices.Contains(named(e.Payload, true), itemID) {
+			about = append(about, e)
+		}
+	}
+	var spent []persistence.CostRow
+	for _, c := range ledger {
+		if slices.Contains(cycles, c.CycleID) {
+			spent = append(spent, c)
+		}
+	}
+	recent := about[max(0, len(about)-limit):]
+	out := make([]map[string]any, len(recent))
+	for i, e := range recent {
+		out[i] = event(e)
+	}
+	writeJSON(w, 200, map[string]any{
+		"item": item, "dependents": dependents, "cycles": cycles, "spend": sumCosts(spent, ""),
+		"events": out, "events_total": len(about),
+	})
+	return nil
+}
+
+func (s *Server) allEvents(ctx context.Context, missionID string) ([]persistence.EventRow, error) {
+	var events []persistence.EventRow
+	for {
+		after := int64(0)
+		if len(events) > 0 {
+			after = events[len(events)-1].ID
+		}
+		page, err := s.Store.ReadMissionEvents(ctx, missionID, after, 1000)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, page...)
+		if len(page) < 1000 {
+			return events, nil
+		}
+	}
+}
+
+// named is the item ids an event's payload names (its items too when withWaves).
+func named(payload map[string]any, withWaves bool) []string {
+	var out []string
+	for _, k := range []string{"item_id", "item"} {
+		if v, ok := payload[k].(string); ok {
+			out = append(out, v)
+		}
+	}
+	if waves, ok := payload["items"].([]any); ok && withWaves {
+		for _, v := range waves {
+			if id, ok := v.(string); ok {
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
+// sumCosts sums calls like the store's CostSummary: an unknown cost is counted, never $0.
+func sumCosts(rows []persistence.CostRow, key string) map[string]any {
+	known, unknown, in, out := 0.0, 0, 0, 0
+	for _, c := range rows {
+		if c.CostKnown && c.USD != nil {
+			known += *c.USD
+		} else {
+			unknown++
+		}
+		in += c.InputTokens
+		out += c.OutputTokens
+	}
+	m := map[string]any{
+		"calls": len(rows), "known_usd": known, "unknown_cost_calls": unknown,
+		"input_tokens": in, "output_tokens": out,
+	}
+	if key != "" {
+		m["key"] = key
+	}
+	return m
+}
+
+func costsBy(rows []persistence.CostRow, field func(persistence.CostRow) string) []map[string]any {
+	var keys []string
+	groups := map[string][]persistence.CostRow{}
+	for _, c := range rows {
+		k := field(c)
+		if _, seen := groups[k]; !seen {
+			keys = append(keys, k)
+		}
+		groups[k] = append(groups[k], c)
+	}
+	out := make([]map[string]any, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, sumCosts(groups[k], k))
+	}
+	slices.SortStableFunc(out, func(a, b map[string]any) int {
+		if c := cmp.Compare(b["known_usd"].(float64), a["known_usd"].(float64)); c != 0 {
+			return c
+		}
+		return strings.Compare(a["key"].(string), b["key"].(string))
+	})
+	return out
+}
+
 func (s *Server) listCosts(w http.ResponseWriter, r *http.Request) error {
 	limit, err := intParam(r, "limit", 100, 1, 1000)
 	if err != nil {
@@ -569,10 +723,11 @@ func (s *Server) listCosts(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	rows, err := s.Store.ListCosts(r.Context(), row.MissionID, limit)
+	ledger, err := s.Store.ListCosts(r.Context(), row.MissionID, ledgerAll)
 	if err != nil {
 		return err
 	}
+	rows := ledger[max(0, len(ledger)-limit):]
 	calls := make([]map[string]any, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- { // most recent first
 		c := rows[i]
@@ -585,7 +740,12 @@ func (s *Server) listCosts(w http.ResponseWriter, r *http.Request) error {
 			"output_tokens": c.OutputTokens, "usd": usd, "ts": c.TS,
 		})
 	}
-	writeJSON(w, 200, map[string]any{"summary": spend(summary), "calls": calls})
+	writeJSON(w, 200, map[string]any{
+		"summary":  spend(summary),
+		"by_role":  costsBy(ledger, func(c persistence.CostRow) string { return c.Role }),
+		"by_model": costsBy(ledger, func(c persistence.CostRow) string { return c.Model }),
+		"calls":    calls,
+	})
 	return nil
 }
 

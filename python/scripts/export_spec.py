@@ -407,6 +407,25 @@ def export_serve_fixture() -> None:
             "ts": _SERVE_TS.format(51),
         },
     ]
+    # Item 02's own cycle, an event that names it outside any cycle, and a wave naming both items
+    # (recorded in item 01's cycle: it does not make c1 one of item 02's cycles).
+    item_events = [
+        ("c2", "cycle_started", {"item_id": "02"}),
+        ("c2", "tool_call", {"tool": "run_command", "ok": False, "error": "exit 1"}),
+        ("c2", "review", {"item": "02", "blocking": True, "verdict": "block"}),
+        ("", "loop_detected", {"item_id": "02"}),
+        ("c1", "parallel_wave", {"items": ["01", "02"], "base": "8d41c0a"}),
+    ]
+    events += [
+        {
+            "mission_id": "mission_durable",
+            "cycle_id": c,
+            "kind": k,
+            "payload": p,
+            "ts": _SERVE_TS.format(55 + n),
+        }
+        for n, (c, k, p) in enumerate(item_events)
+    ]
     failure = "exit 1: tests/test_api.py::test_list FAILED"
     _write(
         "serve/fixture.json",
@@ -501,6 +520,24 @@ def export_serve_fixture() -> None:
                     "output_tokens": 400,
                     "usd": 0.012,
                 },
+                {
+                    "mission_id": "mission_durable",
+                    "cycle_id": "c2",
+                    "role": "lead",
+                    "model": "claude-opus-4-6",
+                    "input_tokens": 3000,
+                    "output_tokens": 600,
+                    "usd": 0.05,
+                },
+                {
+                    "mission_id": "mission_durable",
+                    "cycle_id": "c2",
+                    "role": "reviewer",
+                    "model": "claude-sonnet-4-6",
+                    "input_tokens": 800,
+                    "output_tokens": 100,
+                    "usd": 0.004,
+                },
             ],
             "gates": [
                 {
@@ -540,6 +577,99 @@ def export_serve_fixture() -> None:
             "events": events,
         },
     )
+
+
+# --- serve/mcp: the UI API's operations as MCP tools ------------------------------------------
+#: (tool, operation, title, read only). Each tool is one operation of serve/openapi.json; its
+#: arguments are the operation's path and query parameters and its body's properties.
+_MCP_TOOLS = [
+    ("server_health", "getHealth", "Server health", True),
+    ("list_missions", "listMissions", "List missions", True),
+    ("get_mission", "getMission", "Mission status", True),
+    ("list_items", "listItems", "Mission checklist", True),
+    ("get_item", "getItem", "Checklist item detail", True),
+    ("list_events", "listEvents", "Mission timeline", True),
+    ("list_costs", "listCosts", "Mission costs", True),
+    ("list_gates", "listGates", "Mission human gates", True),
+    ("steer_mission", "steerMission", "Steer a mission", False),
+    ("snooze_mission", "snoozeMission", "Snooze or wake a mission", False),
+]
+#: Operations that are not tools, and why. The gate answer and abort are a human's alone: an agent
+#: must not approve its own irreversible actions, which is what the human gate exists to prevent.
+_MCP_NOT_TOOLS = {
+    "decideGate": "A gate is answered by a human only: an agent must not approve its own "
+    "irreversible actions.",
+    "abortMission": "Only a human aborts a mission.",
+    "editChecklist": "Re-planning a mission (adding, removing or reopening items) is a human's "
+    "decision.",
+    "streamEvents": "A stream, not a call: list_events pages through the same events.",
+}
+
+
+def export_serve_mcp() -> None:
+    """spec/serve/mcp.json, from ``_MCP_TOOLS`` and serve/openapi.json; each implementation's
+    server reads its own copy (written here too), so the tools cannot drift from the API."""
+    api = json.loads((SPEC / "serve/openapi.json").read_text())
+    ops = {
+        op["operationId"]: (method.upper(), template, op)
+        for template, methods in api["paths"].items()
+        for method, op in methods.items()
+    }
+    tools = []
+    for name, op_id, title, read_only in _MCP_TOOLS:
+        method, template, op = ops[op_id]
+        properties: dict[str, Any] = {}
+        required: list[str] = []
+        arguments: dict[str, str] = {}
+        for param in op.get("parameters", []):
+            schema = dict(param["schema"])
+            if param.get("description"):
+                schema["description"] = param["description"]
+            properties[param["name"]] = schema
+            arguments[param["name"]] = param["in"]
+            if param.get("required"):
+                required.append(param["name"])
+        body = op.get("requestBody", {}).get("content", {}).get("application/json", {})
+        for prop, schema in body.get("schema", {}).get("properties", {}).items():
+            properties[prop] = schema
+            arguments[prop] = "body"
+        required += body.get("schema", {}).get("required", [])
+        tools.append(
+            {
+                "name": name,
+                "title": title,
+                "description": op["summary"]
+                + "."
+                + (f" {op['description']}" if "description" in op else ""),
+                "operation": op_id,
+                "method": method,
+                "path": template,
+                "arguments": arguments,
+                "inputSchema": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                    "additionalProperties": False,
+                },
+                "annotations": {
+                    "readOnlyHint": read_only,
+                    "destructiveHint": False,
+                    "openWorldHint": False,
+                },
+            }
+        )
+    mcp = {
+        "description": "The UI API's operations as MCP tools (spec/serve/README.md, MCP). Generated "
+        "by python/scripts/export_spec.py from serve/openapi.json.",
+        "protocol_version": "2025-06-18",
+        "server": {"name": "lha", "title": "LHA missions"},
+        "tools": tools,
+        "not_tools": _MCP_NOT_TOOLS,
+    }
+    _write("serve/mcp.json", mcp)
+    text = (SPEC / "serve/mcp.json").read_text()
+    for copy in (ROOT / "python/src/lha/serve/mcp.json", ROOT / "go/internal/serve/mcp.json"):
+        copy.write_text(text, encoding="utf-8")
 
 
 # --- contracts/verify check names ------------------------------------------------------------
@@ -4035,6 +4165,7 @@ def main() -> None:
     export_redact()
     export_mission_events()
     export_serve_fixture()
+    export_serve_mcp()
     export_check_names()
     export_checklist()
     export_checklist_edit()

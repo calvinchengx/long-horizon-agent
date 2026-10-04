@@ -11,7 +11,7 @@
       "expect": {
         "status": 200,
         "body": {
-          "api_version": "1.0.0",
+          "api_version": "1.1.0",
           "store": {
             "backend": "sqlite",
             "degraded_reason": ""
@@ -175,7 +175,7 @@
                 "durable": true,
                 "workflow_id": "mission:mission_durable",
                 "last_event": {
-                  "id": 38
+                  "id": 43
                 }
               }
             ]
@@ -550,9 +550,31 @@
             {
               "id": 38,
               "kind": "tool_call"
+            },
+            {
+              "id": 39,
+              "kind": "cycle_started",
+              "cycle_id": "c2"
+            },
+            {
+              "id": 40,
+              "kind": "tool_call"
+            },
+            {
+              "id": 41,
+              "kind": "review"
+            },
+            {
+              "id": 42,
+              "kind": "loop_detected",
+              "cycle_id": ""
+            },
+            {
+              "id": 43,
+              "kind": "parallel_wave"
             }
           ],
-          "next_after": 38
+          "next_after": 43
         }
       }
     },
@@ -628,6 +650,37 @@
               "input_tokens": 1000,
               "output_tokens": 200
             }
+          ],
+          "by_role": [
+            {
+              "key": "lead",
+              "calls": 1,
+              "known_usd": 0.006,
+              "unknown_cost_calls": 0,
+              "input_tokens": 1000,
+              "output_tokens": 200
+            },
+            {
+              "key": "reviewer",
+              "calls": 1,
+              "known_usd": 0,
+              "unknown_cost_calls": 1,
+              "input_tokens": 500,
+              "output_tokens": 50
+            }
+          ],
+          "by_model": [
+            {
+              "key": "claude-sonnet-4-6",
+              "calls": 1,
+              "known_usd": 0.006
+            },
+            {
+              "key": "local-model",
+              "calls": 1,
+              "known_usd": 0,
+              "unknown_cost_calls": 1
+            }
           ]
         }
       }
@@ -652,7 +705,10 @@
             {
               "role": "reviewer"
             }
-          ]
+          ],
+          "by_role": {
+            "$len": 2
+          }
         }
       }
     },
@@ -671,7 +727,9 @@
             "known_usd": 0,
             "unknown_cost_calls": 0
           },
-          "calls": []
+          "calls": [],
+          "by_role": [],
+          "by_model": []
         }
       }
     },
@@ -862,6 +920,230 @@
       }
     },
     {
+      "name": "an item's cycles, spend and events",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/items/02"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "item": {
+            "id": "02",
+            "status": "todo",
+            "depends_on": [
+              "01"
+            ]
+          },
+          "dependents": [],
+          "cycles": [
+            "c2"
+          ],
+          "spend": {
+            "calls": 2,
+            "known_usd": 0.054,
+            "unknown_cost_calls": 0,
+            "input_tokens": 3800,
+            "output_tokens": 700
+          },
+          "events": [
+            {
+              "id": 39,
+              "kind": "cycle_started"
+            },
+            {
+              "id": 40,
+              "kind": "tool_call"
+            },
+            {
+              "id": 41,
+              "kind": "review"
+            },
+            {
+              "id": 42,
+              "kind": "loop_detected"
+            },
+            {
+              "id": 43,
+              "kind": "parallel_wave"
+            }
+          ],
+          "events_total": 5
+        }
+      }
+    },
+    {
+      "name": "a wave naming two items is about both, its cycle about the first",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/items/01"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "item": {
+            "id": "01",
+            "status": "done"
+          },
+          "dependents": [
+            "02"
+          ],
+          "cycles": [
+            "c1"
+          ],
+          "spend": {
+            "calls": 1,
+            "known_usd": 0.012,
+            "unknown_cost_calls": 0
+          },
+          "events": [
+            {
+              "id": 37
+            },
+            {
+              "id": 38
+            },
+            {
+              "id": 43
+            }
+          ],
+          "events_total": 3
+        }
+      }
+    },
+    {
+      "name": "an item's most recent events only",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/items/02",
+        "query": {
+          "limit": "1"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "events": [
+            {
+              "id": 43
+            }
+          ],
+          "events_total": 5
+        }
+      }
+    },
+    {
+      "name": "an item nothing was recorded about",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items/03"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "item": {
+            "id": "03",
+            "status": "blocked",
+            "consecutive_failures": 3
+          },
+          "dependents": [
+            "04"
+          ],
+          "cycles": [],
+          "spend": {
+            "calls": 0,
+            "known_usd": 0,
+            "unknown_cost_calls": 0,
+            "input_tokens": 0,
+            "output_tokens": 0
+          },
+          "events": [],
+          "events_total": 0
+        }
+      }
+    },
+    {
+      "name": "an unknown item",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items/99"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "an item of an unknown mission",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope/items/01"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "an item whose anchor is elsewhere",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_elsewhere/items/01"
+      },
+      "expect": {
+        "status": 404,
+        "error": "anchor_unavailable"
+      }
+    },
+    {
+      "name": "an item events limit above 1000",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items/01",
+        "query": {
+          "limit": "1001"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "getItem: no token",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items/01",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "getItem: a foreign Host",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_local/items/01",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
       "name": "listEvents: no token",
       "operation": "listEvents",
       "request": {
@@ -911,6 +1193,59 @@
       "expect": {
         "status": 403,
         "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "spend by role and by model, the largest first",
+      "operation": "listCosts",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/costs",
+        "query": {
+          "limit": "1"
+        }
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "summary": {
+            "calls": 3,
+            "known_usd": 0.066
+          },
+          "by_role": [
+            {
+              "key": "lead",
+              "calls": 2,
+              "known_usd": 0.062,
+              "input_tokens": 5000,
+              "output_tokens": 1000
+            },
+            {
+              "key": "reviewer",
+              "calls": 1,
+              "known_usd": 0.004
+            }
+          ],
+          "by_model": [
+            {
+              "key": "claude-opus-4-6",
+              "calls": 1,
+              "known_usd": 0.05
+            },
+            {
+              "key": "claude-sonnet-4-6",
+              "calls": 2,
+              "known_usd": 0.016,
+              "unknown_cost_calls": 0
+            }
+          ],
+          "calls": [
+            {
+              "role": "reviewer",
+              "cycle_id": "c2"
+            }
+          ]
+        }
       }
     },
     {

@@ -1,8 +1,8 @@
 # Mission UI: design
 
-Status: design. Phase 0 is in progress; nothing below is built yet unless marked done. This page is
-the plan for watching and steering missions from a browser and from MCP clients, and the contracts
-that keep that UI independent of which LHA implementation runs a mission.
+Status: Phases 0 to 3 are built in both implementations; what is still to come is marked. This page
+is the plan for watching and steering missions from a browser and from MCP clients, and the
+contracts that keep that UI independent of which LHA implementation runs a mission.
 
 ## Why
 
@@ -92,6 +92,11 @@ For the UI API (Phase 1), contract first:
   request's base) fails CI unless the API's major version changes (`spec/serve/check-breaking.sh`,
   oasdiff). Done. The UI's TypeScript types are generated from the spec with a drift check
   (Phase 2, with the UI).
+- MCP (Phase 3) is generated from the same spec: `spec/serve/mcp.json` maps each tool to one
+  operation, and lists the operations that are not tools and why. CI fails unless every operation
+  is a tool or refused, the gate answer and abort are refused, every tool has a successful case in
+  `spec/serve/mcp_cases.json`, and each implementation's embedded copy is current; the same runner
+  plays every case over each server's `/mcp` and its `lha mcp`. Done.
 
 ## Phase 0: `mission_events`, the shared event record
 
@@ -135,21 +140,23 @@ mission-report` and plain SQL can read it.
 
 ## Phase 1: `lha serve`, the UI API
 
-Status: both implementations serve the contract below and pass every case. Item detail (attempts,
-witnesses, diffs) and per-role cost breakdowns are additive operations still to come.
+Status: both implementations serve the contract below and pass every case. Diffs (including failed
+attempts) are an additive operation still to come.
 
 - Reads: `GET /api/v1/health`; `/api/v1/missions` (each with its spend, item counts and last
   event); `/missions/{id}` (plus its description, workdir, and for a running durable mission its
   workflow's live state: status, cycles, open gate, open question, wake time, steering notes,
   pending edits); `/missions/{id}/items` (the anchor's checklist); `/missions/{id}/events?after=`
-  (recorded events, paged forward by id); `/missions/{id}/costs`; `/missions/{id}/gates`.
+  (recorded events, paged forward by id); `/missions/{id}/items/{item_id}` (the item, the items
+  that depend on it, its cycles, their spend and the events about it); `/missions/{id}/costs`
+  (totals, totals by role and by model, the latest calls); `/missions/{id}/gates`.
 - Live: `GET /api/v1/stream` (Server-Sent Events, resumable with `Last-Event-ID`): `mission_event`
   messages, and a `mission` message when a mission's row changes.
 - Controls (durable missions): `POST` `steer`, `snooze`, `checklist-edits`, `decision` (with the
   person's name, sent as `human_decision_v2`) and `abort` (a workflow cancellation). A local run is
   `409 not_durable`, a finished mission `409 finished`, Temporal unreachable `503`.
-- Still to come, as additive operations: item detail (attempts, witnesses with their latest
-  results, diffs including failed attempts under `refs/lha/attempts/`) and costs by role.
+- Still to come, as an additive operation: diffs, including failed attempts under
+  `refs/lha/attempts/`, and each witness's latest result.
 - Contract: [`spec/serve/`](../spec/serve/README.md); every implementation's server is tested
   against it.
 
@@ -165,8 +172,9 @@ Performance rules, because the cost is in how the server gets its data, not in t
 
 Status: built ([`ui/`](../ui/README.md)), served by both implementations at the start-up URL:
 the missions list, and per mission its live state, open-gate banner (answered with a name),
-steering, snooze and abort, the checklist, the live timeline, gates and spend. About 15 KB of
-gzipped JavaScript. Still to come: dependency view, per-item attempts and diffs, spend charts.
+steering, snooze and abort, the checklist with each item's history (its cycles, their spend and
+the events about it), the live timeline, gates, and spend by role and by model. About 15 KB of
+gzipped JavaScript. Still to come: a dependency view, diffs, spend charts.
 
 Every mission the store knows, live as their rows change:
 
@@ -221,10 +229,22 @@ CORS; a gate answer requires a name, recorded on the gate row.
 
 ## Phase 3: MCP
 
-The same server answers MCP at `/mcp`, and `lha mcp --stdio` serves desktop clients. Tools: list
-missions, status, report, item detail, timeline, costs, steer and snooze. **No gate answers and no
-abort over MCP**, pinned by a test: an agent must not be able to approve its own irreversible
-actions, which is what the human gate exists to prevent.
+Status: built in both implementations. `lha serve` answers MCP at `/mcp` (Streamable HTTP answered
+with plain JSON, the token as `Authorization: Bearer` or `X-LHA-Token`), and `lha mcp` serves a
+client on stdin and stdout. Tools, each one operation of the UI API: `server_health`,
+`list_missions`, `get_mission`, `list_items`, `get_item`, `list_events`, `list_costs`,
+`list_gates`, `steer_mission` and `snooze_mission`. A call goes through the server's own routes in
+process, so a tool answers exactly what its operation answers: the response is the result's
+`structuredContent`, and an error response is a result with `isError` and the API's error body.
+
+**No gate answers, no abort and no checklist edits over MCP**, pinned by the contract
+(`not_tools` in `spec/serve/mcp.json`) and by cases that call them: an agent must not be able to
+approve its own irreversible actions, which is what the human gate exists to prevent, nor to end
+or re-plan a mission. Those stay with the UI and the `mission-*` commands.
+
+```bash
+claude mcp add lha -- lha mcp
+```
 
 ## Phase 4 (optional): `lha watch`
 

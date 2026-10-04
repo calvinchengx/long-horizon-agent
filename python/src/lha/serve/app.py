@@ -37,15 +37,18 @@ from starlette.routing import Route
 from lha.config import Settings
 from lha.persistence.store import (
     TERMINAL_STATUSES,
+    CostRow,
     CostSummary,
     EventRow,
     GateRow,
     MissionRow,
     MissionStore,
 )
+from lha.serve.mcp import INVALID_REQUEST, PARSE_ERROR, Mcp
+from lha.serve.mcp import error as rpc_error
 from lha.state.mission_anchor import ANCHOR_DIR, GitMissionAnchor
 
-API_VERSION = "1.0.0"
+API_VERSION = "1.1.0"
 IMPLEMENTATION = "python"
 #: How long a mission's live state (its workflow's query answers) is reused.
 LIVE_TTL_S = 3.0
@@ -528,12 +531,94 @@ async def list_events(request: Request) -> Response:
 
 
 @_route()
+async def get_item(request: Request) -> Response:
+    app = _app(request)
+    limit = _int(request, "limit", 200, 1, 1000) or 200
+    row = await app.mission(request.path_params["mission_id"])
+    items = await _items(row)
+    if items is None:
+        raise ApiError(
+            404, "anchor_unavailable", f"the anchor at {row.workdir!r} cannot be read here"
+        )
+    item_id = request.path_params["item_id"]
+    item = next((i for i in items if i["id"] == item_id), None)
+    if item is None:
+        raise ApiError(404, "not_found", f"no item {item_id!r} in {row.mission_id!r}")
+    events, ledger = await asyncio.gather(
+        _all_events(app.store, row.mission_id),
+        app.store.list_costs(row.mission_id, limit=_LEDGER_ALL),
+    )
+    cycles: list[str] = []
+    for e in events:
+        if e.cycle_id and e.cycle_id not in cycles and item_id in _named(e.payload, False):
+            cycles.append(e.cycle_id)
+    about = [e for e in events if e.cycle_id in cycles or item_id in _named(e.payload, True)]
+    return JSONResponse(
+        {
+            "item": item,
+            "dependents": [i["id"] for i in items if item_id in i["depends_on"]],
+            "cycles": cycles,
+            "spend": _sum_costs([c for c in ledger if c.cycle_id in cycles]),
+            "events": [_event(e) for e in about[-limit:]],
+            "events_total": len(about),
+        }
+    )
+
+
+#: "All of a mission's cost ledger" for the routes that sum it.
+_LEDGER_ALL = 1_000_000
+
+
+async def _all_events(store: MissionStore, mission_id: str) -> list[EventRow]:
+    events: list[EventRow] = []
+    while True:
+        page = await store.read_mission_events(
+            mission_id=mission_id, after_id=events[-1].id if events else 0, limit=1000
+        )
+        events += page
+        if len(page) < 1000:
+            return events
+
+
+def _named(payload: dict[str, Any], with_waves: bool) -> list[str]:
+    """The item ids an event's payload names (``items`` too when ``with_waves``)."""
+    named = [v for k in ("item_id", "item") if isinstance(v := payload.get(k), str)]
+    waves = payload.get("items")
+    if with_waves and isinstance(waves, list):
+        named += [v for v in waves if isinstance(v, str)]
+    return named
+
+
+def _sum_costs(rows: list[CostRow], key: str = "") -> dict[str, Any]:
+    """Spend summed like the store's ``cost_summary``: an unknown cost is counted, never $0."""
+    known = [c for c in rows if c.cost_known]
+    group = {"key": key} if key else {}
+    return {
+        **group,
+        "calls": len(rows),
+        "known_usd": sum(c.usd or 0.0 for c in known),
+        "unknown_cost_calls": len(rows) - len(known),
+        "input_tokens": sum(c.input_tokens for c in rows),
+        "output_tokens": sum(c.output_tokens for c in rows),
+    }
+
+
+def _by(rows: list[CostRow], field: str) -> list[dict[str, Any]]:
+    groups: dict[str, list[CostRow]] = {}
+    for c in rows:
+        groups.setdefault(getattr(c, field), []).append(c)
+    summed = [_sum_costs(group, key) for key, group in groups.items()]
+    return sorted(summed, key=lambda g: (-g["known_usd"], g["key"]))
+
+
+@_route()
 async def list_costs(request: Request) -> Response:
     app = _app(request)
     limit = _int(request, "limit", 100, 1, 1000) or 100
     row = await app.mission(request.path_params["mission_id"])
-    summary, rows = await asyncio.gather(
-        app.store.cost_summary(row.mission_id), app.store.list_costs(row.mission_id, limit=limit)
+    summary, ledger = await asyncio.gather(
+        app.store.cost_summary(row.mission_id),
+        app.store.list_costs(row.mission_id, limit=_LEDGER_ALL),
     )
     calls = [
         {
@@ -545,9 +630,16 @@ async def list_costs(request: Request) -> Response:
             "usd": c.usd if c.cost_known else None,
             "ts": c.ts,
         }
-        for c in reversed(rows)
+        for c in reversed(ledger[-limit:])
     ]
-    return JSONResponse({"summary": _spend(summary), "calls": calls})
+    return JSONResponse(
+        {
+            "summary": _spend(summary),
+            "by_role": _by(ledger, "role"),
+            "by_model": _by(ledger, "model"),
+            "calls": calls,
+        }
+    )
 
 
 @_route()
@@ -774,6 +866,33 @@ async def not_found(request: Request) -> Response:
     raise ApiError(404, "not_found", f"no route {request.url.path}")
 
 
+async def mcp_endpoint(request: Request) -> Response:
+    """MCP (spec/serve/mcp.json): JSON-RPC over ``POST``, answered with plain JSON. A client sends
+    the token as ``X-LHA-Token`` or ``Authorization: Bearer``; the UI's cookie is not enough."""
+    app = _app(request)
+    token = request.headers.get("x-lha-token")
+    bearer = request.headers.get("authorization", "")
+    if token is None and bearer[:7].lower() == "bearer ":
+        token = bearer[7:].strip()
+    try:
+        _guard_host(request)
+        if token is None or not hmac.compare_digest(token.encode(), app.token.encode()):
+            raise ApiError(401, "unauthorized", "a valid X-LHA-Token or bearer token is required")
+    except ApiError as exc:
+        return _error(exc.status, exc.code, exc.message)
+    try:
+        message = json.loads(await request.body())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return JSONResponse(rpc_error(None, PARSE_ERROR, "not JSON"), status_code=400)
+    response = await request.app.state.mcp.handle(message)
+    if response is None:
+        return Response(status_code=202)
+    code = response.get("error", {}).get("code")
+    return JSONResponse(
+        response, status_code=400 if code in (PARSE_ERROR, INVALID_REQUEST) else 200
+    )
+
+
 #: The UI bundle (built from ui/ by ui/bundle.sh; the Go server embeds the same files).
 UI_DIR = Path(__file__).parent / "ui"
 _TOKEN_META = '<meta name="lha-token" content="" />'
@@ -844,6 +963,7 @@ API_ROUTES: list[tuple[str, str, Handler]] = [
     ("GET", "/api/v1/missions", list_missions),
     ("GET", "/api/v1/missions/{mission_id}", get_mission),
     ("GET", "/api/v1/missions/{mission_id}/items", list_items),
+    ("GET", "/api/v1/missions/{mission_id}/items/{item_id}", get_item),
     ("GET", "/api/v1/missions/{mission_id}/events", list_events),
     ("GET", "/api/v1/missions/{mission_id}/costs", list_costs),
     ("GET", "/api/v1/missions/{mission_id}/gates", list_gates),
@@ -870,8 +990,14 @@ def create_app(app: App) -> Starlette:
         Route("/", app_page, methods=["GET"]),
         Route("/missions/{rest:path}", app_page, methods=["GET"]),
         Route("/assets/{name}", asset, methods=["GET"]),
+        Route("/mcp", mcp_endpoint, methods=["POST"]),
         Route("/api/{rest:path}", not_found, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]),
     ]
+    from lha import __version__
+
     starlette = Starlette(routes=routes, lifespan=lifespan)
     starlette.state.lha = app
+    starlette.state.mcp = Mcp(
+        starlette, host=f"127.0.0.1:{app.port}", token=app.token, version=__version__
+    )
     return starlette

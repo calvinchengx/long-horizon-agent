@@ -1074,8 +1074,11 @@ def _path_matches(template: str, path: str) -> bool:
 
 
 def test_every_ui_api_operation_and_status_has_a_case() -> None:
+    import re
+
     api = _load("serve/openapi.json")
-    assert api["openapi"] == "3.1.0" and api["info"]["version"] == "1.0.0"
+    # Within /api/v1 the API only grows (a minor version); the health case pins the servers' own.
+    assert api["openapi"] == "3.1.0" and re.fullmatch(r"1\.\d+\.\d+", api["info"]["version"])
     assert api["servers"][0]["url"].startswith("http://127.0.0.1:")
     declared_tags = {t["name"] for t in api["tags"]}
     operations: dict[str, tuple[str, str, set[str]]] = {}
@@ -1126,3 +1129,60 @@ def test_every_ui_api_operation_and_status_has_a_case() -> None:
     assert {g["mission_id"] for g in fixture["gates"]} <= {
         m["mission_id"] for m in fixture["missions"]
     }
+
+
+def test_every_operation_is_an_mcp_tool_or_refused_and_every_tool_has_a_case() -> None:
+    """spec/serve/mcp.json: each operation is one tool, or not a tool for a stated reason; no
+    agent gets the gate answer or abort (pinned); every tool and protocol method has a case."""
+    import re
+
+    api, mcp = _load("serve/openapi.json"), _load("serve/mcp.json")
+    operations = {
+        op["operationId"]: (method.upper(), template)
+        for template, methods in api["paths"].items()
+        for method, op in methods.items()
+    }
+    assert mcp["description"] and re.fullmatch(r"\d{4}-\d{2}-\d{2}", mcp["protocol_version"])
+    assert mcp["server"]["name"] == "lha"
+    tools = {t["name"]: t for t in mcp["tools"]}
+    assert len(tools) == len(mcp["tools"]), "a tool name repeats"
+    as_tools = [t["operation"] for t in mcp["tools"]]
+    assert sorted(as_tools + list(mcp["not_tools"])) == sorted(operations), (
+        "every operation is exactly one tool or one of not_tools"
+    )
+    assert {"decideGate", "abortMission"} <= set(mcp["not_tools"])
+    for tool in mcp["tools"]:
+        assert (tool["method"], tool["path"]) == operations[tool["operation"]], tool["name"]
+        assert "$ref" not in json.dumps(tool["inputSchema"]), f"{tool['name']}: a $ref"
+        assert set(tool["arguments"]) == set(tool["inputSchema"]["properties"]), tool["name"]
+        assert tool["annotations"]["readOnlyHint"] == (tool["method"] == "GET"), tool["name"]
+    for copy in ("python/src/lha/serve/mcp.json", "go/internal/serve/mcp.json"):
+        assert (SPEC.parent / copy).read_text() == (SPEC / "serve/mcp.json").read_text(), (
+            f"{copy} is stale: run python/scripts/export_spec.py"
+        )
+
+    spec_cases = _load("serve/mcp_cases.json")
+    assert spec_cases["description"]
+    cases = spec_cases["cases"]
+    methods = {
+        c["request"]["body"].get("method") for c in cases if isinstance(c["request"]["body"], dict)
+    }
+    assert {
+        "initialize",
+        "ping",
+        "tools/list",
+        "tools/call",
+        "notifications/initialized",
+    } <= methods
+    called = [
+        (c["request"]["body"]["params"]["name"], c["expect"])
+        for c in cases
+        if isinstance(c["request"]["body"], dict)
+        and c["request"]["body"].get("method") == "tools/call"
+    ]
+    answered = {name for name, expect in called if expect.get("result", {}).get("isError") is False}
+    assert answered == set(tools), f"no successful call of: {sorted(set(tools) - answered)}"
+    refused = {name for name, expect in called if expect.get("error", {}).get("code") == -32602}
+    assert {"decide_gate", "abort_mission"} <= refused
+    assert all(c.get("transport") in (None, "http", "stdio") for c in cases)
+    assert all(c.get("temporal") in (None, "absent", "running") for c in cases)

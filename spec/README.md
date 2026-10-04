@@ -18,6 +18,8 @@ the matching package is ported; it runs every file below.
 | `serve/openapi.json` | the UI API every implementation's `lha serve` provides (OpenAPI 3.1; [serve/README.md](serve/README.md)) |
 | `serve/cases.json` | the UI API's conformance cases: a request and its expected status, error and body, run against any implementation's server |
 | `serve/fixture.json` | the mission store rows and anchors the UI API's cases run against |
+| `serve/mcp.json` | the UI API's operations as MCP tools (generated from `serve/openapi.json`), and the operations that are not tools and why |
+| `serve/mcp_cases.json` | the MCP conformance cases, run over each implementation's `/mcp` and `lha mcp` (stdio) |
 | `contracts/check_names.json` | verification check names derived from argv, and de-duplication |
 | `state/checklist.json` | next actionable item, completion, deadlock reasons, status transitions |
 | `state/checklist_edit.json` | operator edit batches (`lha mission-edit`): the resulting checklist and summary lines, or the exact refusal with the checklist unchanged; the `(witness: ...)` description suffix; the next item id |

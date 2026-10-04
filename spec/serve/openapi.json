@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "LHA mission API",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "description": "The API every LHA implementation's `lha serve` provides, and the only thing the mission UI and MCP clients depend on (docs/27-mission-ui.md). Any implementation's server reads any implementation's missions: it reads the mission store, the `.lha/` anchor, `mission_events` and the Temporal wire contract only.\n\nThe server binds to 127.0.0.1 and refuses a request whose `Host` is not its own loopback address. Every request needs the token printed at start-up: as the `X-LHA-Token` header, or (reads only) the `lha_token` cookie the UI's start-up URL sets. No CORS.\n\nCompatibility: within `/api/v1`, changes are additive only (new paths, new optional fields, new event kinds). A client ignores fields and event kinds it does not know.",
     "license": {
       "name": "MIT",
@@ -327,6 +327,154 @@
         }
       }
     },
+    "/api/v1/missions/{mission_id}/items/{item_id}": {
+      "get": {
+        "operationId": "getItem",
+        "summary": "One checklist item: its dependents, its cycles, their spend and the events about it",
+        "description": "An event is about the item when its payload's `item_id` or `item` is the item's id, its `items` holds the id, or it was recorded in one of the item's cycles. The item's cycles are the (non-empty) `cycle_id`s of the events whose `item_id` or `item` is the item's id, in the order first recorded; `spend` sums the cost ledger's calls in those cycles.",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The checklist item id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 200
+            },
+            "description": "How many of the item's events to return: the most recent ones."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The item and what was recorded about it.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "item": {
+                      "$ref": "#/components/schemas/ChecklistItem"
+                    },
+                    "dependents": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "The ids of the items that depend on this one, in checklist order."
+                    },
+                    "cycles": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "spend": {
+                      "$ref": "#/components/schemas/CostSummary"
+                    },
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/MissionEvent"
+                      },
+                      "description": "The most recent `limit` events about the item, oldest first."
+                    },
+                    "events_total": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "How many events are about the item."
+                    }
+                  },
+                  "required": [
+                    "cycles",
+                    "dependents",
+                    "events",
+                    "events_total",
+                    "item",
+                    "spend"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission or item (`not_found`), or the mission's anchor cannot be read here (`anchor_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/missions/{mission_id}/events": {
       "get": {
         "operationId": "listEvents",
@@ -452,7 +600,7 @@
     "/api/v1/missions/{mission_id}/costs": {
       "get": {
         "operationId": "listCosts",
-        "summary": "The mission's cost ledger: totals and the most recent calls",
+        "summary": "The mission's cost ledger: totals, totals by role and by model, and the most recent calls",
         "tags": [
           "missions"
         ],
@@ -504,9 +652,25 @@
                       "items": {
                         "$ref": "#/components/schemas/CostCall"
                       }
+                    },
+                    "by_role": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CostGroup"
+                      },
+                      "description": "The whole ledger summed by role: the largest known spend first, then by role."
+                    },
+                    "by_model": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/CostGroup"
+                      },
+                      "description": "The whole ledger summed by model: the largest known spend first, then by model."
                     }
                   },
                   "required": [
+                    "by_model",
+                    "by_role",
                     "calls",
                     "summary"
                   ],
@@ -2796,6 +2960,45 @@
           "status"
         ],
         "additionalProperties": false
+      },
+      "CostGroup": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The role or model."
+          },
+          "calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "known_usd": {
+            "type": "number",
+            "minimum": 0
+          },
+          "unknown_cost_calls": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "input_tokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "output_tokens": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "calls",
+          "input_tokens",
+          "key",
+          "known_usd",
+          "output_tokens",
+          "unknown_cost_calls"
+        ],
+        "additionalProperties": false,
+        "description": "The spend of the calls sharing a role or a model, summed like `CostSummary`."
       }
     }
   }

@@ -1,5 +1,5 @@
 // The UI API client: spec/serve/openapi.json, types generated into api.gen.ts (`npm run gen`).
-import type { components } from "./api.gen";
+import type { components, paths } from "./api.gen";
 
 type S = components["schemas"];
 export type MissionSummary = S["MissionSummary"];
@@ -8,6 +8,14 @@ export type ChecklistItem = S["ChecklistItem"];
 export type MissionEvent = S["MissionEvent"];
 export type CostSummary = S["CostSummary"];
 export type CostCall = S["CostCall"];
+export type CostGroup = S["CostGroup"];
+type Ok<P extends keyof paths, M extends "get" | "post"> = P extends keyof paths
+  ? paths[P][M] extends { responses: { 200: { content: { "application/json": infer T } } } }
+    ? T
+    : never
+  : never;
+export type ItemDetail = Ok<"/api/v1/missions/{mission_id}/items/{item_id}", "get">;
+export type Costs = Ok<"/api/v1/missions/{mission_id}/costs", "get">;
 export type Gate = S["Gate"];
 export type OpenGate = S["OpenGate"];
 export type ChecklistEdit = S["ChecklistEdit"];
@@ -59,13 +67,14 @@ export const api = {
     request<{ missions: MissionSummary[] }>("GET", `/api/v1/missions?limit=${limit}`),
   mission: (id: string) => request<MissionDetail>("GET", m(id)),
   items: (id: string) => request<{ items: ChecklistItem[] }>("GET", `${m(id)}/items`),
+  item: (id: string, itemId: string, limit = 200) =>
+    request<ItemDetail>("GET", `${m(id)}/items/${encodeURIComponent(itemId)}?limit=${limit}`),
   events: (id: string, after = 0, limit = 1000) =>
     request<{ events: MissionEvent[]; next_after: number }>(
       "GET",
       `${m(id)}/events?after=${after}&limit=${limit}`,
     ),
-  costs: (id: string, limit = 200) =>
-    request<{ summary: CostSummary; calls: CostCall[] }>("GET", `${m(id)}/costs?limit=${limit}`),
+  costs: (id: string, limit = 200) => request<Costs>("GET", `${m(id)}/costs?limit=${limit}`),
   gates: (id: string) => request<{ gates: Gate[] }>("GET", `${m(id)}/gates`),
   steer: (id: string, note: string) => request("POST", `${m(id)}/steer`, { note }),
   snooze: (id: string, seconds: number) => request("POST", `${m(id)}/snooze`, { seconds }),

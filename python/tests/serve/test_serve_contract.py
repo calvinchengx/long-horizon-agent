@@ -7,6 +7,8 @@ the server under test, sends each case's request and checks the status, the erro
 
 - ``LHA_SERVE_CMD``: the server command (default: this Python's ``lha serve``), e.g.
   ``/tmp/lha serve`` for the Go binary.
+- ``LHA_MCP_CMD``: the stdio MCP server command (default: this Python's ``lha mcp``); the MCP
+  cases (spec/serve/mcp_cases.json) run over it and over the server's ``/mcp``.
 - ``LHA_SERVE_TEMPORAL``: a Temporal address. Set, a fake mission workflow runs there
   (``fake_mission.py``) and the ``running`` cases run; unset, Temporal is unreachable and the
   ``absent`` cases run.
@@ -45,6 +47,8 @@ SPEC = Path(__file__).resolve().parents[3] / "spec"
 API = json.loads((SPEC / "serve/openapi.json").read_text())
 CASES = json.loads((SPEC / "serve/cases.json").read_text())["cases"]
 FIXTURE = json.loads((SPEC / "serve/fixture.json").read_text())
+MCP = json.loads((SPEC / "serve/mcp.json").read_text())
+MCP_CASES = json.loads((SPEC / "serve/mcp_cases.json").read_text())["cases"]
 TOKEN = "conformance-token"
 _API_URI = "https://lha.invalid/spec/serve/openapi.json"
 _EVENTS_URI = "https://lha.invalid/spec/obs/mission_events.json"
@@ -128,10 +132,11 @@ def _server_command() -> list[str]:
 
 
 class Server:
-    def __init__(self, base: str, proc: subprocess.Popen[str]) -> None:
+    def __init__(self, base: str, proc: subprocess.Popen[str], env: dict[str, str]) -> None:
         self.base = base
         self.proc = proc
         self.host = base.removeprefix("http://")
+        self.env = env
 
 
 @pytest.fixture(scope="module")
@@ -183,7 +188,7 @@ def server(tmp_path_factory: pytest.TempPathFactory, fake_workflow: None) -> Ite
         pytest.fail(f"the server did not announce itself: {line!r}\n{err[-2000:]}")
     assert match.group(2) == TOKEN
     try:
-        yield Server(match.group(1), proc)
+        yield Server(match.group(1), proc, env)
     finally:
         proc.terminate()
         try:
@@ -273,6 +278,8 @@ def _headers(server: Server, request: dict[str, Any]) -> dict[str, str]:
         headers["Cookie"] = f"lha_token={TOKEN}"
     elif auth == "wrong":
         headers["X-LHA-Token"] = "not-the-token"
+    elif auth == "bearer":
+        headers["Authorization"] = f"Bearer {TOKEN}"
     return headers
 
 
@@ -366,6 +373,157 @@ def _check_signal(expected: dict[str, Any]) -> None:
 def _ordered(cases: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Every case, with the abort that ends the fake workflow last."""
     return sorted(cases, key=lambda c: c["expect"].get("signal", {}).get("name") == "$cancel")
+
+
+# --- MCP (spec/serve/mcp.json, mcp_cases.json) --------------------------------------------------
+def _mcp_command() -> list[str]:
+    configured = os.environ.get("LHA_MCP_CMD")
+    if configured:
+        return shlex.split(configured)
+    return [str(Path(sys.executable).parent / "lha"), "mcp"]
+
+
+class Stdio:
+    """``lha mcp`` on a pipe: one JSON-RPC message per line each way."""
+
+    def __init__(self, proc: subprocess.Popen[str]) -> None:
+        self.proc = proc
+        self.pings = 0
+
+    def send(self, body: Any) -> None:
+        assert self.proc.stdin is not None
+        line = "{not json" if body == "$not-json" else json.dumps(body)
+        self.proc.stdin.write(line + "\n")
+        self.proc.stdin.flush()
+
+    def receive(self) -> dict[str, Any]:
+        assert self.proc.stdout is not None
+        line = self.proc.stdout.readline()
+        assert line, f"lha mcp exited ({self.proc.poll()})"
+        return json.loads(line)
+
+    def no_response(self) -> None:
+        """Nothing was answered: the next line answers a ping sent after the message."""
+        self.pings += 1
+        self.send({"jsonrpc": "2.0", "id": f"after-{self.pings}", "method": "ping"})
+        assert self.receive()["id"] == f"after-{self.pings}"
+
+
+@pytest.fixture(scope="module")
+def stdio(server: Server) -> Iterator[Stdio]:
+    proc = subprocess.Popen(
+        _mcp_command(),
+        env=server.env,
+        cwd=Path(__file__).resolve().parents[2],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        yield Stdio(proc)
+    finally:
+        try:
+            _, err = proc.communicate(timeout=10)  # closes stdin: lha mcp exits
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            _, err = proc.communicate()
+        if err.strip():
+            print(f"--- lha mcp stderr ---\n{err[-5000:]}")
+
+
+def _mcp_tools_as_listed() -> list[dict[str, Any]]:
+    keys = ("name", "title", "description", "inputSchema", "annotations")
+    return [{k: t[k] for k in keys} for t in MCP["tools"]]
+
+
+def _check_mcp(case: dict[str, Any], response: dict[str, Any]) -> None:
+    expect = case["expect"]
+    body = case["request"]["body"]
+    assert response["jsonrpc"] == "2.0"
+    if "id" in expect:
+        assert response["id"] == expect["id"]
+    elif isinstance(body, dict) and "id" in body:
+        assert response["id"] == body["id"]
+    if "error" in expect:
+        assert "result" not in response, response
+        errors = _subset(expect["error"], response["error"])
+        assert not errors, (errors, response)
+        return
+    assert "error" not in response, response
+    result = response["result"]
+    if "result" in expect:
+        want = expect["result"]
+        if want.get("tools") == "$spec":
+            assert result["tools"] == _mcp_tools_as_listed()
+            want = {k: v for k, v in want.items() if k != "tools"}
+        errors = _subset(want, result)
+        assert not errors, (errors, result)
+    if body.get("method") == "tools/call":
+        tool = next(t for t in MCP["tools"] if t["name"] == body["params"]["name"])
+        if "tool_error" in expect:
+            assert result["isError"] is True, result
+            assert result["structuredContent"]["error"]["code"] == expect["tool_error"], result
+        content = result["structuredContent"]
+        assert result["content"][0]["type"] == "text"
+        if result["isError"]:
+            assert not _schema_errors("", 0, "", content)
+        else:
+            # The tool answers exactly its operation's response.
+            assert json.loads(result["content"][0]["text"]) == content
+            status = 202 if tool["method"] == "POST" else 200
+            errors = _schema_errors(tool["operation"], status, "application/json", content)
+            assert not errors, errors
+    if "signal" in expect:
+        _check_signal(expect["signal"])
+
+
+def _mcp_cases(transport: str) -> list[dict[str, Any]]:
+    return [c for c in MCP_CASES if c.get("transport", transport) == transport]
+
+
+@pytest.mark.parametrize("case", _mcp_cases("http"), ids=[c["name"] for c in _mcp_cases("http")])
+def test_mcp_http(server: Server, case: dict[str, Any]) -> None:
+    if case.get("temporal") not in (None, MODE):
+        pytest.skip(f"needs Temporal {case['temporal']}")
+    request = case["request"]
+    method = request.get("method", "POST")
+    headers = _headers(server, request)
+    if request.get("auth", "header") == "bearer":
+        headers.pop("X-LHA-Token", None)
+    body = request["body"]
+    content = b"{not json" if body == "$not-json" else json.dumps(body).encode()
+    if method == "POST":
+        headers["Content-Type"] = "application/json"
+        headers["Accept"] = "application/json, text/event-stream"
+    resp = httpx.request(
+        method,
+        server.base + "/mcp",
+        headers=headers,
+        content=content if method == "POST" else None,
+        timeout=30,
+    )
+    expect = case["expect"]
+    assert resp.status_code == expect.get("status", 200), resp.text[:1000]
+    if expect.get("no_response") or resp.status_code in (401, 403, 405):
+        if resp.status_code in (401, 403):
+            assert not _schema_errors("", 0, "", resp.json())
+        if expect.get("no_response"):
+            assert not resp.content
+        return
+    assert resp.headers["content-type"].startswith("application/json")
+    _check_mcp(case, resp.json())
+
+
+@pytest.mark.parametrize("case", _mcp_cases("stdio"), ids=[c["name"] for c in _mcp_cases("stdio")])
+def test_mcp_stdio(stdio: Stdio, case: dict[str, Any]) -> None:
+    if case.get("temporal") not in (None, MODE):
+        pytest.skip(f"needs Temporal {case['temporal']}")
+    stdio.send(case["request"]["body"])
+    if case["expect"].get("no_response"):
+        stdio.no_response()
+        return
+    _check_mcp(case, stdio.receive())
 
 
 @pytest.mark.parametrize("case", _ordered(CASES), ids=[c["name"] for c in _ordered(CASES)])

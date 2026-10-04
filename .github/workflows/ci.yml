@@ -65,8 +65,9 @@ jobs:
           changed="$(git status --porcelain -- . ../python/src/lha/serve/ui ../go/internal/serve/ui)"
           if [ -n "$changed" ]; then echo "rebuild the UI (ui/bundle.sh) and commit:"; echo "$changed"; exit 1; fi
 
-      # Every case in spec/serve/cases.json against this implementation's `lha serve`, with
-      # Temporal unreachable (the fake-workflow run follows the dev server below).
+      # Every case in spec/serve/cases.json and mcp_cases.json against this implementation's
+      # `lha serve` and `lha mcp`, with Temporal unreachable (the fake-workflow run follows the
+      # dev server below).
       - name: UI API conformance (no Temporal)
         run: uv run pytest -q --cov --cov-append --cov-report= --cov-fail-under=0 tests/serve
 
@@ -221,15 +222,16 @@ jobs:
           LHA_TRACE_AUDIT_CHECK: ${{ runner.temp }}/trace-audit
         run: go test -count=1 -run TestTraceAudit ./internal/spec
 
-      # Every case in spec/serve/cases.json against the Go `lha serve` (the same black-box runner
-      # the Python server passes), with Temporal unreachable, then with the fake mission workflow.
+      # Every case in spec/serve/cases.json and mcp_cases.json against the Go `lha serve` and
+      # `lha mcp` (the same black-box runner the Python server passes), with Temporal unreachable,
+      # then with the fake mission workflow.
       - name: UI API conformance (Go server)
         run: |
           go build -o "$RUNNER_TEMP/lha-go" ./cmd/lha
           cd ../python
-          LHA_SERVE_CMD="$RUNNER_TEMP/lha-go serve" uv run pytest -q tests/serve
-          LHA_SERVE_CMD="$RUNNER_TEMP/lha-go serve" LHA_SERVE_TEMPORAL=127.0.0.1:7233 \
-            uv run pytest -q tests/serve
+          export LHA_SERVE_CMD="$RUNNER_TEMP/lha-go serve" LHA_MCP_CMD="$RUNNER_TEMP/lha-go mcp"
+          uv run pytest -q tests/serve
+          LHA_SERVE_TEMPORAL=127.0.0.1:7233 uv run pytest -q tests/serve
 
   python-services-integration:
     # Real Postgres + pgvector (migrations, cost ledger, semantic memory) and the real Docker

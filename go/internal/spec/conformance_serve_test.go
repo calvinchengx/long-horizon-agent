@@ -1,7 +1,10 @@
 package spec
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -88,5 +91,63 @@ func TestServeFixtureEventsMatchTheirSchemas(t *testing.T) {
 	}
 	if len(fixture["missions"].([]any)) == 0 || len(fixture["anchors"].(map[string]any)) == 0 {
 		t.Fatal("no missions or anchors")
+	}
+}
+
+// MCP (spec/serve/mcp.json): the embedded copy is the spec's, and every tool is one Go route.
+// The MCP cases themselves run against lha serve's /mcp and lha mcp in CI (LHA_MCP_CMD).
+func TestServeMCPToolsAreTheSpecsAndMapOntoRoutes(t *testing.T) {
+	want, err := os.ReadFile(filepath.Join(Dir(), "serve", "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join("..", "serve", "mcp.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatal("go/internal/serve/mcp.json is stale: run python/scripts/export_spec.py")
+	}
+	var spec struct {
+		Description     string            `json:"description"`
+		ProtocolVersion string            `json:"protocol_version"`
+		Server          map[string]string `json:"server"`
+		Tools           []serve.MCPTool   `json:"tools"`
+		NotTools        map[string]string `json:"not_tools"`
+	}
+	Load(t, "serve/mcp.json", &spec)
+	if len(spec.Tools) == 0 || spec.ProtocolVersion != serve.MCP.ProtocolVersion || len(spec.Tools) != len(serve.MCP.Tools) {
+		t.Fatal("mcp.json did not parse as serve.MCP")
+	}
+	// Every case calls a tool lha serve has, or one the contract refuses.
+	var cases struct {
+		Description string           `json:"description"`
+		Cases       []map[string]any `json:"cases"`
+	}
+	Load(t, "serve/mcp_cases.json", &cases)
+	refused := map[string]bool{"decide_gate": true, "abort_mission": true, "edit_checklist": true, "rm_rf": true}
+	for _, c := range cases.Cases {
+		body, _ := c["request"].(map[string]any)["body"].(map[string]any)
+		if body["method"] != "tools/call" {
+			continue
+		}
+		name, _ := body["params"].(map[string]any)["name"].(string)
+		if !refused[name] && !slices.ContainsFunc(serve.MCP.Tools, func(t serve.MCPTool) bool { return t.Name == name }) {
+			t.Errorf("case %v: no tool %s", c["name"], name)
+		}
+	}
+	for _, tool := range serve.MCP.Tools {
+		found := false
+		for _, r := range serve.Routes {
+			found = found || (r.Method == tool.Method && r.Path == tool.Path)
+		}
+		if !found {
+			t.Errorf("tool %s: no route %s %s", tool.Name, tool.Method, tool.Path)
+		}
+	}
+	for _, refused := range []string{"decideGate", "abortMission"} {
+		if serve.MCP.NotTools[refused] == "" {
+			t.Errorf("%s must not be an MCP tool", refused)
+		}
 	}
 }
