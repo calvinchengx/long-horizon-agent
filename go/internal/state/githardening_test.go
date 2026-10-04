@@ -118,7 +118,7 @@ func TestHarnessArgvCarriesTheHardeningOverrides(t *testing.T) {
 			pairs = append(pairs, argv[i+1])
 		}
 	}
-	for _, want := range []string{"core.hooksPath=" + os.DevNull, "core.fsmonitor=false", "filter.Lfs.clean="} {
+	for _, want := range []string{"core.hooksPath=" + os.DevNull, "core.fsmonitor=false", "gc.autoDetach=false", "filter.Lfs.clean="} {
 		if !slices.Contains(pairs, want) {
 			t.Errorf("missing -c %s in %v", want, pairs)
 		}

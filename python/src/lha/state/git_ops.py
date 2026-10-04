@@ -72,6 +72,9 @@ HARDENING_CONFIG: tuple[tuple[str, str], ...] = (
     ("tag.gpgSign", "false"),
     ("gpg.program", ""),
     ("protocol.allow", "never"),  # push/fetch-free: no transport, no remote helper
+    # A commit's `gc --auto` runs in the call, never as a background process that outlives it
+    # and repacks the repository under the next git command (or a copy of the workspace).
+    ("gc.autoDetach", "false"),
 )
 
 # Attribute-driven drivers: the attribute (agent-writable) only names one; config defines it.

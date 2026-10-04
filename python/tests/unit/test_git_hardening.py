@@ -142,6 +142,7 @@ def test_harness_argv_carries_the_hardening_overrides(tmp_path: Path) -> None:
     pairs = [argv[i + 1] for i, a in enumerate(argv) if a == "-c"]
     assert f"core.hooksPath={os.devnull}" in pairs
     assert "core.fsmonitor=false" in pairs
+    assert "gc.autoDetach=false" in pairs  # no background gc outlives a call
     assert "filter.Lfs.clean=" in pairs
     # plumbing that never runs a driver skips the config enumeration
     assert "filter.Lfs.clean=" not in git_ops.git_argv(repo, ["rev-parse", "HEAD"])
