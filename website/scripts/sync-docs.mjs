@@ -24,7 +24,12 @@ const LINK_RE = /\]\((?:\.\/)?(\d{2}-[a-z0-9-]+)\.md(#[^)]*)?\)/g;
 // `](../path#anchor)` -> an absolute GitHub URL (tree for directories, blob for files).
 const REPO_LINK_RE = /\]\(\.\.\/([^)#\s]+)(#[^)]*)?\)/g;
 // `](predicted-runs/x.md)` and other in-docs, non-chapter files -> GitHub URLs too.
-const DOCS_FILE_RE = /\]\((?!https?:|#|\/|\.\.\/|\d{2}-[a-z0-9-]+\.md)([^)#\s]+)(#[^)]*)?\)/g;
+const DOCS_FILE_RE = /\]\((?!https?:|#|\/|\.\.\/|images\/|\d{2}-[a-z0-9-]+\.md)([^)#\s]+)(#[^)]*)?\)/g;
+// Images under docs/images/ (Markdown `](images/x.png)`, or `src`/`srcset` in a <picture>) are
+// copied to public/images/ and served by the site itself.
+const IMAGE_RE = /(\]\(|src="|srcset=")images\//g;
+const IMAGES_SRC = join(DOCS_SRC, 'images');
+const IMAGES_OUT = join(here, '..', 'public', 'images');
 
 let warnings = 0;
 
@@ -49,6 +54,7 @@ function rewriteLinks(md, where) {
       }
       return `](${BASE}${slug}/${anchor ?? ''})`;
     })
+    .replace(IMAGE_RE, (_m, lead) => `${lead}${BASE}images/`)
     .replace(REPO_LINK_RE, (_m, path, anchor) => `](${githubUrl(path, anchor, where)})`)
     .replace(DOCS_FILE_RE, (_m, path, anchor) => `](${githubUrl(`docs/${path}`, anchor, where)})`);
 }
@@ -73,6 +79,11 @@ mkdirSync(OUT, { recursive: true });
 const names = readdirSync(DOCS_SRC).filter((n) => DOC_RE.test(n)).sort();
 for (const name of names) writeFileSync(join(OUT, name), convert(name));
 copyFileSync(LANDING, join(OUT, 'index.mdx'));
+rmSync(IMAGES_OUT, { recursive: true, force: true });
+if (existsSync(IMAGES_SRC)) {
+  mkdirSync(IMAGES_OUT, { recursive: true });
+  for (const image of readdirSync(IMAGES_SRC)) copyFileSync(join(IMAGES_SRC, image), join(IMAGES_OUT, image));
+}
 console.log(`sync-docs: wrote ${names.length} docs + the landing page to src/content/docs/`);
 if (warnings && process.env.SYNC_DOCS_STRICT === '1') {
   console.error(`sync-docs: ${warnings} broken link(s) (SYNC_DOCS_STRICT=1)`);

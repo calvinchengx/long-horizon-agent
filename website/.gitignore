@@ -3,3 +3,5 @@ dist/
 .astro/
 # Generated from ../docs by scripts/sync-docs.mjs; edit the Markdown in docs/ instead.
 src/content/docs/
+# Copied from ../docs/images by scripts/sync-docs.mjs.
+public/images/

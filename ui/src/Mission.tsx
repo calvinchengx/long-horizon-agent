@@ -16,11 +16,23 @@ import { ago, Progress, Section, StatusBadge, usd, useTick } from "./ui";
 /** Kinds shown only with "every step": they are frequent and rarely the point. */
 const DETAIL_KINDS = new Set(["tool_call", "llm_turn", "session_progress", "code_map", "sandbox_egress"]);
 const TIMELINE_ROWS = 400;
+const TABS = ["timeline", "checklist", "gates", "costs"] as const;
+type Tab = (typeof TABS)[number];
 
 export function Mission({ id }: { id: string }) {
   const [mission, setMission] = useState<MissionDetail | null>(null);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"timeline" | "checklist" | "gates" | "costs" | null>(null);
+  // The tab is in the URL (?tab=checklist), so a link can open it.
+  const [tab, setTabState] = useState<Tab | null>(() => {
+    const t = new URLSearchParams(location.search).get("tab");
+    return TABS.includes(t as Tab) ? (t as Tab) : null;
+  });
+  const setTab = (t: Tab) => {
+    setTabState(t);
+    const url = new URL(location.href);
+    url.searchParams.set("tab", t);
+    history.replaceState(history.state, "", url);
+  };
   const now = useTick();
 
   const reload = useCallback(() => {
@@ -45,7 +57,7 @@ export function Mission({ id }: { id: string }) {
           <h1>{mission.title || mission.mission_id}</h1>
           <div class="sub">
             {mission.mission_id} · {mission.durable ? "durable" : "local run"}
-            {mission.workdir && <> · <code>{mission.workdir}</code></>}
+            {mission.workdir && <> · <code title={mission.workdir}>{shortPath(mission.workdir)}</code></>}
           </div>
           {mission.description && (
             <details class="brief">
@@ -76,7 +88,7 @@ export function Mission({ id }: { id: string }) {
       {mission.durable && live && <Controls id={id} mission={mission} onDone={reload} />}
 
       <nav class="tabs">
-        {(["timeline", "checklist", "gates", "costs"] as const).map((t) => (
+        {TABS.map((t) => (
           <button class={shown === t ? "active" : ""} onClick={() => setTab(t)} key={t}>
             {t}
           </button>
@@ -286,6 +298,12 @@ function Timeline({ id }: { id: string }) {
 }
 
 // --- checklist, gates, costs ----------------------------------------------------------------
+/** The last two segments of a path (the full one is the title). */
+function shortPath(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 2 ? `…/${parts.slice(-2).join("/")}` : path;
+}
+
 /** Text with `backticked` spans shown as code (item descriptions are written that way). */
 function Inline({ text }: { text: string }) {
   return <>{text.split("`").map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</>;
@@ -309,9 +327,13 @@ function Checklist({ id }: { id: string }) {
             <div class="body">
               <p><Inline text={it.description} /></p>
               <p class="dim">
-                {it.attempts > 0 && <>attempts {it.attempts} · </>}
-                {it.depends_on.length > 0 && <>after {it.depends_on.join(", ")} · </>}
-                {it.witnesses.length > 0 && <>witnesses: {it.witnesses.join(", ")}</>}
+                {[
+                  it.attempts > 0 && `attempts ${it.attempts}`,
+                  it.depends_on.length > 0 && `after ${it.depends_on.join(", ")}`,
+                  it.witnesses.length > 0 && `witnesses: ${it.witnesses.join(", ")}`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               </p>
               {it.last_failure && it.status !== "done" && (
                 <details>

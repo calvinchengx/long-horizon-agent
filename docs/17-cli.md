@@ -509,7 +509,14 @@ lha serve: http://127.0.0.1:8765/?token=...
 
 Opening that URL in a browser shows the mission UI ([`ui/`](../ui/README.md)): every mission,
 and for each its live state, open gate, checklist, timeline, gates and spend, with the controls
-for a durable mission. It sets the token cookie the UI's reads use; any other client sends the
+for a durable mission ([more screenshots](27-mission-ui.md#phase-2-the-web-ui)).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/mission-ui-missions-dark.png">
+  <img alt="The mission UI's missions list" src="images/mission-ui-missions.png">
+</picture>
+
+ It sets the token cookie the UI's reads use; any other client sends the
 token as the `X-LHA-Token` header, and every write needs the header. The server refuses a `Host` that is not
 its own loopback address.
 

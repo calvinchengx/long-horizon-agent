@@ -42,6 +42,14 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
   gates (SQLite by default, Postgres optionally; `lha missions`, `lha costs`, `lha gates`),
   recalls tiered memory into the
   prompt, and appends design decisions to a hash-chained log (`lha decisions --verify`).
+- **A mission UI.** `lha serve` (in either implementation) shows every mission in a browser:
+  live state, the checklist, a timeline of what each cycle did, spend, and the human gates, which
+  you answer there with your name ([mission UI](docs/27-mission-ui.md)).
+
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/mission-ui-mission-dark.png">
+    <img alt="A durable mission waiting for approval of a git push, above its timeline" src="docs/images/mission-ui-mission.png">
+  </picture>
 - **Fast judgments, never verdicts.** Optionally, a System One decision model (TypeSafe's Jev or
   a self-hosted Kev) triages items that keep failing and reranks recalled memory. It can only
   stop work on an item sooner, never allow an action or mark work done

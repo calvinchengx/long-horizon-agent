@@ -168,6 +168,41 @@ the missions list, and per mission its live state, open-gate banner (answered wi
 steering, snooze and abort, the checklist, the live timeline, gates and spend. About 15 KB of
 gzipped JavaScript. Still to come: dependency view, per-item attempts and diffs, spend charts.
 
+Every mission the store knows, live as their rows change:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/mission-ui-missions-dark.png">
+  <img alt="The missions list: each mission's status, items done, spend and last activity" src="images/mission-ui-missions.png">
+</picture>
+
+A durable mission waiting on a human: the gate's question and the exact action it would run, the
+name it records, then the live timeline of what each cycle did:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/mission-ui-mission-dark.png">
+  <img alt="A durable mission waiting for approval of a git push, above its timeline of cycles, verifications and checkpoints" src="images/mission-ui-mission.png">
+</picture>
+
+Its checklist: status, attempts, dependencies, witnesses, and the last failure of a blocked item:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/mission-ui-checklist-dark.png">
+  <img alt="The checklist of the same mission: two items done, one in progress, one blocked after three attempts" src="images/mission-ui-checklist.png">
+</picture>
+
+The fabric-emulator mission of October 2026 (30 roadmap items over 67 cycles, three of them split
+into smaller ones) and its spend, call by call:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/mission-ui-fabric-checklist-dark.png">
+  <img alt="The fabric-emulator mission's checklist, every item done" src="images/mission-ui-fabric-checklist.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="images/mission-ui-costs-dark.png">
+  <img alt="The fabric-emulator mission's spend: $124 over 72 calls" src="images/mission-ui-costs.png">
+</picture>
+
 Pages: missions (status, items done out of total, spend against the ceiling, last activity, parked
 or waiting badges); one mission (checklist with dependencies, attempts and status, live timeline,
 gates, spend rate and an estimated finish, a link into Temporal's UI); one item (description,
