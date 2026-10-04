@@ -151,24 +151,27 @@ class PostgresStore:
         description: str = "",
         head_sha: str | None = None,
         workflow_id: str | None = None,
+        workdir: str | None = None,
         reopen: bool = False,
     ) -> None:
         status_sql = terminal_guard_sql("missions.status", "EXCLUDED.status", "%s")
         await self._execute(
-            "INSERT INTO missions (mission_id, title, description, status, head_sha, workflow_id) "
-            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "INSERT INTO missions (mission_id, title, description, status, head_sha, workflow_id, "
+            "workdir) VALUES (%s, %s, %s, %s, %s, %s, %s) "
             "ON CONFLICT (mission_id) DO UPDATE SET "
             "title = COALESCE(NULLIF(EXCLUDED.title, ''), missions.title), "
             "description = COALESCE(NULLIF(EXCLUDED.description, ''), missions.description), "
             f"status = {status_sql}, "
             "head_sha = COALESCE(NULLIF(EXCLUDED.head_sha, ''), missions.head_sha), "
             "workflow_id = COALESCE(EXCLUDED.workflow_id, missions.workflow_id), "
+            "workdir = COALESCE(NULLIF(EXCLUDED.workdir, ''), missions.workdir), "
             "updated_at = now()",
-            (mission_id, title, description, status, head_sha, workflow_id, reopen),
+            (mission_id, title, description, status, head_sha, workflow_id, workdir, reopen),
         )
 
     _MISSION_COLS = (
-        "mission_id, title, status, description, head_sha, workflow_id, created_at, updated_at"
+        "mission_id, title, status, description, head_sha, workflow_id, created_at, updated_at, "
+        "workdir"
     )
 
     @staticmethod
@@ -182,6 +185,7 @@ class PostgresStore:
             workflow_id=row[5],
             created_at=_ts(row[6]),
             updated_at=_ts(row[7]),
+            workdir=row[8],
         )
 
     async def get_mission(self, mission_id: str) -> MissionRow | None:
@@ -352,25 +356,36 @@ class PostgresStore:
     async def read_mission_events(
         self, *, mission_id: str | None = None, after_id: int = 0, limit: int = 500
     ) -> list[EventRow]:
-        sql = "SELECT id, mission_id, cycle_id, kind, payload, ts FROM mission_events WHERE id > %s"
+        sql = f"SELECT {self._EVENT_COLS} FROM mission_events WHERE id > %s"
         params: list[Any] = [after_id]
         if mission_id is not None:
             sql += " AND mission_id = %s"
             params.append(mission_id)
         sql += " ORDER BY id LIMIT %s"
         params.append(limit)
-        rows = await self._fetchall(sql, params)
-        return [
-            EventRow(
-                id=int(r[0]),
-                mission_id=str(r[1]),
-                cycle_id=str(r[2]),
-                kind=str(r[3]),
-                payload=r[4] if isinstance(r[4], dict) else json.loads(r[4] or "{}"),
-                ts=_ts(r[5]),
-            )
-            for r in rows
-        ]
+        return [self._event(r) for r in await self._fetchall(sql, params)]
+
+    _EVENT_COLS = "id, mission_id, cycle_id, kind, payload, ts, schema_version"
+
+    @staticmethod
+    def _event(r: Any) -> EventRow:
+        return EventRow(
+            id=int(r[0]),
+            mission_id=str(r[1]),
+            cycle_id=str(r[2]),
+            kind=str(r[3]),
+            payload=r[4] if isinstance(r[4], dict) else json.loads(r[4] or "{}"),
+            ts=_ts(r[5]),
+            schema_version=int(r[6]),
+        )
+
+    async def last_mission_event(self, mission_id: str) -> EventRow | None:
+        rows = await self._fetchall(
+            f"SELECT {self._EVENT_COLS} FROM mission_events WHERE mission_id = %s "
+            "ORDER BY id DESC LIMIT 1",
+            (mission_id,),
+        )
+        return self._event(rows[0]) if rows else None
 
     async def list_events(
         self,

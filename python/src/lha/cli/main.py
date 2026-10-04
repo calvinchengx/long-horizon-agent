@@ -1186,6 +1186,7 @@ def mission_start(
                 title=mission_title,
                 description=description,
                 workflow_id=f"mission:{mission_id}",
+                workdir=workdir,
             )
             await tracker.set_status(STATUS_SLEEPING if resume_at else STATUS_RUNNING)
             try:

@@ -104,7 +104,10 @@ async def test_a_local_mission_leaves_its_trace_in_the_store(tmp_path: Path) -> 
     store = SqliteStore(db)
     await store.open()
     rows = await store.read_mission_events(mission_id=summary.mission_id)
+    mission = await store.get_mission(summary.mission_id)
     await store.close()
+    # The row says where the anchor is, so a reader (lha serve) can find the checklist.
+    assert mission is not None and mission.workdir == str((tmp_path / "ws").resolve())
     kinds = [r.kind for r in rows]
     assert "cycle_started" in kinds and "checkpoint" in kinds
     (call,) = [r for r in rows if r.kind == "tool_call"]

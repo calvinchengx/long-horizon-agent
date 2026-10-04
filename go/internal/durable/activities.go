@@ -525,7 +525,7 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 	tracker := func(status, head string) {
 		if err := store.UpsertMission(context.WithoutCancel(ctx), MissionRow{
 			MissionID: inp.MissionID, Title: title, Description: description, Status: status,
-			HeadSHA: head, WorkflowID: workflowIDOf(ctx),
+			HeadSHA: head, WorkflowID: workflowIDOf(ctx), Workdir: inp.Workdir,
 		}); err != nil {
 			activityLogger().Warn("mission_upsert_failed", "mission_id", inp.MissionID, "status", status,
 				"error", fmt.Sprintf("%s: %v", pyTypeName(err), err))
@@ -1073,6 +1073,7 @@ func (a *Activities) RecordMissionStatus(ctx context.Context, inp MissionStatusI
 	defer store.Close(context.WithoutCancel(ctx))
 	if err := store.UpsertMission(ctx, MissionRow{
 		MissionID: inp.MissionID, Status: inp.Status, HeadSHA: deref(inp.HeadSHA), WorkflowID: workflowIDOf(ctx),
+		Workdir: inp.Workdir,
 	}); err != nil {
 		return false, err
 	}

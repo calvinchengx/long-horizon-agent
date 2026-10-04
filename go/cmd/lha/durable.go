@@ -381,6 +381,7 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 	setStatus := func(status string) {
 		if err := store.UpsertMission(context.WithoutCancel(ctx), durable.MissionRow{
 			MissionID: missionID, Title: mTitle, Description: description, Status: status, WorkflowID: workflowID,
+			Workdir: r.workdir,
 		}); err != nil {
 			obs.Logger("lha.persistence").Warn("mission_upsert_failed", "mission_id", missionID, "status", status, "error", err.Error())
 		}

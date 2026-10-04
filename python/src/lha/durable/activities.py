@@ -984,6 +984,7 @@ async def _record_mission_status(
             status=inp.status,
             head_sha=inp.head_sha or None,
             workflow_id=activity.info().workflow_id if activity.in_activity() else None,
+            workdir=str(Path(inp.workdir).resolve()) if inp.workdir else None,
         )
     finally:
         await store.close()

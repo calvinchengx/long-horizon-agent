@@ -263,4 +263,11 @@ func TestPGMissionEventsAppendInOrderAndReadForward(t *testing.T) {
 	if err != nil || len(one) != 1 || one[0].Kind != "cycle_started" {
 		t.Fatalf("%v %+v", err, one)
 	}
+	last, err := store.LastMissionEvent(ctx, "e1")
+	if err != nil || last == nil || last.Payload["tool"] != "edit_file" || last.SchemaVersion != 1 {
+		t.Fatalf("%v %+v", err, last)
+	}
+	if none, err := store.LastMissionEvent(ctx, "e-none"); err != nil || none != nil {
+		t.Fatalf("%v %+v", err, none)
+	}
 }

@@ -56,7 +56,7 @@ func (p *PersistenceStore) Persistence() persistence.Store { return p.store }
 func (p *PersistenceStore) UpsertMission(ctx context.Context, row MissionRow) error {
 	return p.store.UpsertMission(ctx, persistence.MissionUpsert{
 		MissionID: row.MissionID, Title: row.Title, Description: row.Description, Status: row.Status,
-		HeadSHA: row.HeadSHA, WorkflowID: row.WorkflowID,
+		HeadSHA: row.HeadSHA, WorkflowID: row.WorkflowID, Workdir: persistence.AbsWorkdir(row.Workdir),
 	})
 }
 

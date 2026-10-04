@@ -166,6 +166,11 @@ SQLITE_MIGRATIONS: tuple[tuple[str, str], ...] = (
         CREATE INDEX IF NOT EXISTS mission_events_mission ON mission_events (mission_id, id);
         """,
     ),
+    (
+        # The Postgres ``missions.workdir`` column (0007): where the mission's anchor is.
+        "sqlite_0004_mission_workdir",
+        "ALTER TABLE missions ADD COLUMN workdir TEXT;",
+    ),
 )
 
 # Per gate event: the ON CONFLICT update (``excluded`` = the incoming event's row). ``opened``
@@ -314,6 +319,7 @@ class SqliteStore:
         description: str = "",
         head_sha: str | None = None,
         workflow_id: str | None = None,
+        workdir: str | None = None,
         reopen: bool = False,
     ) -> None:
         now = _now()
@@ -322,7 +328,7 @@ class SqliteStore:
         def _upsert(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "INSERT INTO missions (mission_id, title, description, status, head_sha, "
-                "workflow_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "workflow_id, workdir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                 "ON CONFLICT (mission_id) DO UPDATE SET "
                 "title = CASE WHEN excluded.title != '' THEN excluded.title ELSE title END, "
                 "description = CASE WHEN excluded.description != '' "
@@ -330,6 +336,7 @@ class SqliteStore:
                 f"status = {status_sql}, "
                 "head_sha = COALESCE(NULLIF(excluded.head_sha, ''), head_sha), "
                 "workflow_id = COALESCE(excluded.workflow_id, workflow_id), "
+                "workdir = COALESCE(NULLIF(excluded.workdir, ''), workdir), "
                 "updated_at = excluded.updated_at",
                 (
                     mission_id,
@@ -338,6 +345,7 @@ class SqliteStore:
                     status,
                     head_sha,
                     workflow_id,
+                    workdir,
                     now,
                     now,
                     1 if reopen else 0,
@@ -357,6 +365,7 @@ class SqliteStore:
             workflow_id=row["workflow_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            workdir=row["workdir"],
         )
 
     async def get_mission(self, mission_id: str) -> MissionRow | None:
@@ -582,11 +591,32 @@ class SqliteStore:
                     kind=r["kind"],
                     payload=json.loads(r["payload"] or "{}"),
                     ts=r["ts"],
+                    schema_version=int(r["schema_version"]),
                 )
                 for r in conn.execute(sql, params).fetchall()
             ]
 
         return await self._run(_read)
+
+    async def last_mission_event(self, mission_id: str) -> EventRow | None:
+        def _last(conn: sqlite3.Connection) -> EventRow | None:
+            r = conn.execute(
+                "SELECT * FROM mission_events WHERE mission_id = ? ORDER BY id DESC LIMIT 1",
+                (mission_id,),
+            ).fetchone()
+            if r is None:
+                return None
+            return EventRow(
+                id=int(r["id"]),
+                mission_id=r["mission_id"],
+                cycle_id=r["cycle_id"],
+                kind=r["kind"],
+                payload=json.loads(r["payload"] or "{}"),
+                ts=r["ts"],
+                schema_version=int(r["schema_version"]),
+            )
+
+        return await self._run(_last)
 
     async def list_events(
         self,

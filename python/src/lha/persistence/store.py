@@ -43,6 +43,7 @@ REQUIRED_PG_MIGRATIONS = (
     "0004_memory_skills",
     "0005_hitl_gates",
     "0006_mission_events",
+    "0007_mission_workdir",
 )
 
 
@@ -60,6 +61,8 @@ class MissionRow:
     workflow_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    # Where the mission's anchor (.lha/) is: an absolute path on the host that ran it.
+    workdir: str | None = None
 
 
 @dataclass
@@ -93,6 +96,7 @@ class EventRow:
     kind: str
     payload: dict[str, Any] = field(default_factory=dict)
     ts: str = ""
+    schema_version: int = 1
 
 
 @dataclass
@@ -209,6 +213,7 @@ class MissionStore(Protocol):
         description: str = "",
         head_sha: str | None = None,
         workflow_id: str | None = None,
+        workdir: str | None = None,
         reopen: bool = False,
     ) -> None:
         """Insert or update; ``None``/empty fields keep the stored values (never null them).
@@ -279,6 +284,10 @@ class MissionStore(Protocol):
     ) -> list[EventRow]:
         """The OLDEST ``limit`` events with ``id > after_id`` (one mission, or all), oldest first:
         a reader pages forward from the last id it saw."""
+        ...
+
+    async def last_mission_event(self, mission_id: str) -> EventRow | None:
+        """The mission's most recent ``mission_events`` row (``None`` when it has none)."""
         ...
 
     # --- semantic memory ----------------------------------------------------------------

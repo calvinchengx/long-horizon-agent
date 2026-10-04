@@ -106,7 +106,7 @@ func Open(ctx context.Context, settings *config.Settings, r Request) (*RunServic
 		}
 		sink.Attach(r.Meter)
 	}
-	tracker := persistence.NewMissionTracker(store, r.MissionID, r.Title, r.Description, r.WorkflowID)
+	tracker := persistence.NewMissionTracker(store, r.MissionID, r.Title, r.Description, r.WorkflowID, r.Workdir)
 	opts := r.Memory
 	opts.Model, opts.Recorder, opts.SystemOne = r.Model, r.Recorder, r.SystemOne
 	mem := memory.OpenMissionMemory(ctx, settings, store, r.Workdir, r.MissionID, opts)

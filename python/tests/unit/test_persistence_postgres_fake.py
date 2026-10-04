@@ -89,15 +89,19 @@ async def test_open_requires_every_migration(monkeypatch: pytest.MonkeyPatch) ->
 
 
 async def test_missions_sql_and_mapping() -> None:
-    row = ("m1", "T", "DONE", "D", "abc", "wf", _TS, _TS)
+    row = ("m1", "T", "DONE", "D", "abc", "wf", _TS, _TS, "/w")
     store, conn = _store(_Cursor([]), _Cursor([row]), _Cursor([]), _Cursor([row]))
-    await store.upsert_mission(mission_id="m1", title="T", status="DONE", head_sha="abc")
+    await store.upsert_mission(
+        mission_id="m1", title="T", status="DONE", head_sha="abc", workdir="/w"
+    )
     sql, params = conn.calls[0]
     assert "ON CONFLICT (mission_id)" in sql and "COALESCE(NULLIF(EXCLUDED.head_sha" in sql
-    assert params == ("m1", "T", "", "DONE", "abc", None, False)
+    assert "COALESCE(NULLIF(EXCLUDED.workdir" in sql  # a write without a workdir keeps it
+    assert params == ("m1", "T", "", "DONE", "abc", None, "/w", False)
     assert "NOT IN ('DONE', 'IMPOSSIBLE', 'ABORTED')" in sql  # monotonic status
     got = await store.get_mission("m1")
     assert got is not None and got.head_sha == "abc" and got.updated_at.startswith("2026-01-02")
+    assert got.workdir == "/w"
     assert await store.get_mission("missing") is None
     assert [m.mission_id for m in await store.list_missions(limit=5)] == ["m1"]
 

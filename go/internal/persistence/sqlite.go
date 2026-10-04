@@ -147,6 +147,8 @@ var SQLiteMigrations = [][2]string{
         );
         CREATE INDEX IF NOT EXISTS mission_events_mission ON mission_events (mission_id, id);
         `},
+	// The Postgres missions.workdir column (0007): where the mission's anchor is.
+	{"sqlite_0004_mission_workdir", `ALTER TABLE missions ADD COLUMN workdir TEXT;`},
 }
 
 // Per gate event: the ON CONFLICT update (excluded = the incoming event's row). "opened" reopens
@@ -386,7 +388,7 @@ func (s *SQLiteStore) UpsertMission(ctx context.Context, m MissionUpsert) error 
 	return s.run(ctx, func(c *sql.Conn) error {
 		_, err := c.ExecContext(ctx,
 			"INSERT INTO missions (mission_id, title, description, status, head_sha, "+
-				"workflow_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "+
+				"workflow_id, workdir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "+
 				"ON CONFLICT (mission_id) DO UPDATE SET "+
 				"title = CASE WHEN excluded.title != '' THEN excluded.title ELSE title END, "+
 				"description = CASE WHEN excluded.description != '' "+
@@ -394,20 +396,21 @@ func (s *SQLiteStore) UpsertMission(ctx context.Context, m MissionUpsert) error 
 				"status = "+statusSQL+", "+
 				"head_sha = COALESCE(NULLIF(excluded.head_sha, ''), head_sha), "+
 				"workflow_id = COALESCE(excluded.workflow_id, workflow_id), "+
+				"workdir = COALESCE(NULLIF(excluded.workdir, ''), workdir), "+
 				"updated_at = excluded.updated_at",
 			m.MissionID, m.Title, m.Description, m.Status, nullable(m.HeadSHA), nullable(m.WorkflowID),
-			now, now, boolInt(m.Reopen))
+			nullable(m.Workdir), now, now, boolInt(m.Reopen))
 		return err
 	})
 }
 
-const sqliteMissionCols = "mission_id, title, status, description, head_sha, workflow_id, created_at, updated_at"
+const sqliteMissionCols = "mission_id, title, status, description, head_sha, workflow_id, created_at, updated_at, workdir"
 
 func scanMission(sc interface{ Scan(...any) error }) (MissionRow, error) {
 	var r MissionRow
-	var head, wf sql.NullString
-	err := sc.Scan(&r.MissionID, &r.Title, &r.Status, &r.Description, &head, &wf, &r.CreatedAt, &r.UpdatedAt)
-	r.HeadSHA, r.WorkflowID = head.String, wf.String
+	var head, wf, workdir sql.NullString
+	err := sc.Scan(&r.MissionID, &r.Title, &r.Status, &r.Description, &head, &wf, &r.CreatedAt, &r.UpdatedAt, &workdir)
+	r.HeadSHA, r.WorkflowID, r.Workdir = head.String, wf.String, workdir.String
 	return r, err
 }
 
@@ -727,7 +730,7 @@ func (s *SQLiteStore) ReadMissionEvents(ctx context.Context, missionID string, a
 	if limit <= 0 {
 		limit = 500
 	}
-	query := "SELECT id, mission_id, cycle_id, kind, payload, ts FROM mission_events WHERE id > ?"
+	query := "SELECT " + missionEventCols + " FROM mission_events WHERE id > ?"
 	params := []any{afterID}
 	if missionID != "" {
 		query += " AND mission_id = ?"
@@ -743,17 +746,43 @@ func (s *SQLiteStore) ReadMissionEvents(ctx context.Context, missionID string, a
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var r EventRow
-			var payload sql.NullString
-			if err := rows.Scan(&r.ID, &r.MissionID, &r.CycleID, &r.Kind, &payload, &r.TS); err != nil {
-				return err
-			}
-			if r.Payload, err = decodeObject(payload.String); err != nil {
+			r, err := scanMissionEvent(rows)
+			if err != nil {
 				return err
 			}
 			out = append(out, r)
 		}
 		return rows.Err()
+	})
+	return out, err
+}
+
+const missionEventCols = "id, mission_id, cycle_id, kind, payload, ts, schema_version"
+
+func scanMissionEvent(sc interface{ Scan(...any) error }) (EventRow, error) {
+	var r EventRow
+	var payload sql.NullString
+	if err := sc.Scan(&r.ID, &r.MissionID, &r.CycleID, &r.Kind, &payload, &r.TS, &r.SchemaVersion); err != nil {
+		return r, err
+	}
+	var err error
+	r.Payload, err = decodeObject(payload.String)
+	return r, err
+}
+
+// LastMissionEvent is the mission's most recent mission_events row (nil when it has none).
+func (s *SQLiteStore) LastMissionEvent(ctx context.Context, missionID string) (*EventRow, error) {
+	var out *EventRow
+	err := s.run(ctx, func(c *sql.Conn) error {
+		r, err := scanMissionEvent(c.QueryRowContext(ctx,
+			"SELECT "+missionEventCols+" FROM mission_events WHERE mission_id = ? ORDER BY id DESC LIMIT 1", missionID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err == nil {
+			out = &r
+		}
+		return err
 	})
 	return out, err
 }

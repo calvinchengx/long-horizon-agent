@@ -29,6 +29,7 @@ type MissionRow struct {
 	Status      string
 	HeadSHA     string
 	WorkflowID  string
+	Workdir     string // where the anchor is ("" keeps the stored one)
 }
 
 // GateEvent is one human-gate event, as written to hitl_gates (python: persistence.store.GateEvent).

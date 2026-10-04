@@ -2,6 +2,7 @@ package persistence
 
 import (
 	"context"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -99,12 +100,29 @@ type MissionTracker struct {
 	title       string
 	description string
 	workflowID  string
+	workdir     string
 	Failures    int
 }
 
-// NewMissionTracker tracks missionID ("" workflowID = none).
-func NewMissionTracker(store Store, missionID, title, description, workflowID string) *MissionTracker {
-	return &MissionTracker{store: store, MissionID: missionID, title: title, description: description, workflowID: workflowID}
+// NewMissionTracker tracks missionID ("" workflowID = none). workdir is recorded as an absolute
+// path, so any reader can find the mission's anchor ("" = not recorded).
+func NewMissionTracker(store Store, missionID, title, description, workflowID, workdir string) *MissionTracker {
+	return &MissionTracker{store: store, MissionID: missionID, title: title, description: description,
+		workflowID: workflowID, workdir: AbsWorkdir(workdir)}
+}
+
+// AbsWorkdir is workdir as an absolute path ("" stays "").
+func AbsWorkdir(workdir string) string {
+	if workdir == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(workdir); err == nil {
+		if real, err := filepath.EvalSymlinks(abs); err == nil {
+			return real
+		}
+		return abs
+	}
+	return workdir
 }
 
 // SetStatus upserts the row (a terminal status stays unless reopen: see Store.UpsertMission).
@@ -112,7 +130,7 @@ func NewMissionTracker(store Store, missionID, title, description, workflowID st
 func (t *MissionTracker) SetStatus(ctx context.Context, status, headSHA string, reopen bool) {
 	err := t.store.UpsertMission(ctx, MissionUpsert{
 		MissionID: t.MissionID, Title: t.title, Description: t.description, Status: status,
-		HeadSHA: headSHA, WorkflowID: t.workflowID, Reopen: reopen,
+		HeadSHA: headSHA, WorkflowID: t.workflowID, Workdir: t.workdir, Reopen: reopen,
 	})
 	if err != nil {
 		t.Failures++

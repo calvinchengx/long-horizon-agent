@@ -65,6 +65,7 @@ async def test_sqlite_store_is_wal_and_schema_is_versioned(store: SqliteStore) -
         "sqlite_0001_init",
         "sqlite_0002_hitl_gates",
         "sqlite_0003_mission_events",
+        "sqlite_0004_mission_workdir",
     ]
     assert {
         "missions",
@@ -89,11 +90,14 @@ async def test_sqlite_store_is_wal_and_schema_is_versioned(store: SqliteStore) -
 async def test_mission_upsert_tracks_status_and_keeps_head(store: SqliteStore) -> None:
     assert await store.get_mission("nope") is None
     await store.upsert_mission(mission_id="m1", title="T", description="D", status="RUNNING")
-    await store.upsert_mission(mission_id="m1", title="", status="RUNNING", head_sha="abc")
+    await store.upsert_mission(
+        mission_id="m1", title="", status="RUNNING", head_sha="abc", workdir="/w"
+    )
     await store.upsert_mission(mission_id="m1", title="", status="DONE")  # head_sha=None keeps
     row = await store.get_mission("m1")
     assert row is not None
     assert (row.title, row.description, row.status, row.head_sha) == ("T", "D", "DONE", "abc")
+    assert row.workdir == "/w"  # a write without a workdir keeps it
     assert row.created_at and row.updated_at >= row.created_at
 
     await store.upsert_mission(mission_id="m2", title="second", status="RUNNING")
@@ -270,6 +274,10 @@ async def test_mission_events_are_appended_in_order_and_read_forward(store: Sqli
     rest = await store.read_mission_events(after_id=first[-1].id, limit=5)
     assert [e.id for e in first + rest] == [e.id for e in every]
     assert await store.read_mission_events(after_id=every[-1].id) == []
+    assert {e.schema_version for e in every} == {1}
+    last = await store.last_mission_event("m1")
+    assert last is not None and last.id == every[2].id and last.kind == "tool_call"
+    assert await store.last_mission_event("m3") is None
 
 
 async def test_memory_upsert_vectors_gating_and_soft_invalidation(store: SqliteStore) -> None:

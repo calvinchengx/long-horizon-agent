@@ -17,6 +17,8 @@ counted (``failures``), not raised into the agent loop.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from lha.durable.signals import (
     STATUS_ABORTED,
     STATUS_DONE,
@@ -88,9 +90,12 @@ class MissionTracker:
         title: str = "",
         description: str = "",
         workflow_id: str | None = None,
+        workdir: str | Path | None = None,
     ) -> None:
         self._store = store
         self.mission_id = mission_id
+        # Recorded as an absolute path, so any reader can find the mission's anchor.
+        self._workdir = str(Path(workdir).resolve()) if workdir else None
         self._title = title
         self._description = description
         self._workflow_id = workflow_id
@@ -108,6 +113,7 @@ class MissionTracker:
                 status=status,
                 head_sha=head_sha or None,
                 workflow_id=self._workflow_id,
+                workdir=self._workdir,
                 reopen=reopen,
             )
         except Exception as exc:

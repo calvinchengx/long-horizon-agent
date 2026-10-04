@@ -82,7 +82,7 @@ func TestSQLiteStoreIsWALAndSchemaIsVersioned(t *testing.T) {
 		versions = append(versions, v)
 	}
 	rows.Close()
-	if !reflect.DeepEqual(versions, []string{"sqlite_0001_init", "sqlite_0002_hitl_gates", "sqlite_0003_mission_events"}) {
+	if !reflect.DeepEqual(versions, []string{"sqlite_0001_init", "sqlite_0002_hitl_gates", "sqlite_0003_mission_events", "sqlite_0004_mission_workdir"}) {
 		t.Fatal(versions)
 	}
 	for _, table := range []string{"missions", "hitl_gates", "cost_ledger", "episodic_events", "mission_events", "semantic_memory", "skills"} {
@@ -605,7 +605,7 @@ func TestLedgerAndTrackerFailuresNeverFailTheRun(t *testing.T) {
 	if _, failures := sink.Counts(); result.Text == "" || failures != 1 || len(meter.Ledger.Entries()) != 1 {
 		t.Fatal(failures)
 	}
-	tracker := NewMissionTracker(broken, "m1", "", "", "")
+	tracker := NewMissionTracker(broken, "m1", "", "", "", "")
 	tracker.Running(ctx, "")
 	if tracker.Failures != 1 {
 		t.Fatal(tracker.Failures)
@@ -641,7 +641,8 @@ func TestStatusForStopMirrorsTheWorkflow(t *testing.T) {
 func TestTrackerRecordsTransitions(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
-	tracker := NewMissionTracker(store, "m1", "T", "D", "mission:m1")
+	workdir := t.TempDir()
+	tracker := NewMissionTracker(store, "m1", "T", "D", "mission:m1", workdir)
 	tracker.Running(ctx, "")
 	if row := must(store.GetMission(ctx, "m1")); row.Status != "RUNNING" {
 		t.Fatal(row.Status)
@@ -652,6 +653,10 @@ func TestTrackerRecordsTransitions(t *testing.T) {
 	row := must(store.GetMission(ctx, "m1"))
 	if row.Status != "DONE" || row.HeadSHA != "f00" || row.WorkflowID != "mission:m1" || row.Title != "T" {
 		t.Fatalf("%+v", row)
+	}
+	// The row says where the anchor is (absolute, symlinks resolved), so lha serve can find it.
+	if real, _ := filepath.EvalSymlinks(workdir); row.Workdir != real {
+		t.Fatalf("workdir %q, want %q", row.Workdir, real)
 	}
 }
 
@@ -741,5 +746,14 @@ func TestMissionEventsAreAppendedInOrderAndReadForward(t *testing.T) {
 	}
 	if after := must(store.ReadMissionEvents(ctx, "", every[2].ID, 0)); len(after) != 0 {
 		t.Fatal(after)
+	}
+	if every[0].SchemaVersion != 1 {
+		t.Fatal(every[0])
+	}
+	if last := must(store.LastMissionEvent(ctx, "m1")); last == nil || last.ID != every[2].ID || last.Kind != "tool_call" {
+		t.Fatalf("%+v", last)
+	}
+	if none := must(store.LastMissionEvent(ctx, "m3")); none != nil {
+		t.Fatalf("%+v", none)
 	}
 }

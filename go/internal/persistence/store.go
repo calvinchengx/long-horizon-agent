@@ -64,6 +64,7 @@ var RequiredPGMigrations = []string{
 	"0004_memory_skills",
 	"0005_hitl_gates",
 	"0006_mission_events",
+	"0007_mission_workdir",
 }
 
 // StoreUnavailableError is the configured store being unusable (unreachable, unmigrated).
@@ -81,6 +82,9 @@ type MissionRow struct {
 	WorkflowID  string
 	CreatedAt   string
 	UpdatedAt   string
+	// Workdir is where the mission's anchor (.lha/) is: an absolute path on the host that ran it
+	// ("" when NULL).
+	Workdir string
 }
 
 // CostRow is one cost_ledger row. USD is nil when the cost is unknown (never recorded as $0).
@@ -125,6 +129,8 @@ type EventRow struct {
 	Kind      string
 	Payload   map[string]any
 	TS        string
+	// SchemaVersion is the mission_events row's schema_version (0 for other event tables).
+	SchemaVersion int
 }
 
 // TerminalStatuses are the missions.status values a mission ends in; the store never moves a
@@ -242,6 +248,7 @@ type MissionUpsert struct {
 	Description string
 	HeadSHA     string
 	WorkflowID  string
+	Workdir     string // "" keeps the stored one
 	Reopen      bool
 }
 
@@ -323,6 +330,8 @@ type Store interface {
 	// ReadMissionEvents is the OLDEST limit (default 500) events with id > afterID, of one mission
 	// ("" = all), oldest first: a reader pages forward from the last id it saw.
 	ReadMissionEvents(ctx context.Context, missionID string, afterID int64, limit int) ([]EventRow, error)
+	// LastMissionEvent is the mission's most recent mission_events row (nil when it has none).
+	LastMissionEvent(ctx context.Context, missionID string) (*EventRow, error)
 
 	// PutMemory upserts records by id (with their vectors when emb is non-nil).
 	PutMemory(ctx context.Context, missionID string, records []contracts.MemoryRecord, emb *Embedding) error

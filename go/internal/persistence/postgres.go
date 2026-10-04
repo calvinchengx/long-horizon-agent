@@ -203,31 +203,33 @@ func pyTS(t *time.Time) string {
 
 // UpsertMission inserts or updates (see Store).
 func (s *PostgresStore) UpsertMission(ctx context.Context, m MissionUpsert) error {
-	statusSQL := TerminalGuardSQL("missions.status", "EXCLUDED.status", "$7")
+	statusSQL := TerminalGuardSQL("missions.status", "EXCLUDED.status", "$8")
 	_, err := s.Pool.Exec(ctx,
-		"INSERT INTO missions (mission_id, title, description, status, head_sha, workflow_id) "+
-			"VALUES ($1, $2, $3, $4, $5, $6) "+
+		"INSERT INTO missions (mission_id, title, description, status, head_sha, workflow_id, workdir) "+
+			"VALUES ($1, $2, $3, $4, $5, $6, $7) "+
 			"ON CONFLICT (mission_id) DO UPDATE SET "+
 			"title = COALESCE(NULLIF(EXCLUDED.title, ''), missions.title), "+
 			"description = COALESCE(NULLIF(EXCLUDED.description, ''), missions.description), "+
 			"status = "+statusSQL+", "+
 			"head_sha = COALESCE(NULLIF(EXCLUDED.head_sha, ''), missions.head_sha), "+
 			"workflow_id = COALESCE(EXCLUDED.workflow_id, missions.workflow_id), "+
+			"workdir = COALESCE(NULLIF(EXCLUDED.workdir, ''), missions.workdir), "+
 			"updated_at = now()",
-		m.MissionID, m.Title, m.Description, m.Status, nullable(m.HeadSHA), nullable(m.WorkflowID), m.Reopen)
+		m.MissionID, m.Title, m.Description, m.Status, nullable(m.HeadSHA), nullable(m.WorkflowID),
+		nullable(m.Workdir), m.Reopen)
 	return err
 }
 
-const pgMissionCols = "mission_id, title, status, description, head_sha, workflow_id, created_at, updated_at"
+const pgMissionCols = "mission_id, title, status, description, head_sha, workflow_id, created_at, updated_at, workdir"
 
 func scanPGMission(row pgx.Row) (MissionRow, error) {
 	var r MissionRow
-	var desc, head, wf *string
+	var desc, head, wf, workdir *string
 	var created, updated *time.Time
-	if err := row.Scan(&r.MissionID, &r.Title, &r.Status, &desc, &head, &wf, &created, &updated); err != nil {
+	if err := row.Scan(&r.MissionID, &r.Title, &r.Status, &desc, &head, &wf, &created, &updated, &workdir); err != nil {
 		return r, err
 	}
-	r.Description, r.HeadSHA, r.WorkflowID = deref(desc), deref(head), deref(wf)
+	r.Description, r.HeadSHA, r.WorkflowID, r.Workdir = deref(desc), deref(head), deref(wf), deref(workdir)
 	r.CreatedAt, r.UpdatedAt = pyTS(created), pyTS(updated)
 	return r, nil
 }
@@ -498,7 +500,7 @@ func (s *PostgresStore) ReadMissionEvents(ctx context.Context, missionID string,
 	if limit <= 0 {
 		limit = 500
 	}
-	query := "SELECT id, mission_id, cycle_id, kind, payload::text, ts FROM mission_events WHERE id > $1"
+	query := "SELECT " + pgMissionEventCols + " FROM mission_events WHERE id > $1"
 	params := []any{afterID}
 	if missionID != "" {
 		params = append(params, missionID)
@@ -513,19 +515,41 @@ func (s *PostgresStore) ReadMissionEvents(ctx context.Context, missionID string,
 	defer rows.Close()
 	out := []EventRow{}
 	for rows.Next() {
-		var r EventRow
-		var payload string
-		var ts *time.Time
-		if err := rows.Scan(&r.ID, &r.MissionID, &r.CycleID, &r.Kind, &payload, &ts); err != nil {
+		r, err := scanPGMissionEvent(rows)
+		if err != nil {
 			return nil, err
 		}
-		if r.Payload, err = decodeObject(payload); err != nil {
-			return nil, err
-		}
-		r.TS = pyTS(ts)
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+const pgMissionEventCols = "id, mission_id, cycle_id, kind, payload::text, ts, schema_version"
+
+func scanPGMissionEvent(row pgx.Row) (EventRow, error) {
+	var r EventRow
+	var payload string
+	var ts *time.Time
+	if err := row.Scan(&r.ID, &r.MissionID, &r.CycleID, &r.Kind, &payload, &ts, &r.SchemaVersion); err != nil {
+		return r, err
+	}
+	var err error
+	r.Payload, err = decodeObject(payload)
+	r.TS = pyTS(ts)
+	return r, err
+}
+
+// LastMissionEvent is the mission's most recent mission_events row (nil when it has none).
+func (s *PostgresStore) LastMissionEvent(ctx context.Context, missionID string) (*EventRow, error) {
+	r, err := scanPGMissionEvent(s.Pool.QueryRow(ctx,
+		"SELECT "+pgMissionEventCols+" FROM mission_events WHERE mission_id = $1 ORDER BY id DESC LIMIT 1", missionID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // --- semantic memory ---------------------------------------------------------------------------

@@ -59,7 +59,7 @@ from lha.persistence.store import GateEvent
 async def main(path):
     s = SqliteStore(path)
     await s.open()
-    await s.upsert_mission(mission_id="m1", title="Ünïcode title", description="d", status="RUNNING", workflow_id="mission:m1")
+    await s.upsert_mission(mission_id="m1", title="Ünïcode title", description="d", status="RUNNING", workflow_id="mission:m1", workdir="/w/m1")
     await s.upsert_mission(mission_id="m1", title="", status="DONE", head_sha="abc")
     await s.upsert_mission(mission_id="m1", title="", status="RUNNING")
     base = dict(mission_id="m1", gate_id="m1:tool:ab12", kind="tool_call", question="push? é",
@@ -107,7 +107,7 @@ func goWriteStore(t *testing.T, s Store) {
 	if s.Backend() == BackendSQLite {
 		emb = &Embedding{Vectors: [][]float64{{0.1, 1.0, 1e-07}}, Model: "hash", Version: "1"}
 	}
-	ok(t, s.UpsertMission(ctx, MissionUpsert{MissionID: "m1", Title: "Ünïcode title", Description: "d", Status: "RUNNING", WorkflowID: "mission:m1"}))
+	ok(t, s.UpsertMission(ctx, MissionUpsert{MissionID: "m1", Title: "Ünïcode title", Description: "d", Status: "RUNNING", WorkflowID: "mission:m1", Workdir: "/w/m1"}))
 	ok(t, s.UpsertMission(ctx, MissionUpsert{MissionID: "m1", Status: "DONE", HeadSHA: "abc"}))
 	ok(t, s.UpsertMission(ctx, MissionUpsert{MissionID: "m1", Status: "RUNNING"}))
 	base := GateEvent{MissionID: "m1", GateID: "m1:tool:ab12", Kind: "tool_call", Question: "push? é",
@@ -148,7 +148,7 @@ import json, sqlite3, sys
 conn = sqlite3.connect(sys.argv[1])
 queries = {
     "schema_migrations": "SELECT version FROM schema_migrations ORDER BY version",
-    "missions": "SELECT mission_id, title, description, acceptance, status, workflow_id, run_id, head_sha, schema_version FROM missions",
+    "missions": "SELECT mission_id, title, description, acceptance, status, workflow_id, run_id, head_sha, schema_version, workdir FROM missions",
     "hitl_gates": "SELECT mission_id, gate_id, kind, question, risk, default_action, options, request, status, deadline, decision, resolved_by, reminders, created_at, resolved_at FROM hitl_gates ORDER BY mission_id, gate_id",
     "cost_ledger": "SELECT mission_id, cycle_id, model, input_tokens, output_tokens, usd, idempotency_key, role, cost_known FROM cost_ledger ORDER BY id",
     "episodic_events": "SELECT id, mission_id, cycle_id, kind, payload, payload_ref, schema_version FROM episodic_events ORDER BY id",
@@ -175,7 +175,7 @@ async def main(backend, where):
     if backend == "sqlite":
         vectors = [[r.id, v] for r, v in await s.memory_vectors("m1", embedding_model="hash", embedding_version="1")]
     out = {
-        "missions": [[m.mission_id, m.title, m.status, m.description, m.head_sha, m.workflow_id] for m in await s.list_missions()],
+        "missions": [[m.mission_id, m.title, m.status, m.description, m.head_sha, m.workflow_id, m.workdir] for m in await s.list_missions()],
         "gates": [[g.mission_id, g.gate_id, g.kind, g.status, g.question, g.options, g.default_action, g.risk, g.deadline, g.decision, g.resolved_by, g.reminders, g.request, g.opened_at, g.resolved_at] for g in await s.list_gates()],
         "costs": [[c.mission_id, c.cycle_id, c.model, c.role, c.input_tokens, c.output_tokens, c.usd, c.cost_known] for c in await s.list_costs("m1")],
         "summary": vars(await s.cost_summary("m1")),
@@ -219,7 +219,7 @@ func goReadStore(t *testing.T, s Store) map[string]any {
 	out := map[string]any{}
 	missions := []any{}
 	for _, m := range must(s.ListMissions(ctx, 0)) {
-		missions = append(missions, []any{m.MissionID, m.Title, m.Status, m.Description, optional(m.HeadSHA), optional(m.WorkflowID)})
+		missions = append(missions, []any{m.MissionID, m.Title, m.Status, m.Description, optional(m.HeadSHA), optional(m.WorkflowID), optional(m.Workdir)})
 	}
 	out["missions"] = missions
 	gates := []any{}

@@ -95,7 +95,12 @@ async def open_run_services(
             await sink.backfill(list(meter.ledger.entries))
         sink.attach(meter)
         tracker = MissionTracker(
-            store, mission_id, title=title, description=description, workflow_id=workflow_id
+            store,
+            mission_id,
+            title=title,
+            description=description,
+            workflow_id=workflow_id,
+            workdir=workdir,
         )
         memory = await open_mission_memory(
             settings,

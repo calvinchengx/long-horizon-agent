@@ -185,6 +185,10 @@ async def test_postgres_mission_events_append_in_order_and_read_forward(pg_dsn: 
         assert new[1].ts.startswith("2026-10-03T00:00:00") and new[2].payload["tool"] == "edit_file"
         one = await store.read_mission_events(mission_id="pg-e1", after_id=cursor, limit=1)
         assert [e.kind for e in one] == ["cycle_started"]
+        assert {e.schema_version for e in new} == {1}
+        last = await store.last_mission_event("pg-e1")
+        assert last is not None and last.id == new[2].id and last.payload["tool"] == "edit_file"
+        assert await store.last_mission_event("pg-none") is None
     finally:
         await store.close()
 
