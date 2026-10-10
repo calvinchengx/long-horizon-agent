@@ -21,6 +21,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/tools"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
@@ -145,8 +146,22 @@ type MissionOptions struct {
 }
 
 // RunMission runs the org until complete / deadlocked / over-budget / looping. A budget refusal
-// or an altered decision history ends the run with a StoppedReason (not an error).
+// or an altered decision history ends the run with a StoppedReason (not an error). The run is one
+// "lha.mission" span carrying the result (python: Orchestrator.run_mission).
 func (o *Orchestrator) RunMission(ctx context.Context, m MissionOptions) (agent.MissionSummary, error) {
+	ctx, span := tracing.SpanMission(ctx, map[string]any{
+		"lha.run_path": "orchestrate", "lha.title": m.Title, "lha.resume": m.Resume,
+	})
+	summary, err := o.runMission(ctx, m)
+	if err == nil {
+		span.Set(tracing.MissionResult(summary.MissionID, summary.StoppedReason, summary.Completed,
+			summary.Cycles, summary.ItemsDone, summary.ItemsTotal, summary.TotalUSD))
+	}
+	span.End(err)
+	return summary, err
+}
+
+func (o *Orchestrator) runMission(ctx context.Context, m MissionOptions) (agent.MissionSummary, error) {
 	settings := o.settings
 	if settings == nil {
 		loaded, err := config.Load()
@@ -683,7 +698,9 @@ func (r *missionRun) serialCycle(ctx context.Context, snapshot contracts.Situati
 
 	writers := []string{coordination.Lead, coordination.WriterForItem(item.ID)}
 	r.leadGuard.Update(ownership, writers)
+	ctx, cycleSpan := tracing.AgentSpan(ctx, "cycle", map[string]any{"mission_id": r.missionID, "item": item.ID})
 	outcome, err := r.lead.RunCycle(ctx, r.tctx, r.missionID, cycleID, anchorText, r.checks)
+	cycleSpan.End(err)
 	if err != nil {
 		return false, err
 	}

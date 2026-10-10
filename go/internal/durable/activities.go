@@ -28,6 +28,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/memory"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/ops"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
@@ -392,12 +393,21 @@ func isToolboxConfigError(err error) bool {
 }
 
 // RunAgentCycle is run_agent_cycle: advance the mission by one verified item (safe to retry).
+// One "lha.activity.run_agent_cycle" span per ATTEMPT (retries are visible), wrapping the cycle
+// so its "lha.cycle" / model / tool spans nest (python: _traced_cycle).
 func (a *Activities) RunAgentCycle(ctx context.Context, inp CycleInput) (CycleResult, error) {
+	ctx, span := tracing.StartActivityCycle(ctx, inp.MissionID, inp.CycleID, attemptOf(ctx))
 	result, err := a.executeCycle(ctx, inp)
 	var chain *state.DecisionChainError
 	if errors.As(err, &chain) { // an altered decision log is not transient: fail the mission
-		return CycleResult{}, configError("decision log failed verification: "+chain.Error(), err)
+		err = configError("decision log failed verification: "+chain.Error(), err)
+		span.End(err)
+		return CycleResult{}, err
 	}
+	if err == nil { // a failed attempt records no verdict (python sets it only on success)
+		span.Set(tracing.ActivityResult(result.Verdict, result.Advanced))
+	}
+	span.End(err)
 	return result, err
 }
 

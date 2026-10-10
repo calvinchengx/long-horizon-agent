@@ -13,6 +13,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/tools"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/obs/tracing"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
@@ -275,7 +276,9 @@ func ImplementInWorktree(ctx context.Context, run *ImplementerRun, o ImplementOp
 		}
 		implementer := NewImplementer(o.Model, tools.WithDecisionTool(guarded, buffer), settings.MaxTurnsPerCycle).
 			WithRecorder(o.Recorder, run.CycleID)
+		ctx, implementSpan := tracing.AgentSpan(ctx, "implement", map[string]any{"mission_id": o.MissionID, "item": run.Item.ID})
 		result, err := implementer.Run(ctx, o.Objective, contracts.ToolContext{MissionID: o.MissionID, Session: session}, o.Extra)
+		implementSpan.End(err)
 		if err != nil {
 			return err
 		}
