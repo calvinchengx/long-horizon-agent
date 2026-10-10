@@ -92,6 +92,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/missions/{mission_id}/items/{item_id}/diffs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * An item's failed attempts and their diffs
+         * @description For each of the item's cycles (`getItem`), an attempt is included when a failed attempt is kept at `refs/lha/attempts/<mission_id>/<cycle_id>`: `head` is that ref's commit, `base` the pre-attempt `HEAD` (the ref's parent), and `diff` is `base..head` excluding `.lha/`, cut at 100000 bytes (`truncated`). A cycle with no ref is omitted; an item with no attempts returns `[]`.
+         */
+        get: operations["listItemDiffs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/missions/{mission_id}/events": {
         parameters: {
             query?: never;
@@ -273,6 +293,18 @@ export interface components {
                 code: "unauthorized" | "forbidden_host" | "not_found" | "anchor_unavailable" | "not_durable" | "finished" | "invalid_request" | "temporal_unavailable";
                 message: string;
             };
+        };
+        /** @description One failed attempt kept at `refs/lha/attempts/<mission_id>/<cycle_id>`. */
+        Attempt: {
+            cycle_id: string;
+            /** @description The pre-attempt `HEAD` (the attempt ref's parent commit). */
+            base: string;
+            /** @description The attempt ref's commit. */
+            head: string;
+            /** @description `base..head` excluding `.lha/`, cut at 100000 bytes. */
+            diff: string;
+            /** @description True when `diff` was longer than 100000 bytes and was cut. */
+            truncated: boolean;
         };
         Accepted: {
             /** @constant */
@@ -910,6 +942,72 @@ export interface operations {
                                 duration_s: number;
                             } | null;
                         }[];
+                    };
+                };
+            };
+            /** @description No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads). */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description The `Host` header is not this server's loopback address (DNS rebinding). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description No such mission or item (`not_found`), or the mission's anchor cannot be read here (`anchor_unavailable`). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description A query parameter is invalid. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listItemDiffs: {
+        parameters: {
+            query?: {
+                /** @description How many of the item's attempts to return: the most recent ones. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description The mission id (`lha missions`). */
+                mission_id: string;
+                /** @description The checklist item id. */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The item's attempts, in the item's cycle order. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        attempts: components["schemas"]["Attempt"][];
                     };
                 };
             };

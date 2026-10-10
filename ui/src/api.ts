@@ -15,6 +15,7 @@ type Ok<P extends keyof paths, M extends "get" | "post"> = P extends keyof paths
     : never
   : never;
 export type ItemDetail = Ok<"/api/v1/missions/{mission_id}/items/{item_id}", "get">;
+export type ItemDiffs = Ok<"/api/v1/missions/{mission_id}/items/{item_id}/diffs", "get">;
 export type Costs = Ok<"/api/v1/missions/{mission_id}/costs", "get">;
 export type Gate = S["Gate"];
 export type OpenGate = S["OpenGate"];
@@ -69,6 +70,11 @@ export const api = {
   items: (id: string) => request<{ items: ChecklistItem[] }>("GET", `${m(id)}/items`),
   item: (id: string, itemId: string, limit = 200) =>
     request<ItemDetail>("GET", `${m(id)}/items/${encodeURIComponent(itemId)}?limit=${limit}`),
+  diffs: (id: string, itemId: string, limit = 200) =>
+    request<ItemDiffs>(
+      "GET",
+      `${m(id)}/items/${encodeURIComponent(itemId)}/diffs?limit=${limit}`,
+    ),
   events: (id: string, after = 0, limit = 1000) =>
     request<{ events: MissionEvent[]; next_after: number }>(
       "GET",

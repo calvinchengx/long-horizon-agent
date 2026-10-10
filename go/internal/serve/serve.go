@@ -67,6 +67,8 @@ const (
 	maxWhoChars            = 200
 	eventPage              = 500
 	missionsWatched        = 1000
+	diffCacheSize          = 128     // attempt diffs one process caches (keyed by workdir+head)
+	maxDiffBytes           = 100_000 // an attempt diff longer than this is cut and flagged truncated
 )
 
 var decisions = []string{"approve", "reject", "retry", "abort", "impossible"}
@@ -107,6 +109,9 @@ type Server struct {
 	temporal  temporalState
 	hub       *hub
 	keepalive time.Duration
+
+	diffMu    sync.Mutex
+	diffCache map[string]string // (workdir, head) -> the attempt's diff (bounded; git never reruns)
 }
 
 // Route is one API route (a test checks they are exactly spec/serve/openapi.json's operations).
@@ -123,6 +128,7 @@ var Routes = []Route{
 	{"GET", "/api/v1/missions/{mission_id}", (*Server).getMission, false},
 	{"GET", "/api/v1/missions/{mission_id}/items", (*Server).listItems, false},
 	{"GET", "/api/v1/missions/{mission_id}/items/{item_id}", (*Server).getItem, false},
+	{"GET", "/api/v1/missions/{mission_id}/items/{item_id}/diffs", (*Server).listItemDiffs, false},
 	{"GET", "/api/v1/missions/{mission_id}/events", (*Server).listEvents, false},
 	{"GET", "/api/v1/missions/{mission_id}/costs", (*Server).listCosts, false},
 	{"GET", "/api/v1/missions/{mission_id}/gates", (*Server).listGates, false},
@@ -594,12 +600,7 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	cycles := []string{}
-	for _, e := range events {
-		if e.CycleID != "" && !slices.Contains(cycles, e.CycleID) && slices.Contains(named(e.Payload, false), itemID) {
-			cycles = append(cycles, e.CycleID)
-		}
-	}
+	cycles := cyclesFor(events, itemID)
 	var about []persistence.EventRow
 	for _, e := range events {
 		if slices.Contains(cycles, e.CycleID) || slices.Contains(named(e.Payload, true), itemID) {
@@ -622,6 +623,111 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) error {
 		"cycles": cycles, "spend": sumCosts(spent, ""), "events": out, "events_total": len(about),
 	})
 	return nil
+}
+
+// cyclesFor is the item's cycles: the non-empty cycle_ids of the events whose payload names the
+// item, in the order first recorded (the rule getItem documents; python: lha.serve.app._cycles_for).
+func cyclesFor(events []persistence.EventRow, itemID string) []string {
+	cycles := []string{}
+	for _, e := range events {
+		if e.CycleID != "" && !slices.Contains(cycles, e.CycleID) && slices.Contains(named(e.Payload, false), itemID) {
+			cycles = append(cycles, e.CycleID)
+		}
+	}
+	return cycles
+}
+
+// listItemDiffs is each of the item's failed attempts, from refs/lha/attempts/<mission>/<cycle>.
+//
+// An attempt ref exists only when the cycle changed files outside .lha/; its parent is the
+// pre-attempt HEAD, so the diff is <ref>^..<ref> excluding .lha/. The diff is cached by
+// workdir+head: git never runs per request (python: lha.serve.app.list_item_diffs).
+func (s *Server) listItemDiffs(w http.ResponseWriter, r *http.Request) error {
+	limit, err := intParam(r, "limit", 200, 1, 1000)
+	if err != nil {
+		return err
+	}
+	row, err := s.mission(r.Context(), r.PathValue("mission_id"))
+	if err != nil {
+		return err
+	}
+	its := items(r.Context(), row)
+	if its == nil {
+		return fail(404, "anchor_unavailable", "the anchor at %s cannot be read here", contracts.PyRepr(row.Workdir))
+	}
+	itemID := r.PathValue("item_id")
+	found := false
+	for _, it := range its {
+		if it["id"] == itemID {
+			found = true
+		}
+	}
+	if !found {
+		return fail(404, "not_found", "no item %s in %s", contracts.PyRepr(itemID), contracts.PyRepr(row.MissionID))
+	}
+	events, err := s.allEvents(r.Context(), row.MissionID)
+	if err != nil {
+		return err
+	}
+	attempts := []map[string]any{}
+	for _, cycleID := range cyclesFor(events, itemID) {
+		if a := s.attempt(r.Context(), row.Workdir, row.MissionID, cycleID); a != nil {
+			attempts = append(attempts, a)
+		}
+	}
+	if len(attempts) > limit {
+		attempts = attempts[len(attempts)-limit:]
+	}
+	writeJSON(w, 200, map[string]any{"attempts": attempts})
+	return nil
+}
+
+// attempt is the failed attempt kept at refs/lha/attempts/<mission>/<cycle>, or nil when there is
+// none. head is the ref's commit, base its parent (the pre-attempt HEAD); the diff excludes .lha/
+// and is cut at maxDiffBytes with truncated set when it was longer (python: _attempt).
+func (s *Server) attempt(ctx context.Context, workdir, missionID, cycleID string) map[string]any {
+	ref := "refs/lha/attempts/" + missionID + "/" + cycleID
+	head, err := state.RunGitWith(ctx, workdir, state.RunOptions{NoCheck: true}, "rev-parse", "--verify", "--quiet", ref)
+	if err != nil || head == "" {
+		return nil
+	}
+	base, err := state.RunGitWith(ctx, workdir, state.RunOptions{NoCheck: true}, "rev-parse", "--verify", "--quiet", head+"^")
+	if err != nil || base == "" {
+		return nil
+	}
+	diff := s.cachedDiff(ctx, workdir, head, base)
+	truncated := false
+	if len(diff) > maxDiffBytes {
+		diff = strings.ToValidUTF8(diff[:maxDiffBytes], "")
+		truncated = true
+	}
+	return map[string]any{"cycle_id": cycleID, "base": base, "head": head, "diff": diff, "truncated": truncated}
+}
+
+// cachedDiff is the attempt's diff, from the cache keyed by workdir+head or computed once (python:
+// _cached_diff). Bounded: when full, one entry is dropped (an LRU is not worth the bookkeeping).
+func (s *Server) cachedDiff(ctx context.Context, workdir, head, base string) string {
+	key := workdir + "\x00" + head
+	s.diffMu.Lock()
+	if diff, ok := s.diffCache[key]; ok {
+		s.diffMu.Unlock()
+		return diff
+	}
+	s.diffMu.Unlock()
+	diff := state.DiffRange(ctx, workdir, base, head, state.AnchorDir)
+	s.diffMu.Lock()
+	if s.diffCache == nil {
+		s.diffCache = map[string]string{}
+	}
+	if len(s.diffCache) >= diffCacheSize {
+		for k := range s.diffCache {
+			delete(s.diffCache, k)
+			break
+		}
+	}
+	s.diffCache[key] = diff
+	s.diffMu.Unlock()
+	return diff
 }
 
 // witnessResults is the item's witnesses, in order, each with its latest result from a `verify`

@@ -577,7 +577,7 @@
           "isError": false,
           "structuredContent": {
             "missions": {
-              "$len": 7
+              "$len": 8
             }
           }
         }
@@ -733,6 +733,33 @@
       },
       "expect": {
         "tool_error": "not_found"
+      }
+    },
+    {
+      "name": "list_item_diffs",
+      "request": {
+        "body": {
+          "jsonrpc": "2.0",
+          "id": 50,
+          "method": "tools/call",
+          "params": {
+            "name": "list_item_diffs",
+            "arguments": {
+              "mission_id": "mission_attempts",
+              "item_id": "01"
+            }
+          }
+        }
+      },
+      "expect": {
+        "result": {
+          "isError": false,
+          "structuredContent": {
+            "attempts": {
+              "$len": 1
+            }
+          }
+        }
       }
     },
     {

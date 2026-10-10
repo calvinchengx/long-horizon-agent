@@ -136,7 +136,7 @@
         "status": 200,
         "body": {
           "missions": {
-            "$len": 7
+            "$len": 8
           }
         }
       }
@@ -1224,6 +1224,119 @@
           },
           "events_total": 1001
         }
+      }
+    },
+    {
+      "name": "an item's failed attempt diffs",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_attempts/items/01/diffs"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "attempts": [
+            {
+              "cycle_id": "c2",
+              "base": "$any",
+              "head": "$any",
+              "diff": "diff --git a/hello.txt b/hello.txt\nnew file mode 100644\nindex 0000000..f3d4377\n--- /dev/null\n+++ b/hello.txt\n@@ -0,0 +1 @@\n+draft",
+              "truncated": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "an item with cycles but no kept attempts",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_durable/items/02/diffs"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "attempts": []
+        }
+      }
+    },
+    {
+      "name": "an item diffs limit above 1000",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_attempts/items/01/diffs",
+        "query": {
+          "limit": "1001"
+        }
+      },
+      "expect": {
+        "status": 422,
+        "error": "invalid_request"
+      }
+    },
+    {
+      "name": "listItemDiffs: no token",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_attempts/items/01/diffs",
+        "auth": "none"
+      },
+      "expect": {
+        "status": 401,
+        "error": "unauthorized"
+      }
+    },
+    {
+      "name": "listItemDiffs: a foreign Host",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_attempts/items/01/diffs",
+        "host": "evil.example:80"
+      },
+      "expect": {
+        "status": 403,
+        "error": "forbidden_host"
+      }
+    },
+    {
+      "name": "listItemDiffs: an unknown item",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_attempts/items/99/diffs"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "listItemDiffs: an unknown mission",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_nope/items/01/diffs"
+      },
+      "expect": {
+        "status": 404,
+        "error": "not_found"
+      }
+    },
+    {
+      "name": "listItemDiffs: an anchor elsewhere",
+      "operation": "listItemDiffs",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_elsewhere/items/01/diffs"
+      },
+      "expect": {
+        "status": 404,
+        "error": "anchor_unavailable"
       }
     },
     {

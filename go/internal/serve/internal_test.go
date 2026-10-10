@@ -8,10 +8,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -25,6 +28,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/durable"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
 var errBoom = errors.New("database is locked")
@@ -131,6 +135,7 @@ func TestStoreErrorsAre500(t *testing.T) {
 		{"CostSummary", "/api/v1/missions"},
 		{"ReadMissionEvents", "/api/v1/missions/m/events"},
 		{"ReadMissionEvents", "/api/v1/missions/m/items/01"},
+		{"ReadMissionEvents", "/api/v1/missions/m/items/01/diffs"},
 		{"ListCosts", "/api/v1/missions/m/items/01"},
 		{"CostSummary", "/api/v1/missions/m/costs"},
 		{"ListCosts", "/api/v1/missions/m/costs"},
@@ -441,5 +446,136 @@ func TestWitnessResultsAndNumOr(t *testing.T) {
 	}
 	if numOr("x", 3) != 3 || numOr(json.Number("bad"), 4) != 4 || numOr(json.Number("2.5"), 0) != 2.5 {
 		t.Fatal("numOr")
+	}
+}
+
+// --- item attempt diffs (spec/serve/openapi.json listItemDiffs) ---------------------------------
+
+// seedAttempt writes a file and keeps a candidate commit at refs/lha/attempts/<mission>/<cycle>,
+// then returns the work tree to HEAD (as a real failed cycle leaves it).
+func seedAttempt(t *testing.T, dir, missionID, cycleID string) {
+	t.Helper()
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("draft\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sha, err := verify.CandidateCommit(ctx, dir, "lha: failed attempt ("+cycleID+")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.RunGit(ctx, dir, "update-ref", "refs/lha/attempts/"+missionID+"/"+cycleID, sha); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.DiscardChanges(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The diff comes from the cache on a repeat, and a long diff is cut with truncated set.
+func TestItemAttemptDiffsAreCachedAndTruncated(t *testing.T) {
+	store := &fakeStore{}
+	s := newServer(t, store)
+	dir := store.mission.Workdir
+	seedAttempt(t, dir, "m", "c2")
+	s.diffCache = map[string]string{}
+
+	first := s.attempt(context.Background(), dir, "m", "c2")
+	if first == nil || first["truncated"] != false || first["cycle_id"] != "c2" {
+		t.Fatalf("%v", first)
+	}
+	if first["head"] == first["base"] || first["head"] == "" || first["base"] == "" {
+		t.Fatalf("%v", first)
+	}
+	if !strings.HasPrefix(first["diff"].(string), "diff --git a/hello.txt") {
+		t.Fatalf("%v", first["diff"])
+	}
+	key := dir + "\x00" + first["head"].(string)
+	if s.diffCache[key] != first["diff"] {
+		t.Fatal("the diff was not cached")
+	}
+	if second := s.attempt(context.Background(), dir, "m", "c2"); !reflect.DeepEqual(first, second) {
+		t.Fatalf("%v != %v", first, second)
+	}
+
+	s.diffCache[key] = strings.Repeat("x", maxDiffBytes+50) // a diff longer than the cap
+	cut := s.attempt(context.Background(), dir, "m", "c2")
+	if cut["truncated"] != true || len(cut["diff"].(string)) > maxDiffBytes {
+		t.Fatalf("%v", cut)
+	}
+}
+
+// A cycle with no attempt ref, and a ref whose commit has no parent, are both skipped.
+func TestAttemptWithoutARefOrAParentIsSkipped(t *testing.T) {
+	store := &fakeStore{}
+	s := newServer(t, store)
+	dir := store.mission.Workdir
+	ctx := context.Background()
+	if a := s.attempt(ctx, dir, "m", "nope"); a != nil {
+		t.Fatalf("no ref should be skipped: %v", a)
+	}
+	root, err := state.HeadSHA(ctx, dir) // the root commit: no parent
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := state.RunGit(ctx, dir, "update-ref", "refs/lha/attempts/m/root", root); err != nil {
+		t.Fatal(err)
+	}
+	if a := s.attempt(ctx, dir, "m", "root"); a != nil {
+		t.Fatalf("a ref with no parent should be skipped: %v", a)
+	}
+}
+
+// The cache never grows past its bound.
+func TestTheDiffCacheIsBounded(t *testing.T) {
+	store := &fakeStore{}
+	s := newServer(t, store)
+	s.diffCache = map[string]string{}
+	for i := 0; i <= diffCacheSize; i++ {
+		s.cachedDiff(context.Background(), store.mission.Workdir, fmt.Sprintf("h%d", i), "b")
+	}
+	if len(s.diffCache) != diffCacheSize {
+		t.Fatalf("cache size %d", len(s.diffCache))
+	}
+}
+
+// The handler keeps only the most recent limit attempts, in the item's cycle order.
+func TestListItemDiffsTrimsToLimit(t *testing.T) {
+	store := &fakeStore{events: []persistence.EventRow{
+		{ID: 1, CycleID: "c1", Payload: map[string]any{"item_id": "01"}},
+		{ID: 2, CycleID: "c2", Payload: map[string]any{"item_id": "01"}},
+	}}
+	s := newServer(t, store)
+	dir := store.mission.Workdir
+	seedAttempt(t, dir, "m", "c1")
+	seedAttempt(t, dir, "m", "c2")
+	rec := call(s, "GET", "/api/v1/missions/m/items/01/diffs?limit=1", nil)
+	if rec.Code != 200 {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		Attempts []map[string]any `json:"attempts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Attempts) != 1 || body.Attempts[0]["cycle_id"] != "c2" {
+		t.Fatalf("%v", body.Attempts)
+	}
+}
+
+// cyclesFor is the item's cycles: first recorded, once each, and only the item's own.
+func TestCyclesFor(t *testing.T) {
+	events := []persistence.EventRow{
+		{ID: 1, CycleID: "", Payload: map[string]any{"item_id": "01"}},
+		{ID: 2, CycleID: "c1", Payload: map[string]any{"item_id": "01"}},
+		{ID: 3, CycleID: "c1", Payload: map[string]any{"item_id": "01"}},
+		{ID: 4, CycleID: "c2", Payload: map[string]any{"item": "01"}},
+		{ID: 5, CycleID: "c3", Payload: map[string]any{"item_id": "02"}},
+	}
+	if got := cyclesFor(events, "01"); !reflect.DeepEqual(got, []string{"c1", "c2"}) {
+		t.Fatalf("cyclesFor = %v", got)
+	}
+	if got := cyclesFor(events, "99"); len(got) != 0 {
+		t.Fatalf("cyclesFor = %v", got)
 	}
 }

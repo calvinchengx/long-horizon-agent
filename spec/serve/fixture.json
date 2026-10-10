@@ -165,6 +165,34 @@
      "schema_version": 1
     }
    ]
+  },
+  "attempts": {
+   "title": "Mission with failed attempts",
+   "description": "An item whose failed attempts are kept at refs/lha/attempts/",
+   "items": [
+    {
+     "id": "01",
+     "description": "Ship it (witness: cmd:true)",
+     "status": "blocked",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 2,
+     "consecutive_failures": 2,
+     "last_failure": "exit 1: tests/test_api.py::test_list FAILED",
+     "allow_harness_edits": false,
+     "witnesses": [],
+     "notes": "",
+     "schema_version": 1
+    }
+   ],
+   "attempts": [
+    {
+     "cycle": "c2",
+     "files": {
+      "hello.txt": "draft\n"
+     }
+    }
+   ]
   }
  },
  "missions": [
@@ -225,6 +253,14 @@
    "status": "RUNNING",
    "workflow_id": null,
    "anchor": "busy"
+  },
+  {
+   "mission_id": "mission_attempts",
+   "title": "Mission with failed attempts",
+   "description": "An item whose failed attempts are kept at refs/lha/attempts/",
+   "status": "RUNNING",
+   "workflow_id": null,
+   "anchor": "attempts"
   }
  ],
  "costs": [
@@ -885,6 +921,15 @@
       "duration_s": 0.1
      }
     ]
+   },
+   "ts": "2026-10-04T00:00:59.000000+00:00"
+  },
+  {
+   "mission_id": "mission_attempts",
+   "cycle_id": "c2",
+   "kind": "cycle_started",
+   "payload": {
+    "item_id": "01"
    },
    "ts": "2026-10-04T00:00:59.000000+00:00"
   }

@@ -24,6 +24,7 @@ import json
 import os
 import re
 import time
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -47,6 +48,7 @@ from lha.persistence.store import (
 )
 from lha.serve.mcp import INVALID_REQUEST, PARSE_ERROR, Mcp
 from lha.serve.mcp import error as rpc_error
+from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, GitMissionAnchor
 
 API_VERSION = "1.1.0"
@@ -61,6 +63,13 @@ KEEPALIVE_S = 15.0
 POLL_EVENTS_S = 0.5
 POLL_MISSIONS_S = 2.0
 STREAM_QUEUE = 1000
+#: How many attempt diffs one process caches, keyed by ``(workdir, head)``: git never runs twice
+#: for the same commit (docs/27-mission-ui.md, "Commits and diffs are cached by commit hash").
+DIFF_CACHE_SIZE = 128
+#: An attempt diff longer than this is cut and flagged ``truncated``.
+MAX_DIFF_BYTES = 100_000
+#: The attempts whose diffs have been computed: ``(workdir, head)`` -> the diff (an LRU).
+_DIFF_CACHE: OrderedDict[tuple[str, str], str] = OrderedDict()
 _DECISIONS = ("approve", "reject", "retry", "abort", "impossible")
 _EDIT_FIELDS: dict[str, dict[str, str]] = {
     "add": {
@@ -553,10 +562,7 @@ async def get_item(request: Request) -> Response:
         _all_events(app.store, row.mission_id),
         app.store.list_costs(row.mission_id, limit=_LEDGER_ALL),
     )
-    cycles: list[str] = []
-    for e in events:
-        if e.cycle_id and e.cycle_id not in cycles and item_id in _named(e.payload, False):
-            cycles.append(e.cycle_id)
+    cycles = _cycles_for(events, item_id)
     about = [e for e in events if e.cycle_id in cycles or item_id in _named(e.payload, True)]
     return JSONResponse(
         {
@@ -569,6 +575,79 @@ async def get_item(request: Request) -> Response:
             "events_total": len(about),
         }
     )
+
+
+def _cycles_for(events: list[EventRow], item_id: str) -> list[str]:
+    """The item's cycles: the non-empty ``cycle_id``s of the events whose payload names the item,
+    in the order first recorded (the same rule ``getItem`` documents in the OpenAPI spec)."""
+    cycles: list[str] = []
+    for e in events:
+        if e.cycle_id and e.cycle_id not in cycles and item_id in _named(e.payload, False):
+            cycles.append(e.cycle_id)
+    return cycles
+
+
+@_route()
+async def list_item_diffs(request: Request) -> Response:
+    """Each of the item's failed attempts, from ``refs/lha/attempts/<mission>/<cycle>``.
+
+    An attempt ref exists only when the cycle changed files outside ``.lha/``; its parent is the
+    pre-attempt ``HEAD``, so the diff is ``<ref>^..<ref>`` excluding ``.lha/``. The diff is cached
+    by ``(workdir, head)``: git never runs per request.
+    """
+    app = _app(request)
+    limit = _int(request, "limit", 200, 1, 1000) or 200
+    row = await app.mission(request.path_params["mission_id"])
+    items = await _items(row)
+    if items is None:
+        raise ApiError(
+            404, "anchor_unavailable", f"the anchor at {row.workdir!r} cannot be read here"
+        )
+    item_id = request.path_params["item_id"]
+    if not any(i["id"] == item_id for i in items):
+        raise ApiError(404, "not_found", f"no item {item_id!r} in {row.mission_id!r}")
+    events = await _all_events(app.store, row.mission_id)
+    attempts: list[dict[str, Any]] = []
+    for cycle_id in _cycles_for(events, item_id):
+        attempt = await asyncio.to_thread(_attempt, row.workdir or "", row.mission_id, cycle_id)
+        if attempt is not None:
+            attempts.append(attempt)
+    return JSONResponse({"attempts": attempts[-limit:]})
+
+
+def _attempt(workdir: str, mission_id: str, cycle_id: str) -> dict[str, Any] | None:
+    """The attempt kept at ``refs/lha/attempts/<mission>/<cycle>``, or ``None`` when there is none.
+
+    ``head`` is the ref's commit, ``base`` its parent (the pre-attempt ``HEAD``); the diff excludes
+    ``.lha/`` and is cut at ``MAX_DIFF_BYTES`` with ``truncated`` set when it was longer.
+    """
+    ref = f"refs/lha/attempts/{mission_id}/{cycle_id}"
+    head = git_ops.run_git(workdir, "rev-parse", "--verify", "--quiet", ref, check=False)
+    if not head:
+        return None
+    base = git_ops.run_git(workdir, "rev-parse", "--verify", "--quiet", f"{head}^", check=False)
+    if not base:
+        return None  # a ref with no parent (not an attempt this server can diff)
+    diff = _cached_diff(workdir, head, base)
+    truncated = len(diff.encode("utf-8")) > MAX_DIFF_BYTES
+    if truncated:
+        diff = diff.encode("utf-8")[:MAX_DIFF_BYTES].decode("utf-8", "ignore")
+    return {"cycle_id": cycle_id, "base": base, "head": head, "diff": diff, "truncated": truncated}
+
+
+def _cached_diff(workdir: str, head: str, base: str) -> str:
+    """The attempt's diff, from the cache keyed by ``(workdir, head)`` or computed once."""
+    key = (workdir, head)
+    cached = _DIFF_CACHE.get(key)
+    if cached is not None:
+        _DIFF_CACHE.move_to_end(key)
+        return cached
+    diff = git_ops.diff_range(workdir, base, head, exclude=(ANCHOR_DIR,))
+    _DIFF_CACHE[key] = diff
+    _DIFF_CACHE.move_to_end(key)
+    while len(_DIFF_CACHE) > DIFF_CACHE_SIZE:
+        _DIFF_CACHE.popitem(last=False)
+    return diff
 
 
 def _witness_results(item: dict[str, Any], about: list[EventRow]) -> list[dict[str, Any]]:
@@ -1009,6 +1088,7 @@ API_ROUTES: list[tuple[str, str, Handler]] = [
     ("GET", "/api/v1/missions/{mission_id}", get_mission),
     ("GET", "/api/v1/missions/{mission_id}/items", list_items),
     ("GET", "/api/v1/missions/{mission_id}/items/{item_id}", get_item),
+    ("GET", "/api/v1/missions/{mission_id}/items/{item_id}/diffs", list_item_diffs),
     ("GET", "/api/v1/missions/{mission_id}/events", list_events),
     ("GET", "/api/v1/missions/{mission_id}/costs", list_costs),
     ("GET", "/api/v1/missions/{mission_id}/gates", list_gates),

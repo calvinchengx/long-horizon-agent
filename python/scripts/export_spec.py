@@ -491,6 +491,17 @@ def export_serve_fixture() -> None:
             "ts": _SERVE_TS.format(59),
         },
     ]
+    # Appended last, so every existing event keeps its id. Item 01's cycle is c2; the runner seeds
+    # refs/lha/attempts/mission_attempts/c2, so listItemDiffs finds one attempt for it.
+    events.append(
+        {
+            "mission_id": "mission_attempts",
+            "cycle_id": "c2",
+            "kind": "cycle_started",
+            "payload": {"item_id": "01"},
+            "ts": _SERVE_TS.format(59),
+        }
+    )
     _write(
         "serve/fixture.json",
         {
@@ -543,6 +554,22 @@ def export_serve_fixture() -> None:
                             {"witnesses": ["go:TestFlaky", "cmd:never-ran"]},
                         ),
                     ),
+                },
+                "attempts": {
+                    "title": "Mission with failed attempts",
+                    "description": "An item whose failed attempts are kept at refs/lha/attempts/",
+                    "items": _serve_items(
+                        (
+                            "01",
+                            "Ship it (witness: cmd:true)",
+                            "blocked",
+                            [],
+                            {"attempts": 2, "consecutive_failures": 2, "last_failure": failure},
+                        ),
+                    ),
+                    # What the runner seeds: a candidate commit at
+                    # refs/lha/attempts/<mission_id>/<cycle>, changing one file.
+                    "attempts": [{"cycle": "c2", "files": {"hello.txt": "draft\n"}}],
                 },
             },
             "missions": [
@@ -603,6 +630,14 @@ def export_serve_fixture() -> None:
                     "status": "RUNNING",
                     "workflow_id": None,
                     "anchor": "busy",
+                },
+                {
+                    "mission_id": "mission_attempts",
+                    "title": "Mission with failed attempts",
+                    "description": "An item whose failed attempts are kept at refs/lha/attempts/",
+                    "status": "RUNNING",
+                    "workflow_id": None,
+                    "anchor": "attempts",
                 },
             ],
             "costs": [
@@ -729,6 +764,7 @@ _MCP_TOOLS = [
     ("get_mission", "getMission", "Mission status", True),
     ("list_items", "listItems", "Mission checklist", True),
     ("get_item", "getItem", "Checklist item detail", True),
+    ("list_item_diffs", "listItemDiffs", "Item attempt diffs", True),
     ("list_events", "listEvents", "Mission timeline", True),
     ("list_costs", "listCosts", "Mission costs", True),
     ("list_gates", "listGates", "Mission human gates", True),

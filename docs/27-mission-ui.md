@@ -144,23 +144,24 @@ mission-report` and plain SQL can read it.
 
 ## Phase 1: `lha serve`, the UI API
 
-Status: both implementations serve the contract below and pass every case. Diffs (including failed
-attempts) are an additive operation still to come.
+Status: both implementations serve the contract below and pass every case, including per-item
+attempt diffs.
 
 - Reads: `GET /api/v1/health`; `/api/v1/missions` (each with its spend, item counts and last
   event); `/missions/{id}` (plus its description, workdir, and for a running durable mission its
   workflow's live state: status, cycles, open gate, open question, wake time, steering notes,
   pending edits); `/missions/{id}/items` (the anchor's checklist); `/missions/{id}/events?after=`
   (recorded events, paged forward by id); `/missions/{id}/items/{item_id}` (the item, the items
-  that depend on it, its cycles, their spend and the events about it); `/missions/{id}/costs`
+  that depend on it, its cycles, their spend and the events about it); `/missions/{id}/items/{item_id}/diffs`
+  (each of the item's failed attempts kept under `refs/lha/attempts/`, with its diff, cached by
+  commit); `/missions/{id}/costs`
   (totals, totals by role and by model, the latest calls); `/missions/{id}/gates`.
 - Live: `GET /api/v1/stream` (Server-Sent Events, resumable with `Last-Event-ID`): `mission_event`
   messages, and a `mission` message when a mission's row changes.
 - Controls (durable missions): `POST` `steer`, `snooze`, `checklist-edits`, `decision` (with the
   person's name, sent as `human_decision_v2`) and `abort` (a workflow cancellation). A local run is
   `409 not_durable`, a finished mission `409 finished`, Temporal unreachable `503`.
-- Still to come, as an additive operation: diffs, including failed attempts under
-  `refs/lha/attempts/`, and each witness's latest result.
+- Still to come, as an additive operation: a dependency view and spend charts.
 - Contract: [`spec/serve/`](../spec/serve/README.md); every implementation's server is tested
   against it.
 
@@ -176,9 +177,9 @@ Performance rules, because the cost is in how the server gets its data, not in t
 
 Status: built ([`ui/`](../ui/README.md)), served by both implementations at the start-up URL:
 the missions list, and per mission its live state, open-gate banner (answered with a name),
-steering, snooze and abort, the checklist with each item's history (its cycles, their spend and
-the events about it), the live timeline, gates, and spend by role and by model. About 15 KB of
-gzipped JavaScript. Still to come: a dependency view, diffs, spend charts.
+steering, snooze and abort, the checklist with each item's history (its cycles, their spend, the
+events about it and each failed attempt's diff), the live timeline, gates, and spend by role and
+by model. About 15 KB of gzipped JavaScript. Still to come: a dependency view, spend charts.
 
 Every mission the store knows, live as their rows change:
 
@@ -236,10 +237,11 @@ CORS; a gate answer requires a name, recorded on the gate row.
 Status: built in both implementations. `lha serve` answers MCP at `/mcp` (Streamable HTTP answered
 with plain JSON, the token as `Authorization: Bearer` or `X-LHA-Token`), and `lha mcp` serves a
 client on stdin and stdout. Tools, each one operation of the UI API: `server_health`,
-`list_missions`, `get_mission`, `list_items`, `get_item`, `list_events`, `list_costs`,
-`list_gates`, `steer_mission` and `snooze_mission`. A call goes through the server's own routes in
-process, so a tool answers exactly what its operation answers: the response is the result's
-`structuredContent`, and an error response is a result with `isError` and the API's error body.
+`list_missions`, `get_mission`, `list_items`, `get_item`, `list_item_diffs`, `list_events`,
+`list_costs`, `list_gates`, `steer_mission` and `snooze_mission`. A call goes through the server's
+own routes in process, so a tool answers exactly what its operation answers: the response is the
+result's `structuredContent`, and an error response is a result with `isError` and the API's error
+body.
 
 **No gate answers, no abort and no checklist edits over MCP**, pinned by the contract
 (`not_tools` in `spec/serve/mcp.json`) and by cases that call them: an agent must not be able to
