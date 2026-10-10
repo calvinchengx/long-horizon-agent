@@ -230,7 +230,7 @@ The Auditor, Librarian, Tester and model-backed Integrator runners, the prompt e
 judge and eval harness, and the Claude Agent SDK lead were removed: none had a caller. Their
 jobs are done by deterministic code (the verifier and harness integrity audit the lead's claims;
 `BranchIntegrator` integrates), by memory consolidation (the `librarian` label in the cost
-ledger), and by the `claude_code` lead engine ([13-models.md](13-models.md)).
+ledger), and by the `claude_code` / `opencode` lead engine ([13-models.md](13-models.md)).
 
 ## File ownership
 

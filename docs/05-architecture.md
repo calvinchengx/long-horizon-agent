@@ -46,8 +46,8 @@ The other connections, each used only when it is configured:
 | `lha db migrate`, `missions`, `costs`, `gates`, `memory reembed`, `objects prune` | the mission store and the object store | when run |
 | `lha decisions --verify` | the workspace's decision log | when run |
 
-A model provider is Ollama, an OpenAI-compatible endpoint, Claude, Claude Code (`claude -p`) or
-the stub, then each entry of `LHA_FALLBACK_MODELS` in turn. The worker's activities are
+A model provider is Ollama, an OpenAI-compatible endpoint, Claude, Claude Code (`claude -p`),
+OpenCode (`opencode run`) or the stub, then each entry of `LHA_FALLBACK_MODELS` in turn. The worker's activities are
 `run_agent_cycle`, `check_mission_health`, `notify_gate`, `declare_impossible`, `unblock_items`,
 `read_mission_snapshot` and `record_mission_status`, plus `plan_round`, `run_implementer`,
 `integrate_branch` and `review_cycle` for the opt-in organization; `--research N` adds
@@ -302,6 +302,7 @@ from `LHA_MODEL_BACKEND`:
 | `openai_compat` | `OpenAICompatModel` against `LHA_OPENAI_BASE_URL` | Unknown unless `LHA_OPENAI_PRICE_*_PER_MTOK` are set |
 | `claude` | `ClaudeModel`, Messages API over HTTP | Built-in price table, overridable |
 | `claude_code` | `ClaudeCodeModel` (Go: `model.ClaudeCodeModel`), the `claude -p` CLI | The `total_cost_usd` Claude Code reports |
+| `opencode` | `OpenCodeModel` (Go: `model.OpenCodeModel`), the `opencode run` CLI | The `cost` OpenCode reports per step |
 
 Cost is computed from the token usage in each provider response. Under the `claude` backend,
 `lha orchestrate` routes roles to model tiers (planner, lead and reviewer to Opus, implementers

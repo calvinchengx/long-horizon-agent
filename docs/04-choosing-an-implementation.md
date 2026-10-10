@@ -4,8 +4,8 @@ LHA has two implementations of the same system: Python in [`python/`](../python/
 [`go/`](../go/). Python is the reference implementation: a behaviour change is made there first.
 The Go CLI runs missions locally in the local or Docker sandbox: single-agent (`lha run-local`,
 `lha mission`) and the multi-agent organization (`lha orchestrate`, including `--resume`), with
-the built-in turn loop or the `claude_code` lead engine, the mission store, the persistent cost
-ledger and tiered memory. It also runs missions durably on Temporal (`lha worker`,
+the built-in turn loop or the `claude_code` / `opencode` lead engine, the mission store, the
+persistent cost ledger and tiered memory. It also runs missions durably on Temporal (`lha worker`,
 `lha mission-start` and the other `mission-*` commands), the durable organization's research,
 review and parallel rounds included (`mission-start --research / --review / --max-parallel`),
 writing the same mission store and ledger and with the same tiered memory. Go implements
@@ -71,14 +71,14 @@ memory and Postgres. Current state of [`go/internal/`](../go/internal/):
 | `contracts` | `lha.contracts` | Committed, including item `witnesses`, the `split` status and `Checklist.Split`, `MissionSpec.References` and `Check.Where` |
 | `config` | `lha.config` | Committed: every Python setting, with the same names, defaults and validation; `lha config` output is byte-identical |
 | `spec` | conformance harness | Committed: runs every file in `spec/`, including `agent/prompts.json`, `agent/org.json`, `coordination/shared_paths.json` and `memory/` |
-| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, failover, retry, pricing, health probe) | Committed, including the `claude_code` backend (`claude -p`, the same argv, result parsing, errors and reported cost), `LHA_FALLBACK_MODELS` chains (same `backend:model[@in/out]` format, errors and per-member pricing) and the model health probe a parked durable mission uses (`ProbeModel`) |
+| `model` | `lha.model` (stub, OpenAI-compatible/Ollama, Claude, Claude Code, OpenCode, failover, retry, pricing, health probe) | Committed, including the `claude_code` backend (`claude -p`) and the `opencode` backend (`opencode run`) — the same argv, result parsing, errors and reported cost — `LHA_FALLBACK_MODELS` chains (same `backend:model[@in/out]` format, errors and per-member pricing) and the model health probe a parked durable mission uses (`ProbeModel`) |
 | `safety` | `lha.safety` (command classifier, egress policy with credential broker, Rule of Two) | Committed, including the `>\|` redirection and `fec0::/10` fixes |
 | `obs` | `lha.obs` (events, redaction, OpenTelemetry) | Committed, including OTLP/HTTP trace export (`obs/tracing`: the same settings, span names and redacted attributes) |
 | `state` | `lha.state` (git ops, mission anchor, schema migrations, hash-chained decision log) | Committed, including reading, verifying and appending the chained `.lha/decisions.ndjson` (verified on every snapshot read and before every checkpoint), decisions queued mid-cycle (`RecordDecision`), mission references, the ownership map (`.lha/ownership.json`: read, staged, written at initialization), anchor-only commits (`CommitAnchorUpdate`, for lease decisions) and `ReadEvents`; `state/vendor` is `lha vendor` (same layout and `MANIFEST.json` bytes) |
 | `checklistimport` | `lha.state.checklist_import` | Committed (`.json` and `.md` checklists) |
 | `verify` | `lha.verify` (verifier, harness integrity, flaky quarantine, witnesses, trusted runner, mutation gate) | Committed, including operator-protected paths (`LHA_HARNESS_PATHS`) and the opt-in mutation gate (`LHA_MUTATION_CHECK`, [07](07-verification.md#mutation-gate)) |
-| `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed, including `RunExternal` (a `claude_code` session metered by its reported cost) and the `CostHook` every recorded call, external ones included, is handed to (python `on_record`) |
-| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local` with the mission row, the persistent cost ledger and tiered memory in the lead prompt (recalled before the first turn, recorded after the checkpoint, for the turn loop and the `claude_code` engine alike); the `claude_code` lead engine and its MCP bridge (`agent/mcpbridge`: the same MCP config, tools and results as `lha.agent.mcp_bridge`) |
+| `governor` | `lha.governor` (cost ledger, budget governor, metering) | Committed, including `RunExternal` (a `claude_code` or `opencode` session metered by its reported cost) and the `CostHook` every recorded call, external ones included, is handed to (python `on_record`) |
+| `agent` | `lha.agent` (prompts, loop, compaction, local runner) | Committed: the built-in turn loop with verification, harness integrity, rollback of failed attempts, replanning and checkpoints; `run_mission_local` / `plan_and_run_local` with the mission row, the persistent cost ledger and tiered memory in the lead prompt (recalled before the first turn, recorded after the checkpoint, for the turn loop and the CLI engines alike); the `claude_code` and `opencode` lead engines and their shared MCP bridge (`agent/mcpbridge`: the same MCP config, tools and results as `lha.agent.mcp_bridge`) |
 | `agents` | `lha.agents.planner`, `replanner`, `roles`, `router`, `reviewer` (verdict parsing), `reflection` | Committed: Planner with file ownership, Replanner, the role chart, per-role model routing, review parsing, reflection |
 | `agents/org` | `lha.agents.orchestrator`, `waves`, `integrator`, `reviewer`, `team`, `subagent`, `specialists` | Committed: the sub-agent loop, research fan-out, the Reviewer, implementer waves in `.git/lha-worktrees`, the `BranchIntegrator` and the `Orchestrator` with `--resume`. Its run services (`DefaultServices`, python `open_run_services`) write the mission row, every role's calls to the persistent ledger and the terminal gate's events, and give the Lead tiered memory. The durable rounds (`durable`) run the same wave functions in activities |
 | `coordination` | `lha.coordination` (ownership, enforcement, leases, ticket, blackboard) | Committed: the ownership map and `OwnershipGuard` (same refusal messages), the git-layer check, the `LeaseBroker` (sharing Python's `.git/lha-cycle.lock` flock) and `request_lease`, tickets, the blackboard |
@@ -98,9 +98,10 @@ What the Go CLI can do today:
   (`model unavailable: <error> after <n> attempts`; see [models](13-models.md#retries-and-failover))
   or `max_cycles`, in the `local` sandbox (with
   `LHA_ALLOW_UNSAFE_LOCAL=true` / `--unsafe-local`) or the `docker` sandbox (`LHA_SANDBOX_IMAGE`,
-  `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible, Claude or Claude Code
-  (`claude_code`) backend, and with the built-in turn loop or the `claude_code` lead engine
-  (`LHA_LEAD_ENGINE=claude_code`, both `LHA_CLAUDE_CODE_TOOLS` modes).
+  `LHA_SANDBOX_EGRESS`), with the stub, Ollama, OpenAI-compatible, Claude, Claude Code
+  (`claude_code`) or OpenCode (`opencode`) backend, and with the built-in turn loop or the
+  `claude_code` / `opencode` lead engine (`LHA_LEAD_ENGINE=claude_code` or `opencode`, both tool
+  modes of each).
 - The lead gets the same tools as in Python (file IO, `run_command`, `record_decision`,
   `fetch_url` / `web_search` under `LHA_WEB_ALLOW_HOSTS` / `--allow-host`, and `code_query` when
   `LHA_CODE_QUERY=true`). An unsafe local sandbox
@@ -121,7 +122,8 @@ What the Go CLI can do today:
   A mission started by either implementation can be continued by the other with `--resume`.
 - For the same inputs a Go run and a Python run leave the same checkpoint commits, the same
   `.lha/` files and the same exit code; `go/cmd/lha/e2e_test.go`,
-  `go/cmd/lha/claude_code_test.go` and `go/cmd/lha/orchestrate_test.go` check this by running
+  `go/cmd/lha/claude_code_test.go`, `go/cmd/lha/opencode_test.go` and
+  `go/cmd/lha/orchestrate_test.go` check this by running
   both side by side, including a mission interrupted in one implementation and resumed in the
   other. The comparison is of raw bytes: event payloads and `ownership.json` keep Python's
   insertion key order and float formatting, and messages that embed an exception class name
@@ -129,8 +131,8 @@ What the Go CLI can do today:
   `postgres unavailable (OperationalError: ...)`) use Python's names
   ([wire contract](19-wire-contract.md#json-bytes-and-exception-names)).
 - `run-local`, `mission` and `orchestrate` write the mission row (RUNNING, then DONE /
-  IMPOSSIBLE / ABORTED) and every metered model call (every org role's, and a `claude_code`
-  session's reported cost) to the mission store (the per-user SQLite file, or Postgres with
+  IMPOSSIBLE / ABORTED) and every metered model call (every org role's, and a `claude_code` or
+  `opencode` session's reported cost) to the mission store (the per-user SQLite file, or Postgres with
   `LHA_POSTGRES_DSN`), and the lead gets the same tiered memory block as in Python. `lha
   missions`, `lha costs` and `lha gates` read the store with Python's output; `lha db migrate`
   applies `db/migrations/` and `lha memory reembed` re-embeds stale memory. Either implementation reads what the other wrote, and the parity

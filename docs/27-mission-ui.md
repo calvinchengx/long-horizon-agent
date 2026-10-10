@@ -116,13 +116,14 @@ One new table, written by every run path of every implementation, so a reader ne
 | `schema_version` | integer | `1` |
 
 The rows are the trace events LHA already emits ([observability](16-observability.md): `tool_call`
-with its error tail, `llm_turn`, `turns_exhausted`, `checkpoint`, `claude_code_session`, `code_map`,
-`system_one`, ...), persisted instead of only logged, plus two new kinds:
+with its error tail, `llm_turn`, `turns_exhausted`, `checkpoint`, `claude_code_session`,
+`opencode_session`, `code_map`, `system_one`, ...), persisted instead of only logged, plus two new
+kinds:
 
 - `verify`: a verification ran (inside a cycle or from a session's `verify` tool): verdict and each
   check's name, pass, exit code and duration.
-- `session_progress`: a `claude_code` session's progress while it runs, from
-  `claude -p --output-format stream-json`: turn number, the tool it called, and its spend so far.
+- `session_progress`: a `claude_code` or `opencode` session's progress while it runs, from its
+  streamed output: turn number, the tool it called, and its spend so far.
 
 Work items:
 
@@ -135,8 +136,8 @@ Work items:
    best effort: a store outage never fails a cycle. Done.
 3. Record `verify` events: what asked for the run (`done`, the session's `verify` tool, or the end
    of the cycle), the verdict and each check. Done.
-4. Stream a `claude_code` session (`stream-json`): `session_progress` events while it runs, and a
-   killed session charged the spend it streamed instead of its whole cap. Done.
+4. Stream a `claude_code` / `opencode` session as it runs: `session_progress` events while it
+   runs, and a killed session charged the spend it streamed instead of its whole cap. Done.
 
 Python first, then Go, with spec cases for both. Phase 0 is useful without any UI: `lha
 mission-report` and plain SQL can read it.

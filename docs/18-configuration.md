@@ -38,7 +38,7 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
-| `LHA_MODEL_BACKEND` | `stub` \| `ollama` \| `openai_compat` \| `claude` \| `claude_code` | `stub` (`claude_code` when `LHA_LEAD_ENGINE=claude_code`) | which backend `build_provider` constructs |
+| `LHA_MODEL_BACKEND` | `stub` \| `ollama` \| `openai_compat` \| `claude` \| `claude_code` \| `opencode` | `stub` (`claude_code` when `LHA_LEAD_ENGINE=claude_code`, `opencode` when `LHA_LEAD_ENGINE=opencode`) | which backend `build_provider` constructs |
 | `LHA_MODEL_NAME` | string | `stub-1` | model id sent to the backend |
 | `LHA_OLLAMA_BASE_URL` | string | `http://localhost:11434` | Ollama server; `/v1` is appended for the model backend. `LHA_MEMORY_EMBEDDER=ollama` uses the same server (`/api/tags`, `/api/embed`) |
 | `LHA_OPENAI_BASE_URL` | string | unset | chat-completions base URL; required for `openai_compat` |
@@ -53,11 +53,18 @@ Invalid values fail at startup with a pydantic validation error: an unknown `LHA
 | `LHA_FALLBACK_MAX_ROUNDS` | int (>= 1) | `2` | rounds over the whole chain before the last transient error is raised |
 | `LHA_MODEL_TIMEOUT_S` | float (> 0) | `120.0` | client timeout of one Ollama / OpenAI-compatible model call, in seconds. Raise it when a loaded machine makes local models slow; each timed-out call is retried (see [13-models.md](13-models.md#retries-and-failover)) |
 | `LHA_MODEL_PROBE_TIMEOUT_S` | float (> 0) | `10.0` | timeout of the model health probe a parked durable mission runs |
-| `LHA_LEAD_ENGINE` | `loop` \| `claude_code` | `loop` | `claude_code` runs each lead cycle as one `claude -p` session |
+| `LHA_LEAD_ENGINE` | `loop` \| `claude_code` \| `opencode` | `loop` | `claude_code` runs each lead cycle as one `claude -p` session; `opencode` as one `opencode run` session |
 | `LHA_CLAUDE_CODE_BIN` | string | `claude` | the Claude Code executable |
 | `LHA_CLAUDE_CODE_TOOLS` | `lha` \| `native` | `lha` | the lead engine's tools: LHA's over MCP, or Claude Code's own (unsandboxed) |
 | `LHA_CLAUDE_CODE_MAX_BUDGET_USD` | float (> 0) | `5.0` | `--max-budget-usd` for each `claude -p` call, and its worst case for the governor; lowered to what is left of the budget when that is less |
 | `LHA_CLAUDE_CODE_TIMEOUT_S` | float (> 0) | `3600.0` | a `claude -p` call running longer is killed |
+| `LHA_OPENCODE_BIN` | string | `opencode` | the OpenCode executable |
+| `LHA_OPENCODE_MODEL` | string | empty | `--model` for `opencode run` (`provider/model#variant`); empty keeps OpenCode's own choice |
+| `LHA_OPENCODE_AGENT` | string | `lha` | the primary agent name LHA injects for the lead engine session |
+| `LHA_OPENCODE_TOOLS` | `lha` \| `native` | `lha` | the lead engine's tools: LHA's over MCP, or OpenCode's own (unsandboxed) |
+| `LHA_OPENCODE_STANDALONE` | bool | `true` | run each session against a private OpenCode server (`--standalone`) so it never attaches to the OpenCode that may be running LHA |
+| `LHA_OPENCODE_MAX_BUDGET_USD` | float (> 0) | `5.0` | the session's worst case for the governor and the cap LHA kills a streaming session at; lowered to what is left of the budget when that is less |
+| `LHA_OPENCODE_TIMEOUT_S` | float (> 0) | `3600.0` | an `opencode run` session running longer is killed |
 
 See [13-models.md](13-models.md).
 

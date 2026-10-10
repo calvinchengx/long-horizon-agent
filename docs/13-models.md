@@ -4,7 +4,7 @@ Every model call in LHA goes through one interface, `ModelProvider`
 ([`contracts/model.py`](../python/src/lha/contracts/model.py)). `build_provider` in
 [`model/__init__.py`](../python/src/lha/model/__init__.py) is the only place a concrete backend is
 chosen, from `LHA_MODEL_BACKEND` (plus an optional fallback chain, see
-[Failover](#retries-and-failover)). Five backends exist:
+[Failover](#retries-and-failover)). Six backends exist:
 
 | `LHA_MODEL_BACKEND` | Class | Transport | Cost source |
 |---|---|---|---|
@@ -13,6 +13,7 @@ chosen, from `LHA_MODEL_BACKEND` (plus an optional fallback chain, see
 | `openai_compat` | `OpenAICompatModel` | `POST {LHA_OPENAI_BASE_URL}/chat/completions` | `LHA_OPENAI_PRICE_*`; unknown if unset |
 | `claude` | `ClaudeModel` | `POST https://api.anthropic.com/v1/messages` | built-in table, or `LHA_CLAUDE_PRICE_*` |
 | `claude_code` | `ClaudeCodeModel` | the `claude -p` CLI (Claude Code) | the `total_cost_usd` Claude Code reports |
+| `opencode` | `OpenCodeModel` | the `opencode run` CLI (OpenCode) | the `cost` OpenCode reports per step |
 
 Every provider is wrapped in a `MeteredModel` (see [10-cost-and-budget.md](10-cost-and-budget.md)):
 the budget governor checks each call's worst-case cost *before* it is sent and records the actual
@@ -158,7 +159,8 @@ run path. The planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the r
 `LHA_CLAUDE_PRICE_*` values apply only to calls whose model is `LHA_MODEL_NAME`; routed roles are
 priced from the table. With any other backend every role uses `LHA_MODEL_NAME`.
 
-To run the lead through Claude Code, use the `claude_code` lead engine below.
+To run the lead through Claude Code, use the `claude_code` lead engine below. To run it through
+OpenCode, use the `opencode` lead engine below.
 
 ## `claude_code`: Claude Code (`claude -p`)
 
@@ -226,6 +228,63 @@ the last tool, and the spend so far ([observability](16-observability.md)).
 limits, overload and 5xx answers are retried with backoff like any other backend. Run `claude`
 once in a terminal to log in again.
 
+## `opencode`: OpenCode (`opencode run`)
+
+LHA can run through the OpenCode CLI instead of an API. An OpenCode login pays for it, and the
+session uses OpenCode's own model defaults. As with Claude Code, it comes in two strengths, and you
+can use both at once.
+
+**The model backend** (`LHA_MODEL_BACKEND=opencode`,
+[`model/opencode.py`](../python/src/lha/model/opencode.py)). Each model turn is one
+`opencode run --format json` call against an injected agent whose every tool is denied, so it is a
+plain text turn. The conversation is flattened into the prompt, and the lead replies with the same
+JSON actions it uses with any other backend. The planner, replanner and every other role work
+unchanged. `LHA_OPENCODE_MODEL` is passed as `--model` (`provider/model#variant`); left empty,
+OpenCode picks the model.
+
+**The lead engine** (`LHA_LEAD_ENGINE=opencode`,
+[`agent/opencode_engine.py`](../python/src/lha/agent/opencode_engine.py)). A whole lead cycle is
+one `opencode run` session, so OpenCode's own agentic loop does the work. What comes before and
+after is unchanged: LHA picks the item and recites the anchor; afterwards it runs the checks and
+witnesses, commits verified work or rolls a failed attempt back, and replans blocked items. Each
+cycle starts a fresh session, and the session runs against a private server (`--standalone`) so it
+never attaches to the OpenCode that may be running LHA. Setting `LHA_LEAD_ENGINE=opencode` alone
+also switches `LHA_MODEL_BACKEND` to `opencode`, unless you set a backend explicitly.
+
+```bash
+opencode          # once, to log in
+cd python
+LHA_LEAD_ENGINE=opencode \
+  uv run lha mission --task "Create hello.py with hello() returning 'hello', and a pytest test" \
+  --workdir ../.lha/workspaces/demo --sandbox local --unsafe-local \
+  --no-default-checks --check "uv run --with pytest pytest -q"
+```
+
+The engine's tools come in two modes, set by `LHA_OPENCODE_TOOLS`:
+
+| Mode | What OpenCode can use | Guardrails |
+|---|---|---|
+| `lha` (default) | LHA's tools only, served over MCP by the same in-process server Claude Code uses ([`agent/mcp_bridge.py`](../python/src/lha/agent/mcp_bridge.py)) and injected into a temporary `OPENCODE_CONFIG`; an injected agent denies every other tool | all of LHA's: the configured sandbox (Docker by default), the irreversible-command gate, path rules and the egress allow-list |
+| `native` | its own read/edit/shell on the host workdir, with a permission deny list for git history, publishing and the web | none from LHA beyond that deny list; a prefix deny list is not a safety boundary. Requires `LHA_SANDBOX=local` and `LHA_ALLOW_UNSAFE_LOCAL=true`, and is refused under an ownership guard (`lha orchestrate`, or a durable mission with an ownership map) |
+
+In both modes the session also gets a `verify` tool, exactly as the Claude Code engine's does. It
+runs the mission's checks and the item's witnesses as the harness will; LHA verifies again after the
+session.
+
+**Cost and budget.** Before a session runs, the governor authorizes it with
+`LHA_OPENCODE_MAX_BUDGET_USD` (default $5) as its worst case, or with what is left of the budget
+when that is less. OpenCode has no spend-cap flag, so LHA kills a session that reaches its cap
+while it streams the events; afterwards the ledger records the `cost` OpenCode reports per step. A
+session killed at its cap or its timeout (`LHA_OPENCODE_TIMEOUT_S`, default 3600 s) is still
+verified — whatever it left in the workdir counts — and is charged what it streamed, or its whole
+cap when its spend could not be seen.
+
+**Progress.** Every call streams (`--format json`), so the lead engine records a `session_progress`
+event as each turn begins and each tool is called.
+
+**Failures.** A missing CLI fails the call (and the cycle) without retries; rate limits, overload
+and 5xx answers are retried with backoff like any other backend.
+
 ## Unpriced models: `LHA_ALLOW_UNPRICED_MODELS`
 
 When a provider cannot price a call, the governor has two refusals
@@ -284,7 +343,7 @@ export LHA_FALLBACK_MODELS="openai_compat:llama-3.3-70b-versatile@0.59/0.79,open
 
 | Setting | Default | Notes |
 |---|---|---|
-| `LHA_FALLBACK_MODELS` | empty | `backend` is `stub`, `ollama`, `openai_compat`, `claude` or `claude_code`; the model part may contain `:` (`ollama:qwen3:8b`). A malformed entry raises `ValueError` when the provider is built |
+| `LHA_FALLBACK_MODELS` | empty | `backend` is `stub`, `ollama`, `openai_compat`, `claude`, `claude_code` or `opencode`; the model part may contain `:` (`ollama:qwen3:8b`). A malformed entry raises `ValueError` when the provider is built |
 | `LHA_FALLBACK_MAX_ROUNDS` | `2` | `FailoverModel.max_rounds` |
 
 - Fallback entries use the backend's shared settings: `openai_compat` entries use
@@ -346,3 +405,9 @@ accounting and the same errors. `go/cmd/lha/claude_code_test.go` runs both imple
 against one fake `claude` and compares what each passed to it. The bridge is the standard
 library only (`net/http`), speaking the same Streamable HTTP subset as the Python one. See
 [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
+
+`LHA_MODEL_BACKEND=opencode` ([`model/opencode.go`](../go/internal/model/opencode.go)) and
+`LHA_LEAD_ENGINE=opencode` ([`agent/opencode_engine.go`](../go/internal/agent/opencode_engine.go))
+work in the Go CLI the same way, sharing the bridge and the same injected `OPENCODE_CONFIG`, argv,
+event parsing, per-step cost, budget kill and errors; `go/cmd/lha/opencode_test.go` runs both
+implementations against one fake `opencode` and compares what each passed to it.

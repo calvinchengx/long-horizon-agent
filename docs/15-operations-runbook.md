@@ -225,7 +225,8 @@ While parked, the workflow sleeps 60 s, doubling to at most 3600 s, and after ea
 - `model`: the provider is built and contacted with a cheap, token-free request under
   `LHA_MODEL_PROBE_TIMEOUT_S` (Ollama `/api/tags` with the model pulled, OpenAI-compatible
   `/models`, Claude `/v1/models/<model>`, `claude_code` `claude --version` then
-  `claude auth status`; with a fallback chain, any healthy member counts). See
+  `claude auth status`, `opencode` `opencode --version`; with a fallback chain, any healthy member
+  counts). See
   [13-models.md](13-models.md#health-probe);
 - `sandbox`: a sandbox session can be opened and closed.
 
