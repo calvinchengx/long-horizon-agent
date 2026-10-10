@@ -166,3 +166,19 @@ button.danger-outline { color: var(--bad); border-color: var(--bad); }
   display: flex;
   gap: 0.5rem;
 }
+
+.depgraph {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 8px 14px 12px;
+  color: var(--text);
+}
+.depgraph .edge { stroke: var(--dim); opacity: 0.6; }
+.depgraph .node rect { fill: var(--surface); stroke: var(--line); }
+.depgraph .node text { fill: var(--text); font: 11px var(--mono); }
+.depgraph .node text.dim { fill: var(--dim); }
+.depgraph .node-done rect { stroke: var(--ok); }
+.depgraph .node-blocked rect { stroke: var(--bad); }
+.depgraph .node-in_progress rect { stroke: var(--info); }
+.depgraph .node-split rect { stroke: var(--warn); }

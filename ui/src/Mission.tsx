@@ -314,41 +314,148 @@ function Inline({ text }: { text: string }) {
 function Checklist({ id }: { id: string }) {
   const [items, setItems] = useState<ChecklistItem[] | null>(null);
   const [error, setError] = useState("");
+  const [graph, setGraph] = useState(false);
   useEffect(() => {
     api.items(id).then((r) => setItems(r.items), (e) => setError(String(e.message)));
   }, [id]);
   if (error) return <p class="notice">{error}</p>;
   if (!items) return <p class="dim">Loading checklist…</p>;
   return (
-    <Section title={`Checklist (${items.length} items)`}>
-      <ol class="items">
-        {items.map((it) => (
-          <li key={it.id} class={`item item-${it.status}`}>
-            <span class="id">{it.id}</span>
-            <span class={`status status-${it.status}`}>{it.status.replace("_", " ")}</span>
-            <div class="body">
-              <p><Inline text={it.description} /></p>
-              <p class="dim">
-                {[
-                  it.attempts > 0 && `attempts ${it.attempts}`,
-                  it.depends_on.length > 0 && `after ${it.depends_on.join(", ")}`,
-                  it.witnesses.length > 0 && `witnesses: ${it.witnesses.join(", ")}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </p>
-              {it.last_failure && it.status !== "done" && (
-                <details>
-                  <summary>last failure</summary>
-                  <pre>{it.last_failure}</pre>
-                </details>
-              )}
-              <ItemHistory id={id} itemId={it.id} />
-            </div>
-          </li>
-        ))}
-      </ol>
+    <Section
+      title={`Checklist (${items.length} items)`}
+      aside={
+        <label class="toggle">
+          <input
+            type="checkbox"
+            checked={graph}
+            onChange={(e) => setGraph((e.target as HTMLInputElement).checked)}
+          />{" "}
+          graph
+        </label>
+      }
+    >
+      {graph ? (
+        <DependencyGraph items={items} />
+      ) : (
+        <ol class="items">
+          {items.map((it) => (
+            <li key={it.id} class={`item item-${it.status}`}>
+              <span class="id">{it.id}</span>
+              <span class={`status status-${it.status}`}>{it.status.replace("_", " ")}</span>
+              <div class="body">
+                <p><Inline text={it.description} /></p>
+                <p class="dim">
+                  {[
+                    it.attempts > 0 && `attempts ${it.attempts}`,
+                    it.depends_on.length > 0 && `after ${it.depends_on.join(", ")}`,
+                    it.witnesses.length > 0 && `witnesses: ${it.witnesses.join(", ")}`,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+                {it.last_failure && it.status !== "done" && (
+                  <details>
+                    <summary>last failure</summary>
+                    <pre>{it.last_failure}</pre>
+                  </details>
+                )}
+                <ItemHistory id={id} itemId={it.id} />
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
     </Section>
+  );
+}
+
+/** The checklist as a dependency graph: items in columns by dependency depth, an arrow from each
+ *  dependency to the item that waits on it. A cycle in the data (a broken plan) is broken at the
+ *  first repeat so the view always renders. */
+function DependencyGraph({ items }: { items: ChecklistItem[] }) {
+  const byId = new Map(items.map((it) => [it.id, it]));
+  const depth = new Map<string, number>();
+  const visit = (id: string, seen: Set<string>): number => {
+    const known = depth.get(id);
+    if (known !== undefined) return known;
+    if (seen.has(id)) return 0;
+    seen.add(id);
+    const deps = (byId.get(id)?.depends_on ?? []).filter((d) => byId.has(d));
+    const value = deps.length ? Math.max(...deps.map((d) => visit(d, seen))) + 1 : 0;
+    depth.set(id, value);
+    return value;
+  };
+  items.forEach((it) => visit(it.id, new Set()));
+  const columns = new Map<number, ChecklistItem[]>();
+  for (const it of items) {
+    const col = depth.get(it.id) ?? 0;
+    columns.set(col, [...(columns.get(col) ?? []), it]);
+  }
+  const W = 148;
+  const H = 40;
+  const GX = 64;
+  const GY = 16;
+  const maxCol = Math.max(0, ...columns.keys());
+  const rows = Math.max(1, ...[...columns.values()].map((c) => c.length));
+  const width = (maxCol + 1) * W + maxCol * GX;
+  const height = rows * H + (rows - 1) * GY;
+  const pos = new Map<string, { x: number; y: number }>();
+  for (const [col, list] of columns) {
+    list.forEach((it, row) => pos.set(it.id, { x: col * (W + GX), y: row * (H + GY) }));
+  }
+  const edges: { from: { x: number; y: number }; to: { x: number; y: number } }[] = [];
+  for (const it of items) {
+    for (const dep of it.depends_on) {
+      const a = pos.get(dep);
+      const b = pos.get(it.id);
+      if (a && b) edges.push({ from: a, to: b });
+    }
+  }
+  return (
+    <svg
+      class="depgraph"
+      viewBox={`0 0 ${width} ${height}`}
+      width={width}
+      height={height}
+      role="img"
+      aria-label="Item dependency graph"
+    >
+      <defs>
+        <marker
+          id="dep-arrow"
+          viewBox="0 0 10 10"
+          refX="9"
+          refY="5"
+          markerWidth="6"
+          markerHeight="6"
+          orient="auto-start-reverse"
+        >
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+        </marker>
+      </defs>
+      {edges.map((e, i) => (
+        <line
+          key={i}
+          class="edge"
+          x1={e.from.x + W}
+          y1={e.from.y + H / 2}
+          x2={e.to.x}
+          y2={e.to.y + H / 2}
+          marker-end="url(#dep-arrow)"
+        />
+      ))}
+      {items.map((it) => {
+        const p = pos.get(it.id);
+        if (!p) return null;
+        return (
+          <g key={it.id} class={`node node-${it.status}`} transform={`translate(${p.x},${p.y})`}>
+            <rect width={W} height={H} rx="6" />
+            <text x="10" y="17">{it.id}</text>
+            <text x="10" y="31" class="dim">{it.status.replace("_", " ")}</text>
+          </g>
+        );
+      })}
+    </svg>
   );
 }
 
