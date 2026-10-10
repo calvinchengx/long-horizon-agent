@@ -173,9 +173,9 @@
                   "output_tokens": 250
                 },
                 "last_event": {
-                  "id": 36,
+                  "id": 37,
                   "kind": "verify",
-                  "ts": "2026-10-04T00:00:35.000000+00:00"
+                  "ts": "2026-10-04T00:00:36.000000+00:00"
                 }
               },
               {
@@ -188,7 +188,7 @@
                 "durable": true,
                 "workflow_id": "mission:mission_durable",
                 "last_event": {
-                  "id": 43
+                  "id": 44
                 }
               }
             ]
@@ -498,9 +498,9 @@
         "status": 200,
         "body": {
           "events": {
-            "$len": 36
+            "$len": 37
           },
-          "next_after": 36
+          "next_after": 37
         }
       }
     },
@@ -543,7 +543,7 @@
         "method": "GET",
         "path": "/api/v1/missions/mission_local/events",
         "query": {
-          "after": "34",
+          "after": "35",
           "limit": "5"
         }
       },
@@ -552,13 +552,13 @@
         "body": {
           "events": [
             {
-              "id": 35
+              "id": 36
             },
             {
-              "id": 36
+              "id": 37
             }
           ],
-          "next_after": 36
+          "next_after": 37
         }
       }
     },
@@ -569,14 +569,14 @@
         "method": "GET",
         "path": "/api/v1/missions/mission_local/events",
         "query": {
-          "after": "36"
+          "after": "37"
         }
       },
       "expect": {
         "status": 200,
         "body": {
           "events": [],
-          "next_after": 36
+          "next_after": 37
         }
       }
     },
@@ -592,40 +592,40 @@
         "body": {
           "events": [
             {
-              "id": 37,
+              "id": 38,
               "kind": "cycle_started",
               "payload": {
                 "item_id": "01"
               }
             },
             {
-              "id": 38,
+              "id": 39,
               "kind": "tool_call"
             },
             {
-              "id": 39,
+              "id": 40,
               "kind": "cycle_started",
               "cycle_id": "c2"
             },
             {
-              "id": 40,
+              "id": 41,
               "kind": "tool_call"
             },
             {
-              "id": 41,
+              "id": 42,
               "kind": "review"
             },
             {
-              "id": 42,
+              "id": 43,
               "kind": "loop_detected",
               "cycle_id": ""
             },
             {
-              "id": 43,
+              "id": 44,
               "kind": "parallel_wave"
             }
           ],
-          "next_after": 43
+          "next_after": 44
         }
       }
     },
@@ -1012,23 +1012,23 @@
           },
           "events": [
             {
-              "id": 39,
+              "id": 40,
               "kind": "cycle_started"
             },
             {
-              "id": 40,
+              "id": 41,
               "kind": "tool_call"
             },
             {
-              "id": 41,
+              "id": 42,
               "kind": "review"
             },
             {
-              "id": 42,
+              "id": 43,
               "kind": "loop_detected"
             },
             {
-              "id": 43,
+              "id": 44,
               "kind": "parallel_wave"
             }
           ],
@@ -1063,13 +1063,13 @@
           },
           "events": [
             {
-              "id": 37
-            },
-            {
               "id": 38
             },
             {
-              "id": 43
+              "id": 39
+            },
+            {
+              "id": 44
             }
           ],
           "events_total": 3
@@ -1091,7 +1091,7 @@
         "body": {
           "events": [
             {
-              "id": 43
+              "id": 44
             }
           ],
           "events_total": 5
@@ -1407,11 +1407,11 @@
         "stream": {
           "mission_event": [
             {
-              "id": 37,
+              "id": 38,
               "kind": "cycle_started"
             },
             {
-              "id": 38,
+              "id": 39,
               "kind": "tool_call"
             }
           ]
@@ -1429,7 +1429,7 @@
           "after": "0"
         },
         "headers": {
-          "Last-Event-ID": "35"
+          "Last-Event-ID": "36"
         }
       },
       "expect": {
@@ -1437,7 +1437,7 @@
         "stream": {
           "mission_event": [
             {
-              "id": 36,
+              "id": 37,
               "kind": "verify"
             }
           ]
@@ -1452,7 +1452,7 @@
         "path": "/api/v1/stream",
         "query": {
           "mission_id": "mission_durable",
-          "after": "37"
+          "after": "38"
         },
         "auth": "cookie"
       },
@@ -1461,7 +1461,7 @@
         "stream": {
           "mission_event": [
             {
-              "id": 38
+              "id": 39
             }
           ]
         }
