@@ -11,6 +11,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model/claudecodetest"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/model/opencodetest"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 )
 
@@ -19,6 +20,7 @@ import (
 
 func TestMain(m *testing.M) {
 	claudecodetest.Main() // this binary doubles as the fake claude
+	opencodetest.Main()   // ...and as the fake opencode
 	os.Exit(m.Run())
 }
 

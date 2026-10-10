@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model/claudecodetest"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/model/opencodetest"
 )
 
 // End-to-end tests of LHA_LEAD_ENGINE=claude_code and LHA_MODEL_BACKEND=claude_code through the
@@ -21,6 +22,7 @@ import (
 
 func TestMain(m *testing.M) {
 	claudecodetest.Main() // this binary doubles as the fake claude
+	opencodetest.Main()   // ...and as the fake opencode
 	// Runs persist to the mission store (and memory): never the developer's per-user one.
 	dir, err := os.MkdirTemp("", "lha-cli-store-")
 	if err != nil {

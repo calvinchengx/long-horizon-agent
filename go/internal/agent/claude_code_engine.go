@@ -80,6 +80,16 @@ type EngineDispatch func(ctx context.Context, call contracts.ToolCall) contracts
 // EngineVerify runs the mission's checks and the item's witnesses (with harness integrity).
 type EngineVerify func(ctx context.Context) (contracts.VerificationResult, error)
 
+// Engine is a lead engine: a whole lead cycle runs as one external agent session (Claude Code or
+// OpenCode). Both share EngineRun, EngineRequest, the MCP bridge and the loop's wiring.
+type Engine interface {
+	Name() string
+	Native() bool
+	// SessionEvent is the trace event the loop records when the session ends.
+	SessionEvent() string
+	Run(ctx context.Context, req EngineRequest) (EngineRun, error)
+}
+
 // EngineRun is what one session did, for the cycle's checkpoint and trace.
 type EngineRun struct {
 	Summary   string
@@ -156,6 +166,9 @@ func (e *ClaudeCodeEngine) Name() string { return e.name }
 // Native reports whether the session uses Claude Code's own tools.
 func (e *ClaudeCodeEngine) Native() bool { return e.tools == "native" }
 
+// SessionEvent is the trace event the loop records when the session ends.
+func (e *ClaudeCodeEngine) SessionEvent() string { return "claude_code_session" }
+
 // usedTools records the tools a session called, in order. A handler may still be running when a
 // killed session is torn down, so it is locked.
 type usedTools struct {
@@ -176,13 +189,14 @@ func (u *usedTools) list() []string {
 	return append([]string{}, u.names...)
 }
 
-// bridgeTools are the specs bridged over MCP (all of them, or only record_decision in native
-// mode) plus verify. used collects the names of the tools called, in order.
-func (e *ClaudeCodeEngine) bridgeTools(specs []contracts.ToolSpec, dispatch EngineDispatch, verify EngineVerify, cycleID string, used *usedTools) []mcpbridge.Tool {
+// bridgeTools are the specs bridged over MCP (all of them, or only bridged in native mode) plus
+// verify. used collects the names of the tools called, in order; idPrefix tags this engine's call
+// ids (claude: "cc", opencode: "oc") so two engines never mint the same id.
+func bridgeTools(specs []contracts.ToolSpec, dispatch EngineDispatch, verify EngineVerify, cycleID string, used *usedTools, native bool, bridged []string, idPrefix string) []mcpbridge.Tool {
 	handler := func(spec contracts.ToolSpec) mcpbridge.Handler {
 		return func(ctx context.Context, arguments map[string]any) (string, bool, error) {
 			n := used.add(spec.Name)
-			call := contracts.ToolCall{ID: fmt.Sprintf("%s-cc-%d", cycleID, n), Name: spec.Name, Arguments: arguments}
+			call := contracts.ToolCall{ID: fmt.Sprintf("%s-%s-%d", cycleID, idPrefix, n), Name: spec.Name, Arguments: arguments}
 			result := dispatch(ctx, call)
 			if result.OK {
 				return result.Content, false, nil
@@ -196,7 +210,7 @@ func (e *ClaudeCodeEngine) bridgeTools(specs []contracts.ToolSpec, dispatch Engi
 	}
 	tools := []mcpbridge.Tool{}
 	for _, s := range specs {
-		if !e.Native() || contains(nativeBridged, s.Name) {
+		if !native || contains(bridged, s.Name) {
 			tools = append(tools, mcpbridge.NewTool(s.Name, s.Description, s.Parameters, handler(s)))
 		}
 	}
@@ -209,6 +223,11 @@ func (e *ClaudeCodeEngine) bridgeTools(specs []contracts.ToolSpec, dispatch Engi
 			return VerificationText(result), !result.AllGreen, nil
 		}))
 	return tools
+}
+
+// bridgeTools is the claude_code engine's bridge (all specs, or only nativeBridged in native mode).
+func (e *ClaudeCodeEngine) bridgeTools(specs []contracts.ToolSpec, dispatch EngineDispatch, verify EngineVerify, cycleID string, used *usedTools) []mcpbridge.Tool {
+	return bridgeTools(specs, dispatch, verify, cycleID, used, e.Native(), nativeBridged, "cc")
 }
 
 // Args is the claude argv (after the binary) for a session on bridge with system appended to
@@ -249,7 +268,7 @@ type EngineRequest struct {
 	// Meter meters the session when it is a *governor.MeteredModel (else it runs unmetered).
 	Meter contracts.ModelProvider
 	// OnProgress sees each turn and tool call as the session makes it (stream-json).
-	OnProgress func(*model.SessionProgress)
+	OnProgress func(model.Progress)
 }
 
 // Run is one session on req.Messages in req.Cwd, metered through req.Meter. A refused budget
@@ -280,9 +299,13 @@ func (e *ClaudeCodeEngine) Run(ctx context.Context, req EngineRequest) (EngineRu
 		if err := bridge.Start(ctx); err != nil {
 			return contracts.Usage{}, err
 		}
+		var onProgress func(*model.SessionProgress)
+		if req.OnProgress != nil {
+			onProgress = func(p *model.SessionProgress) { req.OnProgress(p) }
+		}
 		result, err := model.RunClaude(ctx, model.ClaudeCodeRun{
 			Args: e.args(bridge, system, budget), Prompt: prompt, Binary: e.binary, Cwd: req.Cwd,
-			TimeoutS: e.timeoutS, Provider: e.name, FallbackModel: e.model, OnProgress: req.OnProgress,
+			TimeoutS: e.timeoutS, Provider: e.name, FallbackModel: e.model, OnProgress: onProgress,
 		})
 		_ = bridge.Close()
 		if err != nil {
@@ -337,13 +360,29 @@ func (e *ClaudeCodeEngine) stopped(reason string, used *usedTools) EngineRun {
 	}
 }
 
-// LeadEngine is the claude_code lead engine from settings, or nil for the built-in loop (python:
-// lha.agent.assembly.lead_engine).
+// LeadEngine is the claude_code / opencode lead engine from settings, or nil for the built-in
+// loop (python: lha.agent.assembly.lead_engine).
 //
-// Native Claude Code tools act on the host with no sandbox, so they need sandbox=local and
-// allow_unsafe_local, and they cannot run under a guarded dispatcher (the orchestrator's
-// ownership guard only sees calls that go through LHA's tools).
-func LeadEngine(settings *config.Settings, guarded bool) (*ClaudeCodeEngine, error) {
+// Native CLI tools act on the host with no sandbox, so they need sandbox=local and
+// allow_unsafe_local, and they cannot run under a guarded dispatcher (the orchestrator's ownership
+// guard only sees calls that go through LHA's tools).
+func LeadEngine(settings *config.Settings, guarded bool) (Engine, error) {
+	if settings.LeadEngine == "opencode" {
+		if settings.OpenCodeTools == "native" {
+			if err := requireNativeEngine(settings, guarded, "LHA_OPENCODE_TOOLS", "OpenCode"); err != nil {
+				return nil, err
+			}
+		}
+		return NewOpenCodeEngine(OpenCodeEngineOptions{
+			Binary:       settings.OpenCodeBin,
+			Model:        settings.OpenCodeModel,
+			Agent:        settings.OpenCodeAgent,
+			Tools:        settings.OpenCodeTools,
+			Standalone:   model.Bool(settings.OpenCodeStandalone),
+			MaxBudgetUSD: settings.OpenCodeMaxBudgetUSD,
+			TimeoutS:     settings.OpenCodeTimeoutS,
+		})
+	}
 	if settings.LeadEngine != "claude_code" {
 		return nil, nil
 	}
@@ -373,3 +412,19 @@ func LeadEngine(settings *config.Settings, guarded bool) (*ClaudeCodeEngine, err
 
 // engineSummaryCap bounds the session summary kept for the cycle (python: run.summary[:2000]).
 const engineSummaryCap = 2000
+
+// requireNativeEngine refuses a native-mode engine that runs its own tools on the host: it needs
+// sandbox=local with allow_unsafe_local, and it cannot run under a guarded dispatcher (python:
+// _require_native_engine).
+func requireNativeEngine(settings *config.Settings, guarded bool, varName, engineLabel string) error {
+	if settings.Sandbox != "local" || !settings.AllowUnsafeLocal {
+		return errors.New(varName + "=native runs " + engineLabel + "'s own tools on the host with no " +
+			"isolation: it needs LHA_SANDBOX=local and LHA_ALLOW_UNSAFE_LOCAL=true " +
+			"(or use the default " + varName + "=lha)")
+	}
+	if guarded {
+		return errors.New(varName + "=native bypasses the orchestrator's file-ownership guard; " +
+			"use " + varName + "=lha with the multi-agent organization")
+	}
+	return nil
+}

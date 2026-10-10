@@ -6,10 +6,12 @@ import (
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model/claudecodetest"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/model/opencodetest"
 )
 
 func TestMain(m *testing.M) {
 	claudecodetest.Main()                          // this binary doubles as the fake claude (claude_code engine tests)
+	opencodetest.Main()                            // ...and as the fake opencode (opencode engine tests)
 	slog.SetDefault(slog.New(slog.DiscardHandler)) // trace events are asserted, not read
 	// Runs persist to the mission store: never the developer's per-user one.
 	dir, err := os.MkdirTemp("", "lha-agent-store-")
