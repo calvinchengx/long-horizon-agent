@@ -1086,6 +1086,65 @@ def mcp() -> None:
     mcp_stdio(get_settings())
 
 
+@app.command()
+def watch(
+    mission_id: str = typer.Argument(..., help="The mission id (`lha missions`)."),
+    url: str | None = typer.Option(
+        None,
+        "--url",
+        help="Server base (default: LHA_SERVE_URL, else http://127.0.0.1:8765); the serve "
+        "start-up URL with its ?token= is accepted.",
+    ),
+    token: str | None = typer.Option(
+        None, "--token", help="API token (default: LHA_SERVE_TOKEN, else the URL's token)."
+    ),
+    interval: float = typer.Option(2.0, "--interval", help="Seconds between refreshes."),
+    limit: int = typer.Option(10, "--limit", min=1, help="Recent events shown."),
+    once: bool = typer.Option(
+        False, "--once", help="Render once and exit (for non-TTY, tests, CI)."
+    ),
+) -> None:
+    """Watch one mission: a refreshing terminal view of its state and newest events.
+
+    Reads the same UI API as `lha serve` (spec/serve/openapi.json), so it works over SSH without
+    a browser. Without --once it clears the screen and refreshes every --interval seconds until
+    interrupted (Ctrl-C exits 0); a non-TTY stdout behaves as --once.
+    """
+    import os
+    import sys
+    import time
+
+    import httpx
+
+    from lha.cli.watch import (
+        CLEAR,
+        DEFAULT_URL,
+        WatchError,
+        resolve_target,
+        watch_fetch,
+        watch_render,
+    )
+
+    target = url or os.environ.get("LHA_SERVE_URL") or DEFAULT_URL
+    base_url, api_token = resolve_target(target, token or os.environ.get("LHA_SERVE_TOKEN"))
+    once = once or not sys.stdout.isatty()
+    with httpx.Client(timeout=5.0) as client:
+        try:
+            while True:
+                mission, events = watch_fetch(client, base_url, api_token, mission_id, limit)
+                if not once:
+                    sys.stdout.write(CLEAR)
+                sys.stdout.write(watch_render(mission, events))
+                sys.stdout.flush()
+                if once:
+                    return
+                time.sleep(interval)
+        except WatchError as exc:
+            _fail(str(exc), code=1)
+        except KeyboardInterrupt:
+            return
+
+
 @app.command(name="mission-start")
 def mission_start(
     task: str = typer.Option(

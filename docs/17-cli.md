@@ -12,7 +12,8 @@ and exit codes. `go/cmd/lha` implements every command: `version`, `config`, `run
 needs no extra for `db migrate`: the Postgres driver is built in), `objects prune`,
 `memory reembed`, `worker`, `mission-start`
 (including the organization options `--research`, `--review` and `--max-parallel`),
-`mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit` and `mission-abort`. It installs the trace
+`mission-status`, `mission-approve`, `mission-snooze`, `mission-steer`, `mission-edit`, `mission-abort`,
+`serve`, `watch` and `mcp`. It installs the trace
 exporter at start like Python; see [04-choosing-an-implementation.md](04-choosing-an-implementation.md).
 
 ## Commands
@@ -38,6 +39,7 @@ exporter at start like Python; see [04-choosing-an-implementation.md](04-choosin
 | [`eval check`, `eval run`](#lha-eval) | validate gold evaluation sets, and score a judge against them | gold `.jsonl` files |
 | [`worker`](#lha-worker) | serve durable missions | Temporal |
 | [`serve`](#lha-serve) | serve the mission UI's API on loopback | the mission store; Temporal for durable missions' live state and controls; the `serve` extra (Python) |
+| [`watch`](#lha-watch) | refresh a terminal view of one mission for SSH | a running `lha serve` |
 | [`mcp`](#lha-mcp) | serve the missions to an MCP client on stdin and stdout | as `serve` |
 | [`mission-start`](#lha-mission-start) | plan (or import) and start a durable mission | Temporal, a worker |
 | [`mission-status`](#lha-mission-status) | query status, cycles, open gate, sleep and recent gate events | Temporal |
@@ -551,6 +553,48 @@ it.
 ```bash
 claude mcp add lha -- lha mcp
 ```
+
+## `lha watch`
+
+```
+lha watch MISSION_ID [--url URL] [--token TOKEN] [--interval SECONDS] [--limit N] [--once]
+```
+
+A refreshing terminal view of one mission, for SSH sessions, reading the same UI API as
+[`lha serve`](#lha-serve) ([`spec/serve/openapi.json`](../spec/serve/openapi.json)): the mission's
+status, items and spend, its open gate, and its newest events. No browser and no new dependency;
+both implementations print the same bytes.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `MISSION_ID` | required | the mission to watch (`lha missions`) |
+| `--url TEXT` | `LHA_SERVE_URL`, else `http://127.0.0.1:8765` | the server base; the [`serve`](#lha-serve) start-up URL (with its `?token=`) is accepted |
+| `--token TEXT` | `LHA_SERVE_TOKEN`, else the URL's `token` | the API token, sent as `X-LHA-Token` |
+| `--interval FLOAT` | `2.0` | seconds between refreshes |
+| `--limit INTEGER` | `10` | recent events shown |
+| `--once` | off | render once and exit `0` (for a non-TTY, tests, CI) |
+
+Each render prints the mission, then a blank line and its events newest first:
+
+```text
+<mission_id>  <status>[  durable]
+<title>
+items <done>/<total> done, <in_progress> in progress, <blocked> blocked, <split> split
+spend $<known usd> over <calls> calls[ (<unknown-cost calls> unpriced)]
+gate <gate_id>: <question>
+
+events:
+  <time>  <cycle or ->  <kind>  <summary>
+```
+
+`  durable` appears only for a Temporal mission; `gate ...` only while a gate is open; `items -`
+when the anchor cannot be read here. Up to `--limit` events print, newest first; the summary is
+the kind's key field: a tool call's tool name (with ` failed` when it failed), a cycle's item id,
+a verdict for `verify`/`checkpoint`/`review`, `turns <n>` for a session, a wave's items joined by
+`,`, and a gate or tool approval's decision. Without `--once` the screen is cleared before each
+render and refreshed every `--interval` seconds; Ctrl-C exits `0`. When stdout is not a TTY (a
+pipe, CI) it behaves as `--once`. An unreachable server or an unknown mission (HTTP 404) exits `1`
+with a clear message.
 
 ## `lha mission-start`
 
