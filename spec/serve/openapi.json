@@ -2577,6 +2577,22 @@
             "if": {
               "properties": {
                 "kind": {
+                  "const": "opencode_session"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "$ref": "../obs/mission_events.json#/kinds/opencode_session"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "kind": {
                   "const": "parallel_wave"
                 }
               }

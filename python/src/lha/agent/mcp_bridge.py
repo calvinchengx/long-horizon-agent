@@ -89,6 +89,19 @@ class McpBridge:
         """``--allowedTools`` entries that pre-approve every bridged tool."""
         return [f"mcp__{self.name}__{name}" for name in self._tools]
 
+    def opencode_server(self) -> dict[str, object]:
+        """The ``mcp.servers.<name>`` entry that points OpenCode at this server.
+
+        ``codemode`` is off so the tools keep their native ``<server>_<tool>`` names and the agent
+        calls them directly (``tools.<server>.<tool>`` is Code Mode's JavaScript shape).
+        """
+        return {
+            "type": "remote",
+            "url": self.url,
+            "headers": {"Authorization": f"Bearer {self._token}"},
+            "codemode": False,
+        }
+
     async def __aenter__(self) -> McpBridge:
         self._server = await asyncio.start_server(self._serve, host="127.0.0.1", port=0)
         self._port = self._server.sockets[0].getsockname()[1]

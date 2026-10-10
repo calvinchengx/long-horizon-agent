@@ -114,6 +114,9 @@ def verification_text(result: VerificationResult) -> str:
 class ClaudeCodeEngine:
     """Runs a lead cycle as one ``claude -p`` session (see the module docstring)."""
 
+    #: The trace event the loop records when the session ends (``loop._engine_session``).
+    session_event = "claude_code_session"
+
     def __init__(
         self,
         *,

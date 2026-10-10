@@ -67,9 +67,12 @@ from lha.verify.witnesses import parse_witness, witness_paths
 if TYPE_CHECKING:
     from lha.agent.claude_code_engine import ClaudeCodeEngine
     from lha.agent.code_map import RipwireCodeMap
+    from lha.agent.opencode_engine import OpenCodeEngine
     from lha.agents.replanner import Replanner
     from lha.memory.service import CycleMemory
     from lha.systemone.triage import StallTriage
+
+    LeadEngine = ClaudeCodeEngine | OpenCodeEngine
 
 _OBSERVATION_CAP = 4000
 _TRUNCATED_STOP_REASONS = frozenset({"max_tokens", "length", "model_length"})
@@ -210,7 +213,7 @@ class AgentLoop:
         max_replans: int = 0,
         max_split_depth: int = 2,
         memory: CycleMemory | None = None,
-        engine: ClaudeCodeEngine | None = None,
+        engine: LeadEngine | None = None,
         triage: StallTriage | None = None,
         code_map: RipwireCodeMap | None = None,
     ) -> None:
@@ -557,7 +560,7 @@ class AgentLoop:
         if run.edits_untracked:
             acting.dirty = True
         self._emit(
-            "claude_code_session",
+            engine.session_event,
             mission_id,
             cycle_id,
             turns=run.turns,

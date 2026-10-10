@@ -90,15 +90,15 @@
   },
   {
    "entry": "claude",
-   "error": "invalid LHA_FALLBACK_MODELS entry 'claude': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+   "error": "invalid LHA_FALLBACK_MODELS entry 'claude': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code, opencode"
   },
   {
    "entry": "gpt:4o",
-   "error": "invalid LHA_FALLBACK_MODELS entry 'gpt:4o': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+   "error": "invalid LHA_FALLBACK_MODELS entry 'gpt:4o': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code, opencode"
   },
   {
    "entry": ":m",
-   "error": "invalid LHA_FALLBACK_MODELS entry ':m': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+   "error": "invalid LHA_FALLBACK_MODELS entry ':m': expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code, opencode"
   },
   {
    "entry": "claude:",

@@ -8,6 +8,7 @@ backend from ``Settings.model_backend`` so the rest of the system never imports 
 - ``openai_compat``-> any OpenAI-compatible endpoint (Groq/Gemini/OpenRouter, ...)
 - ``claude``       -> the Anthropic Messages API
 - ``claude_code``  -> the Claude Code CLI (``claude -p``), e.g. on a Pro/Max login
+- ``opencode``     -> the OpenCode CLI (``opencode run``), e.g. on an OpenCode login
 
 ``LHA_FALLBACK_MODELS`` turns the result into a ``FailoverModel`` (primary, then each fallback).
 ``lha.model.health.probe_model`` contacts the configured provider(s) cheaply (health probe)."""
@@ -25,6 +26,8 @@ from lha.model.claude_code import DEFAULT_MODEL as CLAUDE_CODE_DEFAULT_MODEL
 from lha.model.claude_code import ClaudeCodeModel
 from lha.model.failover import FailoverModel
 from lha.model.openai_compat import OpenAICompatModel
+from lha.model.opencode import DEFAULT_MODEL as OPENCODE_DEFAULT_MODEL
+from lha.model.opencode import OpenCodeModel
 from lha.model.pricing import ModelPrice
 from lha.model.stub import StubModel
 from lha.model.tool_schemas import to_claude_tools, to_openai_tools
@@ -39,7 +42,7 @@ def secret_value(value: object) -> str | None:
     return str(raw) if raw else None
 
 
-_BACKENDS = ("stub", "ollama", "openai_compat", "claude", "claude_code")
+_BACKENDS = ("stub", "ollama", "openai_compat", "claude", "claude_code", "opencode")
 # Inside a failover chain each member retries a transient error once before the chain moves on,
 # so an outage fails over in seconds instead of after the full per-provider backoff.
 CHAIN_MEMBER_RETRIES = 1
@@ -165,6 +168,19 @@ def _build_backend(
             max_retries=max_retries,
         )
 
+    if backend == "opencode":
+        # Left at the stub's default name, the model is OpenCode's own choice.
+        stub_default = Settings.model_fields["model_name"].default
+        return OpenCodeModel(
+            model_name=OPENCODE_DEFAULT_MODEL if name == stub_default else name,
+            binary=settings.opencode_bin,
+            standalone=settings.opencode_standalone,
+            max_budget_usd=settings.opencode_max_budget_usd,
+            timeout_s=settings.opencode_timeout_s,
+            price=price,
+            max_retries=max_retries,
+        )
+
     raise ValueError(f"Unknown model backend: {backend!r}")
 
 
@@ -236,6 +252,7 @@ __all__ = [
     "FallbackSpec",
     "ModelPrice",
     "OpenAICompatModel",
+    "OpenCodeModel",
     "StubModel",
     "build_provider",
     "parse_fallback_entry",

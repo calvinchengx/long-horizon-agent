@@ -108,6 +108,9 @@ EVENT_KINDS: dict[str, JSONSchema] = {
     "claude_code_session": _payload(
         {"turns": INTEGER, "tool_calls": INTEGER, "session_id": STRING, "stopped": STRING}
     ),
+    "opencode_session": _payload(
+        {"turns": INTEGER, "tool_calls": INTEGER, "session_id": STRING, "stopped": STRING}
+    ),
     "verify": _payload(
         {"trigger": _enum("done", "tool", "cycle"), "verdict": VERDICT, "checks": _array(_CHECK)}
     ),
