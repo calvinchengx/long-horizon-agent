@@ -182,3 +182,6 @@ button.danger-outline { color: var(--bad); border-color: var(--bad); }
 .depgraph .node-blocked rect { stroke: var(--bad); }
 .depgraph .node-in_progress rect { stroke: var(--info); }
 .depgraph .node-split rect { stroke: var(--warn); }
+
+.spend-chart { padding: 6px 14px 0; }
+.spend-chart .u-axis { color: var(--dim); }
