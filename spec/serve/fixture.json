@@ -126,6 +126,45 @@
      "schema_version": 1
     }
    ]
+  },
+  "witness": {
+   "title": "Witness mission",
+   "description": "An item whose witnesses recorded a result",
+   "items": [
+    {
+     "id": "01",
+     "description": "Ship it (witness: cmd:true)",
+     "status": "in_progress",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "cmd:true"
+     ],
+     "notes": "",
+     "schema_version": 1
+    },
+    {
+     "id": "02",
+     "description": "Needs witnesses that never ran",
+     "status": "todo",
+     "verified_by": [],
+     "depends_on": [],
+     "attempts": 0,
+     "consecutive_failures": 0,
+     "last_failure": "",
+     "allow_harness_edits": false,
+     "witnesses": [
+      "go:TestFlaky",
+      "cmd:never-ran"
+     ],
+     "notes": "",
+     "schema_version": 1
+    }
+   ]
   }
  },
  "missions": [
@@ -144,6 +183,14 @@
    "status": "RUNNING",
    "workflow_id": "mission:mission_durable",
    "anchor": "durable"
+  },
+  {
+   "mission_id": "mission_witness",
+   "title": "Witness mission",
+   "description": "An item whose witnesses recorded a result",
+   "status": "RUNNING",
+   "workflow_id": null,
+   "anchor": "witness"
   },
   {
    "mission_id": "mission_finished",
@@ -791,6 +838,55 @@
     "item_id": "01"
    },
    "ts": "2026-10-04T00:00:56.000000+00:00"
+  },
+  {
+   "mission_id": "mission_witness",
+   "cycle_id": "c1",
+   "kind": "cycle_started",
+   "payload": {
+    "item_id": "01"
+   },
+   "ts": "2026-10-04T00:00:57.000000+00:00"
+  },
+  {
+   "mission_id": "mission_witness",
+   "cycle_id": "c1",
+   "kind": "verify",
+   "payload": {
+    "trigger": "cycle",
+    "verdict": "failed",
+    "checks": [
+     {
+      "name": "cmd:true",
+      "passed": false,
+      "exit_code": 1,
+      "gating": true,
+      "timed_out": false,
+      "duration_s": 0.2
+     }
+    ]
+   },
+   "ts": "2026-10-04T00:00:58.000000+00:00"
+  },
+  {
+   "mission_id": "mission_witness",
+   "cycle_id": "c1",
+   "kind": "verify",
+   "payload": {
+    "trigger": "cycle",
+    "verdict": "passed",
+    "checks": [
+     {
+      "name": "cmd:true",
+      "passed": true,
+      "exit_code": 0,
+      "gating": true,
+      "timed_out": false,
+      "duration_s": 0.1
+     }
+    ]
+   },
+   "ts": "2026-10-04T00:00:59.000000+00:00"
   }
  ],
  "bulk_events": [

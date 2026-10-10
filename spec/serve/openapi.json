@@ -417,6 +417,54 @@
                       "type": "integer",
                       "minimum": 0,
                       "description": "How many events are about the item."
+                    },
+                    "witnesses": {
+                      "type": "array",
+                      "description": "The item's witnesses, in order, each with its latest recorded result from the item's cycles (null when it never ran).",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "witness": {
+                            "type": "string"
+                          },
+                          "latest": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "properties": {
+                              "passed": {
+                                "type": "boolean"
+                              },
+                              "exit_code": {
+                                "type": "integer"
+                              },
+                              "gating": {
+                                "type": "boolean"
+                              },
+                              "timed_out": {
+                                "type": "boolean"
+                              },
+                              "duration_s": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "passed",
+                              "exit_code",
+                              "gating",
+                              "timed_out",
+                              "duration_s"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "witness",
+                          "latest"
+                        ],
+                        "additionalProperties": false
+                      }
                     }
                   },
                   "required": [
@@ -425,7 +473,8 @@
                     "events",
                     "events_total",
                     "item",
-                    "spend"
+                    "spend",
+                    "witnesses"
                   ],
                   "additionalProperties": false
                 }

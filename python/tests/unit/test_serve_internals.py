@@ -84,3 +84,50 @@ def test_a_temporal_error_other_than_not_found_is_503() -> None:
     assert (gone.status, gone.code) == (409, "finished")
     down = serve_app._temporal_error(SimpleNamespace(status=RPCStatusCode.UNAVAILABLE))
     assert (down.status, down.code) == (503, "temporal_unavailable")
+
+
+def test_witness_results_pick_the_latest_and_ignore_junk() -> None:
+    """The defensive branches: a non-verify event, a checks value that is not a list, a check that
+    is not a mapping, a check naming another item's check, missing fields, a duplicate witness and
+    a witness that is not a string."""
+
+    def event(kind: str, payload: dict[str, Any]) -> Any:
+        return SimpleNamespace(kind=kind, payload=payload)
+
+    item = {"witnesses": ["cmd:true", "cmd:true", "go:T", 7]}
+    about = [
+        event("tool_call", {"tool": "x"}),
+        event("verify", {"checks": "not a list"}),
+        event(
+            "verify",
+            {
+                "checks": [
+                    {
+                        "name": "cmd:true",
+                        "passed": False,
+                        "exit_code": 1,
+                        "gating": True,
+                        "timed_out": False,
+                        "duration_s": 0.2,
+                    },
+                    {"name": "other", "passed": True},
+                    "nope",
+                ]
+            },
+        ),
+        event("verify", {"checks": [{"name": "cmd:true", "passed": True}]}),  # later result wins
+    ]
+    assert serve_app._witness_results(item, about) == [
+        {
+            "witness": "cmd:true",
+            "latest": {
+                "passed": True,
+                "exit_code": 0,
+                "gating": True,
+                "timed_out": False,
+                "duration_s": 0.0,
+            },
+        },
+        {"witness": "go:T", "latest": None},
+    ]
+    assert serve_app._witness_results({}, []) == []

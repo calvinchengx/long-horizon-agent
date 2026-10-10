@@ -577,7 +577,7 @@
           "isError": false,
           "structuredContent": {
             "missions": {
-              "$len": 6
+              "$len": 7
             }
           }
         }
