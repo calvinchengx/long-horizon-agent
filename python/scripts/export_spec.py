@@ -439,6 +439,58 @@ def export_serve_fixture() -> None:
         }
     )
     failure = "exit 1: tests/test_api.py::test_list FAILED"
+    # A mission whose items have witnesses: each witness's latest result comes from a ``verify``
+    # event in one of the item's cycles. Item 01's ``cmd:true`` ran twice (the later result wins);
+    # item 02's witnesses never ran, so their latest result is null.
+    events += [
+        {
+            "mission_id": "mission_witness",
+            "cycle_id": "c1",
+            "kind": "cycle_started",
+            "payload": {"item_id": "01"},
+            "ts": _SERVE_TS.format(57),
+        },
+        {
+            "mission_id": "mission_witness",
+            "cycle_id": "c1",
+            "kind": "verify",
+            "payload": {
+                "trigger": "cycle",
+                "verdict": "failed",
+                "checks": [
+                    {
+                        "name": "cmd:true",
+                        "passed": False,
+                        "exit_code": 1,
+                        "gating": True,
+                        "timed_out": False,
+                        "duration_s": 0.2,
+                    }
+                ],
+            },
+            "ts": _SERVE_TS.format(58),
+        },
+        {
+            "mission_id": "mission_witness",
+            "cycle_id": "c1",
+            "kind": "verify",
+            "payload": {
+                "trigger": "cycle",
+                "verdict": "passed",
+                "checks": [
+                    {
+                        "name": "cmd:true",
+                        "passed": True,
+                        "exit_code": 0,
+                        "gating": True,
+                        "timed_out": False,
+                        "duration_s": 0.1,
+                    }
+                ],
+            },
+            "ts": _SERVE_TS.format(59),
+        },
+    ]
     _write(
         "serve/fixture.json",
         {
@@ -472,6 +524,26 @@ def export_serve_fixture() -> None:
                         ("02", "Second step", "todo", ["01"], {}),
                     ),
                 },
+                "witness": {
+                    "title": "Witness mission",
+                    "description": "An item whose witnesses recorded a result",
+                    "items": _serve_items(
+                        (
+                            "01",
+                            "Ship it (witness: cmd:true)",
+                            "in_progress",
+                            [],
+                            {"witnesses": ["cmd:true"]},
+                        ),
+                        (
+                            "02",
+                            "Needs witnesses that never ran",
+                            "todo",
+                            [],
+                            {"witnesses": ["go:TestFlaky", "cmd:never-ran"]},
+                        ),
+                    ),
+                },
             },
             "missions": [
                 {
@@ -489,6 +561,14 @@ def export_serve_fixture() -> None:
                     "status": "RUNNING",
                     "workflow_id": "mission:mission_durable",
                     "anchor": "durable",
+                },
+                {
+                    "mission_id": "mission_witness",
+                    "title": "Witness mission",
+                    "description": "An item whose witnesses recorded a result",
+                    "status": "RUNNING",
+                    "workflow_id": None,
+                    "anchor": "witness",
                 },
                 {
                     "mission_id": "mission_finished",

@@ -899,6 +899,17 @@ export interface operations {
                         events: components["schemas"]["MissionEvent"][];
                         /** @description How many events are about the item. */
                         events_total: number;
+                        /** @description The item's witnesses, in order, each with its latest recorded result from the item's cycles (null when it never ran). */
+                        witnesses: {
+                            witness: string;
+                            latest: {
+                                passed: boolean;
+                                exit_code: number;
+                                gating: boolean;
+                                timed_out: boolean;
+                                duration_s: number;
+                            } | null;
+                        }[];
                     };
                 };
             };

@@ -156,3 +156,13 @@ button.danger-outline { color: var(--bad); border-color: var(--bad); }
 .breakdown .share { width: 120px; }
 .breakdown .bar { width: 100%; }
 @media (max-width: 720px) { .breakdowns { padding: 0 4px 8px; } .breakdown .share { width: 56px; } }
+
+.witnesses {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+}
+.witnesses li {
+  display: flex;
+  gap: 0.5rem;
+}

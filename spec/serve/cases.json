@@ -136,7 +136,7 @@
         "status": 200,
         "body": {
           "missions": {
-            "$len": 6
+            "$len": 7
           }
         }
       }
@@ -2726,6 +2726,57 @@
       "expect": {
         "status": 422,
         "error": "invalid_request"
+      }
+    },
+    {
+      "name": "an item's witnesses and their latest result",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_witness/items/01"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "cycles": [
+            "c1"
+          ],
+          "witnesses": [
+            {
+              "witness": "cmd:true",
+              "latest": {
+                "passed": true,
+                "exit_code": 0,
+                "gating": true,
+                "timed_out": false,
+                "duration_s": 0.1
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a witness that never ran has no result",
+      "operation": "getItem",
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/missions/mission_witness/items/02"
+      },
+      "expect": {
+        "status": 200,
+        "body": {
+          "witnesses": [
+            {
+              "witness": "go:TestFlaky",
+              "latest": null
+            },
+            {
+              "witness": "cmd:never-ran",
+              "latest": null
+            }
+          ]
+        }
       }
     }
   ]

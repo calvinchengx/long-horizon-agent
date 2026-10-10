@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -406,5 +407,39 @@ func TestMCPStdioStopsWhenItCannotAnswer(t *testing.T) {
 	in := strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}` + "\n")
 	if err := s.ServeMCPStdio(context.Background(), in, closedPipe{}); err == nil {
 		t.Fatal("a failed write was ignored")
+	}
+}
+
+// TestWitnessResultsAndNumOr covers the defensive branches the black-box cases cannot: a check
+// that is not a map, a check naming another item's check, a non-list checks value, missing fields,
+// duplicate witnesses, and a number that is not a json.Number.
+func TestWitnessResultsAndNumOr(t *testing.T) {
+	about := []persistence.EventRow{
+		{Kind: "tool_call", Payload: map[string]any{"tool": "x"}},
+		{Kind: "verify", Payload: map[string]any{"checks": "not a list"}},
+		{Kind: "verify", Payload: map[string]any{"checks": []any{
+			map[string]any{"name": "cmd:true", "passed": false, "exit_code": json.Number("1"),
+				"gating": true, "timed_out": false, "duration_s": json.Number("0.2")},
+			map[string]any{"name": "other", "passed": true},
+			"nope",
+		}}},
+		{Kind: "verify", Payload: map[string]any{"checks": []any{
+			map[string]any{"name": "cmd:true", "passed": true},
+		}}},
+	}
+	item := map[string]any{"witnesses": []any{"cmd:true", "cmd:true", "go:T", 7}}
+	want := []map[string]any{
+		{"witness": "cmd:true", "latest": map[string]any{
+			"passed": true, "exit_code": 0, "gating": true, "timed_out": false, "duration_s": float64(0)}},
+		{"witness": "go:T", "latest": nil},
+	}
+	if got := witnessResults(item, about); !reflect.DeepEqual(got, want) {
+		t.Fatalf("witnessResults = %#v", got)
+	}
+	if out := witnessResults(map[string]any{}, nil); len(out) != 0 {
+		t.Fatalf("no witnesses should mean no results: %#v", out)
+	}
+	if numOr("x", 3) != 3 || numOr(json.Number("bad"), 4) != 4 || numOr(json.Number("2.5"), 0) != 2.5 {
+		t.Fatal("numOr")
 	}
 }

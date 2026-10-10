@@ -377,6 +377,22 @@ function ItemHistory({ id, itemId }: { id: string; itemId: string }) {
             </span>
             {detail.dependents.length > 0 && <span class="fact dim">needed by {detail.dependents.join(", ")}</span>}
           </p>
+          {detail.witnesses.length > 0 && (
+            <ul class="witnesses">
+              {detail.witnesses.map((w) => (
+                <li key={w.witness}>
+                  <span class="label">{w.witness}</span>{" "}
+                  <span class={w.latest && !w.latest.passed ? "error" : "dim"}>
+                    {w.latest
+                      ? w.latest.passed
+                        ? "latest: passed"
+                        : `latest: failed (exit ${w.latest.exit_code})`
+                      : "latest: never ran"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           {detail.events.length === 0 ? (
             <p class="dim">Nothing recorded about this item yet.</p>
           ) : (

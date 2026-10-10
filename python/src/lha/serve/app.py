@@ -561,6 +561,7 @@ async def get_item(request: Request) -> Response:
     return JSONResponse(
         {
             "item": item,
+            "witnesses": _witness_results(item, about),
             "dependents": [i["id"] for i in items if item_id in i["depends_on"]],
             "cycles": cycles,
             "spend": _sum_costs([c for c in ledger if c.cycle_id in cycles]),
@@ -568,6 +569,31 @@ async def get_item(request: Request) -> Response:
             "events_total": len(about),
         }
     )
+
+
+def _witness_results(item: dict[str, Any], about: list[EventRow]) -> list[dict[str, Any]]:
+    """The item's witnesses and each one's latest result, from the item's ``verify`` events.
+
+    ``about`` is oldest first, so a later ``verify`` overwrites an earlier result; a witness no
+    ``verify`` recorded (or one whose check never appeared) has ``latest: None``.
+    """
+    witnesses = [w for w in item.get("witnesses", []) if isinstance(w, str)]
+    latest: dict[str, dict[str, Any]] = {}
+    for e in about:
+        if e.kind != "verify":
+            continue
+        checks = e.payload.get("checks")
+        for check in checks if isinstance(checks, list) else []:
+            if not isinstance(check, dict) or check.get("name") not in witnesses:
+                continue
+            latest[check["name"]] = {
+                "passed": bool(check.get("passed")),
+                "exit_code": int(check.get("exit_code") or 0),
+                "gating": bool(check.get("gating", True)),
+                "timed_out": bool(check.get("timed_out")),
+                "duration_s": float(check.get("duration_s") or 0.0),
+            }
+    return [{"witness": w, "latest": latest.get(w)} for w in dict.fromkeys(witnesses)]
 
 
 #: "All of a mission's cost ledger" for the routes that sum it.

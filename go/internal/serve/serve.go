@@ -618,10 +618,73 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) error {
 		out[i] = event(e)
 	}
 	writeJSON(w, 200, map[string]any{
-		"item": item, "dependents": dependents, "cycles": cycles, "spend": sumCosts(spent, ""),
-		"events": out, "events_total": len(about),
+		"item": item, "witnesses": witnessResults(item, about), "dependents": dependents,
+		"cycles": cycles, "spend": sumCosts(spent, ""), "events": out, "events_total": len(about),
 	})
 	return nil
+}
+
+// witnessResults is the item's witnesses, in order, each with its latest result from a `verify`
+// event in the item's cycles (nil when none ran). about is oldest first, so a later result wins
+// (python: lha.serve.app._witness_results).
+func witnessResults(item map[string]any, about []persistence.EventRow) []map[string]any {
+	var names []string
+	if ws, ok := item["witnesses"].([]any); ok {
+		for _, w := range ws {
+			if s, ok := w.(string); ok {
+				names = append(names, s)
+			}
+		}
+	}
+	latest := map[string]map[string]any{}
+	for _, e := range about {
+		if e.Kind != "verify" {
+			continue
+		}
+		checks, _ := e.Payload["checks"].([]any)
+		for _, c := range checks {
+			check, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := check["name"].(string)
+			if !slices.Contains(names, name) {
+				continue
+			}
+			latest[name] = map[string]any{
+				"passed":     check["passed"] == true,
+				"exit_code":  int(numOr(check["exit_code"], 0)),
+				"gating":     check["gating"] != false,
+				"timed_out":  check["timed_out"] == true,
+				"duration_s": numOr(check["duration_s"], 0),
+			}
+		}
+	}
+	seen := map[string]bool{}
+	out := []map[string]any{}
+	for _, w := range names {
+		if seen[w] {
+			continue
+		}
+		seen[w] = true
+		var result any
+		if r, ok := latest[w]; ok {
+			result = r
+		}
+		out = append(out, map[string]any{"witness": w, "latest": result})
+	}
+	return out
+}
+
+// numOr is v as a float, or def for a missing/unsupported value (event payload numbers are
+// json.Number).
+func numOr(v any, def float64) float64 {
+	if n, ok := v.(json.Number); ok {
+		if f, err := n.Float64(); err == nil {
+			return f
+		}
+	}
+	return def
 }
 
 func (s *Server) allEvents(ctx context.Context, missionID string) ([]persistence.EventRow, error) {
