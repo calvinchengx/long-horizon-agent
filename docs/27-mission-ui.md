@@ -161,7 +161,8 @@ attempt diffs.
 - Controls (durable missions): `POST` `steer`, `snooze`, `checklist-edits`, `decision` (with the
   person's name, sent as `human_decision_v2`) and `abort` (a workflow cancellation). A local run is
   `409 not_durable`, a finished mission `409 finished`, Temporal unreachable `503`.
-- Still to come, as an additive operation: spend charts.
+- Additive reads: `getItem` carries each item's witnesses and their latest result, and
+  `/missions/{id}/items/{item_id}/diffs` (`listItemDiffs`) serves each failed attempt's diff.
 - Contract: [`spec/serve/`](../spec/serve/README.md); every implementation's server is tested
   against it.
 
@@ -179,8 +180,8 @@ Status: built ([`ui/`](../ui/README.md)), served by both implementations at the 
 the missions list, and per mission its live state, open-gate banner (answered with a name),
 steering, snooze and abort, the checklist with each item's history (its cycles, their spend, the
 events about it and each failed attempt's diff), the live timeline, gates, and spend by role and
-by model. About 15 KB of gzipped JavaScript. The checklist has a dependency-graph toggle. Still to
-come: spend charts.
+by model, and a cumulative spend chart (uPlot). About 39 KB of gzipped JavaScript. The checklist has
+a dependency-graph toggle.
 
 Every mission the store knows, live as their rows change:
 

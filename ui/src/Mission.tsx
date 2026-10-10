@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "preact/hooks";
+import { useCallback, useEffect, useMemo, useRef, useState } from "preact/hooks";
+import uPlot from "uplot";
+import "uplot/dist/uPlot.min.css";
 import {
   api,
   ApiError,
@@ -586,6 +588,53 @@ function Gates({ id }: { id: string }) {
   );
 }
 
+/** Cumulative known spend over the mission's calls, oldest first (uPlot). */
+function SpendChart({ calls }: { calls: CostsData["calls"] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = ref.current;
+    if (!host) return;
+    const points = calls
+      .filter((c) => c.usd != null)
+      .map((c) => ({ t: new Date(c.ts).getTime() / 1000, usd: c.usd as number }))
+      .sort((a, b) => a.t - b.t);
+    if (points.length === 0) return;
+    let running = 0;
+    const xs: number[] = [];
+    const ys: number[] = [];
+    for (const p of points) {
+      xs.push(p.t);
+      ys.push((running += p.usd));
+    }
+    const css = getComputedStyle(document.documentElement);
+    const accent = css.getPropertyValue("--accent").trim() || "#2f5fd0";
+    const dim = css.getPropertyValue("--dim").trim() || "#888";
+    const size = () => ({ width: host.clientWidth || 640, height: 160 });
+    const plot = new uPlot(
+      {
+        ...size(),
+        legend: { show: false },
+        cursor: { y: false },
+        scales: { x: { time: true } },
+        axes: [
+          { stroke: dim, grid: { stroke: dim, width: 0.5 }, ticks: { stroke: dim } },
+          { stroke: dim, grid: { stroke: dim, width: 0.5 }, ticks: { stroke: dim }, values: (_u, v) => v.map(usd) },
+        ],
+        series: [{}, { stroke: accent, width: 2, fill: accent + "22", points: { show: false } }],
+      },
+      [xs, ys],
+      host,
+    );
+    const resize = () => plot.setSize(size());
+    window.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      plot.destroy();
+    };
+  }, [calls]);
+  return <div class="spend-chart" ref={ref} />;
+}
+
 function Costs({ id }: { id: string }) {
   const [data, setData] = useState<CostsData | null>(null);
   useEffect(() => {
@@ -601,6 +650,7 @@ function Costs({ id }: { id: string }) {
           {s.unknown_cost_calls > 0 && <span class="fact">{s.unknown_cost_calls} calls of unknown cost</span>}
           <span class="fact dim">{s.input_tokens.toLocaleString()} tokens in · {s.output_tokens.toLocaleString()} out</span>
         </p>
+        {s.calls > 0 && <SpendChart calls={data.calls} />}
         {s.calls > 0 && (
           <div class="breakdowns">
             <Breakdown title="By role" groups={data.by_role} total={s.known_usd} />

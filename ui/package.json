@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "preact": "^10.29.8",
-    "preact-iso": "^2.12.2"
+    "preact-iso": "^2.12.2",
+    "uplot": "^1.6.32"
   },
   "devDependencies": {
     "@preact/preset-vite": "^2.10.6",
