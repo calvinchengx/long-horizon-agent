@@ -8,6 +8,7 @@ import {
   type Costs as CostsData,
   type Gate,
   type ItemDetail,
+  type ItemDiffs,
   type MissionDetail,
   type MissionEvent,
 } from "./api";
@@ -393,6 +394,7 @@ function ItemHistory({ id, itemId }: { id: string; itemId: string }) {
               ))}
             </ul>
           )}
+          <AttemptDiffs id={id} itemId={itemId} />
           {detail.events.length === 0 ? (
             <p class="dim">Nothing recorded about this item yet.</p>
           ) : (
@@ -415,6 +417,33 @@ function ItemHistory({ id, itemId }: { id: string; itemId: string }) {
           )}
         </>
       )}
+    </details>
+  );
+}
+
+/** An item's failed attempts and their diffs, loaded when opened (listItemDiffs). */
+function AttemptDiffs({ id, itemId }: { id: string; itemId: string }) {
+  const [data, setData] = useState<ItemDiffs | null>(null);
+  const [error, setError] = useState("");
+  const load = (e: Event) => {
+    if ((e.currentTarget as HTMLDetailsElement).open && !data)
+      api.diffs(id, itemId).then(setData, (err) => setError(String(err.message)));
+  };
+  return (
+    <details class="diffs" onToggle={load}>
+      <summary>attempt diffs</summary>
+      {error && <p class="error">{error}</p>}
+      {!data && !error && <p class="dim">Loading…</p>}
+      {data && data.attempts.length === 0 && <p class="dim">No failed attempt was kept.</p>}
+      {data?.attempts.map((a) => (
+        <div class="attempt" key={a.cycle_id}>
+          <p class="dim">
+            <span class="cycle">{a.cycle_id}</span> {a.base.slice(0, 7)}..{a.head.slice(0, 7)}
+            {a.truncated && <span class="error"> · truncated</span>}
+          </p>
+          <pre>{a.diff}</pre>
+        </div>
+      ))}
     </details>
   );
 }

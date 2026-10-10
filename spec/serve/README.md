@@ -59,8 +59,10 @@ stop cleanly (exit 0) on Ctrl-C, and `--host` other than loopback exits 2.
 
 The fixture's missions cover each shape the API distinguishes: a local run, a durable mission (the
 fake workflow), a finished one, one whose anchor is on another host, one whose workflow no longer
-exists and whose anchor's checklist does not parse (`"anchor": "$broken"`), and one with more
-events than a page (`bulk_events`: `count` copies of an event, recorded after `events`).
+exists and whose anchor's checklist does not parse (`"anchor": "$broken"`), one with more
+events than a page (`bulk_events`: `count` copies of an event, recorded after `events`), and one
+whose item has a failed attempt kept under `refs/lha/attempts/` (an anchor's `attempts` list seeds
+the candidate commit).
 
 ## Cases
 

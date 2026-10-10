@@ -42,7 +42,9 @@ from lha.contracts.state import Checklist, ChecklistItem
 from lha.governor.cost import CostEntry
 from lha.persistence.sqlite import SqliteStore
 from lha.persistence.store import GateEvent, MissionEvent
+from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
+from lha.verify.trusted import candidate_commit
 from tests.serve import fake_mission
 
 SPEC = Path(__file__).resolve().parents[3] / "spec"
@@ -97,6 +99,16 @@ async def _seed(root: Path, db: Path) -> None:
                     description=anchor["description"],
                     items=Checklist(items=[ChecklistItem(**i) for i in anchor["items"]]),
                 )
+                # A failed attempt is a candidate commit kept at
+                # refs/lha/attempts/<mission_id>/<cycle> (its parent is the pre-attempt HEAD); the
+                # work tree is then returned to HEAD, as a real failed cycle leaves it.
+                for attempt in anchor.get("attempts", []):
+                    for name, content in attempt["files"].items():
+                        (path / name).write_text(content, encoding="utf-8")
+                    ref = f"refs/lha/attempts/{mission['mission_id']}/{attempt['cycle']}"
+                    sha = candidate_commit(path, message=f"lha: failed attempt ({ref})")
+                    git_ops.run_git(str(path), "update-ref", ref, sha)
+                    git_ops.discard_changes(str(path))
                 workdir = str(path.resolve())
             await store.upsert_mission(
                 mission_id=mission["mission_id"],

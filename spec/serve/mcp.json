@@ -165,6 +165,53 @@
    }
   },
   {
+   "name": "list_item_diffs",
+   "title": "Item attempt diffs",
+   "description": "An item's failed attempts and their diffs. For each of the item's cycles (`getItem`), an attempt is included when a failed attempt is kept at `refs/lha/attempts/<mission_id>/<cycle_id>`: `head` is that ref's commit, `base` the pre-attempt `HEAD` (the ref's parent), and `diff` is `base..head` excluding `.lha/`, cut at 100000 bytes (`truncated`). A cycle with no ref is omitted; an item with no attempts returns `[]`.",
+   "operation": "listItemDiffs",
+   "method": "GET",
+   "path": "/api/v1/missions/{mission_id}/items/{item_id}/diffs",
+   "arguments": {
+    "mission_id": "path",
+    "item_id": "path",
+    "limit": "query"
+   },
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "mission_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The mission id (`lha missions`)."
+     },
+     "item_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The checklist item id."
+     },
+     "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 1000,
+      "default": 200,
+      "description": "How many of the item's attempts to return: the most recent ones."
+     }
+    },
+    "required": [
+     "mission_id",
+     "item_id"
+    ],
+    "additionalProperties": false
+   },
+   "annotations": {
+    "readOnlyHint": true,
+    "destructiveHint": false,
+    "openWorldHint": false
+   }
+  },
+  {
    "name": "list_events",
    "title": "Mission timeline",
    "description": "The mission's recorded events after a cursor, oldest first.",

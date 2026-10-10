@@ -5,6 +5,7 @@ error other than "no such workflow"."""
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,7 +13,11 @@ import pytest
 
 pytest.importorskip("starlette")
 
+from lha.contracts.state import Checklist, ChecklistItem
 from lha.serve import app as serve_app
+from lha.state import git_ops
+from lha.state.mission_anchor import GitMissionAnchor
+from lha.verify.trusted import candidate_commit
 
 
 def test_a_stream_that_falls_behind_is_dropped_and_told_so() -> None:
@@ -131,3 +136,85 @@ def test_witness_results_pick_the_latest_and_ignore_junk() -> None:
         {"witness": "go:T", "latest": None},
     ]
     assert serve_app._witness_results({}, []) == []
+
+
+# --- item attempt diffs (spec/serve/openapi.json listItemDiffs) ---------------------------------
+
+
+def _failed_attempt(workdir: Path, mission_id: str, cycle_id: str) -> None:
+    """A repo at ``workdir`` with a failed attempt kept at refs/lha/attempts/<mission>/<cycle>."""
+
+    async def setup() -> None:
+        await GitMissionAnchor(str(workdir)).initialize(
+            title="t",
+            description="d",
+            items=Checklist(items=[ChecklistItem(id="01", description="x")]),
+        )
+
+    asyncio.run(setup())
+    (workdir / "hello.txt").write_text("draft\n", encoding="utf-8")
+    sha = candidate_commit(workdir, message=f"lha: failed attempt ({cycle_id})")
+    git_ops.run_git(str(workdir), "update-ref", f"refs/lha/attempts/{mission_id}/{cycle_id}", sha)
+    git_ops.discard_changes(str(workdir))
+
+
+def test_an_attempts_diff_is_cached_and_truncated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The diff comes from the cache on a repeat, and a long diff is cut with ``truncated``."""
+    _failed_attempt(tmp_path, "m", "c2")
+    serve_app._DIFF_CACHE.clear()
+    calls: list[int] = []
+    real = serve_app.git_ops.diff_range
+
+    def counting(*args: Any, **kwargs: Any) -> str:
+        calls.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(serve_app.git_ops, "diff_range", counting)
+    first = serve_app._attempt(str(tmp_path), "m", "c2")
+    second = serve_app._attempt(str(tmp_path), "m", "c2")
+    assert first is not None and first == second
+    assert calls == [1]  # the second attempt is a cache hit: git never ran again
+    assert first["truncated"] is False
+    assert first["cycle_id"] == "c2"
+    assert first["diff"].startswith("diff --git a/hello.txt")
+    assert first["head"] and first["base"] and first["head"] != first["base"]
+
+    monkeypatch.setattr(serve_app, "MAX_DIFF_BYTES", 10)
+    cut = serve_app._attempt(str(tmp_path), "m", "c2")
+    assert cut is not None and cut["truncated"] is True
+    assert len(cut["diff"].encode("utf-8")) <= 10
+
+
+def test_an_attempt_without_a_ref_or_a_parent_is_skipped(tmp_path: Path) -> None:
+    """A cycle with no attempt ref, and a ref whose commit has no parent, are both omitted."""
+    _failed_attempt(tmp_path, "m", "c2")
+    assert serve_app._attempt(str(tmp_path), "m", "nope") is None
+    root = git_ops.run_git(str(tmp_path), "rev-parse", "HEAD")  # the root commit: no parent
+    git_ops.run_git(str(tmp_path), "update-ref", "refs/lha/attempts/m/root", root)
+    assert serve_app._attempt(str(tmp_path), "m", "root") is None
+
+
+def test_the_diff_cache_is_bounded(monkeypatch: pytest.MonkeyPatch) -> None:
+    serve_app._DIFF_CACHE.clear()
+    monkeypatch.setattr(serve_app, "DIFF_CACHE_SIZE", 1)
+    monkeypatch.setattr(serve_app.git_ops, "diff_range", lambda *a, **k: "d")
+    serve_app._cached_diff("/w", "h1", "b1")
+    serve_app._cached_diff("/w", "h2", "b2")
+    assert list(serve_app._DIFF_CACHE) == [("/w", "h2")]
+
+
+def test_cycles_for_lists_an_items_cycles_once() -> None:
+    def event(cycle: str, payload: dict[str, Any]) -> Any:
+        return SimpleNamespace(cycle_id=cycle, payload=payload)
+
+    events = [
+        event("", {"item_id": "01"}),  # no cycle
+        event("c1", {"item_id": "01"}),
+        event("c1", {"item_id": "01"}),  # already seen
+        event("c2", {"item": "01"}),
+        event("c3", {"item_id": "02"}),  # another item
+    ]
+    assert serve_app._cycles_for(events, "01") == ["c1", "c2"]
+    assert serve_app._cycles_for(events, "99") == []

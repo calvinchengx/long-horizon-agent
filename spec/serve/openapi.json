@@ -524,6 +524,124 @@
         }
       }
     },
+    "/api/v1/missions/{mission_id}/items/{item_id}/diffs": {
+      "get": {
+        "operationId": "listItemDiffs",
+        "summary": "An item's failed attempts and their diffs",
+        "description": "For each of the item's cycles (`getItem`), an attempt is included when a failed attempt is kept at `refs/lha/attempts/<mission_id>/<cycle_id>`: `head` is that ref's commit, `base` the pre-attempt `HEAD` (the ref's parent), and `diff` is `base..head` excluding `.lha/`, cut at 100000 bytes (`truncated`). A cycle with no ref is omitted; an item with no attempts returns `[]`.",
+        "tags": [
+          "missions"
+        ],
+        "security": [
+          {
+            "token_header": []
+          },
+          {
+            "token_cookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "mission_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The mission id (`lha missions`)."
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            },
+            "description": "The checklist item id."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 200
+            },
+            "description": "How many of the item's attempts to return: the most recent ones."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The item's attempts, in the item's cycle order.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "attempts": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Attempt"
+                      }
+                    }
+                  },
+                  "required": [
+                    "attempts"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid token (`X-LHA-Token` header, or the `lha_token` cookie for reads).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The `Host` header is not this server's loopback address (DNS rebinding).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such mission or item (`not_found`), or the mission's anchor cannot be read here (`anchor_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A query parameter is invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/missions/{mission_id}/events": {
       "get": {
         "operationId": "listEvents",
@@ -1636,6 +1754,39 @@
           "error"
         ],
         "additionalProperties": false
+      },
+      "Attempt": {
+        "type": "object",
+        "properties": {
+          "cycle_id": {
+            "type": "string"
+          },
+          "base": {
+            "type": "string",
+            "description": "The pre-attempt `HEAD` (the attempt ref's parent commit)."
+          },
+          "head": {
+            "type": "string",
+            "description": "The attempt ref's commit."
+          },
+          "diff": {
+            "type": "string",
+            "description": "`base..head` excluding `.lha/`, cut at 100000 bytes."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "True when `diff` was longer than 100000 bytes and was cut."
+          }
+        },
+        "required": [
+          "base",
+          "cycle_id",
+          "diff",
+          "head",
+          "truncated"
+        ],
+        "additionalProperties": false,
+        "description": "One failed attempt kept at `refs/lha/attempts/<mission_id>/<cycle_id>`."
       },
       "Accepted": {
         "type": "object",
