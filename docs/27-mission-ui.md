@@ -1,6 +1,6 @@
 # Mission UI: design
 
-Status: Phases 0 to 3 are built in both implementations; what is still to come is marked. This page
+Status: Phases 0 to 4 are built in both implementations; what is still to come is marked. This page
 is the plan for watching and steering missions from a browser and from MCP clients, and the
 contracts that keep that UI independent of which LHA implementation runs a mission.
 
@@ -256,7 +256,10 @@ claude mcp add lha -- lha mcp
 
 ## Phase 4 (optional): `lha watch`
 
-A refreshing terminal view of one mission for SSH sessions, reading the same API, no new dependency.
+Status: built in both implementations. A refreshing terminal view of one mission for SSH sessions,
+reading the same API ([`lha watch`](17-cli.md#lha-watch)), no new dependency: the mission's status,
+items and spend, its open gate, and its newest events, with `--once` for a non-TTY and the same
+bytes from either implementation.
 
 ## Measured basis
 
