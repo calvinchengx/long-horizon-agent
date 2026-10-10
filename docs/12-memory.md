@@ -16,7 +16,7 @@ the replanner do not get memory. Memory is persisted in the mission store
 
 **In Go.** [`go/internal/memory`](../go/internal/memory/) is the same memory plane, wired into
 the Go `lha run-local`, `lha mission`, `lha orchestrate` (the Lead) and the Go worker's cycles, for the built-in turn
-loop and the `claude_code` engine alike: the same tiers, retrieval, consolidation, skills,
+loop and the `claude_code` / `opencode` engine alike: the same tiers, retrieval, consolidation, skills,
 degradation rules and settings, and the same rows in the same store, so either implementation
 recalls what the other recorded. For the same inputs the memory block is byte-identical:
 [`spec/memory/`](../spec/memory/) pins the hash embedder's vectors (Go reproduces CPython's

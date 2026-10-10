@@ -38,7 +38,7 @@ func TestParseFallbackEntries(t *testing.T) {
 }
 
 func TestParseFallbackEntryErrors(t *testing.T) {
-	const expected = ": expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code"
+	const expected = ": expected 'backend:model[@in/out]' with backend one of stub, ollama, openai_compat, claude, claude_code, opencode"
 	const badPrice = ": expected '@<in>/<out>' USD per 1M tokens"
 	for entry, want := range map[string]string{
 		"claude":                "invalid LHA_FALLBACK_MODELS entry 'claude'" + expected,

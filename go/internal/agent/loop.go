@@ -91,10 +91,10 @@ type LoopOptions struct {
 	Replanner              Splitter
 	MaxReplans             int
 	MaxSplitDepth          int
-	// Engine, when set, is the claude_code lead engine: the acting phase runs as one claude -p
-	// session instead of Model turns (Model still meters it and serves the replanner).
-	// Everything before and after acting is the same.
-	Engine *ClaudeCodeEngine
+	// Engine, when set, is the claude_code / opencode lead engine: the acting phase runs as one
+	// external agent session instead of Model turns (Model still meters it and serves the
+	// replanner). Everything before and after acting is the same.
+	Engine Engine
 	// Memory is the optional tiered memory: recalled into the task message before the first turn
 	// and told the cycle's outcome after the checkpoint (nil = no memory).
 	Memory memory.CycleMemory
@@ -380,7 +380,7 @@ func (l *AgentLoop) modelTurns(ctx context.Context, act *acting, messages []cont
 	return nil
 }
 
-// engineSession is the claude_code lead: one Claude Code session using LHA's tools and verify.
+// engineSession is the CLI lead engine: one external agent session using LHA's tools and verify.
 func (l *AgentLoop) engineSession(ctx context.Context, act *acting, messages []contracts.ModelMessage, cs *cycleState) error {
 	engine := l.opts.Engine
 	var mu sync.Mutex // the bridge serializes calls; this guards act against a torn-down session
@@ -410,13 +410,13 @@ func (l *AgentLoop) engineSession(ctx context.Context, act *acting, messages []c
 		Dispatch: dispatch,
 		Verify:   verifyFn,
 		Meter:    l.opts.Model,
-		OnProgress: func(p *model.SessionProgress) {
+		OnProgress: func(p model.Progress) {
 			var spent any // null while a model the session used has no price
-			if usd, ok := p.SpentUSD(); ok {
+			if usd, ok := p.ProgressSpentUSD(); ok {
 				spent = usd
 			}
-			l.emit("session_progress", cs.missionID, cs.cycleID, obs.F("turns", p.Turns),
-				obs.F("tool_calls", p.ToolCalls), obs.F("tool", p.Tool), obs.F("spent_usd", spent))
+			l.emit("session_progress", cs.missionID, cs.cycleID, obs.F("turns", p.ProgressTurns()),
+				obs.F("tool_calls", p.ProgressToolCalls()), obs.F("tool", p.ProgressTool()), obs.F("spent_usd", spent))
 		},
 	})
 	if err != nil {
@@ -431,7 +431,7 @@ func (l *AgentLoop) engineSession(ctx context.Context, act *acting, messages []c
 	if run.EditsUntracked {
 		act.dirty = true
 	}
-	l.emit("claude_code_session", cs.missionID, cs.cycleID,
+	l.emit(engine.SessionEvent(), cs.missionID, cs.cycleID,
 		obs.F("turns", run.Turns),
 		obs.F("tool_calls", run.ToolCalls),
 		obs.F("session_id", run.SessionID),

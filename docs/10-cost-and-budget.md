@@ -89,11 +89,12 @@ The governor refuses to spend an unknown amount:
 `CostMeter` ([metering.py](../python/src/lha/governor/metering.py)) holds one ledger, one governor
 and a running total of in-flight reservations. Every provider a mission uses is wrapped with
 `meter.wrap(provider, role=…)`, which returns a `MeteredModel`. The planner, lead, researchers,
-reviewer and reflection models are all wrapped. A `claude_code` lead engine session is metered
-through the lead's model (`run_external`): authorized with `LHA_CLAUDE_CODE_MAX_BUDGET_USD` as its
-worst case, or what is left of the budget when that is less (the session's `--max-budget-usd` is
-lowered to match), then charged the cost it reports, or that worst case when it reports none. A
-`claude_code` model call is capped the same way. The
+reviewer and reflection models are all wrapped. A `claude_code` or `opencode` lead engine session
+is metered through the lead's model (`run_external`): authorized with
+`LHA_CLAUDE_CODE_MAX_BUDGET_USD` / `LHA_OPENCODE_MAX_BUDGET_USD` as its worst case, or what is left
+of the budget when that is less (Claude Code's `--max-budget-usd` is lowered to match; OpenCode,
+which has no cap flag, is killed while streaming), then charged the cost it reports, or that worst
+case when it reports none. A `claude_code` or `opencode` model call is capped the same way. The
 replanner uses the lead's metered model, so the call that splits a blocked item is authorized
 against the budget and recorded under role `lead` in the same cycle. For each `complete()` call:
 
@@ -251,9 +252,9 @@ The Go `lha run-local`, `lha mission` and `lha orchestrate` persist the same way
 install `persistence.LedgerSink` there, backfilling the Planner's call (the `planner` role, cycle
 `c0`), with the same key prefixes (empty, or `run<N>` for a resumed `orchestrate`) and the same
 row key, so a Go run's ledger rows are the ones a Python run would write. Every org role's calls
-land there, and so does a `claude_code` session metered by `RunExternal` (its reported cost, or
-the worst case when it reported none); a failing hook is logged (`cost_hook_failed`) and never
-fails the call.
+land there, and so does a `claude_code` or `opencode` session metered by `RunExternal` (its
+reported cost, or the worst case when it reported none); a failing hook is logged
+(`cost_hook_failed`) and never fails the call.
 The Go `lha missions` and `lha costs` read either implementation's store with the same output.
 The Postgres backend is built in (no extra); `lha db migrate` works from the Go binary too.
 

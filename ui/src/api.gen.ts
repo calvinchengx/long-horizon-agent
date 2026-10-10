@@ -427,7 +427,7 @@ export interface components {
                 [key: string]: unknown;
             };
             schema_version: number;
-        } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown);
+        } & (unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown & unknown);
         CostCall: {
             cycle_id: string;
             role: string;
@@ -562,6 +562,12 @@ export interface components {
         ownership_violation: {
             writer: string;
             paths: string[];
+        };
+        opencode_session: {
+            turns: number;
+            tool_calls: number;
+            session_id: string;
+            stopped: string;
         };
         parallel_wave: {
             items: string[];

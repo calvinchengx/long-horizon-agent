@@ -35,6 +35,13 @@ func TestNewFieldDefaults(t *testing.T) {
 		"ClaudeCodeTools":            {s.ClaudeCodeTools, "lha"},
 		"ClaudeCodeMaxBudgetUSD":     {s.ClaudeCodeMaxBudgetUSD, 5.0},
 		"ClaudeCodeTimeoutS":         {s.ClaudeCodeTimeoutS, 3600.0},
+		"OpenCodeBin":                {s.OpenCodeBin, "opencode"},
+		"OpenCodeModel":              {s.OpenCodeModel, ""},
+		"OpenCodeAgent":              {s.OpenCodeAgent, "lha"},
+		"OpenCodeTools":              {s.OpenCodeTools, "lha"},
+		"OpenCodeStandalone":         {s.OpenCodeStandalone, true},
+		"OpenCodeMaxBudgetUSD":       {s.OpenCodeMaxBudgetUSD, 5.0},
+		"OpenCodeTimeoutS":           {s.OpenCodeTimeoutS, 3600.0},
 		"MaxParallelImplementers":    {s.MaxParallelImplementers, 3},
 		"SQLitePathSetting":          {s.SQLitePathSetting, ""},
 		"PostgresFallbackToSQLite":   {s.PostgresFallbackToSQLite, true},
@@ -101,7 +108,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 111 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 118 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
@@ -230,6 +237,20 @@ func TestLeadEngineValidator(t *testing.T) {
 	}
 	if s.ModelBackend != "ollama" {
 		t.Errorf("a model_backend from .env must win, got %s", s.ModelBackend)
+	}
+	s, err = LoadFrom([]string{"LHA_LEAD_ENGINE=opencode"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ModelBackend != "opencode" {
+		t.Errorf("lead_engine=opencode alone should route model_backend to opencode, got %s", s.ModelBackend)
+	}
+	s, err = LoadFrom([]string{"LHA_LEAD_ENGINE=opencode", "LHA_MODEL_BACKEND=stub"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.ModelBackend != "stub" {
+		t.Errorf("an explicit model_backend must win over lead_engine=opencode, got %s", s.ModelBackend)
 	}
 }
 

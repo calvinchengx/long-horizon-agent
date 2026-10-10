@@ -9,7 +9,7 @@ import (
 )
 
 // Backends are the model backends BuildProvider knows, in python's _BACKENDS order.
-var Backends = []string{"stub", "ollama", "openai_compat", "claude", "claude_code"}
+var Backends = []string{"stub", "ollama", "openai_compat", "claude", "claude_code", "opencode"}
 
 // FallbackSpec is one LHA_FALLBACK_MODELS entry: backend:model[@in/out] (USD per 1M tokens).
 type FallbackSpec struct {

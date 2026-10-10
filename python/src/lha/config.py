@@ -36,9 +36,10 @@ from typing import Literal
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ModelBackend = Literal["stub", "ollama", "openai_compat", "claude", "claude_code"]
-LeadEngine = Literal["loop", "claude_code"]
+ModelBackend = Literal["stub", "ollama", "openai_compat", "claude", "claude_code", "opencode"]
+LeadEngine = Literal["loop", "claude_code", "opencode"]
 ClaudeCodeTools = Literal["lha", "native"]
+OpenCodeTools = Literal["lha", "native"]
 SandboxKind = Literal["docker", "e2b", "local"]
 WorkerVersioningBehavior = Literal["pinned", "auto_upgrade"]
 
@@ -92,6 +93,27 @@ class Settings(BaseSettings):
     # call can overshoot it by a single turn.
     claude_code_max_budget_usd: float = Field(default=5.0, gt=0)
     claude_code_timeout_s: float = Field(default=3600.0, gt=0)
+
+    # --- OpenCode (``opencode run``; see src/lha/model/opencode.py) -------------------
+    # ``model_backend=opencode`` runs each model turn through the ``opencode`` CLI (a session with
+    # every tool denied), so an OpenCode login works without an LHA-side API key; ``model_name`` is
+    # passed as ``--model`` (``provider/model#variant``; left at its default, OpenCode chooses).
+    # ``lead_engine=opencode`` goes further: each lead cycle is ONE ``opencode run`` session that
+    # works the item with its own agentic loop, then LHA verifies and checkpoints as usual.
+    opencode_bin: str = "opencode"
+    opencode_model: str = ""
+    opencode_agent: str = "lha"
+    # lha: OpenCode's own tools are denied (an injected agent) and it gets LHA's tools over MCP,
+    # so the sandbox, the human gate and egress rules still apply. native: its own read/edit/shell
+    # on the host workdir, with no isolation (needs sandbox=local and allow_unsafe_local).
+    opencode_tools: OpenCodeTools = "lha"
+    # Run each session against a private server (``--standalone``) so it never attaches to the
+    # OpenCode that may be running LHA.
+    opencode_standalone: bool = True
+    # The session's worst-case cost and spend cap. OpenCode has no cap flag, so the engine kills a
+    # session that reaches it while streaming; its reported per-step cost is what is recorded.
+    opencode_max_budget_usd: float = Field(default=5.0, gt=0)
+    opencode_timeout_s: float = Field(default=3600.0, gt=0)
 
     # --- Durable control plane (Temporal) --------------------------------------------
     temporal_address: str = "localhost:7233"
@@ -358,12 +380,18 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _claude_code_lead_uses_claude_code(self) -> Settings:
-        """``lead_engine=claude_code`` alone also routes the other roles through ``claude -p``.
+        """A CLI lead engine alone also routes the other roles through its CLI.
 
-        Only when ``model_backend`` was left at its ``stub`` default: an explicit backend wins.
+        ``lead_engine=claude_code`` / ``opencode`` sets ``model_backend`` to the matching backend,
+        so the planner, replanner, reviewer and every other role run on the same engine. Only when
+        ``model_backend`` was left at its ``stub`` default: an explicit backend wins.
         """
-        if self.lead_engine == "claude_code" and "model_backend" not in self.model_fields_set:
+        if "model_backend" in self.model_fields_set:
+            return self
+        if self.lead_engine == "claude_code":
             self.model_backend = "claude_code"
+        elif self.lead_engine == "opencode":
+            self.model_backend = "opencode"
         return self
 
     def sandbox_egress_hosts(self) -> list[str]:

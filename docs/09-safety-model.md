@@ -515,8 +515,9 @@ refuses a repository owned by another user.
 - The E2B adapter's workspace sync is tested against a fake SDK, not the E2B service. Files a
   background process writes in the VM after a command returns reach the host only with the next
   command's sync (see section 1).
-- The `claude_code` lead engine with `LHA_CLAUDE_CODE_TOOLS=native` hands the host workdir to
-  Claude Code's own tools. None of the sections above apply to them: only a prefix deny list for
-  git history, publishing and web access, which `sh -c` gets around. The default `lha` mode
-  serves LHA's tools over MCP instead, so everything above still applies
-  ([models](13-models.md#claude_code-claude-code-claude--p)).
+- The `claude_code` or `opencode` lead engine with `*_TOOLS=native` hands the host workdir to the
+  CLI's own tools. None of the sections above apply to them: only a prefix deny list for git
+  history, publishing and web access, which `sh -c` gets around. The default `lha` mode serves
+  LHA's tools over MCP instead, so everything above still applies
+  ([models](13-models.md#claude_code-claude-code-claude--p),
+  [opencode](13-models.md#opencode-opencode-opencode-run)).

@@ -45,7 +45,8 @@ or an API call fails. LHA treats long-horizon autonomy as an engineering problem
 - **A mission UI.** `lha serve` (in either implementation) shows every mission in a browser:
   live state, the checklist, a timeline of what each cycle did, spend, and the human gates, which
   you answer there with your name ([mission UI](docs/27-mission-ui.md)). An MCP client gets the
-  same reads, steer and snooze (`claude mcp add lha -- lha mcp`), but never the gate answers or
+  same reads, steer and snooze (`claude mcp add lha -- lha mcp`, or
+  `opencode mcp add lha -- lha mcp`), but never the gate answers or
   abort.
 
   <picture>
@@ -94,6 +95,10 @@ To run it with Claude Code instead, on a Claude Pro/Max login or an API key, set
 `LHA_LEAD_ENGINE=claude_code`: each cycle becomes one `claude -p` session that uses LHA's
 sandboxed tools, and LHA still verifies and commits the result. See
 [models](docs/13-models.md#claude_code-claude-code-claude--p).
+
+Or set `LHA_LEAD_ENGINE=opencode`, on an OpenCode login: each cycle is one `opencode run` session
+whose tools are LHA's over the same MCP bridge, with the same sandbox and gate. See
+[models](docs/13-models.md#opencode-opencode-opencode-run).
 
 ## Repository layout
 

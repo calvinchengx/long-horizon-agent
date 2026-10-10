@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from lha.agent.claude_code_engine import ClaudeCodeEngine
 from lha.agent.code_map import RipwireCodeMap
 from lha.agent.loop import AgentLoop
+from lha.agent.opencode_engine import OpenCodeEngine
 from lha.agents.replanner import Replanner
 from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
@@ -98,27 +99,31 @@ def lead_verifier(workdir: str, settings: Settings | None = None) -> Verifier:
     return verifier
 
 
-def lead_engine(settings: Settings, *, guarded: bool = False) -> ClaudeCodeEngine | None:
-    """The ``claude_code`` lead engine from settings, or ``None`` for the built-in loop.
+def lead_engine(
+    settings: Settings, *, guarded: bool = False
+) -> ClaudeCodeEngine | OpenCodeEngine | None:
+    """The ``claude_code`` / ``opencode`` lead engine from settings, or ``None`` for the built-in loop.
 
-    Native Claude Code tools act on the host with no sandbox, so they need ``sandbox=local`` and
+    Native CLI tools act on the host with no sandbox, so they need ``sandbox=local`` and
     ``allow_unsafe_local``, and they cannot run under a ``guarded`` dispatcher (the orchestrator's
     ownership guard only sees calls that go through LHA's tools).
     """
+    if settings.lead_engine == "opencode":
+        if settings.opencode_tools == "native":
+            _require_native_engine(settings, guarded, var="LHA_OPENCODE_TOOLS", engine="OpenCode")
+        return OpenCodeEngine(
+            binary=settings.opencode_bin,
+            model=settings.opencode_model,
+            agent=settings.opencode_agent,
+            tools=settings.opencode_tools,
+            standalone=settings.opencode_standalone,
+            max_budget_usd=settings.opencode_max_budget_usd,
+            timeout_s=settings.opencode_timeout_s,
+        )
     if settings.lead_engine != "claude_code":
         return None
     if settings.claude_code_tools == "native":
-        if settings.sandbox != "local" or not settings.allow_unsafe_local:
-            raise ValueError(
-                "LHA_CLAUDE_CODE_TOOLS=native runs Claude Code's own tools on the host with no "
-                "isolation: it needs LHA_SANDBOX=local and LHA_ALLOW_UNSAFE_LOCAL=true "
-                "(or use the default LHA_CLAUDE_CODE_TOOLS=lha)"
-            )
-        if guarded:
-            raise ValueError(
-                "LHA_CLAUDE_CODE_TOOLS=native bypasses the orchestrator's file-ownership guard; "
-                "use LHA_CLAUDE_CODE_TOOLS=lha with the multi-agent organization"
-            )
+        _require_native_engine(settings, guarded, var="LHA_CLAUDE_CODE_TOOLS", engine="Claude Code")
     uses_cli_model = settings.model_backend == "claude_code"
     stub_default = Settings.model_fields["model_name"].default
     model = (
@@ -133,6 +138,20 @@ def lead_engine(settings: Settings, *, guarded: bool = False) -> ClaudeCodeEngin
         max_budget_usd=settings.claude_code_max_budget_usd,
         timeout_s=settings.claude_code_timeout_s,
     )
+
+
+def _require_native_engine(settings: Settings, guarded: bool, *, var: str, engine: str) -> None:
+    """A native-mode engine runs its own tools on the host: refuse it without the unsafe opt-in."""
+    if settings.sandbox != "local" or not settings.allow_unsafe_local:
+        raise ValueError(
+            f"{var}=native runs {engine}'s own tools on the host with no isolation: it needs "
+            "LHA_SANDBOX=local and LHA_ALLOW_UNSAFE_LOCAL=true (or use the default tool mode lha)"
+        )
+    if guarded:
+        raise ValueError(
+            f"{var}=native bypasses the orchestrator's file-ownership guard; use the default "
+            "tool mode lha with the multi-agent organization"
+        )
 
 
 def build_lead_loop(

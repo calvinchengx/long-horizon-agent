@@ -486,20 +486,20 @@
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "ownership_released",
+   "kind": "opencode_session",
    "payload": {
-    "paths": [
-     "s"
-    ]
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
    },
    "ts": "2026-10-04T00:00:18.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "ownership_violation",
+   "kind": "ownership_released",
    "payload": {
-    "writer": "s",
     "paths": [
      "s"
     ]
@@ -509,6 +509,18 @@
   {
    "mission_id": "mission_local",
    "cycle_id": "",
+   "kind": "ownership_violation",
+   "payload": {
+    "writer": "s",
+    "paths": [
+     "s"
+    ]
+   },
+   "ts": "2026-10-04T00:00:20.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
    "kind": "parallel_wave",
    "payload": {
     "items": [
@@ -516,11 +528,11 @@
     ],
     "base": "s"
    },
-   "ts": "2026-10-04T00:00:20.000000+00:00"
+   "ts": "2026-10-04T00:00:21.000000+00:00"
   },
   {
    "mission_id": "mission_local",
-   "cycle_id": "c1",
+   "cycle_id": "",
    "kind": "quarantined_check_failed",
    "payload": {
     "check": "s",
@@ -528,83 +540,83 @@
     "passes": 3,
     "fails": 3
    },
-   "ts": "2026-10-04T00:00:21.000000+00:00"
-  },
-  {
-   "mission_id": "mission_local",
-   "cycle_id": "",
-   "kind": "reflection",
-   "payload": {
-    "item": "s"
-   },
    "ts": "2026-10-04T00:00:22.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "research",
+   "kind": "reflection",
    "payload": {
-    "item": "s",
-    "n": 3,
-    "failed": 3
+    "item": "s"
    },
    "ts": "2026-10-04T00:00:23.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "research_failed",
+   "kind": "research",
    "payload": {
     "item": "s",
-    "error": "s"
+    "n": 3,
+    "failed": 3
    },
    "ts": "2026-10-04T00:00:24.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "resumed",
+   "kind": "research_failed",
    "payload": {
-    "run": 3,
-    "cycle_offset": 3,
-    "board": 3
+    "item": "s",
+    "error": "s"
    },
    "ts": "2026-10-04T00:00:25.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "review",
+   "kind": "resumed",
    "payload": {
-    "item": "s",
-    "blocking": true,
-    "verdict": "approve"
+    "run": 3,
+    "cycle_offset": 3,
+    "board": 3
    },
    "ts": "2026-10-04T00:00:26.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "review_reopened",
+   "kind": "review",
    "payload": {
-    "item": "s"
+    "item": "s",
+    "blocking": true,
+    "verdict": "approve"
    },
    "ts": "2026-10-04T00:00:27.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "review_screen",
+   "kind": "review_reopened",
    "payload": {
-    "item": "s",
-    "findings": 3,
-    "forced": true
+    "item": "s"
    },
    "ts": "2026-10-04T00:00:28.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
+   "kind": "review_screen",
+   "payload": {
+    "item": "s",
+    "findings": 3,
+    "forced": true
+   },
+   "ts": "2026-10-04T00:00:29.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
    "kind": "sandbox_egress",
    "payload": {
     "decision": "allow",
@@ -614,11 +626,11 @@
     "detail": "s",
     "count": 3
    },
-   "ts": "2026-10-04T00:00:29.000000+00:00"
+   "ts": "2026-10-04T00:00:30.000000+00:00"
   },
   {
    "mission_id": "mission_local",
-   "cycle_id": "",
+   "cycle_id": "c1",
    "kind": "session_progress",
    "payload": {
     "turns": 3,
@@ -626,20 +638,20 @@
     "tool": "s",
     "spent_usd": 0.5
    },
-   "ts": "2026-10-04T00:00:30.000000+00:00"
-  },
-  {
-   "mission_id": "mission_local",
-   "cycle_id": "c1",
-   "kind": "skill_stored",
-   "payload": {
-    "skill_id": "s"
-   },
    "ts": "2026-10-04T00:00:31.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
+   "kind": "skill_stored",
+   "payload": {
+    "skill_id": "s"
+   },
+   "ts": "2026-10-04T00:00:32.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
    "kind": "system_one",
    "payload": {
     "use": "s",
@@ -655,11 +667,11 @@
     "action": "continue",
     "error": "s"
    },
-   "ts": "2026-10-04T00:00:32.000000+00:00"
+   "ts": "2026-10-04T00:00:33.000000+00:00"
   },
   {
    "mission_id": "mission_local",
-   "cycle_id": "c1",
+   "cycle_id": "",
    "kind": "tool_call",
    "payload": {
     "tool": "s",
@@ -667,21 +679,21 @@
     "role": "s",
     "error": "s"
    },
-   "ts": "2026-10-04T00:00:33.000000+00:00"
-  },
-  {
-   "mission_id": "mission_local",
-   "cycle_id": "",
-   "kind": "turns_exhausted",
-   "payload": {
-    "max_turns": 3,
-    "tool_calls": 3
-   },
    "ts": "2026-10-04T00:00:34.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
+   "kind": "turns_exhausted",
+   "payload": {
+    "max_turns": 3,
+    "tool_calls": 3
+   },
+   "ts": "2026-10-04T00:00:35.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
    "kind": "verify",
    "payload": {
     "trigger": "done",
@@ -697,7 +709,7 @@
      }
     ]
    },
-   "ts": "2026-10-04T00:00:35.000000+00:00"
+   "ts": "2026-10-04T00:00:36.000000+00:00"
   },
   {
    "mission_id": "mission_durable",

@@ -133,6 +133,18 @@ func (b *Bridge) MCPConfig() string {
 		`, "headers": {"Authorization": ` + q("Bearer "+b.token) + `}}}}`
 }
 
+// OpenCodeServer is the mcp.servers.<name> entry that points OpenCode at this server
+// (python: McpBridge.opencode_server). codemode is off so the tools keep their native
+// <server>_<tool> names and the agent calls them directly.
+func (b *Bridge) OpenCodeServer() map[string]any {
+	return map[string]any{
+		"type":     "remote",
+		"url":      b.URL(),
+		"headers":  map[string]any{"Authorization": "Bearer " + b.token},
+		"codemode": false,
+	}
+}
+
 // AllowedTools are the --allowedTools entries that pre-approve every bridged tool.
 func (b *Bridge) AllowedTools() []string {
 	out := make([]string, len(b.order))

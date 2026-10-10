@@ -169,6 +169,20 @@ func buildBackend(settings *config.Settings, backend, name string, client *http.
 			TimeoutS:     settings.ClaudeCodeTimeoutS,
 		}), nil
 
+	case "opencode":
+		// Left at the stub's default name, the model is OpenCode's own choice. No explicit price
+		// applies (python: _primary_price is None for opencode).
+		if name == DefaultSettingsModelName() {
+			name = OpenCodeDefaultModel
+		}
+		return NewOpenCode(OpenCodeOptions{
+			ModelName:    name,
+			Binary:       settings.OpenCodeBin,
+			Standalone:   Bool(settings.OpenCodeStandalone),
+			MaxBudgetUSD: settings.OpenCodeMaxBudgetUSD,
+			TimeoutS:     settings.OpenCodeTimeoutS,
+		}), nil
+
 	default:
 		return nil, fmt.Errorf("Unknown model backend: %s", contracts.PyRepr(backend))
 	}
@@ -187,6 +201,9 @@ func Int(n int) *int { return &n }
 
 // Float returns a pointer to x (for the optional *float64 option fields and prices).
 func Float(x float64) *float64 { return &x }
+
+// Bool returns a pointer to b (for the optional *bool option fields whose default is true).
+func Bool(b bool) *bool { return &b }
 
 // modelTimeout is LHA_MODEL_TIMEOUT_S as a duration (an owned OpenAI-compatible client's timeout).
 func modelTimeout(settings *config.Settings) time.Duration {

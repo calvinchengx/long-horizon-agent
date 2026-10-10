@@ -186,14 +186,14 @@ extras
 | `LHA_*` settings and `.env` | `internal/config` | present: every Python setting, with the same names, defaults and validation. `LHA_SANDBOX=e2b` (a Python-only sandbox) is refused |
 | Shared contracts (state, model, tools, sandbox, verify) | `internal/contracts` | present, including witnesses, `split` and `Checklist.Split`, references and `Check.Where`; `spec/state/checklist.json` passes |
 | Safety: command classifier, egress policy, IDNA, shlex | `internal/safety` | present; `spec/safety/*` pass |
-| Model backends: stub, OpenAI-compatible, Claude, Claude Code (`claude -p`), pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
+| Model backends: stub, OpenAI-compatible, Claude, Claude Code (`claude -p`), OpenCode (`opencode run`), pricing, retry, failover | `internal/model` | present; `spec/model/pricing.json` passes |
 | Budget governor, cost ledger, metering | `internal/governor` | present |
 | Git mission anchor and git operations | `internal/state` | present; cross-implementation tests read Python anchors and vice versa |
 | Verifier, harness integrity, flaky quarantine, witnesses, trusted runner | `internal/verify` | present; `spec/verify/harness_files.json` and `spec/verify/flaky_retry.json` pass. The lead re-runs failing checks (`LHA_FLAKY_RETRIES`) as in Python |
 | Redaction and structured events | `internal/obs` | present; `spec/obs/redact.json` passes |
 | Checklist import, `vendor` | `internal/checklistimport`, `internal/state/vendor` | present |
 | Sandboxes (local, Docker, E2B), egress proxy and tools | `internal/execution` | present: local and Docker sandboxes, the egress proxy (also served by the hidden `lha egress-proxy`), the dispatcher and every lead tool including the web tools. No E2B |
-| Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` lead engine with its MCP bridge |
+| Agent loop, replanner, approval gates | `internal/agent`, `internal/hitl` | present: the turn loop, local runner, Planner and Replanner, the console approval gate (`--approve-interactive`) and the `claude_code` / `opencode` lead engines with their shared MCP bridge |
 | CLI | `cmd/lha` | present: every command (`version`, `config`, `run-local`, `mission`, `orchestrate`, `decisions`, `vendor`, `missions`, `costs`, `gates`, `db migrate`, `memory reembed`, `objects prune`, `worker` and `mission-*`); the mission commands run real missions (end-to-end tests compare them, and the stores they leave, with Python), including `mission-start`'s durable organization options |
 
 `go test ./...` passes for the present packages; the `go` CI job runs it with the race detector,

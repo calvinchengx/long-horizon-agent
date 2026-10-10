@@ -50,7 +50,7 @@ func (s *Secret) GoString() string { return "**********" }
 // bounds (`gt`, `ge`, `le`). Field order is python's declaration order (Redacted relies on it).
 type Settings struct {
 	// --- Model layer
-	ModelBackend string `env:"model_backend" default:"stub" choices:"stub,ollama,openai_compat,claude,claude_code"`
+	ModelBackend string `env:"model_backend" default:"stub" choices:"stub,ollama,openai_compat,claude,claude_code,opencode"`
 	ModelName    string `env:"model_name" default:"stub-1"`
 
 	OllamaBaseURL string  `env:"ollama_base_url" default:"http://localhost:11434"`
@@ -66,11 +66,20 @@ type Settings struct {
 	AllowUnpricedModels   bool     `env:"allow_unpriced_models" default:"false"`
 
 	// --- Claude Code (claude -p)
-	LeadEngine             string  `env:"lead_engine" default:"loop" choices:"loop,claude_code"`
+	LeadEngine             string  `env:"lead_engine" default:"loop" choices:"loop,claude_code,opencode"`
 	ClaudeCodeBin          string  `env:"claude_code_bin" default:"claude"`
 	ClaudeCodeTools        string  `env:"claude_code_tools" default:"lha" choices:"lha,native"`
 	ClaudeCodeMaxBudgetUSD float64 `env:"claude_code_max_budget_usd" default:"5.0" gt:"0"`
 	ClaudeCodeTimeoutS     float64 `env:"claude_code_timeout_s" default:"3600.0" gt:"0"`
+
+	// --- OpenCode (opencode run; see src/lha/model/opencode.go)
+	OpenCodeBin          string  `env:"opencode_bin" default:"opencode"`
+	OpenCodeModel        string  `env:"opencode_model" default:""`
+	OpenCodeAgent        string  `env:"opencode_agent" default:"lha"`
+	OpenCodeTools        string  `env:"opencode_tools" default:"lha" choices:"lha,native"`
+	OpenCodeStandalone   bool    `env:"opencode_standalone" default:"true"`
+	OpenCodeMaxBudgetUSD float64 `env:"opencode_max_budget_usd" default:"5.0" gt:"0"`
+	OpenCodeTimeoutS     float64 `env:"opencode_timeout_s" default:"3600.0" gt:"0"`
 
 	// --- Durable control plane (Temporal)
 	TemporalAddress   string `env:"temporal_address" default:"localhost:7233"`
@@ -271,8 +280,13 @@ func LoadFrom(environ []string, dotenv string) (*Settings, error) {
 		}
 	}
 	// python: the _claude_code_lead_uses_claude_code model validator.
-	if _, explicit := values["model_backend"]; s.LeadEngine == "claude_code" && !explicit {
-		s.ModelBackend = "claude_code"
+	if _, explicit := values["model_backend"]; !explicit {
+		switch s.LeadEngine {
+		case "claude_code":
+			s.ModelBackend = "claude_code"
+		case "opencode":
+			s.ModelBackend = "opencode"
+		}
 	}
 	return s, nil
 }

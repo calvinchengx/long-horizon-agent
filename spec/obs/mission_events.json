@@ -177,6 +177,30 @@
    ],
    "additionalProperties": false
   },
+  "opencode_session": {
+   "type": "object",
+   "properties": {
+    "turns": {
+     "type": "integer"
+    },
+    "tool_calls": {
+     "type": "integer"
+    },
+    "session_id": {
+     "type": "string"
+    },
+    "stopped": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "session_id",
+    "stopped",
+    "tool_calls",
+    "turns"
+   ],
+   "additionalProperties": false
+  },
   "verify": {
    "type": "object",
    "properties": {
@@ -1486,6 +1510,106 @@
   },
   {
    "kind": "claude_code_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": 7
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": true
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "session_id": "s",
+    "stopped": "s",
+    "tool_calls": 3,
+    "turns": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s",
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": "s",
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3.5,
+    "tool_calls": 3,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": "s",
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3.5,
+    "session_id": "s",
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
+   "data": {
+    "turns": 3,
+    "tool_calls": 3,
+    "session_id": 7,
+    "stopped": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "opencode_session",
    "data": {
     "turns": 3,
     "tool_calls": 3,
