@@ -14,11 +14,13 @@ Two uses, sharing the helpers here:
 - ``lha.agent.opencode_engine`` (``LHA_LEAD_ENGINE=opencode``): a whole lead cycle is one
   ``opencode run`` session with LHA's tools served over MCP (``lha.agent.mcp_bridge``).
 
-Cost: the ledger records the cost OpenCode reports for the session's steps
-(``Usage.reported_cost_usd``). Before a call runs, its worst case is
-``LHA_OPENCODE_MAX_BUDGET_USD``, or what is left of the budget when that is less
-(``call_budget_usd``). OpenCode has no spend-cap flag, so the engine kills a session that reaches
-its cap while streaming; whatever it left in the workdir is still verified.
+Cost: the ledger records the session's cost (``Usage.reported_cost_usd``). The ``--format json``
+stream reports usage only for steps that end in a tool call, so the final assistant turn is
+missing; the exact totals come from ``opencode session export`` (``session_cost``), falling back to
+the streamed step sum. Before a call runs, its worst case is ``LHA_OPENCODE_MAX_BUDGET_USD``, or
+what is left of the budget when that is less (``call_budget_usd``). OpenCode has no spend-cap flag,
+so the engine kills a session that reaches its cap while streaming; whatever it left in the workdir
+is still verified.
 
 Progress: each turn and tool call arrives as it happens; ``SessionProgress`` follows the turns,
 the tools called and the spend so far, and ``run_opencode`` calls ``on_progress`` on change.
@@ -49,6 +51,8 @@ DEFAULT_MODEL = ""
 # The longest stream-json line read (a tool result can be large; asyncio's default is 64 KiB).
 _STREAM_LINE_LIMIT = 64 * 1024 * 1024
 _STDERR_TAIL = 2000
+# The longest `opencode session export` may take when reading a finished session's totals.
+_SESSION_EXPORT_TIMEOUT_S = 30.0
 # OpenCode's default agent, used when ``opencode_agent`` names one.
 DEFAULT_AGENT = "lha"
 # Environment variables that make a child ``opencode`` attach to the parent's session or config.
@@ -87,17 +91,21 @@ class OpenCodeTimeout(TimeoutError):
 class SessionProgress:
     """A running ``opencode run`` session's progress, from its ``--format json`` stream.
 
-    ``spent_usd`` sums the costs OpenCode reports per step; it is ``None`` before the first step
-    and while a step reports no cost, so a session whose spend cannot be seen is charged its cap,
-    never $0.
+    OpenCode reports usage and cost on a step's ``step_finish``, but only for steps that end in a
+    tool call: the final assistant turn streams none. ``spent_usd`` is therefore the sum of the
+    costs seen so far, and is ``None`` only when no step has reported one (so a session whose spend
+    cannot be seen at all is charged its cap, never $0). A finished session's exact totals come
+    from ``session_cost``.
     """
 
     turns: int = 0
     tool_calls: int = 0
     tool: str = ""  # the last tool called
     session_id: str = ""
-    # messageID -> the step's usage tokens and cost, filled at ``step_finish``.
+    # messageID -> the step's usage tokens, filled at ``step_finish``.
     _steps: dict[str, dict[str, object]] = field(default_factory=dict)
+    # The costs OpenCode reported per step, in order; their sum is ``spent_usd``.
+    _costs: list[float] = field(default_factory=list)
     _tool_ids: set[str] = field(default_factory=set)
 
     def observe(self, event: dict[str, object]) -> bool:
@@ -122,12 +130,11 @@ class SessionProgress:
                 self.turns += 1
                 changed = True
             tokens = part.get("tokens")
-            cost = part.get("cost")
             if isinstance(step_id, str):
-                self._steps[step_id] = {
-                    "tokens": tokens if isinstance(tokens, dict) else {},
-                    "cost": cost if isinstance(cost, int | float) else None,
-                }
+                self._steps[step_id] = {"tokens": tokens if isinstance(tokens, dict) else {}}
+            cost = part.get("cost")
+            if isinstance(cost, int | float) and not isinstance(cost, bool):
+                self._costs.append(float(cost))
             return changed
         if kind == "tool_use":
             call_id = part.get("id") or part.get("partID")
@@ -157,15 +164,9 @@ class SessionProgress:
 
     @property
     def spent_usd(self) -> float | None:
-        if not self._steps:
+        if not self._costs:
             return None
-        cost = 0.0
-        for step in self._steps.values():
-            raw = step.get("cost")
-            if not isinstance(raw, int | float):
-                return None
-            cost += float(raw)
-        return round(cost, 6)
+        return round(sum(self._costs), 6)
 
 
 def _step_usage(step: dict[str, object], *, provider: str) -> Usage:
@@ -334,13 +335,82 @@ async def run_opencode(
         raise OpenCodeError(
             f"opencode run failed: {error_line}", retryable=_is_transient(error_line)
         )
+    # The stream omits the final assistant turn's usage, so read the session's exact totals.
+    usage = progress.usage(provider=provider, fallback_model=fallback_model)
+    if progress.session_id:
+        exported = await session_cost(binary, progress.session_id)
+        if exported is not None:
+            usage = exported_usage(exported, provider=provider, fallback_model=fallback_model)
     return OpenCodeResult(
         text="\n".join(texts),
-        usage=progress.usage(provider=provider, fallback_model=fallback_model),
+        usage=usage,
         session_id=progress.session_id or None,
         num_turns=progress.turns,
         stop_reason=stop_reason,
         raw=raw,
+    )
+
+
+async def session_cost(
+    binary: str, session_id: str, *, timeout_s: float = _SESSION_EXPORT_TIMEOUT_S
+) -> tuple[float, dict[str, object]] | None:
+    """The exact cost and token totals of a finished session, from ``opencode session export``.
+
+    The ``--format json`` stream reports usage only on the ``step_finish`` of a step that ended in
+    a tool call, so a session's final assistant turn is missing from the streamed sum. The export
+    carries the session's totals; ``None`` when it cannot be read (no such session, a non-zero
+    exit, timed out, or no ``cost`` field).
+    """
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            binary,
+            "session",
+            "export",
+            session_id,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=child_env(),
+        )
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except TimeoutError:
+        proc.kill()
+        await proc.wait()
+        return None
+    if proc.returncode != 0:
+        return None
+    try:
+        data = json.loads(out.decode(errors="replace"))
+    except json.JSONDecodeError:
+        return None
+    info = data.get("info") if isinstance(data, dict) else None
+    if not isinstance(info, dict):
+        return None
+    cost = info.get("cost")
+    if not isinstance(cost, int | float) or isinstance(cost, bool):
+        return None
+    tokens = info.get("tokens")
+    return float(cost), tokens if isinstance(tokens, dict) else {}
+
+
+def exported_usage(
+    exported: tuple[float, dict[str, object]], *, provider: str, fallback_model: str
+) -> Usage:
+    """An exported session's totals as one ``Usage`` (reasoning counts as billed output)."""
+    cost, tokens = exported
+    cache = tokens.get("cache")
+    cache = cache if isinstance(cache, dict) else {}
+    return Usage(
+        input_tokens=_int(tokens.get("input")),
+        output_tokens=_int(tokens.get("output")) + _int(tokens.get("reasoning")),
+        cache_read_input_tokens=_int(cache.get("read")),
+        cache_creation_input_tokens=_int(cache.get("write")),
+        model=fallback_model,
+        provider=provider,
+        reported_cost_usd=round(cost, 6),
     )
 
 

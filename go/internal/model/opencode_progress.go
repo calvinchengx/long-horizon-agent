@@ -32,21 +32,24 @@ func (p *SessionProgress) ProgressSpentUSD() (float64, bool) { return p.SpentUSD
 // OpenCodeSessionProgress is a running opencode run session's progress, from its --format json
 // stream (python: lha.model.opencode.SessionProgress).
 //
-// SpentUSD sums the costs OpenCode reports per step; it is unknown before the first step and while
-// a step reports no cost, so a session whose spend cannot be seen is charged its cap, never $0.
+// OpenCode reports usage and cost on a step's step_finish, but only for steps that end in a tool
+// call: the final assistant turn streams none. SpentUSD is therefore the sum of the costs seen so
+// far, and is unknown only when no step has reported one (so a session whose spend cannot be seen
+// at all is charged its cap, never $0). A finished session's exact totals come from SessionCost.
 type OpenCodeSessionProgress struct {
 	Turns     int
 	ToolCalls int
 	Tool      string // the last tool called
 	SessionID string
-	// steps is messageID -> the step's usage tokens and cost, filled at step_finish.
-	steps   map[string]openCodeStep
+	// steps is messageID -> the step's usage tokens, filled at step_finish.
+	steps map[string]openCodeStep
+	// costs are the costs OpenCode reported per step, in order; their sum is SpentUSD.
+	costs   []float64
 	toolIDs map[string]bool
 }
 
 type openCodeStep struct {
 	tokens *pyfmt.OrderedMap
-	cost   *float64 // nil when the step reported no cost
 }
 
 // Observe takes one stream event; it reports whether the event began a turn or called a tool.
@@ -83,12 +86,15 @@ func (p *OpenCodeSessionProgress) Observe(event *pyfmt.OrderedMap) bool {
 			}
 		}
 		tokens, _ := omGet(part, "tokens").(*pyfmt.OrderedMap)
-		var cost *float64
-		if c, _, ok := pyNumber(omGet(part, "cost")); ok {
-			cost = &c
-		}
 		if stepIDIsStr {
-			p.steps[stepID] = openCodeStep{tokens: tokens, cost: cost}
+			p.steps[stepID] = openCodeStep{tokens: tokens}
+		}
+		// python: isinstance(cost, int | float) and not isinstance(cost, bool)
+		costValue := omGet(part, "cost")
+		if _, isBool := costValue.(bool); !isBool {
+			if c, _, ok := pyNumber(costValue); ok {
+				p.costs = append(p.costs, c)
+			}
 		}
 		return changed
 	case "tool_use":
@@ -111,18 +117,15 @@ func (p *OpenCodeSessionProgress) Observe(event *pyfmt.OrderedMap) bool {
 	return false
 }
 
-// SpentUSD is the cost OpenCode reported per step so far (rounded to 6 places); ok is false before
-// the first step and while any step reported no cost.
+// SpentUSD is the sum of the costs OpenCode reported per step so far (rounded to 6 places); ok is
+// false only when no step reported a cost.
 func (p *OpenCodeSessionProgress) SpentUSD() (usd float64, ok bool) {
-	if len(p.steps) == 0 {
+	if len(p.costs) == 0 {
 		return 0, false
 	}
 	cost := 0.0
-	for _, step := range p.steps {
-		if step.cost == nil {
-			return 0, false
-		}
-		cost += *step.cost
+	for _, c := range p.costs {
+		cost += c
 	}
 	return math.Round(cost*1e6) / 1e6, true
 }
@@ -153,7 +156,7 @@ func (p *OpenCodeSessionProgress) ProgressToolCalls() int { return p.ToolCalls }
 // ProgressTool is the last tool called.
 func (p *OpenCodeSessionProgress) ProgressTool() string { return p.Tool }
 
-// ProgressSpentUSD is the cost OpenCode reported so far (unknown while a step reports none).
+// ProgressSpentUSD is the cost OpenCode reported so far (unknown only when no step reported one).
 func (p *OpenCodeSessionProgress) ProgressSpentUSD() (float64, bool) { return p.SpentUSD() }
 
 // openCodeStepUsage is one step's tokens as a Usage (python: _step_usage).

@@ -32,7 +32,9 @@ from lha.model.opencode import (
     OpenCodeTimeout,
     SessionProgress,
     base_args,
+    exported_usage,
     run_opencode,
+    session_cost,
 )
 from lha.model.pricing import ModelPrice
 from lha.model.retry import is_retryable
@@ -43,6 +45,13 @@ import json, os, sys, time, urllib.request
 args = sys.argv[1:]
 if args == ["--version"]:
     print("0.0.0-fake (OpenCode)")
+    sys.exit(0)
+if args[:2] == ["session", "export"]:
+    if os.environ.get("FAKE_OPENCODE_EXPORT_FAIL"):
+        sys.exit(2)
+    print(json.dumps({"info": {"cost": float(os.environ.get("FAKE_OPENCODE_EXPORT_COST", "0.03")),
+                               "tokens": {"input": 200, "output": 120, "reasoning": 30,
+                                          "cache": {"read": 500, "write": 40}}}}))
     sys.exit(0)
 prompt = sys.stdin.read()
 log = os.environ.get("FAKE_OPENCODE_LOG")
@@ -190,10 +199,15 @@ def test_session_progress_counts_each_turn_and_tool_once() -> None:
     assert (total.cache_read_input_tokens, total.cache_creation_input_tokens) == (50, 20)
     assert total.reported_cost_usd == pytest.approx(0.25)
 
-    # A step with no cost makes the whole session's spend unknown (never $0).
+    # A step that reports no cost does not erase the costs already seen.
     progress.observe(step_start("m2"))
     progress.observe(step_finish("m2", None))
-    assert progress.spent_usd is None
+    assert progress.spent_usd == pytest.approx(0.25)
+
+    # A session where no step reported a cost is unknown (charged its cap, never $0).
+    quiet = SessionProgress()
+    quiet.observe(step_finish("m3", None))
+    assert quiet.spent_usd is None
 
 
 # --- parsing the CLI output and errors ------------------------------------------------------
@@ -210,7 +224,55 @@ async def test_run_opencode_reads_text_usage_and_cost(fake_opencode: Path, tmp_p
     )
     assert result.text == '{"done": true, "summary": "ok"}'
     assert result.session_id == "sess-oc-1" and result.num_turns == 1
-    assert result.usage.reported_cost_usd == pytest.approx(0.01)
+    # The exact totals come from `session export`, not the (incomplete) streamed step sum.
+    assert result.usage.reported_cost_usd == pytest.approx(0.03)
+    assert (result.usage.input_tokens, result.usage.output_tokens) == (
+        200,
+        150,
+    )  # 120 + 30 reasoning
+
+
+@pytest.mark.asyncio
+async def test_run_opencode_falls_back_to_the_streamed_sum(
+    fake_opencode: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("FAKE_OPENCODE_MODE", "text")  # a step cost of 0.01
+    monkeypatch.setenv("FAKE_OPENCODE_EXPORT_FAIL", "1")  # `session export` fails
+    result = await run_opencode(
+        base_args(model="", agent="a", standalone=False),
+        prompt="hi",
+        binary=str(fake_opencode),
+        cwd=str(tmp_path),
+        timeout_s=10,
+        provider="p",
+        fallback_model="",
+    )
+    assert result.usage.reported_cost_usd == pytest.approx(0.01)  # the step cost, not the cap
+
+
+@pytest.mark.asyncio
+async def test_session_cost_reads_the_exported_totals(fake_opencode: Path) -> None:
+    assert await session_cost(str(fake_opencode), "ses-x") == (
+        0.03,
+        {
+            "input": 200,
+            "output": 120,
+            "reasoning": 30,
+            "cache": {"read": 500, "write": 40},
+        },
+    )
+    assert await session_cost("/nonexistent/opencode", "ses-x") is None
+
+
+def test_exported_usage_counts_reasoning_as_output() -> None:
+    usage = exported_usage(
+        (0.5, {"input": 3, "output": 4, "reasoning": 5, "cache": {"read": 6, "write": 7}}),
+        provider="p",
+        fallback_model="m",
+    )
+    assert usage.reported_cost_usd == pytest.approx(0.5)
+    assert (usage.input_tokens, usage.output_tokens) == (3, 9)
+    assert (usage.cache_read_input_tokens, usage.cache_creation_input_tokens) == (6, 7)
 
 
 @pytest.mark.asyncio
@@ -303,8 +365,8 @@ async def test_model_runs_a_tool_less_turn_through_the_cli(
     )
     assert result.text == '{"done": true, "summary": "ok"}'
     assert result.session_id == "sess-oc-1"
-    assert result.usage.reported_cost_usd == pytest.approx(0.01)
-    assert model.estimate_cost_usd(result.usage) == pytest.approx(0.01)
+    assert result.usage.reported_cost_usd == pytest.approx(0.03)  # the exported session total
+    assert model.estimate_cost_usd(result.usage) == pytest.approx(0.03)
 
     (call,) = _calls(tmp_path)
     argv = call["argv"]
@@ -432,6 +494,7 @@ async def test_a_cycle_is_one_opencode_session_using_lha_tools(
     fake_opencode: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("FAKE_OPENCODE_MODE", "mcp")
+    monkeypatch.setenv("FAKE_OPENCODE_EXPORT_COST", "0.42")
     calls = [["write_file", {"path": "hello.txt", "content": "hi\n"}], ["verify", {}]]
     monkeypatch.setenv("FAKE_OPENCODE_CALLS", json.dumps(calls))
     ws = tmp_path / "ws"
@@ -448,7 +511,7 @@ async def test_a_cycle_is_one_opencode_session_using_lha_tools(
 
     assert summary.completed, summary.stopped_reason
     assert summary.cycles == 1
-    assert summary.total_usd == pytest.approx(0.21 * (len(calls) + 1))  # the cost OpenCode reported
+    assert summary.total_usd == pytest.approx(0.42)  # the session's exported cost
     (session,) = _calls(tmp_path)
     argv = session["argv"]
     assert isinstance(argv, list)

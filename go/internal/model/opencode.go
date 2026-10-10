@@ -36,11 +36,12 @@ import (
 //   - agent.OpenCodeEngine (LHA_LEAD_ENGINE=opencode): a whole lead cycle is one opencode run
 //     session with LHA's tools served over MCP (agent/mcpbridge).
 //
-// Cost: the ledger records the cost OpenCode reports for the session's steps
-// (Usage.ReportedCostUSD). Before a call runs, its worst case is LHA_OPENCODE_MAX_BUDGET_USD, or
-// what is left of the budget when that is less (CallBudgetUSD). OpenCode has no spend-cap flag, so
-// the engine kills a session that reaches its cap while streaming; whatever it left in the workdir
-// is still verified.
+// Cost: the ledger records the session's cost (Usage.ReportedCostUSD). The --format json stream
+// reports usage only for steps that end in a tool call, so the final assistant turn is missing; the
+// exact totals come from opencode session export (SessionCost), falling back to the streamed step
+// sum. Before a call runs, its worst case is LHA_OPENCODE_MAX_BUDGET_USD, or what is left of the
+// budget when that is less (CallBudgetUSD). OpenCode has no spend-cap flag, so the engine kills a
+// session that reaches its cap while streaming; whatever it left in the workdir is still verified.
 
 // OpenCodeDefaultModel is the --model value meaning "whatever OpenCode would pick" (no flag is
 // passed).
@@ -56,6 +57,10 @@ const openCodeModelAgentDefault = "lha-model"
 const openCodeStreamLineLimit = 64 << 20
 
 const openCodeStderrTail = 2000
+
+// openCodeSessionExportTimeoutS is the longest `opencode session export` may take when reading a
+// finished session's totals (python: _SESSION_EXPORT_TIMEOUT_S).
+const openCodeSessionExportTimeoutS = 30.0
 
 // openCodeTransientMarkers are transient failures worth another try (rate limit, overload,
 // server errors, timeouts).
@@ -256,14 +261,77 @@ func RunOpenCode(ctx context.Context, r OpenCodeRun) (OpenCodeResult, error) {
 		s := stream.progress.SessionID
 		sessionID = &s
 	}
+	// The stream omits the final assistant turn's usage, so read the session's exact totals.
+	usage := stream.progress.Usage(r.Provider, r.FallbackModel)
+	if stream.progress.SessionID != "" {
+		if cost, tokens, ok := SessionCost(ctx, r.Binary, stream.progress.SessionID, openCodeSessionExportTimeoutS); ok {
+			usage = exportedUsage(cost, tokens, r.Provider, r.FallbackModel)
+		}
+	}
 	return OpenCodeResult{
 		Text:       strings.Join(stream.texts, "\n"),
-		Usage:      stream.progress.Usage(r.Provider, r.FallbackModel),
+		Usage:      usage,
 		SessionID:  sessionID,
 		NumTurns:   stream.progress.Turns,
 		StopReason: stream.stopReason,
 		Raw:        stream.raw,
 	}, nil
+}
+
+// SessionCost reads the exact cost and token totals of a finished session from
+// `opencode session export` (python: session_cost). The --format json stream reports usage only on
+// the step_finish of a step that ended in a tool call, so a session's final assistant turn is
+// missing from the streamed sum; the export carries the session's totals. ok is false when the
+// export cannot be read (no such session, a non-zero exit, timed out, or no cost field).
+func SessionCost(ctx context.Context, binary, sessionID string, timeoutS float64) (cost float64, tokens *pyfmt.OrderedMap, ok bool) {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutS*float64(time.Second)))
+	defer cancel()
+	cmd := exec.CommandContext(ctx, binary, "session", "export", sessionID)
+	cmd.Env = OpenCodeChildEnv(nil)
+	cmd.WaitDelay = time.Second
+	out, err := cmd.Output()
+	if err != nil {
+		return 0, nil, false
+	}
+	decoded, err := pyfmt.DecodeOrdered(out)
+	if err != nil {
+		return 0, nil, false
+	}
+	data, ok := decoded.(*pyfmt.OrderedMap)
+	if !ok {
+		return 0, nil, false
+	}
+	info, ok := omGet(data, "info").(*pyfmt.OrderedMap)
+	if !ok {
+		return 0, nil, false
+	}
+	// python: isinstance(cost, int | float) and not isinstance(cost, bool)
+	costValue := omGet(info, "cost")
+	if _, isBool := costValue.(bool); isBool {
+		return 0, nil, false
+	}
+	c, _, numeric := pyNumber(costValue)
+	if !numeric {
+		return 0, nil, false
+	}
+	tokens, _ = omGet(info, "tokens").(*pyfmt.OrderedMap)
+	return c, tokens, true
+}
+
+// exportedUsage is an exported session's totals as one Usage (reasoning counts as billed output;
+// python: exported_usage).
+func exportedUsage(cost float64, tokens *pyfmt.OrderedMap, provider, fallbackModel string) contracts.Usage {
+	cache, _ := omGet(tokens, "cache").(*pyfmt.OrderedMap)
+	rounded := math.Round(cost*1e6) / 1e6
+	return contracts.Usage{
+		InputTokens:              pyInt(omGet(tokens, "input")),
+		OutputTokens:             pyInt(omGet(tokens, "output")) + pyInt(omGet(tokens, "reasoning")),
+		CacheReadInputTokens:     pyInt(omGet(cache, "read")),
+		CacheCreationInputTokens: pyInt(omGet(cache, "write")),
+		Model:                    fallbackModel,
+		Provider:                 provider,
+		ReportedCostUSD:          &rounded,
+	}
 }
 
 // openCodeStream is opencode run's stdout: it splits event lines as they arrive, follows the
