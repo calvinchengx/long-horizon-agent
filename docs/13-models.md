@@ -274,10 +274,12 @@ session.
 **Cost and budget.** Before a session runs, the governor authorizes it with
 `LHA_OPENCODE_MAX_BUDGET_USD` (default $5) as its worst case, or with what is left of the budget
 when that is less. OpenCode has no spend-cap flag, so LHA kills a session that reaches its cap
-while it streams the events; afterwards the ledger records the `cost` OpenCode reports per step. A
-session killed at its cap or its timeout (`LHA_OPENCODE_TIMEOUT_S`, default 3600 s) is still
-verified — whatever it left in the workdir counts — and is charged what it streamed, or its whole
-cap when its spend could not be seen.
+while it streams the events; afterwards the ledger records the session's exact cost from
+`opencode session export` (the `--format json` stream omits the final assistant turn's usage),
+falling back to the sum of the per-step costs it streamed. A session killed at its cap or its
+timeout (`LHA_OPENCODE_TIMEOUT_S`, default 3600 s) is still verified — whatever it left in the
+workdir counts — and is charged what it streamed, or its whole cap when its spend could not be
+seen.
 
 **Progress.** Every call streams (`--format json`), so the lead engine records a `session_progress`
 event as each turn begins and each tool is called.

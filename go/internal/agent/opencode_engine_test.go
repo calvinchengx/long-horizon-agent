@@ -111,6 +111,7 @@ func TestOpenCodeNativeModeDeniesHistoryPublishingAndTheWeb(t *testing.T) {
 func TestACycleIsOneOpenCodeSessionUsingLHATools(t *testing.T) {
 	bin, log := opencodetest.Install(t)
 	t.Setenv("FAKE_OPENCODE_MODE", "mcp")
+	t.Setenv("FAKE_OPENCODE_EXPORT_COST", "0.42")
 	setOpenCodeCalls(t, []any{"write_file", map[string]any{"path": "hello.txt", "content": "hi\n"}}, []any{"verify", map[string]any{}})
 	ws := filepath.Join(t.TempDir(), "ws")
 	if err := os.MkdirAll(ws, 0o755); err != nil {
@@ -121,7 +122,7 @@ func TestACycleIsOneOpenCodeSessionUsingLHATools(t *testing.T) {
 	if !summary.Completed || summary.Cycles != 1 {
 		t.Fatalf("%+v", summary)
 	}
-	if d := summary.TotalUSD - 0.21*3; d > 1e-9 || d < -1e-9 { // the cost OpenCode reported
+	if d := summary.TotalUSD - 0.42; d > 1e-9 || d < -1e-9 { // the session's exported cost
 		t.Fatalf("total %v", summary.TotalUSD)
 	}
 	calls := opencodetest.Calls(t, log)

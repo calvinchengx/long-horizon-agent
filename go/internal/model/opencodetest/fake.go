@@ -11,8 +11,9 @@
 //
 // Environment (the same as the Python fake): FAKE_OPENCODE_MODE (text | error | hang |
 // hang-unpriced | budget | mcp), FAKE_OPENCODE_LOG (append the run's {argv, stdin, cwd, config,
-// project_disabled, texts} per run), FAKE_OPENCODE_REPLY (text mode's final text) and
-// FAKE_OPENCODE_CALLS ([[name, arguments], ...]).
+// project_disabled, texts} per run), FAKE_OPENCODE_REPLY (text mode's final text),
+// FAKE_OPENCODE_CALLS ([[name, arguments], ...]), FAKE_OPENCODE_EXPORT_COST (the cost `session
+// export` reports, default 0.03) and FAKE_OPENCODE_EXPORT_FAIL (set => `session export` exits 2).
 package opencodetest
 
 import (
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -94,6 +96,22 @@ func tokens() map[string]any {
 func run(args []string) int {
 	if len(args) == 1 && args[0] == "--version" {
 		fmt.Println("0.0.0-fake (OpenCode)")
+		return 0
+	}
+	if len(args) >= 2 && args[0] == "session" && args[1] == "export" {
+		// `opencode session export` reports a finished session's totals; it never logs a call.
+		if os.Getenv("FAKE_OPENCODE_EXPORT_FAIL") != "" {
+			return 2
+		}
+		cost := 0.03
+		if raw := os.Getenv("FAKE_OPENCODE_EXPORT_COST"); raw != "" {
+			if f, err := strconv.ParseFloat(raw, 64); err == nil {
+				cost = f
+			}
+		}
+		emit(map[string]any{"info": map[string]any{"cost": cost, "tokens": map[string]any{
+			"input": 200, "output": 120, "reasoning": 30,
+			"cache": map[string]any{"read": 500, "write": 40}}}})
 		return 0
 	}
 	prompt, _ := io.ReadAll(os.Stdin)

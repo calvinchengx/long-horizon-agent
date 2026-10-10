@@ -302,7 +302,7 @@ from `LHA_MODEL_BACKEND`:
 | `openai_compat` | `OpenAICompatModel` against `LHA_OPENAI_BASE_URL` | Unknown unless `LHA_OPENAI_PRICE_*_PER_MTOK` are set |
 | `claude` | `ClaudeModel`, Messages API over HTTP | Built-in price table, overridable |
 | `claude_code` | `ClaudeCodeModel` (Go: `model.ClaudeCodeModel`), the `claude -p` CLI | The `total_cost_usd` Claude Code reports |
-| `opencode` | `OpenCodeModel` (Go: `model.OpenCodeModel`), the `opencode run` CLI | The `cost` OpenCode reports per step |
+| `opencode` | `OpenCodeModel` (Go: `model.OpenCodeModel`), the `opencode run` CLI | The session cost from `opencode session export` (falling back to the streamed per-step cost) |
 
 Cost is computed from the token usage in each provider response. Under the `claude` backend,
 `lha orchestrate` routes roles to model tiers (planner, lead and reviewer to Opus, implementers

@@ -73,11 +73,18 @@ func TestOpenCodeSessionProgressCountsEachTurnAndToolOnce(t *testing.T) {
 		t.Fatalf("%+v", total)
 	}
 
-	// A step with no cost makes the whole session's spend unknown (never $0).
+	// A step that reports no cost does not erase the costs already seen.
 	progress.Observe(stepStart("m2"))
 	progress.Observe(om(t, `{"type": "step_finish", "sessionID": "s-9", "part": {"messageID": "m2"}}`))
-	if _, ok := progress.SpentUSD(); ok {
-		t.Fatal("spend known though a step reported no cost")
+	if usd, ok := progress.SpentUSD(); !ok || usd != 0.25 {
+		t.Fatalf("spent %v %v", usd, ok)
+	}
+
+	// A session where no step reported a cost is unknown (charged its cap, never $0).
+	quiet := &OpenCodeSessionProgress{}
+	quiet.Observe(om(t, `{"type": "step_finish", "sessionID": "s-9", "part": {"messageID": "m3"}}`))
+	if _, ok := quiet.SpentUSD(); ok {
+		t.Fatal("spend known though no step reported a cost")
 	}
 }
 
@@ -93,8 +100,61 @@ func TestRunOpenCodeReadsTextUsageAndCost(t *testing.T) {
 	if result.Text != `{"done": true, "summary": "ok"}` || result.SessionID == nil || *result.SessionID != "sess-oc-1" || result.NumTurns != 1 {
 		t.Fatalf("%+v", result)
 	}
-	if result.Usage.ReportedCostUSD == nil || *result.Usage.ReportedCostUSD != 0.01 {
+	// The exact totals come from `session export`, not the (incomplete) streamed step sum.
+	if result.Usage.ReportedCostUSD == nil || *result.Usage.ReportedCostUSD != 0.03 {
 		t.Fatalf("%+v", result.Usage)
+	}
+	if result.Usage.InputTokens != 200 || result.Usage.OutputTokens != 150 { // 120 + 30 reasoning
+		t.Fatalf("%+v", result.Usage)
+	}
+}
+
+func TestRunOpenCodeFallsBackToTheStreamedSum(t *testing.T) {
+	bin, _ := opencodetest.Install(t)
+	t.Setenv("FAKE_OPENCODE_MODE", "text")     // a step cost of 0.01
+	t.Setenv("FAKE_OPENCODE_EXPORT_FAIL", "1") // `session export` fails
+	result, err := RunOpenCode(context.Background(), OpenCodeRun{
+		Args: OpenCodeBaseArgs("", "a", false), Prompt: "hi", Binary: bin,
+		Cwd: t.TempDir(), TimeoutS: 10, Provider: "p",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Usage.ReportedCostUSD == nil || *result.Usage.ReportedCostUSD != 0.01 { // the step cost, not the cap
+		t.Fatalf("%+v", result.Usage)
+	}
+}
+
+func TestSessionCostReadsTheExportedTotals(t *testing.T) {
+	bin, _ := opencodetest.Install(t)
+	cost, tokens, ok := SessionCost(context.Background(), bin, "ses-x", 30)
+	if !ok || cost != 0.03 || tokens == nil {
+		t.Fatalf("cost %v tokens %v ok %v", cost, tokens, ok)
+	}
+	if pyInt(omGet(tokens, "input")) != 200 || pyInt(omGet(tokens, "output")) != 120 ||
+		pyInt(omGet(tokens, "reasoning")) != 30 {
+		t.Fatalf("tokens %v", tokens)
+	}
+	cache, _ := omGet(tokens, "cache").(*pyfmt.OrderedMap)
+	if pyInt(omGet(cache, "read")) != 500 || pyInt(omGet(cache, "write")) != 40 {
+		t.Fatalf("cache %v", cache)
+	}
+	if _, _, ok := SessionCost(context.Background(), "/nonexistent/opencode", "ses-x", 30); ok {
+		t.Fatal("session export of a missing binary reported ok")
+	}
+}
+
+func TestExportedUsageCountsReasoningAsOutput(t *testing.T) {
+	tokens := om(t, `{"input": 3, "output": 4, "reasoning": 5, "cache": {"read": 6, "write": 7}}`)
+	usage := exportedUsage(0.5, tokens, "p", "m")
+	if usage.ReportedCostUSD == nil || *usage.ReportedCostUSD != 0.5 {
+		t.Fatalf("%+v", usage)
+	}
+	if usage.InputTokens != 3 || usage.OutputTokens != 9 {
+		t.Fatalf("%+v", usage)
+	}
+	if usage.CacheReadInputTokens != 6 || usage.CacheCreationInputTokens != 7 {
+		t.Fatalf("%+v", usage)
 	}
 }
 
@@ -170,10 +230,10 @@ func TestOpenCodeModelRunsAToolLessTurnThroughTheCLI(t *testing.T) {
 	if result.Text != `{"done": true, "summary": "ok"}` || result.SessionID == nil || *result.SessionID != "sess-oc-1" {
 		t.Fatalf("%+v", result)
 	}
-	if result.Usage.ReportedCostUSD == nil || *result.Usage.ReportedCostUSD != 0.01 {
+	if result.Usage.ReportedCostUSD == nil || *result.Usage.ReportedCostUSD != 0.03 {
 		t.Fatalf("%+v", result.Usage)
 	}
-	if cost, _ := m.EstimateCostUSD(result.Usage); cost != 0.01 {
+	if cost, _ := m.EstimateCostUSD(result.Usage); cost != 0.03 {
 		t.Fatalf("estimate %v", cost)
 	}
 

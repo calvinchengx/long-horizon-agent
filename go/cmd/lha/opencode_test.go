@@ -97,6 +97,8 @@ func TestE2EOpenCodeEngineMatchesPython(t *testing.T) {
 		return processEnv("LHA_SANDBOX=local", "LHA_ALLOW_UNSAFE_LOCAL=true", "LHA_LEAD_ENGINE=opencode",
 			"LHA_OPENCODE_BIN="+fake, "LHA_OPENCODE_MAX_BUDGET_USD=1.5", "LHA_OPENCODE_MODEL=sonnet",
 			opencodetest.EnvFake+"=1", "FAKE_OPENCODE_MODE=mcp", "FAKE_OPENCODE_CALLS="+string(calls),
+			// The session's exact totals, which override the incomplete streamed step sum.
+			"FAKE_OPENCODE_EXPORT_COST=1.47",
 			"FAKE_OPENCODE_LOG="+filepath.Join(dir, "opencode.log"))
 	}
 
