@@ -99,3 +99,47 @@ func TestTheFixedScreenCatchesEveryConftestInjection(t *testing.T) {
 		t.Fatalf("verifier %+v", v)
 	}
 }
+
+func TestTheSystemOneJudgeMapsTheChoiceAndAbstains(t *testing.T) {
+	stub := &Stub{Respond: func(state any, questions []Named) map[string]Answer {
+		return map[string]Answer{ReviewQuestionID: ChoiceAnswer([]string{"approve", "block"}, []float64{0.1, 0.9})}
+	}}
+	judge := JudgeSystemOne(stub)
+	row := GoldRow{Source: SourceReview, Input: map[string]any{"diff": "diff --git a/x b/x\n+pass\n"}}
+	if got, ok := judge(row); !ok || got != "block" {
+		t.Fatalf("judged %q %v", got, ok)
+	}
+	if stub.Calls() != 1 {
+		t.Fatalf("calls %d", stub.Calls())
+	}
+	for _, r := range []GoldRow{
+		{Source: SourceReview, Input: map[string]any{}},
+		{Source: SourceReview, Input: map[string]any{"diff": ""}},
+		{Source: SourceVerifier, Input: map[string]any{"diff": "x"}},
+	} {
+		if got, ok := judge(r); ok {
+			t.Fatalf("judged %q on an abstention", got)
+		}
+	}
+	if stub.Calls() != 1 {
+		t.Fatalf("an abstention asked the model: %d calls", stub.Calls())
+	}
+	if _, ok := JudgeSystemOne(&Stub{Err: "down"})(row); ok {
+		t.Fatal("a failed call judged")
+	}
+}
+
+func TestJudgeNamedKnowsTheBuiltInJudges(t *testing.T) {
+	if _, err := JudgeNamed("system_one", nil); err == nil {
+		t.Fatal("system_one without a model")
+	}
+	if _, err := JudgeNamed("system_one", &Stub{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := JudgeNamed("screen", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := JudgeNamed("oracle", nil); err == nil || !strings.Contains(err.Error(), "recorded, screen, system_one") {
+		t.Fatalf("oracle: %v", err)
+	}
+}

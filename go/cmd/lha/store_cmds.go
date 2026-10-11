@@ -526,12 +526,26 @@ func (c *cli) evalCmd(args []string) error {
 		return nil
 	case "run":
 		fs := c.newFlags("eval run", evalRunHelp)
-		judgeName := fs.String("judge", "recorded", "recorded (the label the mission recorded) or screen (the pre-review screen re-run on each review row's diff).")
+		judgeName := fs.String("judge", "recorded", "recorded (the label the mission recorded), screen (the pre-review screen re-run on each review row's diff), or system_one (a System One model asked the review question; needs LHA_SYSTEM_ONE_BACKEND).")
 		files, err := c.parseInterleaved(fs, args[1:], 1<<30)
 		if err != nil {
 			return err
 		}
-		judge, err := systemone.JudgeNamed(*judgeName)
+		var model systemone.Model
+		if *judgeName == "system_one" {
+			settings, err := config.Load()
+			if err != nil {
+				return err
+			}
+			if model, err = systemone.Build(settings, nil); err != nil {
+				return fail(2, "%s", err)
+			}
+			if model == nil {
+				return fail(2, "--judge system_one needs a System One backend; set LHA_SYSTEM_ONE_BACKEND=stub (offline) or systemone")
+			}
+			defer systemone.Close(model)
+		}
+		judge, err := systemone.JudgeNamed(*judgeName, model)
 		if err != nil {
 			return fail(2, "unknown --judge %s; expected %s", contracts.PyRepr(*judgeName), strings.Join(systemone.Judges, ", "))
 		}

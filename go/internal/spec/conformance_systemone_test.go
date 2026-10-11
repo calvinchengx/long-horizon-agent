@@ -99,6 +99,17 @@ func TestSystemOneWire(t *testing.T) {
 				State    json.RawMessage         `json:"state"`
 			} `json:"states"`
 		} `json:"triage"`
+		Review struct {
+			QuestionID   string          `json:"question_id"`
+			Question     json.RawMessage `json:"question"`
+			MaxDiffChars int             `json:"max_diff_chars"`
+			States       []struct {
+				Task     string          `json:"task"`
+				Diff     string          `json:"diff"`
+				MaxChars int             `json:"max_chars"`
+				State    json.RawMessage `json:"state"`
+			} `json:"states"`
+		} `json:"review"`
 		Rerank struct {
 			Requests []struct {
 				Query     string          `json:"query"`
@@ -198,6 +209,18 @@ func TestSystemOneWire(t *testing.T) {
 		state := systemone.TriageState(c.Item, c.Latest, c.Previous, c.MaxChars)
 		if got, want := orderedJSON(t, state), orderedJSON(t, ordered(t, c.State)); got != want {
 			t.Errorf("triage state %d:\n got  %s\n want %s", i, got, want)
+		}
+	}
+	if s.Review.QuestionID != systemone.ReviewQuestionID || s.Review.MaxDiffChars != systemone.MaxDiffChars {
+		t.Errorf("review constants differ: %q %d", s.Review.QuestionID, s.Review.MaxDiffChars)
+	}
+	if got, want := orderedJSON(t, systemone.ReviewQuestion().Body()), orderedJSON(t, ordered(t, s.Review.Question)); got != want {
+		t.Errorf("review question:\n got  %s\n want %s", got, want)
+	}
+	for i, c := range s.Review.States {
+		state := systemone.ReviewState(c.Task, c.Diff, c.MaxChars)
+		if got, want := orderedJSON(t, state), orderedJSON(t, ordered(t, c.State)); got != want {
+			t.Errorf("review state %d:\n got  %s\n want %s", i, got, want)
 		}
 	}
 

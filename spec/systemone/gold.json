@@ -218,5 +218,58 @@
     "report": "judge: screen\ngate: 2 rows, 0 judged (the judge abstains)\ntool_approval: 1 rows, 0 judged (the judge abstains)\nverifier: 3 rows, 0 judged (the judge abstains)\nreview: 5 rows, 4 judged, 3 agree (0.75); block: precision 1.00, recall 0.67 (tp 2, fp 0, fn 1, tn 1)\n  m1 c5 03: judged approve, gold block [empty-diff]\ntotal: 11 rows, 4 judged, 3 agree (0.75)\n"
    }
   ]
+ },
+ "system_one": {
+  "judge": "system_one",
+  "cards": [
+   {
+    "source": "gate",
+    "rows": 2,
+    "judged": 0,
+    "agree": 0,
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "tn": 0,
+    "disagreements": []
+   },
+   {
+    "source": "tool_approval",
+    "rows": 1,
+    "judged": 0,
+    "agree": 0,
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "tn": 0,
+    "disagreements": []
+   },
+   {
+    "source": "verifier",
+    "rows": 3,
+    "judged": 0,
+    "agree": 0,
+    "tp": 0,
+    "fp": 0,
+    "fn": 0,
+    "tn": 0,
+    "disagreements": []
+   },
+   {
+    "source": "review",
+    "rows": 5,
+    "judged": 3,
+    "agree": 1,
+    "tp": 0,
+    "fp": 0,
+    "fn": 2,
+    "tn": 1,
+    "disagreements": [
+     "  m1 c1 01: judged approve, gold block",
+     "  m1 c3 01: judged approve, gold block [dangling-tool-call]"
+    ]
+   }
+  ],
+  "report": "judge: system_one\ngate: 2 rows, 0 judged (the judge abstains)\ntool_approval: 1 rows, 0 judged (the judge abstains)\nverifier: 3 rows, 0 judged (the judge abstains)\nreview: 5 rows, 3 judged, 1 agree (0.33); block: precision n/a, recall 0.00 (tp 0, fp 0, fn 2, tn 1)\n  m1 c1 01: judged approve, gold block\n  m1 c3 01: judged approve, gold block [dangling-tool-call]\ntotal: 11 rows, 3 judged, 1 agree (0.33)\n"
  }
 }

@@ -796,7 +796,7 @@ def test_system_one_wire() -> None:
     from lha.contracts.system_one import ChoiceAnswer, SystemOneError
     from lha.memory.rerank import apply_relevance, system_one_rerank_request
     from lha.safety.egress import parse_url
-    from lha.systemone import triage
+    from lha.systemone import review, triage
     from lha.systemone.client import default_price_in_per_mtok, is_local_endpoint
     from lha.systemone.wire import (
         choice_confidence,
@@ -843,6 +843,12 @@ def test_system_one_wire() -> None:
             case["previous"],
             max_chars=case["max_chars"],
         )
+        assert state == case["state"]
+    assert spec["review"]["question_id"] == review.QUESTION_ID
+    assert spec["review"]["max_diff_chars"] == review.MAX_DIFF_CHARS
+    assert spec["review"]["question"] == question_body(review.QUESTION)
+    for case in spec["review"]["states"]:
+        state = review.review_state(case["task"], case["diff"], max_chars=case["max_chars"])
         assert state == case["state"]
 
     def hits(texts: list[str]) -> list[RetrievalHit]:
@@ -971,6 +977,31 @@ def test_system_one_gold() -> None:
             for c in cards
         ] == judged["cards"], judged["judge"]
         assert render_scorecards(cards, judged["judge"]) == judged["report"], judged["judge"]
+    # The model-backed judge, on the deterministic stub (python: export_gold).
+    import asyncio
+
+    from lha.systemone.gold import judge_system_one, score_async
+    from lha.systemone.stub import StubSystemOne
+
+    system_one = spec["system_one"]
+    cards = asyncio.run(score_async(rows, judge_system_one(StubSystemOne())))
+    assert [
+        {
+            "source": c.source,
+            "rows": c.rows,
+            "judged": c.judged,
+            "agree": c.agree,
+            "tp": c.tp,
+            "fp": c.fp,
+            "fn": c.fn,
+            "tn": c.tn,
+            "disagreements": c.disagreements,
+        }
+        for c in cards
+    ] == system_one["cards"], system_one["judge"]
+    assert render_scorecards(cards, system_one["judge"]) == system_one["report"], system_one[
+        "judge"
+    ]
 
 
 def test_mission_report() -> None:

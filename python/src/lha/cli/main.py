@@ -678,8 +678,9 @@ def run(
     files: list[str] = typer.Argument(..., help="Gold JSON Lines files."),
     judge: str = typer.Option(
         "recorded",
-        help="recorded (the label the mission recorded) or screen (the pre-review screen "
-        "re-run on each review row's diff).",
+        help="recorded (the label the mission recorded), screen (the pre-review screen re-run "
+        "on each review row's diff), or system_one (a System One model asked the review "
+        "question; needs LHA_SYSTEM_ONE_BACKEND).",
     ),
 ) -> None:
     """Score a judge against gold files: per source, agreement with the gold labels and the
@@ -689,7 +690,33 @@ def run(
     if judge not in JUDGES:
         _fail(f"unknown --judge {judge!r}; expected {', '.join(JUDGES)}")
     rows = _load_gold(files)
-    typer.echo(render_scorecards(score(rows, judge_named(judge)), judge), nl=False)
+    if judge == "system_one":
+        cards = _run(_score_system_one(rows))
+    else:
+        cards = score(rows, judge_named(judge))
+    typer.echo(render_scorecards(cards, judge), nl=False)
+
+
+async def _score_system_one(rows: list[Any]) -> list[Any]:
+    """Score the System One pre-review judge, building and closing the model from settings."""
+    from lha.systemone.build import build_system_one, close_system_one
+    from lha.systemone.gold import judge_system_one, score_async
+
+    settings = get_settings()
+    if settings.system_one_backend == "off":
+        _fail(
+            "--judge system_one needs a System One backend; set LHA_SYSTEM_ONE_BACKEND=stub "
+            "(offline) or systemone"
+        )
+    try:
+        model = build_system_one(settings, None)
+    except ValueError as exc:
+        _fail(str(exc))
+    assert model is not None  # backend is not off
+    try:
+        return await score_async(rows, judge_system_one(model))
+    finally:
+        await close_system_one(model)
 
 
 @app.command(name="mission-report")

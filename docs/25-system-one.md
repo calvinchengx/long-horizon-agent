@@ -137,11 +137,12 @@ failed rerank is logged as `memory_rerank_failed`.
 
 ## Go
 
-The Go implementation has the same settings, client, triage and reranker, checked against the
-same cases (`spec/systemone/wire.json`): request bodies (including option order, which can change
-a model's answer), strict answer parsing, the confidence formulas, the triage question, state and
-action table, reranking, and endpoint prices. In Go, `LHA_MEMORY_RERANK=system_one` is the one
-reranker that actually reranks (Go has no cross-encoder).
+The Go implementation has the same settings, client, triage, reranker and pre-review question,
+checked against the same cases (`spec/systemone/wire.json`): request bodies (including option
+order, which can change a model's answer), strict answer parsing, the confidence formulas, the
+triage question, state and action table, the pre-review question and state, reranking, and
+endpoint prices. In Go, `LHA_MEMORY_RERANK=system_one` is the one reranker that actually reranks
+(Go has no cross-encoder).
 
 ## Measured
 
@@ -199,14 +200,17 @@ scoring counts its precision and recall. `lha eval check FILES` refuses a set wi
 outside the vocabulary, a `gold` without `label` and `by`, or the same judgment twice;
 `lha eval run FILES --judge NAME` scores a judge and prints, per source, how many rows it
 judged, how many agree with gold, precision and recall of the refusing label, and every
-disagreement with its tags and note ([17-cli.md](17-cli.md#lha-eval)). Two judges are built in
-and need no model:
+disagreement with its tags and note ([17-cli.md](17-cli.md#lha-eval)). Three judges are built in:
 
 - `recorded`: the label the mission recorded, so the scorecard says how often LHA's own verifier,
   reviewer and gates were right;
 - `screen`: the deterministic pre-review screen re-run on each review row's diff
   ([07-verification.md](07-verification.md#pre-review-screen)); it abstains from rows that
-  carry no diff and from every other source.
+  carry no diff and from every other source;
+- `system_one`: a System One model asked the pre-review question (`lha.systemone.review`) on
+  each review row's diff, so a model-backed screen can be scored before any threshold is wired
+  into a run. It needs a backend (`LHA_SYSTEM_ONE_BACKEND`), and abstains off-review, on a row
+  without a diff and when the call fails, exactly as the deterministic screen does.
 
 Both implementations parse, check, score and render the same bytes
 ([`spec/systemone/gold.json`](../spec/systemone/gold.json)), and both test suites keep the
@@ -226,7 +230,8 @@ So the verifier's misses are the gates closed since ([07-verification.md](07-ver
 the reviewer's misses are the defect fixed since (the final-turn message), and the screen's
 recall on this set is the ceiling a diff-only screen has: it never blocks wrongly and it cannot
 see what is not in the diff. A model-backed judge (a System One model asked the review question,
-or a fine-tuned Kev) slots in as a third judge; the rows carry everything it would be shown.
+or a fine-tuned Kev) is the third judge, `--judge system_one`; the rows carry everything it would
+be shown, so its score on this set is measured the same way.
 
 ## Not built yet
 
@@ -235,7 +240,9 @@ LHA missions first:
 
 - a model-backed pre-review screen: the deterministic one is built
   ([07-verification.md](07-verification.md#pre-review-screen)) and records what it found next to
-  each review verdict, which is the label set a model-backed screen would be fitted on;
+  each review verdict, which is the label set a model-backed screen would be fitted on, and
+  `lha eval --judge system_one` scores one offline; wiring it into a run still waits on a
+  threshold measured here;
 - screening `fetch_url` and `web_search` results for instructions aimed at the agent (defence in
   depth; the Rule of Two stays the boundary);
 - choosing the implementer's model tier by the item's difficulty;
@@ -243,8 +250,9 @@ LHA missions first:
   output.
 
 The labels for fitting those thresholds already exist and [`lha labels export`](#labels) writes
-them; the [gold sets](#gold-evaluation-sets) and `lha eval` score any such judge offline, and a
-model-backed judge is the next one to add. See [the roadmap](23-roadmap.md).
+them; the [gold sets](#gold-evaluation-sets) and `lha eval` score any such judge offline, and the
+model-backed judge (`--judge system_one`) is built. The four uses above still wait on thresholds
+measured on real missions before they act in a run. See [the roadmap](23-roadmap.md).
 
 ## Sources
 

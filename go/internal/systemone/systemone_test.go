@@ -186,6 +186,33 @@ func TestTriageStateIsRedactedAndBounded(t *testing.T) {
 	}
 }
 
+func TestReviewQuestionIsAChoiceInOptionOrder(t *testing.T) {
+	if ReviewQuestionID != "soundness" || MaxDiffChars != DiffCap {
+		t.Fatalf("%q %d", ReviewQuestionID, MaxDiffChars)
+	}
+	q := ReviewQuestion()
+	if q.Type != "choice" || strings.Join(q.options(), ",") != "approve,block" {
+		t.Fatalf("%+v", q)
+	}
+	if instructions, _ := q.Instructions.(string); !strings.Contains(instructions, "blocking defect") {
+		t.Fatalf("instructions: %v", q.Instructions)
+	}
+}
+
+func TestReviewStateIsRedactedAndTakesTheDiffTail(t *testing.T) {
+	task := "token ghp_" + strings.Repeat("c", 36)
+	diff := strings.Repeat("x", 5000) + " token sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAA end"
+	state := ReviewState(task, diff, 100)
+	taskText, _ := state.String("task")
+	diffText, _ := state.String("diff")
+	if strings.Contains(taskText, "ghp_") {
+		t.Fatalf("task: %q", taskText)
+	}
+	if len([]rune(diffText)) > 103 || strings.Contains(diffText, "sk-ant-api03") || !strings.HasSuffix(diffText, "end") {
+		t.Fatalf("diff: %q", diffText)
+	}
+}
+
 func TestBuildStallTriageOnlyWhenConfigured(t *testing.T) {
 	if BuildStallTriage(settings(t), nil) != nil || BuildStallTriage(settings(t, "LHA_SYSTEM_ONE_TRIAGE=false"), &Stub{}) != nil {
 		t.Fatal("triage without a model or with triage off")
