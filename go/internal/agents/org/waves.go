@@ -266,7 +266,7 @@ func ImplementInWorktree(ctx context.Context, run *ImplementerRun, o ImplementOp
 		buffer := &tools.DecisionBuffer{}
 		// The Lead's tools and human gate, behind the implementer's ownership guard; the lease
 		// tool sits outside the guard (asking is always allowed, writing only after a grant).
-		lead, err := LeadDispatcher(settings, o.Gate, o.AllowEgress)
+		lead, err := LeadDispatcher(settings, o.Gate, o.AllowEgress, nil)
 		if err != nil {
 			return err
 		}

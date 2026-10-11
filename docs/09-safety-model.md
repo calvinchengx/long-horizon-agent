@@ -115,7 +115,10 @@ and never raises into the agent loop. Checks run in this order:
    classified. A gated command is sent to the configured `HITLGate` with its tool, arguments,
    reason and fingerprint. With no gate configured it is denied. Every answer (approve, reject,
    queued, gate error, no gate) is kept as a `tool_approval` event and committed with the cycle's
-   checkpoint.
+   checkpoint. When `LHA_SYSTEM_ONE_COMMANDS` is on, a `run_command` the classifier ALLOWED is
+   optionally sent to a System One second opinion ([section 5](#5-rule-of-two)); a confident
+   `dangerous` becomes the gate reason, so the call is gated exactly as an irreversible command is.
+   It can only add gating: a command the classifier already gates is not asked about.
 
 The default toolset (`default_local_tools()`) is `read_file`, `write_file` (mutating),
 `edit_file` (mutating: replaces one exact snippet, refused unless it matches exactly once),
@@ -395,8 +398,15 @@ activities raise a non-retryable `ERROR_CONFIG`. A human gate (including the dur
 share context (research briefs reach the Lead).
 
 **System One decision models.** A System One endpoint ([25](25-system-one.md)) is called by the
-harness, not by the agent: it gets no tool, and its answers can only split or block an item early
-or reorder recalled memory, never allow a command or answer a gate. A remote endpoint must be
+harness, not by the agent: it gets no tool, and its answers can only make LHA more cautious —
+split or block an item early, add a pre-review finding, add a gate to a command the classifier
+allowed, or reorder recalled memory — never allow a command or answer a gate. With
+`LHA_SYSTEM_ONE_COMMANDS` (off by default), after the classifier ALLOWS a `run_command` the model
+is asked whether the command is dangerous; a confident `dangerous` is used as the gate reason, so
+the call goes to the human gate exactly as an irreversible command is (denied when there is no
+gate). It can only add gating: it never allows a command the classifier denied and never changes
+the classifier, and a command the classifier already gates is not asked about. Only the command
+argv is sent (redacted), never tool output. A remote endpoint must be
 https, is re-resolved and checked for public addresses on every request, is dialled only at the
 vetted addresses, and receives its API key only for its own host. What it is sent is redacted
 first. It receives what the lead's model provider already receives, so it adds no Rule of Two

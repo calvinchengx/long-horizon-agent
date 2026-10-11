@@ -7,7 +7,7 @@ from lha.contracts.system_one import SystemOneModel
 from lha.governor.metering import CostMeter
 from lha.safety.egress import EgressDenied, parse_url
 from lha.systemone.client import SystemOneClient, default_price_in_per_mtok, is_local_endpoint
-from lha.systemone.screen import ReviewScreen
+from lha.systemone.screen import CommandSecondOpinion, ReviewScreen
 from lha.systemone.stub import StubSystemOne
 from lha.systemone.triage import StallTriage
 
@@ -78,6 +78,19 @@ def build_review_screen(settings: Settings, model: SystemOneModel | None) -> Rev
     if model is None or not settings.system_one_review:
         return None
     return ReviewScreen(model, threshold=settings.system_one_review_threshold)
+
+
+def build_command_second_opinion(
+    settings: Settings, model: SystemOneModel | None
+) -> CommandSecondOpinion | None:
+    """The command second opinion over ``model`` when it is configured and commands are on.
+
+    Off by default: it needs a System One backend (like triage), and its threshold is unmeasured.
+    It can only add gating to a command the classifier already allowed.
+    """
+    if model is None or not settings.system_one_commands:
+        return None
+    return CommandSecondOpinion(model, threshold=settings.system_one_commands_threshold)
 
 
 async def close_system_one(model: SystemOneModel | None) -> None:

@@ -66,6 +66,10 @@ type ToolboxRequest struct {
 	// Gate, when set, answers irreversible commands instead (a durable cycle's
 	// DeferredApprovalGate: it queues them for a human and allows approved ones once).
 	Gate contracts.HITLGate
+	// SystemOne, when set, lets the dispatcher add the command second opinion
+	// (LHA_SYSTEM_ONE_COMMANDS, off by default): a confident "dangerous" about an allowed
+	// run_command sends it to Gate (or is denied when Gate is nil). It can only add gating.
+	SystemOne systemone.Model
 }
 
 // ToolboxOpener opens the run's Toolbox. It must refuse an unsafe local sandbox (without
@@ -291,15 +295,22 @@ func runMissionLocal(ctx context.Context, o RunOptions) (MissionSummary, error) 
 		checks = verify.DefaultPythonChecks()
 	}
 	anchor := state.NewGitMissionAnchor(o.Workdir)
+	// The System One model is built here (off by default): the toolbox needs it for the command
+	// second opinion (LHA_SYSTEM_ONE_COMMANDS), and the cycle uses it for triage and memory.
+	systemOne, err := systemone.Build(settings, meter)
+	if err != nil {
+		return MissionSummary{}, err
+	}
+	defer func() { _ = systemone.Close(systemOne) }()
 	toolbox, err := o.OpenToolbox(ctx, ToolboxRequest{
 		Settings: settings, Workdir: o.Workdir, Anchor: anchor,
-		AllowEgress: o.AllowEgress, ApproveInteractive: o.ApproveInteractive,
+		AllowEgress: o.AllowEgress, ApproveInteractive: o.ApproveInteractive, SystemOne: systemOne,
 	})
 	if err != nil {
 		return MissionSummary{}, err
 	}
 	missionID := NewID("mission")
-	summary, runErr := runCycles(ctx, o, settings, meter, loopDetector, checks, anchor, toolbox, recorder, missionID)
+	summary, runErr := runCycles(ctx, o, settings, meter, loopDetector, checks, anchor, toolbox, recorder, missionID, systemOne)
 	closeErr := toolbox.Close(context.WithoutCancel(ctx))
 	if runErr != nil {
 		return MissionSummary{}, runErr
@@ -319,7 +330,7 @@ type GateStoreBinder interface {
 // errorStop is python's f"error: {type(exc).__name__}" stop reason for a run that raised.
 func errorStop(err error) string { return "error: " + pyfmt.ExcTypeName(err) }
 
-func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, meter *governor.CostMeter, detector *governor.LoopDetector, checks []contracts.Check, anchor *state.GitMissionAnchor, toolbox Toolbox, recorder *obs.TraceRecorder, missionID string) (_ MissionSummary, runErr error) {
+func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, meter *governor.CostMeter, detector *governor.LoopDetector, checks []contracts.Check, anchor *state.GitMissionAnchor, toolbox Toolbox, recorder *obs.TraceRecorder, missionID string, systemOne systemone.Model) (_ MissionSummary, runErr error) {
 	lead := o.Model
 	if lead == nil {
 		built, err := model.BuildProvider(settings, "", nil)
@@ -332,10 +343,6 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 	}
 	// Persistence + memory: mission row, persistent cost ledger (incl. a Planner call made before
 	// the mission id existed), tiered memory for the lead.
-	systemOne, err := systemone.Build(settings, meter)
-	if err != nil {
-		return MissionSummary{}, err
-	}
 	svc, err := services.Open(ctx, settings, services.Request{
 		MissionID: missionID, Workdir: o.Workdir, Meter: meter, Title: o.Title, Description: o.Description,
 		Model: meter.Wrap(lead, "librarian"), Recorder: recorder, SystemOne: systemOne,

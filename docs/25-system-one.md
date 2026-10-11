@@ -7,13 +7,14 @@ rate on ordered levels (`score`). It returns a probability for every possible an
 hosted one. **Kev** is an Apache-2.0 open-weights family that serves the same
 `POST /v1/systemone` API, so LHA talks to both with one client.
 
-LHA uses these answers for exactly three things, and only in ways that make it more cautious or
+LHA uses these answers for exactly four things, and only in ways that make it more cautious or
 cheaper:
 
 | Use | What is asked | What a confident answer changes |
 |---|---|---|
 | **Stall triage** | after an item fails twice in a row: *why do the attempts fail?* (a fixable defect, too much scope, or the environment) | `scope`: the item is split now, not after `max_consecutive_failures`. `environment`: the item is blocked now, for a human |
 | **Pre-review screen** (`LHA_SYSTEM_ONE_REVIEW`) | on a verified diff: *does it contain a blocking defect, or is it sound?* | `block`: one more finding, so the diff gets the full review |
+| **Command second opinion** (`LHA_SYSTEM_ONE_COMMANDS`) | on a `run_command` the classifier allowed: *is it routine or dangerous?* | `dangerous`: the call is gated exactly as an irreversible command is — the human gate, or denied when there is none |
 | **Memory reranking** (`LHA_MEMORY_RERANK=system_one`) | per recalled passage: *does it help with this task?* | recalled memory is reordered, and passages below `LHA_SYSTEM_ONE_RERANK_MIN` dropped |
 
 A System One answer never allows a command, never answers a human gate and never marks an item
@@ -24,7 +25,9 @@ authority-widening outcome, and confidence 1.00 under a zero threshold — and b
 implementations must show that triage still only continues, splits or blocks, and that
 reranking only reorders and drops passages. The model-backed pre-review screen is not part of
 that sweep yet, but its answer can only ever add one finding — never an approval — and a failed
-call changes nothing. When the
+call changes nothing. The command second opinion is not part of the sweep either, but its answer
+can only ever add gating — never allow a command the classifier denied — and a failed call changes
+nothing. When the
 model is down, slow, over budget or returns a malformed answer, LHA behaves exactly as it does
 with System One off.
 
@@ -95,6 +98,8 @@ export LHA_MEMORY_RERANK=system_one
 | `LHA_SYSTEM_ONE_TRIAGE_MIN_FAILURES` | `2` | failures in a row before triage is asked |
 | `LHA_SYSTEM_ONE_REVIEW` | `false` | the model-backed pre-review screen, when a backend is configured |
 | `LHA_SYSTEM_ONE_REVIEW_THRESHOLD` | `0.9` | the confidence a `block` needs before it adds a finding |
+| `LHA_SYSTEM_ONE_COMMANDS` | `false` | the command second opinion, when a backend is configured |
+| `LHA_SYSTEM_ONE_COMMANDS_THRESHOLD` | `0.9` | the confidence a `dangerous` needs before it gates a command |
 | `LHA_SYSTEM_ONE_RERANK_MIN` | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages whose relevance is below this |
 
 A configuration that cannot be used safely stops the run before it starts. That covers a
@@ -145,13 +150,21 @@ committed alongside its `review_screen` event (so the anchor carries both). A co
 adds one finding, `system_one: block (confidence 0.95)`, in front of the item's acceptance
 criteria; anything else, or a failed call, leaves the deterministic findings alone.
 
+The command second opinion records the same event shape with `use: "command_second_opinion"` and
+`action: "gate"` or `"continue"`, committed through the dispatcher's drained events (no
+`item_id`). A confident `dangerous` becomes the call's gate reason
+(`the command looks dangerous (system one, confidence 0.94)`); anything else, or a failed call,
+leaves the call exactly as the classifier left it.
+
 ## Go
 
-The Go implementation has the same settings, client, triage, pre-review screen, reranker and
-pre-review question, checked against the same cases (`spec/systemone/wire.json`): request bodies
+The Go implementation has the same settings, client, triage, pre-review screen, command second
+opinion, reranker and questions, checked against the same cases (`spec/systemone/wire.json`):
+request bodies
 (including option order, which can change a model's answer), strict answer parsing, the confidence
 formulas, the triage question, state and action table, the pre-review question, state and screen,
-reranking, and endpoint prices. In Go, `LHA_MEMORY_RERANK=system_one` is the one reranker that
+the command question, state and second opinion, reranking, and endpoint prices. In Go,
+`LHA_MEMORY_RERANK=system_one` is the one reranker that
 actually reranks (Go has no cross-encoder).
 
 ## Measured
@@ -261,6 +274,24 @@ Its threshold is unmeasured. The `--judge system_one` scorecard
 everything the screen is shown, so a threshold can be fitted before it is trusted. Until then it
 stays off, and its answer only ever adds a review.
 
+## Command second opinion
+
+The command second opinion is built and **off by default**: with a System One backend configured,
+`LHA_SYSTEM_ONE_COMMANDS=true` asks the command question
+([`lha.systemone.commands`](../python/src/lha/systemone/commands.py)) about a `run_command` the
+deterministic classifier **allowed** and, on a confident `dangerous`
+(`LHA_SYSTEM_ONE_COMMANDS_THRESHOLD`, default `0.9`), sends the call to the human gate exactly as
+an irreversible command is — or denies it when there is no gate. Only the command argv is sent
+(redacted), never tool output. It can only make LHA more cautious: it never allows a command the
+classifier denied and never changes the classifier; a command the classifier already gates is not
+even asked about. Every call is committed as a `system_one` event
+(`use: "command_second_opinion"`) through the dispatcher's drained events, with `action: "gate"` or
+`"continue"`.
+
+Its threshold is unmeasured. The `system_one` events record the answer, its confidence and the
+command it judged, so a threshold can be fitted on real missions before it is trusted. Until then
+it stays off, and its answer only ever adds a gate.
+
 ## Not built yet
 
 These uses were considered and left for later, because each needs thresholds measured on real
@@ -268,13 +299,11 @@ LHA missions first:
 
 - screening `fetch_url` and `web_search` results for instructions aimed at the agent (defence in
   depth; the Rule of Two stays the boundary);
-- choosing the implementer's model tier by the item's difficulty;
-- a second opinion on commands the classifier allows, sending only the command, never tool
-  output.
+- choosing the implementer's model tier by the item's difficulty.
 
 The labels for fitting those thresholds already exist and [`lha labels export`](#labels) writes
 them; the [gold sets](#gold-evaluation-sets) and `lha eval` score any such judge offline, and the
-model-backed judge (`--judge system_one`) is built. The three uses above still wait on thresholds
+model-backed judge (`--judge system_one`) is built. The two uses above still wait on thresholds
 measured on real missions before they act in a run. See [the roadmap](23-roadmap.md).
 
 ## Sources

@@ -81,6 +81,7 @@ var openToolbox agent.ToolboxOpener = func(ctx context.Context, req agent.Toolbo
 		AllowMutating: true,
 		DisableEgress: req.AllowEgress != nil && !*req.AllowEgress,
 		Gate:          gate,
+		SystemOne:     req.SystemOne,
 	})
 	if err != nil {
 		return nil, err

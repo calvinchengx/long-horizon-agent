@@ -738,7 +738,6 @@
    "kind": "system_one",
    "payload": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -748,7 +747,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "ts": "2026-10-04T00:00:33.000000+00:00"
   },

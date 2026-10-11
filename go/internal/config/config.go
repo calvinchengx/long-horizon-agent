@@ -208,6 +208,8 @@ type Settings struct {
 	SystemOneTriageMinFailures int      `env:"system_one_triage_min_failures" default:"2" ge:"1"`
 	SystemOneReview            bool     `env:"system_one_review" default:"false"`
 	SystemOneReviewThreshold   float64  `env:"system_one_review_threshold" default:"0.9" ge:"0" le:"1"`
+	SystemOneCommands          bool     `env:"system_one_commands" default:"false"`
+	SystemOneCommandsThreshold float64  `env:"system_one_commands_threshold" default:"0.9" ge:"0" le:"1"`
 	SystemOneRerankMin         float64  `env:"system_one_rerank_min" default:"0.0" ge:"0" le:"1"`
 
 	// --- Model resilience

@@ -963,7 +963,7 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 	}
 	closeModel := func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
 	noEgress := false
-	tools, err := org.RunDispatcher(settings, false, nil, &noEgress)
+	tools, err := org.RunDispatcher(settings, false, nil, &noEgress, nil)
 	if err != nil {
 		closeModel()
 		return CycleResult{}, configError(fmt.Sprintf("cannot assemble the reviewer: %v", err), err)
@@ -1099,7 +1099,7 @@ func (a *Activities) runSubAgent(ctx context.Context, inp SubAgentInput) (SubAge
 		off := false
 		egress = &off
 	}
-	dispatcher, err := org.RunDispatcher(settings, role.AllowMutating, nil, egress)
+	dispatcher, err := org.RunDispatcher(settings, role.AllowMutating, nil, egress, nil)
 	if err != nil { // RuleOfTwoViolation / WebConfigError: fail closed
 		return SubAgentOutput{}, configError(fmt.Sprintf("cannot assemble the sub-agent's tools: %v", err), err)
 	}

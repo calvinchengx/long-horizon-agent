@@ -298,9 +298,6 @@
     "use": {
      "type": "string"
     },
-    "item_id": {
-     "type": "string"
-    },
     "model": {
      "type": "string"
     },
@@ -324,10 +321,14 @@
      "enum": [
       "continue",
       "split",
-      "block"
+      "block",
+      "gate"
      ]
     },
     "error": {
+     "type": "string"
+    },
+    "item_id": {
      "type": "string"
     }
    },
@@ -336,7 +337,6 @@
     "answer",
     "confidence",
     "error",
-    "item_id",
     "model",
     "probabilities",
     "threshold",
@@ -1873,7 +1873,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -1883,7 +1882,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": true
   },
@@ -1894,7 +1894,6 @@
     "answer": "s",
     "confidence": 0.5,
     "error": "s",
-    "item_id": "s",
     "model": "s",
     "probabilities": {
      "defect": 0.9,
@@ -1909,7 +1908,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -1918,7 +1916,8 @@
      "scope": 0.1
     },
     "threshold": 0.5,
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -1926,7 +1925,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -1937,6 +1935,7 @@
     "threshold": 0.5,
     "action": "continue",
     "error": "s",
+    "item_id": "s",
     "unexpected": 1
    },
    "valid": false
@@ -1945,7 +1944,6 @@
    "kind": "system_one",
    "data": {
     "use": 7,
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -1955,7 +1953,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -1963,25 +1962,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": 7,
-    "model": "s",
-    "answer": "s",
-    "confidence": 0.5,
-    "probabilities": {
-     "defect": 0.9,
-     "scope": 0.1
-    },
-    "threshold": 0.5,
-    "action": "continue",
-    "error": "s"
-   },
-   "valid": false
-  },
-  {
-   "kind": "system_one",
-   "data": {
-    "use": "s",
-    "item_id": "s",
     "model": 7,
     "answer": "s",
     "confidence": 0.5,
@@ -1991,7 +1971,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -1999,7 +1980,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": 7,
     "confidence": 0.5,
@@ -2009,7 +1989,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -2017,7 +1998,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": "s",
@@ -2027,7 +2007,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -2035,14 +2016,14 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
     "probabilities": "s",
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -2050,7 +2031,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -2060,7 +2040,8 @@
     },
     "threshold": "s",
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -2068,7 +2049,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -2078,7 +2058,8 @@
     },
     "threshold": 0.5,
     "action": 7,
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -2086,7 +2067,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -2096,7 +2076,8 @@
     },
     "threshold": 0.5,
     "action": "not-continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },
@@ -2104,7 +2085,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -2114,7 +2094,26 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": 7
+    "error": 7,
+    "item_id": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "system_one",
+   "data": {
+    "use": "s",
+    "model": "s",
+    "answer": "s",
+    "confidence": 0.5,
+    "probabilities": {
+     "defect": 0.9,
+     "scope": 0.1
+    },
+    "threshold": 0.5,
+    "action": "continue",
+    "error": "s",
+    "item_id": 7
    },
    "valid": false
   },
@@ -3691,14 +3690,14 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
     "probabilities": {},
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": true
   },
@@ -3706,7 +3705,6 @@
    "kind": "system_one",
    "data": {
     "use": "s",
-    "item_id": "s",
     "model": "s",
     "answer": "s",
     "confidence": 0.5,
@@ -3715,7 +3713,8 @@
     },
     "threshold": 0.5,
     "action": "continue",
-    "error": "s"
+    "error": "s",
+    "item_id": "s"
    },
    "valid": false
   },

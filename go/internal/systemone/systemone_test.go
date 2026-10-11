@@ -314,6 +314,86 @@ func TestBuildReviewScreenOnlyWhenEnabledAndConfigured(t *testing.T) {
 	}
 }
 
+func commandStub(choice string, confidence float64) *Stub {
+	return &Stub{Respond: func(state any, questions []Named) map[string]Answer {
+		return map[string]Answer{CommandQuestionID: {
+			Type: "choice", Choice: choice, Confidence: confidence,
+			Probabilities: contracts.NewOrderedMap(choice, confidence),
+		}}
+	}}
+}
+
+func TestCommandQuestionIsAChoiceInOptionOrder(t *testing.T) {
+	if CommandQuestionID != "danger" {
+		t.Fatalf("%q", CommandQuestionID)
+	}
+	q := CommandQuestion()
+	if q.Type != "choice" || strings.Join(q.options(), ",") != "routine,dangerous" {
+		t.Fatalf("%+v", q)
+	}
+	if instructions, _ := q.Instructions.(string); !strings.Contains(instructions, "command") {
+		t.Fatalf("instructions: %v", q.Instructions)
+	}
+}
+
+func TestCommandStateIsTheRedactedArgvJoined(t *testing.T) {
+	state := CommandState([]string{"echo", "token", "sk-ant-api03-" + strings.Repeat("A", 28)})
+	command, _ := state.String("command")
+	if !strings.HasPrefix(command, "echo token ") || strings.Contains(command, "sk-ant-api03") {
+		t.Fatalf("command: %q", command)
+	}
+}
+
+func TestAConfidentDangerousGivesTheReasonAndPayload(t *testing.T) {
+	opinion := NewCommandSecondOpinion(commandStub("dangerous", 0.94))
+	reason, payload := opinion.Reason(context.Background(), []string{"ls"})
+	if reason != "the command looks dangerous (system one, confidence 0.94)" {
+		t.Fatalf("reason: %q", reason)
+	}
+	if payload.Value("use") != "command_second_opinion" || payload.Value("model") != "stub-1" ||
+		payload.Value("answer") != "dangerous" || payload.Value("confidence") != 0.94 ||
+		payload.Value("threshold") != 0.9 || payload.Value("action") != "gate" || payload.Value("error") != "" {
+		t.Fatalf("payload: %v", payload.Plain())
+	}
+	probs, _ := payload.Value("probabilities").(*contracts.OrderedMap)
+	if probs == nil || probs.Value("dangerous") != 0.94 {
+		t.Fatalf("probabilities: %v", probs)
+	}
+}
+
+func TestARoutineOrLowConfidenceGivesNoReason(t *testing.T) {
+	for _, c := range []struct {
+		choice     string
+		confidence float64
+	}{{"routine", 0.99}, {"dangerous", 0.5}} {
+		opinion := NewCommandSecondOpinion(commandStub(c.choice, c.confidence))
+		if reason, payload := opinion.Reason(context.Background(), []string{"ls"}); reason != "" || payload.Value("action") != "continue" {
+			t.Fatalf("%s %v: %q %v", c.choice, c.confidence, reason, payload.Plain())
+		}
+	}
+}
+
+func TestAFailedCommandCallGivesNoReasonAndRecordsTheError(t *testing.T) {
+	opinion := NewCommandSecondOpinion(&Stub{Err: "system one call failed: timeout"})
+	reason, payload := opinion.Reason(context.Background(), []string{"ls"})
+	if reason != "" || payload.Value("action") != "continue" ||
+		!strings.Contains(payload.Value("error").(string), "timeout") {
+		t.Fatalf("%q %v", reason, payload.Plain())
+	}
+}
+
+func TestBuildCommandSecondOpinionOnlyWhenEnabledAndConfigured(t *testing.T) {
+	if BuildCommandSecondOpinion(settings(t), &Stub{}) != nil {
+		t.Fatal("opinion without the setting")
+	}
+	if BuildCommandSecondOpinion(settings(t, "LHA_SYSTEM_ONE_COMMANDS=true"), nil) != nil {
+		t.Fatal("opinion without a model")
+	}
+	if o := BuildCommandSecondOpinion(settings(t, "LHA_SYSTEM_ONE_COMMANDS=true", "LHA_SYSTEM_ONE_COMMANDS_THRESHOLD=0.8"), &Stub{}); o == nil || o.Threshold != 0.8 {
+		t.Fatalf("opinion: %+v", o)
+	}
+}
+
 func TestStubAnswersNeutrallyUnlessScripted(t *testing.T) {
 	s := &Stub{}
 	qs := []Named{

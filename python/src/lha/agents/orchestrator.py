@@ -352,7 +352,12 @@ class _MissionRun:
             # The Lead writes through an ownership guard: unassigned space, shared files and the
             # active item's own files — never another open item's leased files.
             self.lead_guard = OwnershipGuard(
-                lead_dispatcher(settings, self.hitl_gate, allow_egress=self.allow_egress),
+                lead_dispatcher(
+                    settings,
+                    self.hitl_gate,
+                    allow_egress=self.allow_egress,
+                    system_one=self.services.system_one,
+                ),
                 FileOwnershipMap(),
                 writers=(LEAD,),
             )

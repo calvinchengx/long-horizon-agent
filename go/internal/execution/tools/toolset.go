@@ -13,6 +13,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/internal/pyval"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 // Run tool assembly: the web tools, their egress policy and the run-level Rule of Two
@@ -359,11 +360,16 @@ type RunDispatcherOptions struct {
 	DisableEgress bool
 	Gate          contracts.HITLGate
 	IO            *WebIO
+	// SystemOne (off by default via LHA_SYSTEM_ONE_COMMANDS) adds the command second opinion: a
+	// confident "dangerous" about an allowed run_command sends it to the human gate. It can only
+	// add gating.
+	SystemOne systemone.Model
 }
 
 // BuildRunDispatcher is the dispatcher for one agent of a run: local tools (+ web tools when
 // enabled). The run-level Rule of Two is checked with the RUN's capabilities (a run's agents share
-// briefs, so untrusted content read by one reaches the others).
+// briefs, so untrusted content read by one reaches the others). opts.SystemOne adds the command
+// second opinion (off by default), which can only add gating to a command the classifier allowed.
 func BuildRunDispatcher(s *config.Settings, opts RunDispatcherOptions) (*execution.AllowListDispatcher, error) {
 	if err := CheckRunRuleOfTwo(s); err != nil {
 		return nil, err
@@ -379,10 +385,14 @@ func BuildRunDispatcher(s *config.Settings, opts RunDispatcherOptions) (*executi
 			declared = append(declared, c)
 		}
 	}
-	return execution.ForTools(tools, execution.DispatcherOptions{
+	dopts := execution.DispatcherOptions{
 		AllowMutating: opts.AllowMutating,
 		AllowEgress:   useWeb,
 		Gate:          opts.Gate,
 		Capabilities:  declared,
-	})
+	}
+	if opinion := systemone.BuildCommandSecondOpinion(s, opts.SystemOne); opinion != nil {
+		dopts.SecondOpinion = opinion
+	}
+	return execution.ForTools(tools, dopts)
 }
