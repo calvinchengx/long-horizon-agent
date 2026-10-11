@@ -13,16 +13,19 @@ twice. ``score`` runs a judge over the rows and counts agreement with the gold l
 precision and recall of each source's positive label (the one that refuses: ``reject``,
 ``failed``, ``block``). Two judges are built in and need no model: ``recorded`` (the label the
 mission recorded, so the scorecard says how often LHA's own verifier, reviewer and gates were
-right) and ``screen`` (the deterministic pre-review screen re-run on each review row's diff).
-Both implementations parse, check, score and render identically (``spec/systemone/gold.json``).
+right) and ``screen`` (the deterministic pre-review screen re-run on each review row's diff). A
+third, ``system_one``, asks a System One model the pre-review question (``lha.systemone.review``)
+and needs a model, so it is scored with ``score_async``. Both implementations parse, check, score
+and render identically (``spec/systemone/gold.json``).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
+from lha.contracts.system_one import ChoiceAnswer, SystemOneError, SystemOneModel
 from lha.systemone.labels import (
     LABEL_SCHEMA,
     SOURCE_GATE,
@@ -31,6 +34,9 @@ from lha.systemone.labels import (
     SOURCE_VERIFIER,
     SOURCES,
 )
+from lha.systemone.review import QUESTION as REVIEW_QUESTION
+from lha.systemone.review import QUESTION_ID as REVIEW_QUESTION_ID
+from lha.systemone.review import review_state
 from lha.verify.review_screen import screen_diff
 
 #: The labels a gold row may carry per source, and the one that refuses (the positive class).
@@ -46,7 +52,7 @@ POSITIVE: dict[str, str] = {
     SOURCE_VERIFIER: "failed",
     SOURCE_REVIEW: "block",
 }
-JUDGES = ("recorded", "screen")
+JUDGES = ("recorded", "screen", "system_one")
 _STRING_KEYS = ("label", "by", "mission_id", "cycle_id", "item_id", "at")
 
 
@@ -190,6 +196,7 @@ def check_gold(rows: Sequence[GoldRow]) -> list[str]:
 
 
 Judge = Callable[[GoldRow], str | None]
+AsyncJudge = Callable[[GoldRow], Awaitable[str | None]]
 
 
 def judge_recorded(row: GoldRow) -> str | None:
@@ -207,11 +214,43 @@ def judge_screen(row: GoldRow) -> str | None:
     return "block" if screen_diff(diff) else "approve"
 
 
+def judge_system_one(model: SystemOneModel) -> AsyncJudge:
+    """A model asked the pre-review question on each review row's diff.
+
+    The judge abstains (``None``) on every other source, on a row without a non-empty string
+    ``diff``, and when the call fails (``SystemOneError``), exactly as the deterministic screen
+    does. It returns the model's choice, ``approve`` or ``block``.
+    """
+
+    async def judge(row: GoldRow) -> str | None:
+        if row.source != SOURCE_REVIEW:
+            return None
+        diff = row.input.get("diff")
+        if not isinstance(diff, str) or not diff:
+            return None
+        task = row.input.get("task")
+        state = review_state(task if isinstance(task, str) else "", diff)
+        try:
+            result = await model.evaluate(state, {REVIEW_QUESTION_ID: REVIEW_QUESTION})
+        except SystemOneError:
+            return None
+        answer = result.answers[REVIEW_QUESTION_ID]
+        if not isinstance(answer, ChoiceAnswer):  # parse_response guarantees it; be explicit
+            return None
+        return answer.choice
+
+    return judge
+
+
 def judge_named(name: str) -> Judge:
     if name == "recorded":
         return judge_recorded
     if name == "screen":
         return judge_screen
+    if name == "system_one":
+        raise ValueError(
+            "judge 'system_one' needs a System One model; build it with judge_system_one(model)"
+        )
     raise ValueError(f"unknown judge {name!r}; expected one of {', '.join(JUDGES)}")
 
 
@@ -230,34 +269,48 @@ class Scorecard:
     disagreements: list[str] = field(default_factory=list)
 
 
+def _record(card: Scorecard, row: GoldRow, judged: str | None) -> None:
+    """Tally one judge's answer against a row's gold label (``None`` abstains)."""
+    if judged is None:
+        return
+    card.judged += 1
+    positive = POSITIVE[row.source]
+    if judged == row.gold:
+        card.agree += 1
+    else:
+        line = f"  {row.place}: judged {judged}, gold {row.gold}"
+        if row.tags:
+            line += f" [{','.join(row.tags)}]"
+        if row.note:
+            line += f" ({row.note})"
+        card.disagreements.append(line)
+    if judged == positive and row.gold == positive:
+        card.tp += 1
+    elif judged == positive:
+        card.fp += 1
+    elif row.gold == positive:
+        card.fn += 1
+    else:
+        card.tn += 1
+
+
 def score(rows: Sequence[GoldRow], judge: Judge) -> list[Scorecard]:
     """A scorecard per source present, in ``SOURCES`` order."""
     cards = {source: Scorecard(source) for source in SOURCES}
     for row in rows:
         card = cards[row.source]
         card.rows += 1
-        judged = judge(row)
-        if judged is None:
-            continue
-        card.judged += 1
-        positive = POSITIVE[row.source]
-        if judged == row.gold:
-            card.agree += 1
-        else:
-            line = f"  {row.place}: judged {judged}, gold {row.gold}"
-            if row.tags:
-                line += f" [{','.join(row.tags)}]"
-            if row.note:
-                line += f" ({row.note})"
-            card.disagreements.append(line)
-        if judged == positive and row.gold == positive:
-            card.tp += 1
-        elif judged == positive:
-            card.fp += 1
-        elif row.gold == positive:
-            card.fn += 1
-        else:
-            card.tn += 1
+        _record(card, row, judge(row))
+    return [cards[s] for s in SOURCES if cards[s].rows]
+
+
+async def score_async(rows: Sequence[GoldRow], judge: AsyncJudge) -> list[Scorecard]:
+    """``score`` for an async judge (a model call per row)."""
+    cards = {source: Scorecard(source) for source in SOURCES}
+    for row in rows:
+        card = cards[row.source]
+        card.rows += 1
+        _record(card, row, await judge(row))
     return [cards[s] for s in SOURCES if cards[s].rows]
 
 

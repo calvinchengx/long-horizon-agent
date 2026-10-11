@@ -372,6 +372,28 @@ def test_triage_state_is_redacted_and_bounded() -> None:
     assert "sk-ant-api03" not in state["latest_failure"]
 
 
+# --- pre-review question ----------------------------------------------------------------------
+
+
+def test_review_question_is_a_choice_in_option_order() -> None:
+    from lha.systemone import review
+
+    assert review.QUESTION_ID == "soundness"
+    assert list(review.QUESTION.criteria) == ["approve", "block"]
+    assert "blocking defect" in review.QUESTION.instructions
+
+
+def test_review_state_is_redacted_and_takes_the_diff_tail() -> None:
+    from lha.systemone.review import review_state
+
+    task = "token ghp_" + "c" * 36
+    diff = "x" * 5000 + " token sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAA end"
+    state = review_state(task, diff, max_chars=100)
+    assert "ghp_" not in state["task"]
+    assert isinstance(state["diff"], str) and len(state["diff"]) <= 103
+    assert "sk-ant-api03" not in state["diff"] and state["diff"].endswith("end")
+
+
 def _items() -> list[ChecklistItem]:
     return [
         ChecklistItem(id="01", description="coarse", witnesses=["cmd:exit 1"]),

@@ -392,7 +392,7 @@ reminders only raise the count of an open gate, and a closed gate stays closed. 
 
 ```
 lha eval check FILES...
-lha eval run FILES... [--judge recorded|screen]
+lha eval run FILES... [--judge recorded|screen|system_one]
 ```
 
 Gold evaluation sets ([25-system-one.md](25-system-one.md#gold-evaluation-sets),
@@ -415,7 +415,11 @@ total: 73 rows, 73 judged, 55 agree (0.75)
 otherwise); precision and recall are of the source's refusing label (`reject`, `failed`,
 `block`), `n/a` when undefined. `--judge recorded` (default) scores the label the mission
 recorded; `--judge screen` re-runs the pre-review screen on each review row's `diff` and
-abstains elsewhere. An unknown judge exits `2`. Both implementations print the same report.
+abstains elsewhere; `--judge system_one` asks a configured System One model the pre-review
+question on each review row's `diff` ([25-system-one.md](25-system-one.md#gold-evaluation-sets)),
+abstaining off-review, on a row without a diff and when the call fails. `system_one` needs a
+backend (`LHA_SYSTEM_ONE_BACKEND=stub` offline, or `systemone`). An unknown judge exits `2`. Both
+implementations print the same report.
 
 ## `lha mission-report`
 

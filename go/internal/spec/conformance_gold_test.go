@@ -42,6 +42,11 @@ func TestGold(t *testing.T) {
 				Report string `json:"report"`
 			} `json:"judges"`
 		} `json:"scored"`
+		SystemOne struct {
+			Judge  string `json:"judge"`
+			Cards  []card `json:"cards"`
+			Report string `json:"report"`
+		} `json:"system_one"`
 	}
 	Load(t, "systemone/gold.json", &s)
 	for _, c := range s.ParseErrors {
@@ -70,7 +75,7 @@ func TestGold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, j := range s.Scored.Judges {
-		judge, err := systemone.JudgeNamed(j.Judge)
+		judge, err := systemone.JudgeNamed(j.Judge, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -89,5 +94,21 @@ func TestGold(t *testing.T) {
 		if report := systemone.RenderScorecards(cards, j.Judge); report != j.Report {
 			t.Errorf("%s: report\n%s\nwant\n%s", j.Judge, report, j.Report)
 		}
+	}
+	// The model-backed judge, on the deterministic stub (python: export_gold).
+	systemOne := systemone.ScoreGold(rows, systemone.JudgeSystemOne(&systemone.Stub{}))
+	got := make([]card, len(systemOne))
+	for i, c := range systemOne {
+		d := c.Disagreements
+		if d == nil {
+			d = []string{}
+		}
+		got[i] = card{c.Source, c.Rows, c.Judged, c.Agree, c.TP, c.FP, c.FN, c.TN, d}
+	}
+	if !reflect.DeepEqual(got, s.SystemOne.Cards) {
+		t.Errorf("system_one: cards %+v, want %+v", got, s.SystemOne.Cards)
+	}
+	if report := systemone.RenderScorecards(systemOne, s.SystemOne.Judge); report != s.SystemOne.Report {
+		t.Errorf("system_one: report\n%s\nwant\n%s", report, s.SystemOne.Report)
 	}
 }

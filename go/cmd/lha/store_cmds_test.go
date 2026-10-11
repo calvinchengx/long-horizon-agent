@@ -487,7 +487,7 @@ func TestMissionReport(t *testing.T) {
 
 // lha eval check / run on the committed gold sets, with Python's output (python: test_gold.py).
 func TestEvalCheckAndRun(t *testing.T) {
-	dir := cleanEnv(t)
+	dir := cleanEnv(t, "LHA_SYSTEM_ONE_BACKEND=stub")
 	sets := []string{filepath.Join(spec.Dir(), "..", "eval", "gold", "review-and-verifier-2026-10-02.jsonl")}
 	all, err := filepath.Glob(filepath.Join(spec.Dir(), "..", "eval", "gold", "*.jsonl"))
 	if err != nil || len(all) < 2 {
@@ -504,7 +504,16 @@ func TestEvalCheckAndRun(t *testing.T) {
 	if ran.code != 0 || !strings.HasPrefix(ran.stdout, "judge: screen\nverifier: 52 rows, 0 judged (the judge abstains)\n") || !strings.Contains(ran.stdout, "review: 21 rows, 21 judged") {
 		t.Fatalf("%+v", ran)
 	}
-	if r := runCLI(t, nil, "eval", "run", "--judge", "oracle", sets[0]); r.code != 2 || !strings.Contains(r.stderr, "error: unknown --judge 'oracle'; expected recorded, screen") {
+	so := runCLI(t, nil, append([]string{"eval", "run", "--judge", "system_one"}, sets...)...)
+	if so.code != 0 || !strings.HasPrefix(so.stdout, "judge: system_one\nverifier: 52 rows, 0 judged (the judge abstains)\n") || !strings.Contains(so.stdout, "review: 21 rows, 21 judged") {
+		t.Fatalf("%+v", so)
+	}
+	t.Setenv("LHA_SYSTEM_ONE_BACKEND", "off")
+	if off := runCLI(t, nil, "eval", "run", "--judge", "system_one", sets[0]); off.code != 2 || !strings.Contains(off.stderr, "needs a System One backend") {
+		t.Fatalf("%+v", off)
+	}
+	t.Setenv("LHA_SYSTEM_ONE_BACKEND", "stub")
+	if r := runCLI(t, nil, "eval", "run", "--judge", "oracle", sets[0]); r.code != 2 || !strings.Contains(r.stderr, "error: unknown --judge 'oracle'; expected recorded, screen, system_one") {
 		t.Fatalf("%+v", r)
 	}
 	bad := filepath.Join(dir, "bad.jsonl")

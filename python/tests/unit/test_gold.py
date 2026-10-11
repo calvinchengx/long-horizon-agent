@@ -4,21 +4,31 @@ behave on them as documented, and the CLI reads them (``lha.systemone.gold`` its
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 import lha.cli.main as cli
+from lha.config import Settings
+from lha.contracts.system_one import ChoiceAnswer
 from lha.systemone.gold import (
     POSITIVE,
+    GoldRow,
     check_gold,
     count_by_source,
+    judge_named,
     judge_recorded,
     judge_screen,
+    judge_system_one,
     parse_gold,
     score,
+    score_async,
 )
+from lha.systemone.review import QUESTION_ID
+from lha.systemone.stub import StubSystemOne
 
 runner = CliRunner()
 
@@ -114,3 +124,97 @@ def test_the_honest_set_has_no_disagreements() -> None:
             assert card.agree == card.judged and card.fp == 0, (card.source, card.disagreements)
     # Both sets together stay one valid set: no judgment appears in both.
     assert check_gold([row for path in SETS for row in _rows(path)]) == []
+
+
+def _gold_row(source: str, **input_: object) -> GoldRow:
+    row = {
+        "schema": 1,
+        "source": source,
+        "label": "approve",
+        "by": "x",
+        "mission_id": "m",
+        "cycle_id": "c1",
+        "item_id": "01",
+        "input": input_,
+        "gold": {"label": "approve", "by": "y"},
+        "tags": [],
+    }
+    return parse_gold(json.dumps(row) + "\n")[0]
+
+
+def test_the_system_one_judge_maps_the_choice_and_abstains() -> None:
+    answer = ChoiceAnswer(
+        choice="block", probabilities={"approve": 0.1, "block": 0.9}, confidence=0.8
+    )
+    stub = StubSystemOne(lambda state, questions: {QUESTION_ID: answer})
+    judge = judge_system_one(stub)
+    assert asyncio.run(judge(_gold_row("review", diff="diff --git a/x b/x\n+pass\n"))) == "block"
+    assert len(stub.calls) == 1
+    # abstains without a diff, off-review, and when the call fails; none of those asks the model
+    assert asyncio.run(judge(_gold_row("review"))) is None
+    assert asyncio.run(judge(_gold_row("review", diff=""))) is None
+    assert asyncio.run(judge(_gold_row("verifier", diff="x"))) is None
+    assert len(stub.calls) == 1
+    broken = judge_system_one(StubSystemOne(error="down"))
+    assert asyncio.run(broken(_gold_row("review", diff="d"))) is None
+
+
+def test_score_async_mirrors_score() -> None:
+    rows = parse_gold(
+        "".join(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "source": "review",
+                    "label": "approve",
+                    "by": "reviewer",
+                    "mission_id": "m",
+                    "cycle_id": f"c{i}",
+                    "item_id": "01",
+                    "input": {"diff": diff},
+                    "gold": {"label": gold, "by": "y"},
+                    "tags": ["t"] if gold != "approve" else [],
+                }
+            )
+            + "\n"
+            for i, (diff, gold) in enumerate([("d1", "approve"), ("d2", "block"), ("d3", "block")])
+        ),
+        name="g",
+    )
+    stub = StubSystemOne(
+        lambda state, questions: {
+            QUESTION_ID: ChoiceAnswer(
+                choice="approve", probabilities={"approve": 0.9, "block": 0.1}, confidence=0.8
+            )
+        }
+    )
+    cards = asyncio.run(score_async(rows, judge_system_one(stub)))
+    assert len(cards) == 1 and cards[0].source == "review"
+    assert (cards[0].rows, cards[0].judged, cards[0].agree) == (3, 3, 1)
+    assert (cards[0].fp, cards[0].fn) == (0, 2)
+
+
+def test_judge_named_says_system_one_needs_a_model() -> None:
+    with pytest.raises(ValueError, match="needs a System One model"):
+        judge_named("system_one")
+    assert judge_named("screen") is judge_screen
+
+
+def test_eval_run_with_the_system_one_stub_backend(monkeypatch: pytest.MonkeyPatch) -> None:
+    paths = [str(GOLD / "review-and-verifier-2026-10-02.jsonl")]
+    settings = Settings(_env_file=None, system_one_backend="stub")  # type: ignore[call-arg]
+    monkeypatch.setattr(cli, "get_settings", lambda: settings)
+    monkeypatch.setattr("lha.config.get_settings", lambda: settings)
+    ran = runner.invoke(cli.app, ["eval", "run", "--judge", "system_one", *paths])
+    assert ran.exit_code == 0, ran.output
+    assert ran.output.startswith(
+        "judge: system_one\nverifier: 52 rows, 0 judged (the judge abstains)\n"
+    )
+    assert "review: 21 rows, 21 judged" in ran.output
+
+    off = Settings(_env_file=None, system_one_backend="off")  # type: ignore[call-arg]
+    monkeypatch.setattr(cli, "get_settings", lambda: off)
+    monkeypatch.setattr("lha.config.get_settings", lambda: off)
+    refused = runner.invoke(cli.app, ["eval", "run", "--judge", "system_one", *paths])
+    assert refused.exit_code == 2
+    assert "needs a System One backend" in refused.output

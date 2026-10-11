@@ -3122,7 +3122,7 @@ def export_system_one() -> None:
     from lha.contracts.system_one import ChoiceAnswer, SystemOneError
     from lha.memory.rerank import apply_relevance, system_one_rerank_request
     from lha.safety.egress import parse_url
-    from lha.systemone import triage
+    from lha.systemone import review, triage
     from lha.systemone.client import default_price_in_per_mtok, is_local_endpoint
     from lha.systemone.wire import (
         MAX_CHOICE_OPTIONS,
@@ -3321,6 +3321,26 @@ def export_system_one() -> None:
         for item, latest, previous, limit in state_cases
     ]
 
+    review_diff = (
+        "diff --git a/src/a.py b/src/a.py\n--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n"
+        "-x = 1\n+x = 2\n"
+    )
+    long_diff = "diff --git a/tests/test_a.py b/tests/test_a.py\n" + "+" + "z" * 5000 + "\n"
+    review_state_cases = [
+        ("Add greet (witness: go:TestHello)", review_diff, review.MAX_DIFF_CHARS),
+        ("token ghp_" + "c" * 36, long_diff, 200),
+        ("", "", review.MAX_DIFF_CHARS),
+    ]
+    review_states = [
+        {
+            "task": task,
+            "diff": diff,
+            "max_chars": limit,
+            "state": review.review_state(task, diff, max_chars=limit),
+        }
+        for task, diff, limit in review_state_cases
+    ]
+
     from lha.contracts.memory import MemoryRecord, RetrievalHit
 
     def hits(texts: list[str]) -> list[RetrievalHit]:
@@ -3399,6 +3419,12 @@ def export_system_one() -> None:
                 "max_failure_chars": triage.MAX_FAILURE_CHARS,
                 "actions": actions,
                 "states": states,
+            },
+            "review": {
+                "question_id": review.QUESTION_ID,
+                "question": question_body(review.QUESTION),
+                "max_diff_chars": review.MAX_DIFF_CHARS,
+                "states": review_states,
             },
             "rerank": {"requests": rerank_requests, "apply": applied},
             "endpoints": [
@@ -3852,11 +3878,14 @@ def export_gold() -> None:
         GoldError,
         check_gold,
         judge_named,
+        judge_system_one,
         parse_gold,
         render_scorecards,
         score,
+        score_async,
         to_jsonl,
     )
+    from lha.systemone.stub import StubSystemOne
 
     def row(source: str, label: str, gold_label: str, **extra: Any) -> dict[str, Any]:
         base: dict[str, Any] = {
@@ -3996,35 +4025,46 @@ def export_gold() -> None:
         )
     rows = parse_gold(scored, name="gold.jsonl")
     assert check_gold(rows) == []
+
+    def cards_json(cards: Any) -> list[dict[str, Any]]:
+        return [
+            {
+                "source": c.source,
+                "rows": c.rows,
+                "judged": c.judged,
+                "agree": c.agree,
+                "tp": c.tp,
+                "fp": c.fp,
+                "fn": c.fn,
+                "tn": c.tn,
+                "disagreements": c.disagreements,
+            }
+            for c in cards
+        ]
+
     scores = []
     for judge in JUDGES:
+        if judge == "system_one":
+            continue  # needs a model; scored below with the stub backend
         cards = score(rows, judge_named(judge))
         scores.append(
-            {
-                "judge": judge,
-                "cards": [
-                    {
-                        "source": c.source,
-                        "rows": c.rows,
-                        "judged": c.judged,
-                        "agree": c.agree,
-                        "tp": c.tp,
-                        "fp": c.fp,
-                        "fn": c.fn,
-                        "tn": c.tn,
-                        "disagreements": c.disagreements,
-                    }
-                    for c in cards
-                ],
-                "report": render_scorecards(cards, judge),
-            }
+            {"judge": judge, "cards": cards_json(cards), "report": render_scorecards(cards, judge)}
         )
+    # The model-backed judge, on the deterministic stub: the stub picks the first criterion
+    # ("approve") for every review row, so this pins the judge's plumbing, not a model's quality.
+    system_one_cards = asyncio.run(score_async(rows, judge_system_one(StubSystemOne())))
+    system_one = {
+        "judge": "system_one",
+        "cards": cards_json(system_one_cards),
+        "report": render_scorecards(system_one_cards, "system_one"),
+    }
     _write(
         "systemone/gold.json",
         {
             "parse_errors": parse_errors,
             "checks": checks,
             "scored": {"text": scored, "judges": scores},
+            "system_one": system_one,
         },
     )
 

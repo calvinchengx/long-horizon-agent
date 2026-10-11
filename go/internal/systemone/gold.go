@@ -33,7 +33,7 @@ var (
 		SourceReview:       "block",
 	}
 	// Judges are the built-in judge names.
-	Judges = []string{"recorded", "screen"}
+	Judges = []string{"recorded", "screen", "system_one"}
 )
 
 var goldStringKeys = []string{"label", "by", "mission_id", "cycle_id", "item_id", "at"}
@@ -254,13 +254,19 @@ func JudgeScreen(row GoldRow) (string, bool) {
 	return "approve", true
 }
 
-// JudgeNamed is the built-in judge of that name.
-func JudgeNamed(name string) (Judge, error) {
+// JudgeNamed is the built-in judge of that name. model is the System One model the "system_one"
+// judge asks (ignored by the judges that need no model; nil there is fine).
+func JudgeNamed(name string, model Model) (Judge, error) {
 	switch name {
 	case "recorded":
 		return JudgeRecorded, nil
 	case "screen":
 		return JudgeScreen, nil
+	case "system_one":
+		if model == nil {
+			return nil, fmt.Errorf("judge %s needs a System One model", contracts.PyRepr(name))
+		}
+		return JudgeSystemOne(model), nil
 	}
 	return nil, fmt.Errorf("unknown judge %s; expected one of %s", contracts.PyRepr(name), strings.Join(Judges, ", "))
 }
