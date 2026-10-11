@@ -43,6 +43,8 @@ func TestNewFieldDefaults(t *testing.T) {
 		"OpenCodeMaxBudgetUSD":        {s.OpenCodeMaxBudgetUSD, 5.0},
 		"OpenCodeTimeoutS":            {s.OpenCodeTimeoutS, 3600.0},
 		"MaxParallelImplementers":     {s.MaxParallelImplementers, 3},
+		"PlanReview":                  {s.PlanReview, false},
+		"PlanReviewMax":               {s.PlanReviewMax, 1},
 		"SQLitePathSetting":           {s.SQLitePathSetting, ""},
 		"PostgresFallbackToSQLite":    {s.PostgresFallbackToSQLite, true},
 		"MemoryEnabled":               {s.MemoryEnabled, true},
@@ -116,7 +118,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 126 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 128 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }

@@ -64,6 +64,7 @@ from lha.agent.runner import (
     mission_span_attributes,
 )
 from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_worktree
+from lha.agents.plan_review import PlanReview
 from lha.agents.reflection import reflect_on_failure
 from lha.agents.reviewer import REVIEW_EVENT, Reviewer, ReviewResult
 from lha.agents.roles import ModelTier, cheaper_tier
@@ -192,6 +193,7 @@ class Orchestrator:
         references: list[str] | None = None,
         ownership: FileOwnershipMap | None = None,
         resume: bool = False,
+        plan_reviews: list[PlanReview] | None = None,
     ) -> MissionSummary:
         """Run the org until complete / deadlocked / over-budget / looping.
 
@@ -209,6 +211,8 @@ class Orchestrator:
         checklist, ownership map and decisions); ``title`` / ``description`` / ``checklist`` /
         ``references`` / ``ownership`` are then ignored. Raises ``MissionResumeError`` if there
         is no anchor. Without ``resume`` the anchor is (re-)initialized from the arguments.
+        ``plan_reviews``: the plan review's ``plan_review`` events (recorded before the first
+        cycle; the Planner was already re-planned by the caller).
         """
         preflight_run_tools(self._settings)
         if resume and not await asyncio.to_thread(anchor_exists, workdir):
@@ -232,6 +236,7 @@ class Orchestrator:
                 ownership=ownership,
                 references=references,
                 resume=resume,
+                plan_reviews=plan_reviews,
             )
             traced.set(mission_span_attributes(summary))
             return summary
@@ -289,6 +294,7 @@ class _MissionRun:
         ownership: FileOwnershipMap | None,
         references: list[str] | None,
         resume: bool,
+        plan_reviews: list[PlanReview] | None = None,
     ) -> MissionSummary:
         settings = self.settings
         meter = self.meter
@@ -352,6 +358,17 @@ class _MissionRun:
             )
             stack.push_async_callback(self.services.close)
             await self.services.tracker.running()
+            # The optional plan review ran in the caller; its events belong before the first cycle
+            # (cycle_id ""). Advisory: they are recorded whatever the plan, and gate nothing.
+            if not resume:
+                for plan_review in plan_reviews or ():
+                    self._emit(
+                        "plan_review",
+                        "",
+                        item_count=plan_review.item_count,
+                        findings=len(plan_review.findings),
+                        replanned=int(plan_review.replanned),
+                    )
             self.review_screen = build_review_screen(settings, self.services.system_one)
             # Difficulty-based tiering (off by default): the screen is asked per item and, on a
             # confident "small", the implementer runs on the next cheaper tier's model. The cheaper

@@ -31,7 +31,8 @@ from lha.agent.prompt import (  # noqa: E402
     render_memory_block,
     render_tools,
 )
-from lha.agents.planner import Planner, assign_ownership, parse_plan  # noqa: E402
+from lha.agents.plan_review import PlanReviewer, parse_findings  # noqa: E402
+from lha.agents.planner import MissionPlan, Planner, assign_ownership, parse_plan  # noqa: E402
 from lha.agents.reflection import reflect_on_failure  # noqa: E402
 from lha.agents.replanner import Replanner  # noqa: E402
 from lha.agents.reviewer import Reviewer, ReviewResult, parse_review  # noqa: E402
@@ -2000,6 +2001,25 @@ def export_agent_prompts() -> None:
                     for m in _replanner_messages("Mission: M", blocked)
                 ],
             },
+            "plan_reviewer": {
+                "item_count": 2,
+                "messages": [
+                    {"role": m.role, "content": m.content}
+                    for m in _plan_reviewer_messages("T", "Build the thing.", "")
+                ],
+                "findings": [
+                    {"text": text, "findings": parse_findings(text)}
+                    for text in [
+                        '["item 02 is not independently verifiable"]',
+                        "[]",
+                        'Sure, here you go:\n["too coarse", "missing migration step"]\nHope that helps.',
+                        "no json here",
+                        '{"findings": ["x"]}',
+                        '["a", " a ", "b", 7, "", null]',
+                        "[" + ", ".join(f'"finding {n}"' for n in range(25)) + "]",
+                    ]
+                ],
+            },
         },
     )
 
@@ -2017,6 +2037,28 @@ def _planner_messages(title: str, description: str, acceptance: str) -> list[Mod
 
 def _replanner_messages(mission_text: str, item: ChecklistItem) -> list[ModelMessage]:
     return asyncio.run(_capture(lambda m: Replanner(m).split(mission_text=mission_text, item=item)))
+
+
+_REVIEW_PLAN = MissionPlan(
+    checklist=Checklist(
+        items=[
+            ChecklistItem(id="01", description="Add the model", depends_on=[]),
+            ChecklistItem(id="02", description="Add the tests", depends_on=["01"]),
+        ]
+    ),
+    ownership=FileOwnershipMap(),
+    files={"01": ["src/model.py"], "02": ["tests/test_model.py"]},
+)
+
+
+def _plan_reviewer_messages(title: str, description: str, acceptance: str) -> list[ModelMessage]:
+    return asyncio.run(
+        _capture(
+            lambda m: PlanReviewer(m).review(
+                title=title, description=description, acceptance=acceptance, plan=_REVIEW_PLAN
+            )
+        )
+    )
 
 
 async def _capture(call: Any) -> list[ModelMessage]:

@@ -155,6 +155,13 @@ class Settings(BaseSettings):
     # ``max_replans`` splits per mission, nested at most ``max_split_depth`` levels). 0 disables.
     max_replans: int = 20
     max_split_depth: int = 2
+    # Plan review: when on, a design reviewer model reads the Planner's checklist before the first
+    # cycle and, on findings, the Planner re-plans up to ``plan_review_max`` times (the findings
+    # are handed to it through the acceptance channel). Advisory: the per-item deterministic
+    # verifier still gates every item, and an unparseable review means no findings. Off by default;
+    # needs the planner's model.
+    plan_review: bool = False
+    plan_review_max: int = Field(default=1, ge=0, le=3)
     # How long a durable mission waits on a human for an approval / deadlock decision.
     approval_timeout_s: int = 86_400
 

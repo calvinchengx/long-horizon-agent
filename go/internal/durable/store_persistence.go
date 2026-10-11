@@ -74,6 +74,13 @@ func (p *PersistenceStore) RecordCost(ctx context.Context, missionID string, ent
 	return p.store.RecordCost(ctx, missionID, entry, callKey)
 }
 
+// AppendMissionEvents writes to the shared event record (mission_events), in order (python:
+// MissionStore.append_mission_events). The mission-start command uses it for the optional plan
+// review's plan_review events, which happen before the workflow (and so before its recorder).
+func (p *PersistenceStore) AppendMissionEvents(ctx context.Context, events []persistence.MissionEvent) error {
+	return p.store.AppendMissionEvents(ctx, events)
+}
+
 // Close closes the store.
 func (p *PersistenceStore) Close(context.Context) error { return p.store.Close() }
 

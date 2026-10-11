@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/calvinchengx/long-horizon-agent/go/internal/agent/agenttest"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
@@ -80,6 +81,32 @@ func TestRunnerCompletesWhenVerified(t *testing.T) {
 	}
 	if !strings.Contains(s.TraceJSONL, `"kind":"checkpoint"`) {
 		t.Fatalf("trace: %s", s.TraceJSONL)
+	}
+}
+
+func TestRunnerRecordsPlanReviewsBeforeTheFirstCycle(t *testing.T) {
+	o := runOpts(t, t.TempDir(), runnerSettings(t), model.NewStub([]contracts.TurnResult{done}), passCheck)
+	o.PlanReviews = []agents.PlanReview{
+		{ItemCount: 2, Findings: []string{"a", "b"}, Replanned: true},
+		{ItemCount: 3, Findings: nil, Replanned: false},
+	}
+	s, err := RunMissionLocal(context.Background(), o)
+	if err != nil || !s.Completed {
+		t.Fatalf("%+v %v", s, err)
+	}
+	for _, payload := range []string{
+		`"kind":"plan_review"`,
+		`"data":{"item_count":2,"findings":2,"replanned":1}`,
+		`"data":{"item_count":3,"findings":0,"replanned":0}`,
+	} {
+		if !strings.Contains(s.TraceJSONL, payload) {
+			t.Fatalf("missing %s in %s", payload, s.TraceJSONL)
+		}
+	}
+	planIdx := strings.Index(s.TraceJSONL, `"kind":"plan_review"`)
+	cycleIdx := strings.Index(s.TraceJSONL, `"kind":"cycle_started"`)
+	if planIdx < 0 || cycleIdx < 0 || planIdx > cycleIdx {
+		t.Fatalf("plan_review not before cycle_started: %d %d", planIdx, cycleIdx)
 	}
 }
 

@@ -616,6 +616,17 @@
   {
    "mission_id": "mission_local",
    "cycle_id": "",
+   "kind": "plan_review",
+   "payload": {
+    "item_count": 3,
+    "findings": 3,
+    "replanned": 3
+   },
+   "ts": "2026-10-04T00:00:22.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
    "kind": "quarantined_check_failed",
    "payload": {
     "check": "s",
@@ -623,83 +634,83 @@
     "passes": 3,
     "fails": 3
    },
-   "ts": "2026-10-04T00:00:22.000000+00:00"
-  },
-  {
-   "mission_id": "mission_local",
-   "cycle_id": "c1",
-   "kind": "reflection",
-   "payload": {
-    "item": "s"
-   },
    "ts": "2026-10-04T00:00:23.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "research",
+   "kind": "reflection",
    "payload": {
-    "item": "s",
-    "n": 3,
-    "failed": 3
+    "item": "s"
    },
    "ts": "2026-10-04T00:00:24.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "research_failed",
+   "kind": "research",
    "payload": {
     "item": "s",
-    "error": "s"
+    "n": 3,
+    "failed": 3
    },
    "ts": "2026-10-04T00:00:25.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "resumed",
+   "kind": "research_failed",
    "payload": {
-    "run": 3,
-    "cycle_offset": 3,
-    "board": 3
+    "item": "s",
+    "error": "s"
    },
    "ts": "2026-10-04T00:00:26.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "review",
+   "kind": "resumed",
    "payload": {
-    "item": "s",
-    "blocking": true,
-    "verdict": "approve"
+    "run": 3,
+    "cycle_offset": 3,
+    "board": 3
    },
    "ts": "2026-10-04T00:00:27.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
-   "kind": "review_reopened",
+   "kind": "review",
    "payload": {
-    "item": "s"
+    "item": "s",
+    "blocking": true,
+    "verdict": "approve"
    },
    "ts": "2026-10-04T00:00:28.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
-   "kind": "review_screen",
+   "kind": "review_reopened",
    "payload": {
-    "item": "s",
-    "findings": 3,
-    "forced": true
+    "item": "s"
    },
    "ts": "2026-10-04T00:00:29.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
+   "kind": "review_screen",
+   "payload": {
+    "item": "s",
+    "findings": 3,
+    "forced": true
+   },
+   "ts": "2026-10-04T00:00:30.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
    "kind": "sandbox_egress",
    "payload": {
     "decision": "allow",
@@ -709,11 +720,11 @@
     "detail": "s",
     "count": 3
    },
-   "ts": "2026-10-04T00:00:30.000000+00:00"
+   "ts": "2026-10-04T00:00:31.000000+00:00"
   },
   {
    "mission_id": "mission_local",
-   "cycle_id": "c1",
+   "cycle_id": "",
    "kind": "session_progress",
    "payload": {
     "turns": 3,
@@ -721,20 +732,20 @@
     "tool": "s",
     "spent_usd": 0.5
    },
-   "ts": "2026-10-04T00:00:31.000000+00:00"
-  },
-  {
-   "mission_id": "mission_local",
-   "cycle_id": "",
-   "kind": "skill_stored",
-   "payload": {
-    "skill_id": "s"
-   },
    "ts": "2026-10-04T00:00:32.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "c1",
+   "kind": "skill_stored",
+   "payload": {
+    "skill_id": "s"
+   },
+   "ts": "2026-10-04T00:00:33.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "",
    "kind": "system_one",
    "payload": {
     "use": "s",
@@ -750,11 +761,11 @@
     "error": "s",
     "item_id": "s"
    },
-   "ts": "2026-10-04T00:00:33.000000+00:00"
+   "ts": "2026-10-04T00:00:34.000000+00:00"
   },
   {
    "mission_id": "mission_local",
-   "cycle_id": "",
+   "cycle_id": "c1",
    "kind": "tool_call",
    "payload": {
     "tool": "s",
@@ -762,21 +773,21 @@
     "role": "s",
     "error": "s"
    },
-   "ts": "2026-10-04T00:00:34.000000+00:00"
-  },
-  {
-   "mission_id": "mission_local",
-   "cycle_id": "c1",
-   "kind": "turns_exhausted",
-   "payload": {
-    "max_turns": 3,
-    "tool_calls": 3
-   },
    "ts": "2026-10-04T00:00:35.000000+00:00"
   },
   {
    "mission_id": "mission_local",
    "cycle_id": "",
+   "kind": "turns_exhausted",
+   "payload": {
+    "max_turns": 3,
+    "tool_calls": 3
+   },
+   "ts": "2026-10-04T00:00:36.000000+00:00"
+  },
+  {
+   "mission_id": "mission_local",
+   "cycle_id": "c1",
    "kind": "verify",
    "payload": {
     "trigger": "done",
@@ -792,7 +803,7 @@
      }
     ]
    },
-   "ts": "2026-10-04T00:00:36.000000+00:00"
+   "ts": "2026-10-04T00:00:37.000000+00:00"
   },
   {
    "mission_id": "mission_durable",

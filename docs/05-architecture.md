@@ -282,6 +282,11 @@ What runs where today:
 | Blackboard | No | No | Yes |
 | `record_decision` and the chained decision log | Yes | Yes | Yes |
 
+The Planner's checklist is optionally reviewed before the first cycle. With `LHA_PLAN_REVIEW` (off
+by default), a design reviewer model reads the plan and, on findings, the Planner re-plans up to
+`LHA_PLAN_REVIEW_MAX` times; each review is a `plan_review` event. It is advisory — the per-item
+deterministic verifier still gates every item, and an unparseable review means no findings.
+
 `lha orchestrate --resume` continues the mission in an existing workspace; without it,
 `orchestrate` refuses a workspace that already holds one. An implementer that needs a file
 outside its write-set asks for a lease (`request_lease`), which is granted when the file is

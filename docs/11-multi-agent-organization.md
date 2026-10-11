@@ -51,6 +51,15 @@ trusted. The code enforces this split:
 | `lha orchestrate` | Planner (checklist + file ownership; skipped with `--checklist`, which leaves no ownership map), then rounds. A serial round runs 2 Researchers, then the Lead on one item. A parallel wave runs 2 Researchers per item, then one Implementer per item in its own worktree, then the Integrator. Reflection runs on failure, the Reviewer on success, and the Replanner when an item blocks |
 | `lha mission-start` + `lha worker` | Planner (at start, in the CLI process; skipped with `--checklist`), then Lead cycles inside `MissionWorkflow`, Replanner when an item blocks. Opt-in, per mission: `--research N` Researchers per item before each round (child workflows), `--review` the Reviewer after every verified item, `--max-parallel N` parallel waves of Implementers (one activity each, in its own worktree) and the Integrator (one activity per branch); see [Durable execution](08-durable-execution.md#the-multi-agent-organization-opt-in) |
 
+Before the first cycle, on every path that runs the Planner (`mission`, `orchestrate`,
+`mission-start`), an optional plan review may run: with `LHA_PLAN_REVIEW` (off by default) a
+design reviewer model lists the ways the plan is inadequate, and the Planner re-plans up to
+`LHA_PLAN_REVIEW_MAX` times (default 1) with the findings handed to it through the acceptance
+channel. It is **advisory** — it never marks work done, an unparseable review means no findings,
+and the per-item deterministic verifier still gates every item. Each review is recorded as a
+`plan_review` trace event (`item_count`, `findings`, `replanned`), before any cycle. A `--checklist`
+import skips planning, so it skips the review too.
+
 All run paths build the Lead the same way ([agent/assembly.py](../python/src/lha/agent/assembly.py)),
 so the Replanner runs, and the `record_decision` tool is available
 ([mission anchor](06-mission-anchor.md#decisionsndjson)), wherever the Lead runs. Both
@@ -213,7 +222,7 @@ never a stronger one ([25-system-one.md](25-system-one.md#difficulty-based-model
 
 | Role / module | Tier | Mutating | What the code does | Used by a CLI path |
 |---|---|---|---|---|
-| Planner ([planner.py](../python/src/lha/agents/planner.py)) | opus | no | One model call. It parses a JSON array into `ChecklistItem`s with ids `01`, `02`, … and keeps only dependencies on earlier steps (dropped ones are noted). `plan_mission` also reads each step's `files` and assigns ownership (see below). If nothing parses, it creates a single serial item from the description | `mission`, `orchestrate`, `mission-start` (the ownership map is used by `orchestrate` and by `mission-start --max-parallel 2` or more) |
+| Planner ([planner.py](../python/src/lha/agents/planner.py)) | opus | no | One model call. It parses a JSON array into `ChecklistItem`s with ids `01`, `02`, … and keeps only dependencies on earlier steps (dropped ones are noted). `plan_mission` also reads each step's `files` and assigns ownership (see below). If nothing parses, it creates a single serial item from the description. With `LHA_PLAN_REVIEW` (off by default) a `PlanReviewer` ([plan_review.py](../python/src/lha/agents/plan_review.py)) reviews the plan and the Planner re-plans up to `LHA_PLAN_REVIEW_MAX` times, each review a `plan_review` event (advisory; the verifier still gates) | `mission`, `orchestrate`, `mission-start` (the ownership map is used by `orchestrate` and by `mission-start --max-parallel 2` or more) |
 | Lead (`AgentLoop`, [agent/loop.py](../python/src/lha/agent/loop.py)) | opus | yes | Works one item per cycle: tools (plus `record_decision`), gating checks and witnesses, checkpoint commit | all |
 | Replanner ([replanner.py](../python/src/lha/agents/replanner.py)) | lead's model | no tools | One model call when an item has just become `blocked`: given the mission, the item, its witnesses and the latest failure report (last 3,000 chars), returns a JSON array of 2 to 6 smaller steps. `Checklist.split` replaces the item with them; fewer than 2 usable steps means no split. Bounded by `LHA_MAX_REPLANS` and `LHA_MAX_SPLIT_DEPTH`. In `orchestrate` it also splits items blocked in a parallel wave | all (unless `LHA_MAX_REPLANS=0`) |
 | Researcher ([team.py](../python/src/lha/agents/team.py)) | haiku | no | Read-only `SubAgent` that returns a brief (capped at 8,000 chars); sees the web tools when the allow-list is set | `orchestrate`, `mission-start --research N` (one `SubAgentWorkflow` child each) |

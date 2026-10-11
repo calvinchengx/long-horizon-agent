@@ -71,6 +71,7 @@ field is added there first.
 | `ownership_violation`, `ownership_released` | orchestrator | writer and paths |
 | `lease` | orchestrator | `writer`, `path`, `granted`, `why` (one per lease request of an implementer) |
 | `resumed` | orchestrator (`--resume`) | `run`, `cycle_offset`, `board` |
+| `plan_review` | runner, orchestrator, `mission-start` (written to the store) | `item_count`, `findings` (count), `replanned` (0/1); one per plan review, before the first cycle ([11-multi-agent-organization.md](11-multi-agent-organization.md)) |
 | `memory_degraded`, `memory_error`, `memory_consolidated`, `memory_reembedded`, `skill_stored` | memory service | reason or counts ([12-memory.md](12-memory.md)) |
 
 Model spend is recorded by the metering wrapper, not by `llm_turn` events.

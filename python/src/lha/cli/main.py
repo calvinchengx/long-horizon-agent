@@ -938,6 +938,7 @@ def orchestrate(
     """Plan, then run the FULL multi-agent org (research, Lead or parallel waves, review) locally."""
     from lha.agent.runner import MissionSummary, aclose_provider, build_meter
     from lha.agents.orchestrator import Orchestrator, anchor_exists
+    from lha.agents.plan_review import plan_with_optional_review
     from lha.agents.planner import Planner
     from lha.contracts.verify import checks_from_commands
     from lha.model import build_provider
@@ -983,8 +984,13 @@ def orchestrate(
             )
         planner_model = build_provider(settings)
         try:
-            planner = Planner(meter.wrap(planner_model, role="planner"))
-            plan = await planner.plan_mission(title=title or "mission", description=task)
+            plan, plan_reviews = await plan_with_optional_review(
+                planner=Planner(meter.wrap(planner_model, role="planner")),
+                model=meter.wrap(planner_model, role="plan_reviewer"),
+                settings=settings,
+                title=title or "mission",
+                description=task,
+            )
         finally:
             await aclose_provider(planner_model)
         return await Orchestrator(
@@ -998,6 +1004,7 @@ def orchestrate(
             gate=_gate(approve_interactive, settings),
             references=list(reference),
             ownership=plan.ownership,
+            plan_reviews=plan_reviews,
         )
 
     _report(_run(_mission()))
@@ -1242,6 +1249,7 @@ def mission_start(
     import time
 
     from lha.agent.runner import aclose_provider, build_meter
+    from lha.agents.plan_review import PlanReview, plan_with_optional_review
     from lha.agents.planner import Planner
     from lha.config import get_settings
     from lha.durable.signals import (
@@ -1256,6 +1264,8 @@ def mission_start(
     from lha.governor.cost import CostEntry
     from lha.ids import new_id
     from lha.model import build_provider
+    from lha.obs.events import TraceEvent
+    from lha.persistence.event_log import MissionEventLog
     from lha.persistence.store import open_store
     from lha.persistence.tracking import LedgerSink, MissionTracker
     from lha.state.mission_anchor import GitMissionAnchor
@@ -1280,6 +1290,7 @@ def mission_start(
         references = list(reference)
         planner_spend: list[CostEntry] = []
         ownership = None
+        plan_reviews: list[PlanReview] = []
         if imported is not None:
             checklist = imported.checklist
             mission_title = title or imported.title or "mission"
@@ -1290,12 +1301,17 @@ def mission_start(
             meter = build_meter(settings)
             planner_model = build_provider(settings)
             try:
-                planner = Planner(meter.wrap(planner_model, role="planner"))
-                if max_parallel >= 2:  # waves need the Planner's single-writer file ownership
-                    plan = await planner.plan_mission(title=mission_title, description=task)
-                    checklist, ownership = plan.checklist, plan.ownership
-                else:
-                    checklist = await planner.plan(title=mission_title, description=task)
+                plan, plan_reviews = await plan_with_optional_review(
+                    planner=Planner(meter.wrap(planner_model, role="planner")),
+                    model=meter.wrap(planner_model, role="plan_reviewer"),
+                    settings=settings,
+                    title=mission_title,
+                    description=task,
+                )
+                # Waves need the Planner's single-writer file ownership.
+                checklist = plan.checklist
+                if max_parallel >= 2:
+                    ownership = plan.ownership
             finally:
                 await aclose_provider(planner_model)
             planner_spend = list(meter.ledger.entries)
@@ -1316,6 +1332,17 @@ def mission_start(
         store = await open_store(settings, workdir=workdir)
         try:
             await LedgerSink(store, mission_id, key_prefix="planner").backfill(planner_spend)
+            if plan_reviews:  # the plan review's events, before the first cycle (cycle_id "")
+                event_log = MissionEventLog(store)
+                for plan_review in plan_reviews:
+                    event_log.add(
+                        TraceEvent(
+                            kind="plan_review",
+                            mission_id=mission_id,
+                            data=plan_review.event_data(),
+                        )
+                    )
+                await event_log.flush()
             tracker = MissionTracker(
                 store,
                 mission_id,

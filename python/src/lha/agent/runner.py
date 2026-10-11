@@ -21,6 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from lha.agent.assembly import build_lead_loop, lead_dispatcher, open_lead_sandbox
+from lha.agents.plan_review import PlanReview, plan_with_optional_review
 from lha.agents.planner import Planner
 from lha.config import Settings, get_settings
 from lha.contracts.hitl import HITLGate
@@ -113,6 +114,7 @@ async def run_mission_local(
     model: ModelProvider | None = None,
     gate: HITLGate | None = None,
     references: list[str] | None = None,
+    plan_reviews: list[PlanReview] | None = None,
 ) -> MissionSummary:
     """Initialize the anchor and run cycles until done / deadlocked / over-budget / looping.
 
@@ -123,6 +125,8 @@ async def run_mission_local(
     (``None`` denies them). ``references``: vendored reference paths recited every cycle.
     ``allow_egress``: ``None`` => web tools iff ``LHA_WEB_ALLOW_HOSTS`` is set; ``True`` requires
     it; ``False`` drops them. A lethal-trifecta run raises ``RuleOfTwoViolation`` up front.
+    ``plan_reviews``: the plan review's ``plan_review`` events (recorded before the first cycle;
+    the Planner was already re-planned by the caller).
     """
     with span("lha.mission", {"lha.run_path": "local", "lha.title": title}) as traced:
         summary = await _run_mission_local(
@@ -138,6 +142,7 @@ async def run_mission_local(
             model=model,
             gate=gate,
             references=references,
+            plan_reviews=plan_reviews,
         )
         traced.set(mission_span_attributes(summary))
         return summary
@@ -170,6 +175,7 @@ async def _run_mission_local(
     model: ModelProvider | None,
     gate: HITLGate | None,
     references: list[str] | None,
+    plan_reviews: list[PlanReview] | None = None,
 ) -> MissionSummary:
     settings = settings or get_settings()
     preflight_run_tools(settings)  # Rule of Two + web settings, before anything is opened
@@ -230,6 +236,17 @@ async def _run_mission_local(
             system_one=services.system_one,
         )
         ctx = ToolContext(mission_id=mission_id, session=session)
+
+        # The optional plan review ran before this call; its events belong before the first cycle
+        # (cycle_id ""). Advisory: they are recorded whatever the plan, and gate nothing.
+        for review in plan_reviews or ():
+            recorder.record(
+                "plan_review",
+                mission_id=mission_id,
+                item_count=review.item_count,
+                findings=len(review.findings),
+                replanned=int(review.replanned),
+            )
 
         while cycles < settings.max_cycles:
             decision = meter.governor.authorize_next(meter.ledger, cycles_done=cycles)
@@ -336,8 +353,12 @@ async def plan_and_run_local(
     meter = meter or build_meter(settings)
     planner_model = build_provider(settings)
     try:
-        checklist = await Planner(meter.wrap(planner_model, role="planner")).plan(
-            title=title, description=task
+        plan, plan_reviews = await plan_with_optional_review(
+            planner=Planner(meter.wrap(planner_model, role="planner")),
+            model=meter.wrap(planner_model, role="plan_reviewer"),
+            settings=settings,
+            title=title,
+            description=task,
         )
     except Exception as exc:
         unavailable = model_unavailable_reason(exc)
@@ -350,11 +371,12 @@ async def plan_and_run_local(
         workdir=workdir,
         title=title,
         description=task,
-        checklist=checklist,
+        checklist=plan.checklist,
         checks=checks,
         settings=settings,
         allow_egress=allow_egress,
         meter=meter,
         gate=gate,
         references=references,
+        plan_reviews=plan_reviews,
     )

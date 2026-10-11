@@ -27,6 +27,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
 )
@@ -320,6 +321,7 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 	var mTitle, description string
 	var plannerSpend []governor.CostEntry
 	var ownershipJSON []byte
+	var planReviews []agents.PlanReview
 	if r.imported != nil {
 		planned = r.imported.checklist
 		mTitle = firstNonEmpty(r.title, r.imported.title, "mission")
@@ -337,11 +339,20 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 			defer agent.CloseProvider(context.WithoutCancel(ctx), built)
 			plannerModel = built
 		}
-		plan, err := agents.NewPlanner(meter.Wrap(plannerModel, "planner")).PlanMission(ctx, mTitle, r.task, "")
+		plan, reviews, err := agents.PlanWithOptionalReview(
+			ctx,
+			agents.NewPlanner(meter.Wrap(plannerModel, "planner")),
+			meter.Wrap(plannerModel, "plan_reviewer"),
+			settings,
+			mTitle,
+			r.task,
+			"",
+		)
 		if err != nil {
 			return "", err
 		}
 		planned = plan.Checklist
+		planReviews = reviews
 		if r.withOwnership { // waves need the Planner's single-writer file ownership
 			data, err := coordination.OwnershipJSON(plan.Ownership)
 			if err != nil {
@@ -376,6 +387,25 @@ func (c *cli) startMission(settings *config.Settings, r startRequest) (string, e
 	for i, e := range plannerSpend {
 		if _, err := store.RecordCost(ctx, missionID, e, fmt.Sprintf("planner#%d", i)); err != nil {
 			obs.Logger("lha.persistence").Warn("cost_ledger_write_failed", "mission_id", missionID, "error", err.Error())
+		}
+	}
+	// The optional plan review's events, before the first cycle (cycle_id ""). Advisory: they are
+	// written whatever the plan, and gate nothing. The mission-start store is the default one; a
+	// store that cannot write events (a test fake, a nop store) simply skips them.
+	if len(planReviews) > 0 {
+		events := make([]persistence.MissionEvent, 0, len(planReviews))
+		for _, review := range planReviews {
+			events = append(events, persistence.MissionEvent{
+				MissionID: missionID, CycleID: "", Kind: "plan_review",
+				Payload: obs.Fields(review.PlanReviewFields()).Map(),
+			})
+		}
+		if appender, ok := store.(interface {
+			AppendMissionEvents(ctx context.Context, events []persistence.MissionEvent) error
+		}); ok {
+			if err := appender.AppendMissionEvents(ctx, events); err != nil {
+				obs.Logger("lha.persistence").Warn("mission_events_write_failed", "mission_id", missionID, "error", err.Error())
+			}
 		}
 	}
 	setStatus := func(status string) {
