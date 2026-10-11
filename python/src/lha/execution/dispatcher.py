@@ -30,6 +30,7 @@ from lha.hitl.approvals import PENDING, action_fingerprint
 from lha.obs.redact import redact_text
 from lha.safety.commands import classify_command
 from lha.safety.rule_of_two import Capability, check_rule_of_two, permits
+from lha.systemone.screen import CommandSecondOpinion
 
 
 class AllowListDispatcher:
@@ -46,6 +47,9 @@ class AllowListDispatcher:
         capabilities: Rule-of-Two capabilities the caller knows this session holds beyond what
             the tools imply — typically ``Capability.PRIVATE_DATA`` when the workspace or the
             sandbox exposes secrets/customer data.
+        second_opinion: when set, a ``run_command`` the classifier ALLOWED is optionally sent to
+            it; a confident ``dangerous`` becomes the gate reason (the human gate, or denied with
+            no gate). It can only add gating, never allow a denied command.
 
     Raises:
         RuleOfTwoViolation: if the derived capability set is the full trifecta and no gate is set.
@@ -60,6 +64,7 @@ class AllowListDispatcher:
         allow_egress: bool = False,
         gate: HITLGate | None = None,
         capabilities: Iterable[Capability] = (),
+        second_opinion: CommandSecondOpinion | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {t.spec.name: t for t in tools}
         if isinstance(allow, str):
@@ -68,6 +73,7 @@ class AllowListDispatcher:
         self._allow_mutating = allow_mutating
         self._allow_egress = allow_egress
         self._gate = gate
+        self._second_opinion = second_opinion
         self._events: list[EventRecord] = []
         self.capabilities: frozenset[Capability] = frozenset(
             {*capabilities, *self._derived_capabilities()}
@@ -85,6 +91,7 @@ class AllowListDispatcher:
         allow_egress: bool = False,
         gate: HITLGate | None = None,
         capabilities: Iterable[Capability] = (),
+        second_opinion: CommandSecondOpinion | None = None,
     ) -> AllowListDispatcher:
         """Allow every tool in ``tools`` by name; the mutating policy must still be stated."""
         registered = list(tools)
@@ -95,6 +102,7 @@ class AllowListDispatcher:
             allow_egress=allow_egress,
             gate=gate,
             capabilities=capabilities,
+            second_opinion=second_opinion,
         )
 
     def _derived_capabilities(self) -> set[Capability]:
@@ -157,6 +165,8 @@ class AllowListDispatcher:
             return ToolResult.failure(path_error)
 
         gate_reason = self._gate_reason(spec, call.arguments, ctx)
+        if gate_reason is None:
+            gate_reason = await self._second_opinion_reason(spec, call.arguments)
         if gate_reason is not None:
             denied = await self._ask_gate(call, ctx, gate_reason)
             if denied:
@@ -185,6 +195,31 @@ class AllowListDispatcher:
         if spec.egress and self._gate_all_egress:
             return "egress while holding untrusted input + private data + external comms"
         return None
+
+    async def _second_opinion_reason(
+        self, spec: ToolSpec, arguments: dict[str, object]
+    ) -> str | None:
+        """The command second opinion's reason for a command the classifier ALLOWED.
+
+        Only a ``run_command`` (the tool with a ``command_arg``) whose classifier gate reason is
+        ``None`` is asked, and only when a screen is configured. A confident ``dangerous`` gives a
+        reason, so the call flows into the existing human gate (or is denied when there is none)
+        exactly as an irreversible command is; anything else leaves it alone. The call is always
+        recorded as a ``system_one`` event. It can only add gating, never un-gate.
+        """
+        if self._second_opinion is None or spec.command_arg is None:
+            return None
+        argv = arguments.get(spec.command_arg)
+        if not isinstance(argv, list):
+            return None
+        verdict = await self._second_opinion.assess([str(token) for token in argv])
+        self._events.append(
+            EventRecord(
+                kind="system_one",
+                payload=verdict.payload(self._second_opinion.threshold),
+            )
+        )
+        return verdict.reason()
 
     async def _ask_gate(self, call: ToolCall, ctx: ToolContext, reason: str) -> str | None:
         """Return ``None`` if a human approved, else the denial message (fail closed)."""

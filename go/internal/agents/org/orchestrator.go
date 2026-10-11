@@ -329,7 +329,7 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	r.implementerModel = meter.Wrap(raw["implementer"], "implementer")
 
 	// Researchers get the web tools with the lead (the Reviewer's role hides them).
-	if r.readTools, err = RunDispatcher(settings, false, nil, r.allowEgress); err != nil {
+	if r.readTools, err = RunDispatcher(settings, false, nil, r.allowEgress, nil); err != nil {
 		return agent.MissionSummary{}, err
 	}
 	keyPrefix := ""
@@ -361,7 +361,7 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	}
 	// The Lead writes through an ownership guard: unassigned space, shared files and the active
 	// item's own files — never another open item's leased files.
-	leadDispatcher, err := LeadDispatcher(settings, r.gate, r.allowEgress)
+	leadDispatcher, err := LeadDispatcher(settings, r.gate, r.allowEgress, systemOne)
 	if err != nil {
 		return agent.MissionSummary{}, err
 	}

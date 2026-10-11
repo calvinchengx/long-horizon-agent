@@ -64,14 +64,26 @@ def lead_tools(settings: Settings) -> list[Tool]:
 
 
 def lead_dispatcher(
-    settings: Settings, gate: HITLGate | None = None, *, allow_egress: bool | None = None
+    settings: Settings,
+    gate: HITLGate | None = None,
+    *,
+    allow_egress: bool | None = None,
+    system_one: SystemOneModel | None = None,
 ) -> AllowListDispatcher:
     """Every lead tool, mutating allowed; egress only for the web tools' allow-list.
 
     Raises ``RuleOfTwoViolation`` when the run would hold the lethal trifecta (web tools plus a
     ``local`` sandbox or ``LHA_PRIVATE_DATA``); ``allow_egress=False`` drops the web tools.
+    ``system_one`` (off by default via ``LHA_SYSTEM_ONE_COMMANDS``) adds the command second
+    opinion, which can only add gating to a command the classifier allowed.
     """
-    return build_run_dispatcher(settings, allow_mutating=True, allow_egress=allow_egress, gate=gate)
+    return build_run_dispatcher(
+        settings,
+        allow_mutating=True,
+        allow_egress=allow_egress,
+        gate=gate,
+        system_one=system_one,
+    )
 
 
 def lead_verifier(workdir: str, settings: Settings | None = None) -> Verifier:
@@ -175,12 +187,15 @@ def build_lead_loop(
     checkpoint commit. ``dispatcher`` replaces ``lead_dispatcher(settings, gate)`` (the
     orchestrator passes that dispatcher wrapped in an ownership guard); ``record_decision`` is
     added to it either way. ``system_one`` (the run services' System One model) enables stall
-    triage when ``system_one_triage`` is on.
+    triage when ``system_one_triage`` is on and the command second opinion when
+    ``system_one_commands`` is on (both off/opt-in; the second opinion can only add gating).
     """
     return AgentLoop(
         model=model,
         dispatcher=with_decision_tool(
-            dispatcher or lead_dispatcher(settings, gate, allow_egress=allow_egress), anchor
+            dispatcher
+            or lead_dispatcher(settings, gate, allow_egress=allow_egress, system_one=system_one),
+            anchor,
         ),
         verifier=lead_verifier(workdir, settings),
         anchor=anchor,

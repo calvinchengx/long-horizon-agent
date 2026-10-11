@@ -83,6 +83,16 @@ func BuildReviewScreen(s *config.Settings, m Model) *ReviewScreen {
 	return &ReviewScreen{Model: m, Threshold: s.SystemOneReviewThreshold}
 }
 
+// BuildCommandSecondOpinion is the command second opinion over m when it is configured and
+// system_one_commands is on (off by default). It can only add gating to a command the classifier
+// already allowed.
+func BuildCommandSecondOpinion(s *config.Settings, m Model) *CommandSecondOpinion {
+	if m == nil || !s.SystemOneCommands {
+		return nil
+	}
+	return &CommandSecondOpinion{Model: m, Threshold: s.SystemOneCommandsThreshold}
+}
+
 // Close closes m when it holds resources.
 func Close(m Model) error {
 	if c, ok := m.(interface{ Close() error }); ok {

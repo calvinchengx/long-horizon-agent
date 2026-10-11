@@ -475,13 +475,20 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 	lead := meter.Wrap(inner, "lead")
 	closeModel := func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
 
+	systemOne, err := systemone.Build(settings, meter)
+	if err != nil { // e.g. a remote System One endpoint without a key
+		closeModel()
+		return CycleResult{}, configError(fmt.Sprintf("cannot build the System One model: %v", err), err)
+	}
+	defer func() { _ = systemone.Close(systemOne) }()
+
 	gate := NewDeferredApprovalGate(approvedFingerprints(inp.ApprovedActions))
 	if a.OpenToolbox == nil {
 		closeModel()
 		return CycleResult{}, configError("cannot open the sandbox: "+agent.ErrExecutionNotLinked.Error(), nil)
 	}
 	toolbox, err := a.OpenToolbox(ctx, agent.ToolboxRequest{
-		Settings: settings, Workdir: inp.Workdir, Anchor: anchor, Gate: gate,
+		Settings: settings, Workdir: inp.Workdir, Anchor: anchor, Gate: gate, SystemOne: systemOne,
 	})
 	if err != nil {
 		closeModel()
@@ -502,13 +509,6 @@ func (a *Activities) executeCycle(ctx context.Context, inp CycleInput) (CycleRes
 		return CycleResult{}, err
 	}
 	defer store.Close(context.WithoutCancel(ctx))
-	systemOne, err := systemone.Build(settings, meter)
-	if err != nil { // e.g. a remote System One endpoint without a key
-		_ = toolbox.Close(context.WithoutCancel(ctx))
-		closeModel()
-		return CycleResult{}, configError(fmt.Sprintf("cannot build the System One model: %v", err), err)
-	}
-	defer func() { _ = systemone.Close(systemOne) }()
 	// Every metered call lands in cost_ledger as it happens (python: LedgerSink attached with
 	// key_prefix=f"{cycle_id}@{attempt}", backfill=False: the seeded prior spend is already there).
 	meter.SetHook(newLedgerHook(store, inp.MissionID, fmt.Sprintf("%s@%d", inp.CycleID, attempt)))

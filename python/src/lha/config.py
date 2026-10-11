@@ -347,6 +347,12 @@ class Settings(BaseSettings):
     # ``--judge system_one`` scorecard says what it should be.
     system_one_review: bool = False
     system_one_review_threshold: float = Field(default=0.9, ge=0, le=1)
+    # Command second opinion: off by default; after the command classifier ALLOWS a
+    # ``run_command``, a confident "dangerous" sends it to the human gate exactly as an
+    # irreversible command is (denied when there is no gate). It can only add gating, never allow
+    # a command the classifier denied and never change the classifier.
+    system_one_commands: bool = False
+    system_one_commands_threshold: float = Field(default=0.9, ge=0, le=1)
     # ``memory_rerank=system_one``: drop passages whose relevance probability is below this.
     system_one_rerank_min: float = Field(default=0.0, ge=0, le=1)
 

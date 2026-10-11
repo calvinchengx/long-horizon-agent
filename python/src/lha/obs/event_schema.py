@@ -120,15 +120,16 @@ EVENT_KINDS: dict[str, JSONSchema] = {
     "system_one": _payload(
         {
             "use": STRING,
-            "item_id": STRING,
             "model": STRING,
             "answer": STRING,
             "confidence": NUMBER,
             "probabilities": {"type": "object", "additionalProperties": NUMBER},
             "threshold": NUMBER,
-            "action": _enum("continue", "split", "block"),
+            "action": _enum("continue", "split", "block", "gate"),
             "error": STRING,
-        }
+        },
+        # item_id only when the answer is about an item (triage); a command second opinion has none.
+        {"item_id": STRING},
     ),
     "check_quarantined": _QUARANTINE,
     "quarantined_check_failed": _QUARANTINE,

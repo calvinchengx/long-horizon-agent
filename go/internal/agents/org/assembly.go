@@ -8,6 +8,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution/tools"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 // Assembling the organization's agents from settings, the same way for every role (python:
@@ -39,14 +40,16 @@ func OpenLeadSandbox(ctx context.Context, settings *config.Settings, workdir str
 // LeadDispatcher is every lead tool, mutating allowed; egress only for the web tools'
 // allow-list (allowEgress nil => web tools iff LHA_WEB_ALLOW_HOSTS is set; false drops them).
 // Irreversible commands go to gate (nil: refused). A lethal-trifecta run is a
-// *tools.RuleOfTwoViolation.
-func LeadDispatcher(settings *config.Settings, gate contracts.HITLGate, allowEgress *bool) (contracts.ToolDispatcher, error) {
-	return RunDispatcher(settings, true, gate, allowEgress)
+// *tools.RuleOfTwoViolation. systemOne adds the command second opinion (off by default), which
+// can only add gating to a command the classifier allowed.
+func LeadDispatcher(settings *config.Settings, gate contracts.HITLGate, allowEgress *bool, systemOne systemone.Model) (contracts.ToolDispatcher, error) {
+	return RunDispatcher(settings, true, gate, allowEgress, systemOne)
 }
 
 // RunDispatcher is one agent's dispatcher (python: build_run_dispatcher): the local tools, plus
-// the web tools under the egress policy unless allowEgress is false.
-func RunDispatcher(settings *config.Settings, allowMutating bool, gate contracts.HITLGate, allowEgress *bool) (contracts.ToolDispatcher, error) {
+// the web tools under the egress policy unless allowEgress is false. systemOne adds the command
+// second opinion (off by default).
+func RunDispatcher(settings *config.Settings, allowMutating bool, gate contracts.HITLGate, allowEgress *bool, systemOne systemone.Model) (contracts.ToolDispatcher, error) {
 	var hitlGate contracts.HITLGate
 	if gate != nil {
 		hitlGate = gate
@@ -55,6 +58,7 @@ func RunDispatcher(settings *config.Settings, allowMutating bool, gate contracts
 		AllowMutating: allowMutating,
 		DisableEgress: allowEgress != nil && !*allowEgress,
 		Gate:          hitlGate,
+		SystemOne:     systemOne,
 	})
 }
 

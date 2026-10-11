@@ -20,6 +20,8 @@ const (
 	SystemOneEvent = "system_one"
 	// UsePreReview is the use this screen writes into its system_one event.
 	UsePreReview = "pre_review"
+	// UseCommandSecondOpinion is the use the command second opinion writes into its system_one event.
+	UseCommandSecondOpinion = "command_second_opinion"
 )
 
 // ScreenVerdict is the model's answer and what it changed (Asked is false when the diff was empty).
@@ -103,4 +105,85 @@ func (s *ReviewScreen) Assess(ctx context.Context, diff, task string) ScreenVerd
 // Findings is the finding a confident block adds, or an empty slice.
 func (s *ReviewScreen) Findings(ctx context.Context, diff, task string) []string {
 	return s.Assess(ctx, diff, task).Findings()
+}
+
+// CommandVerdict is the model's answer about one command and what it changed.
+type CommandVerdict struct {
+	Action        string
+	Answer        string
+	Confidence    float64
+	Probabilities *contracts.OrderedMap
+	Model         string
+	Error         string
+}
+
+// Reason is the gate reason a confident "dangerous" gives ("" otherwise).
+func (v CommandVerdict) Reason() string {
+	if v.Action == ActionGate {
+		return fmt.Sprintf("the command looks dangerous (system one, confidence %.2f)", v.Confidence)
+	}
+	return ""
+}
+
+// Payload is the system_one event recorded with the call (the shape the other screens record).
+func (v CommandVerdict) Payload(threshold float64) *contracts.OrderedMap {
+	probs := v.Probabilities
+	if probs == nil {
+		probs = contracts.NewOrderedMap()
+	}
+	return contracts.NewOrderedMap(
+		"use", UseCommandSecondOpinion,
+		"model", v.Model,
+		"answer", v.Answer,
+		"confidence", v.Confidence,
+		"probabilities", probs,
+		"threshold", threshold,
+		"action", v.Action,
+		"error", v.Error,
+	)
+}
+
+// CommandSecondOpinion asks Model whether a command the classifier allowed is dangerous, and gates
+// only then. The dispatcher calls it ONLY for a run_command the classifier allowed: a confident
+// "dangerous" returns a reason the dispatcher uses as the gate reason (the human gate, or denied
+// with no gate). It can only add gating, never allow a denied command and never change the
+// classifier. It implements execution.CommandSecondOpinion.
+type CommandSecondOpinion struct {
+	Model     Model
+	Threshold float64
+}
+
+// NewCommandSecondOpinion is a second opinion with the default threshold (0.9).
+func NewCommandSecondOpinion(m Model) *CommandSecondOpinion {
+	return &CommandSecondOpinion{Model: m, Threshold: 0.9}
+}
+
+// Assess is the model's answer for command (a failure changes nothing).
+func (s *CommandSecondOpinion) Assess(ctx context.Context, command []string) CommandVerdict {
+	state := CommandState(command)
+	result, err := s.Model.Evaluate(ctx, state, []Named{{ID: CommandQuestionID, Question: CommandQuestion()}})
+	if err != nil {
+		return CommandVerdict{Action: ActionContinue, Error: err.Error()}
+	}
+	a := result.Answers[CommandQuestionID]
+	if a.Type != "choice" { // parse_response guarantees it; be explicit
+		return CommandVerdict{Action: ActionContinue, Error: "the answer is not a choice"}
+	}
+	action := ActionContinue
+	if a.Choice == "dangerous" && a.Confidence >= s.Threshold {
+		action = ActionGate
+	}
+	return CommandVerdict{
+		Action:        action,
+		Answer:        a.Choice,
+		Confidence:    a.Confidence,
+		Probabilities: a.Probabilities,
+		Model:         result.Model,
+	}
+}
+
+// Reason is the gate reason a confident "dangerous" gives, plus the system_one event to record.
+func (s *CommandSecondOpinion) Reason(ctx context.Context, command []string) (string, *contracts.OrderedMap) {
+	v := s.Assess(ctx, command)
+	return v.Reason(), v.Payload(s.Threshold)
 }

@@ -18,9 +18,10 @@ from lha.agent.assembly import build_lead_loop
 from lha.agent.loop import AgentLoop
 from lha.agents.replanner import Replanner
 from lha.config import Settings
+from lha.contracts.hitl import GateDecision, GateRequest, RiskTier
 from lha.contracts.memory import MemoryRecord, RetrievalHit
-from lha.contracts.model import TurnResult
-from lha.contracts.state import Checklist, ChecklistItem
+from lha.contracts.model import ToolCall, TurnResult
+from lha.contracts.state import Checklist, ChecklistItem, EventRecord
 from lha.contracts.system_one import (
     Choice,
     ChoiceAnswer,
@@ -35,18 +36,28 @@ from lha.contracts.verify import Check
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.sandbox_local import LocalSandbox
 from lha.execution.tools import default_local_tools
+from lha.execution.tools.toolset import build_run_dispatcher
 from lha.governor.cost import CostLedger
 from lha.governor.governor import BudgetGovernor
 from lha.governor.metering import CostMeter
+from lha.hitl.gate import CallbackGate
 from lha.memory.rerank import SystemOneReranker, apply_relevance, system_one_rerank_request
 from lha.model.stub import StubModel
+from lha.obs.event_schema import event_errors
 from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.systemone import StallTriage, StubSystemOne, SystemOneClient, build_system_one
-from lha.systemone.build import build_review_screen, build_stall_triage
+from lha.systemone.build import (
+    build_command_second_opinion,
+    build_review_screen,
+    build_stall_triage,
+)
 from lha.systemone.client import TYPESAFE_ENDPOINT, default_price_in_per_mtok
+from lha.systemone.commands import QUESTION as COMMAND_QUESTION
+from lha.systemone.commands import QUESTION_ID as COMMAND_QUESTION_ID
+from lha.systemone.commands import command_state
 from lha.systemone.review import QUESTION_ID as REVIEW_QUESTION_ID
-from lha.systemone.screen import ReviewScreen
+from lha.systemone.screen import CommandSecondOpinion, ReviewScreen
 from lha.systemone.stub import choice_answer
 from lha.systemone.triage import QUESTION_ID, triage_action, triage_state
 from lha.systemone.wire import (
@@ -598,6 +609,205 @@ def test_the_screen_is_built_only_when_enabled_and_configured() -> None:
     assert build_review_screen(_settings(system_one_review=True), stub) is not None
     assert build_review_screen(_settings(), stub) is None
     assert build_review_screen(_settings(system_one_review=True), None) is None
+
+
+# --- the command second opinion ---------------------------------------------------------------
+
+
+def _danger(answer: str, confidence: float) -> StubSystemOne:
+    probs = {answer: confidence, "other": round(1 - confidence, 4)}
+    return StubSystemOne(
+        lambda state, questions: {
+            COMMAND_QUESTION_ID: ChoiceAnswer(
+                choice=answer, probabilities=probs, confidence=confidence
+            )
+        }
+    )
+
+
+def test_command_question_is_a_choice_in_option_order() -> None:
+    assert COMMAND_QUESTION_ID == "danger"
+    assert list(COMMAND_QUESTION.criteria) == ["routine", "dangerous"]
+    assert "command" in COMMAND_QUESTION.instructions
+
+
+def test_command_state_is_the_redacted_argv_joined() -> None:
+    state = command_state(["echo", "token", "sk-ant-api03-" + "A" * 28])
+    assert isinstance(state["command"], str)
+    assert state["command"].startswith("echo token ")
+    assert "sk-ant-api03" not in state["command"]
+
+
+async def test_a_confident_dangerous_gives_the_reason() -> None:
+    screen = CommandSecondOpinion(_danger("dangerous", 0.94))
+    assert await screen.reason(["ls"]) == (
+        "the command looks dangerous (system one, confidence 0.94)"
+    )
+    verdict = await screen.assess(["ls"])
+    assert verdict.action == "gate" and verdict.answer == "dangerous"
+    payload = verdict.payload(0.9)
+    assert payload == {
+        "use": "command_second_opinion",
+        "model": "stub-1",
+        "answer": "dangerous",
+        "confidence": 0.94,
+        "probabilities": {"dangerous": 0.94, "other": 0.06},
+        "threshold": 0.9,
+        "action": "gate",
+        "error": "",
+    }
+    assert event_errors("system_one", payload) == []  # the recorded event matches its schema
+
+
+async def test_a_routine_or_a_low_confidence_gives_no_reason() -> None:
+    for answer, confidence in [("routine", 0.99), ("dangerous", 0.5)]:
+        screen = CommandSecondOpinion(_danger(answer, confidence))
+        assert await screen.reason(["ls"]) is None
+        verdict = await screen.assess(["ls"])
+        assert verdict.action == "continue" and verdict.answer == answer and not verdict.error
+
+
+async def test_a_failed_call_gives_no_reason_and_records_the_error() -> None:
+    screen = CommandSecondOpinion(StubSystemOne(error="system one call failed: timeout"))
+    assert await screen.reason(["ls"]) is None
+    verdict = await screen.assess(["ls"])
+    assert verdict.action == "continue" and "timeout" in verdict.error
+
+
+def test_the_command_second_opinion_is_built_only_when_enabled_and_configured() -> None:
+    stub = StubSystemOne()
+    assert build_command_second_opinion(_settings(), stub) is None
+    assert build_command_second_opinion(_settings(system_one_commands=True), None) is None
+    screen = build_command_second_opinion(
+        _settings(system_one_commands=True, system_one_commands_threshold=0.8), stub
+    )
+    assert isinstance(screen, CommandSecondOpinion) and screen.threshold == 0.8
+
+
+async def _cmd_ctx(tmp_path: Path) -> ToolContext:
+    session = await LocalSandbox().open(workdir=str(tmp_path))
+    return ToolContext(mission_id="m", session=session)
+
+
+def _benign() -> ToolCall:
+    return ToolCall(id="b", name="run_command", arguments={"argv": [sys.executable, "-c", "1"]})
+
+
+def _system_one_events(dispatcher: AllowListDispatcher) -> list[EventRecord]:
+    return [e for e in dispatcher.drain_events() if e.kind == "system_one"]
+
+
+async def test_a_confident_dangerous_sends_an_allowed_command_to_the_gate(tmp_path: Path) -> None:
+    asked: list[GateRequest] = []
+
+    async def reject(req: GateRequest) -> GateDecision:
+        asked.append(req)
+        return GateDecision.REJECT
+
+    stub = _danger("dangerous", 0.94)
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(),
+        allow_mutating=True,
+        gate=CallbackGate(reject),
+        second_opinion=CommandSecondOpinion(stub),
+    )
+    result = await dispatcher.dispatch(_benign(), await _cmd_ctx(tmp_path))
+    assert not result.ok and "looks dangerous" in (result.error or "")
+    assert len(asked) == 1 and asked[0].risk is RiskTier.IRREVERSIBLE
+    assert "looks dangerous" in asked[0].context["reason"]
+    (event,) = _system_one_events(dispatcher)
+    assert event.payload["use"] == "command_second_opinion"
+    assert event.payload["action"] == "gate" and event.payload["answer"] == "dangerous"
+    assert event.payload["model"] == "stub-1" and event.payload["threshold"] == 0.9
+    assert event.payload["error"] == ""
+
+
+async def test_a_confident_dangerous_is_denied_without_a_gate(tmp_path: Path) -> None:
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(),
+        allow_mutating=True,
+        second_opinion=CommandSecondOpinion(_danger("dangerous", 0.94)),
+    )
+    result = await dispatcher.dispatch(_benign(), await _cmd_ctx(tmp_path))
+    assert not result.ok and "no human gate" in (result.error or "")
+    assert "looks dangerous" in (result.error or "")
+    (event,) = _system_one_events(dispatcher)
+    assert event.payload["action"] == "gate"
+
+
+@pytest.mark.parametrize("answer,confidence", [("routine", 0.99), ("dangerous", 0.5)])
+async def test_a_routine_or_low_confidence_leaves_the_command_alone(
+    tmp_path: Path, answer: str, confidence: float
+) -> None:
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(),
+        allow_mutating=True,
+        second_opinion=CommandSecondOpinion(_danger(answer, confidence)),
+    )
+    assert (await dispatcher.dispatch(_benign(), await _cmd_ctx(tmp_path))).ok
+    (event,) = _system_one_events(dispatcher)
+    assert event.payload["action"] == "continue" and event.payload["answer"] == answer
+
+
+async def test_a_failed_call_leaves_the_command_alone_and_records_the_error(
+    tmp_path: Path,
+) -> None:
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(),
+        allow_mutating=True,
+        second_opinion=CommandSecondOpinion(StubSystemOne(error="system one call failed: timeout")),
+    )
+    assert (await dispatcher.dispatch(_benign(), await _cmd_ctx(tmp_path))).ok
+    (event,) = _system_one_events(dispatcher)
+    assert event.payload["action"] == "continue" and "timeout" in event.payload["error"]
+
+
+async def test_only_run_command_is_asked(tmp_path: Path) -> None:
+    stub = _danger("dangerous", 0.99)
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(), allow_mutating=True, second_opinion=CommandSecondOpinion(stub)
+    )
+    result = await dispatcher.dispatch(
+        ToolCall(id="w", name="write_file", arguments={"path": "x", "content": "y"}),
+        await _cmd_ctx(tmp_path),
+    )
+    assert result.ok and stub.calls == [] and _system_one_events(dispatcher) == []
+
+
+async def test_a_classifier_gated_command_is_never_un_gated(tmp_path: Path) -> None:
+    asked: list[GateRequest] = []
+
+    async def reject(req: GateRequest) -> GateDecision:
+        asked.append(req)
+        return GateDecision.REJECT
+
+    stub = _danger("routine", 0.99)  # a "routine" answer must not save a gated command
+    dispatcher = AllowListDispatcher.for_tools(
+        default_local_tools(),
+        allow_mutating=True,
+        gate=CallbackGate(reject),
+        second_opinion=CommandSecondOpinion(stub),
+    )
+    result = await dispatcher.dispatch(
+        ToolCall(id="p", name="run_command", arguments={"argv": ["git", "push", "origin"]}),
+        await _cmd_ctx(tmp_path),
+    )
+    assert not result.ok and "git push" in (result.error or "")
+    assert len(asked) == 1 and "git push" in asked[0].context["reason"]
+    assert stub.calls == [] and _system_one_events(dispatcher) == []
+
+
+async def test_the_dispatcher_asks_only_when_the_setting_is_on(tmp_path: Path) -> None:
+    stub = _danger("dangerous", 0.99)
+    on = build_run_dispatcher(
+        _settings(system_one_commands=True), allow_mutating=True, system_one=stub
+    )
+    assert not (await on.dispatch(_benign(), await _cmd_ctx(tmp_path))).ok  # denied: no gate
+    assert len(_system_one_events(on)) == 1
+
+    off = build_run_dispatcher(_settings(), allow_mutating=True, system_one=stub)
+    assert (await off.dispatch(_benign(), await _cmd_ctx(tmp_path))).ok  # unchanged: off
+    assert _system_one_events(off) == []
 
 
 # --- reranking --------------------------------------------------------------------------------

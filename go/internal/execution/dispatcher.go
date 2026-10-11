@@ -39,6 +39,7 @@ type AllowListDispatcher struct {
 	allowMutating bool
 	allowEgress   bool
 	gate          contracts.HITLGate
+	secondOpinion CommandSecondOpinion
 	events        []contracts.EventRecord
 	capabilities  map[safety.Capability]struct{}
 	gateAllEgress bool
@@ -48,6 +49,16 @@ var (
 	_ contracts.ToolDispatcher = (*AllowListDispatcher)(nil)
 	_ contracts.EventDrainer   = (*AllowListDispatcher)(nil)
 )
+
+// CommandSecondOpinion is asked, only after the classifier allowed a run_command, whether the
+// command is dangerous. It can only add gating: a non-empty reason sends the call to the human gate
+// exactly as an irreversible command is. The implementation is *systemone.CommandSecondOpinion.
+type CommandSecondOpinion interface {
+	// Reason asks the model about command and returns the gate reason when a confident answer
+	// calls it dangerous ("" otherwise), plus the system_one event to record (nil when the model
+	// was not asked).
+	Reason(ctx context.Context, command []string) (string, *contracts.OrderedMap)
+}
 
 // DispatcherOptions configures an AllowListDispatcher.
 type DispatcherOptions struct {
@@ -64,6 +75,9 @@ type DispatcherOptions struct {
 	// Capabilities the caller knows the session holds beyond what the tools imply — typically
 	// safety.PrivateData when the workspace or the sandbox exposes secrets / customer data.
 	Capabilities []safety.Capability
+	// SecondOpinion, when set, optionally gates a run_command the classifier ALLOWED: a confident
+	// "dangerous" becomes the gate reason. It can only add gating, never allow a denied command.
+	SecondOpinion CommandSecondOpinion
 }
 
 // NewAllowListDispatcher builds a dispatcher over tools (registration is itself an allow-list).
@@ -76,6 +90,7 @@ func NewAllowListDispatcher(tools []contracts.Tool, opts DispatcherOptions) (*Al
 		allowMutating: opts.AllowMutating,
 		allowEgress:   opts.AllowEgress,
 		gate:          opts.Gate,
+		secondOpinion: opts.SecondOpinion,
 		capabilities:  map[safety.Capability]struct{}{},
 	}
 	for _, t := range tools {
@@ -207,7 +222,13 @@ func (d *AllowListDispatcher) Dispatch(ctx context.Context, call contracts.ToolC
 	if pathErr := checkPaths(spec, arguments, tctx); pathErr != "" {
 		return contracts.Failure(pathErr)
 	}
-	if reason, gated := d.gateReason(spec, arguments, tctx); gated {
+	reason, gated := d.gateReason(spec, arguments, tctx)
+	if !gated {
+		if secondReason, gatedByOpinion := d.secondOpinionReason(ctx, spec, arguments); gatedByOpinion {
+			reason, gated = secondReason, true
+		}
+	}
+	if gated {
 		if denied := d.askGate(ctx, call, arguments, tctx, reason); denied != "" {
 			return contracts.Failure(denied)
 		}
@@ -242,6 +263,34 @@ func (d *AllowListDispatcher) gateReason(spec contracts.ToolSpec, arguments map[
 		return "egress while holding untrusted input + private data + external comms", true
 	}
 	return "", false
+}
+
+// secondOpinionReason is the command second opinion's reason for a command the classifier ALLOWED.
+// Only a run_command (the tool with a CommandArg) whose classifier reason was empty is asked, and
+// only when a second opinion is configured. A confident "dangerous" gives a reason, so the call
+// flows into the existing human gate (or is denied when there is none) exactly as an irreversible
+// command is; anything else leaves it alone. The call is always recorded as a system_one event. It
+// can only add gating, never un-gate.
+func (d *AllowListDispatcher) secondOpinionReason(ctx context.Context, spec contracts.ToolSpec, arguments map[string]any) (string, bool) {
+	if d.secondOpinion == nil || spec.CommandArg == nil {
+		return "", false
+	}
+	argv, ok := asList(arguments[*spec.CommandArg])
+	if !ok {
+		return "", false
+	}
+	tokens := make([]string, len(argv))
+	for i, t := range argv {
+		tokens[i] = pyval.Str(t)
+	}
+	reason, payload := d.secondOpinion.Reason(ctx, tokens)
+	if payload != nil {
+		d.events = append(d.events, contracts.EventRecord{Kind: "system_one", Payload: payload})
+	}
+	if reason == "" {
+		return "", false
+	}
+	return reason, true
 }
 
 // askGate returns "" if a human approved, else the denial message (fail closed).

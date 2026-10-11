@@ -41,6 +41,7 @@ from lha.agents.waves import board_context, reflection_for
 from lha.config import Settings, get_settings, refresh_secrets, secret_fingerprints
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checkpoint, EventRecord, SituationSnapshot
+from lha.contracts.system_one import SystemOneModel
 from lha.contracts.tools import ToolContext, ToolDispatcher
 from lha.contracts.verify import Check, checks_from_commands
 from lha.coordination.decision_log import DecisionChainError
@@ -370,19 +371,26 @@ def research_event(inp: CycleInput) -> EventRecord | None:
 
 
 async def lead_guard(
-    settings: Settings, anchor: GitMissionAnchor, gate: DeferredApprovalGate, item_id: str | None
+    settings: Settings,
+    anchor: GitMissionAnchor,
+    gate: DeferredApprovalGate,
+    item_id: str | None,
+    system_one: SystemOneModel | None = None,
 ) -> ToolDispatcher | None:
     """The Lead's dispatcher behind an ``OwnershipGuard`` when the mission has an ownership map
     (a durable mission with parallel waves), else ``None`` (the plain lead dispatcher).
 
     As in ``orchestrate``'s serial rounds, the Lead may write unassigned space, shared files and
-    the active item's own files, never files leased to another open item."""
+    the active item's own files, never files leased to another open item. ``system_one`` adds the
+    command second opinion (off by default), which can only add gating."""
     checklist = await anchor.read_checklist()
     ownership = effective_ownership(await anchor.read_ownership(), finished_writers(checklist))
     if not ownership.owners:
         return None
     writers = (LEAD, writer_for_item(item_id)) if item_id else (LEAD,)
-    return OwnershipGuard(lead_dispatcher(settings, gate), ownership, writers=writers)
+    return OwnershipGuard(
+        lead_dispatcher(settings, gate, system_one=system_one), ownership, writers=writers
+    )
 
 
 async def _execute_cycle(
@@ -485,7 +493,9 @@ async def _execute_cycle(
                         workdir=inp.workdir,
                         gate=gate,
                         memory=services.memory,
-                        dispatcher=await lead_guard(settings, anchor, gate, active),
+                        dispatcher=await lead_guard(
+                            settings, anchor, gate, active, services.system_one
+                        ),
                         system_one=services.system_one,
                         recorder=recorder,
                     )

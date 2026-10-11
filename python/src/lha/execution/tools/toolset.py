@@ -31,6 +31,7 @@ import httpx
 
 from lha.config import Settings
 from lha.contracts.hitl import HITLGate
+from lha.contracts.system_one import SystemOneModel
 from lha.contracts.tools import Tool
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.tools import default_local_tools
@@ -45,6 +46,7 @@ from lha.safety.egress import (
     system_resolver,
 )
 from lha.safety.rule_of_two import Capability, RuleOfTwoViolation, check_rule_of_two
+from lha.systemone.build import build_command_second_opinion
 
 
 class WebConfigError(ValueError):
@@ -253,13 +255,16 @@ def build_run_dispatcher(
     allow_egress: bool | None = None,
     gate: HITLGate | None = None,
     io: WebIO | None = None,
+    system_one: SystemOneModel | None = None,
 ) -> AllowListDispatcher:
     """The dispatcher for one agent of a run: local tools (+ web tools when enabled).
 
     ``allow_egress``: ``None`` (default) => web tools iff the allow-list is non-empty; ``False``
     forces them off for this dispatcher (e.g. a role without egress). The run-level Rule of Two
     is checked with the RUN's capabilities (a run's agents share briefs, so untrusted content
-    read by one reaches the others) and raises ``RuleOfTwoViolation``.
+    read by one reaches the others) and raises ``RuleOfTwoViolation``. ``system_one`` (off by
+    default via ``LHA_SYSTEM_ONE_COMMANDS``) adds the command second opinion: a confident
+    ``dangerous`` about an allowed ``run_command`` sends it to the human gate.
     """
     check_run_rule_of_two(settings)
     use_web = web_enabled(settings) and allow_egress is not False
@@ -271,4 +276,5 @@ def build_run_dispatcher(
         allow_egress=use_web,
         gate=gate,
         capabilities=declared,
+        second_opinion=build_command_second_opinion(settings, system_one),
     )

@@ -12,6 +12,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/execution"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/safety"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 func tctx(t *testing.T, dir string) contracts.ToolContext {
@@ -451,5 +452,149 @@ func TestASandboxWithItsOwnTmpIsNotAskedAboutDeletingThere(t *testing.T) {
 	r := dispatch(d, c, contracts.ToolContext{MissionID: "m1", Session: container})
 	if !r.OK || len(gate.asked) != 1 || len(container.ran) != 1 { // run without asking again
 		t.Fatal(r, gate.asked, container.ran)
+	}
+}
+
+// The command second opinion (python: test_system_one.py, the command section). A fake System One
+// model returns a ChoiceAnswer; a benign allowed run_command then goes to the gate (or is denied
+// with no gate) exactly as an irreversible command is, and a system_one event is recorded.
+
+func commandOpinionStub(choice string, confidence float64) *systemone.Stub {
+	return &systemone.Stub{Respond: func(state any, questions []systemone.Named) map[string]systemone.Answer {
+		return map[string]systemone.Answer{systemone.CommandQuestionID: {
+			Type: "choice", Choice: choice, Confidence: confidence,
+			Probabilities: contracts.NewOrderedMap(choice, confidence),
+		}}
+	}}
+}
+
+func benignCommand() contracts.ToolCall {
+	return call("b", "run_command", map[string]any{"argv": []any{"sh", "-c", "echo hi"}})
+}
+
+func systemOneEvent(t *testing.T, d *execution.AllowListDispatcher) *contracts.EventRecord {
+	t.Helper()
+	for _, e := range d.DrainEvents() {
+		if e.Kind == "system_one" {
+			return &e
+		}
+	}
+	t.Fatal("no system_one event")
+	return nil
+}
+
+func TestAConfidentDangerousSendsAnAllowedCommandToTheGate(t *testing.T) {
+	gate := &callbackGate{decision: contracts.GateReject, by: "policy"}
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{
+		AllowMutating: true, Gate: gate,
+		SecondOpinion: systemone.NewCommandSecondOpinion(commandOpinionStub("dangerous", 0.94))})
+	r := dispatch(d, benignCommand(), tctx(t, t.TempDir()))
+	if r.OK || !strings.Contains(r.ErrorText(), "looks dangerous") {
+		t.Fatal(r)
+	}
+	if len(gate.asked) != 1 || gate.asked[0].Risk != contracts.RiskIrreversible ||
+		!strings.Contains(gate.asked[0].Context["reason"], "looks dangerous") {
+		t.Fatal(gate.asked)
+	}
+	p := systemOneEvent(t, d).Payload.Plain()
+	if p["use"] != "command_second_opinion" || p["action"] != "gate" || p["answer"] != "dangerous" ||
+		p["model"] != "stub-1" || p["threshold"] != 0.9 || p["error"] != "" || p["confidence"] != 0.94 {
+		t.Fatal(p)
+	}
+}
+
+func TestAConfidentDangerousIsDeniedWithoutAGate(t *testing.T) {
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{
+		AllowMutating: true,
+		SecondOpinion: systemone.NewCommandSecondOpinion(commandOpinionStub("dangerous", 0.94))})
+	r := dispatch(d, benignCommand(), tctx(t, t.TempDir()))
+	if r.OK || !strings.HasPrefix(r.ErrorText(), "irreversible action denied (no human gate configured): ") ||
+		!strings.Contains(r.ErrorText(), "looks dangerous") {
+		t.Fatal(r)
+	}
+	if p := systemOneEvent(t, d).Payload.Plain(); p["action"] != "gate" {
+		t.Fatal(p)
+	}
+}
+
+func TestARoutineOrLowConfidenceLeavesTheCommandAlone(t *testing.T) {
+	for _, c := range []struct {
+		choice     string
+		confidence float64
+	}{{"routine", 0.99}, {"dangerous", 0.5}} {
+		d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{
+			AllowMutating: true,
+			SecondOpinion: systemone.NewCommandSecondOpinion(commandOpinionStub(c.choice, c.confidence))})
+		if r := dispatch(d, benignCommand(), tctx(t, t.TempDir())); !r.OK {
+			t.Fatal(r)
+		}
+		if p := systemOneEvent(t, d).Payload.Plain(); p["action"] != "continue" || p["answer"] != c.choice {
+			t.Fatalf("%s %v: %v", c.choice, c.confidence, p)
+		}
+	}
+}
+
+func TestAFailedCommandCallLeavesTheCommandAloneAndRecordsTheError(t *testing.T) {
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{
+		AllowMutating: true,
+		SecondOpinion: systemone.NewCommandSecondOpinion(&systemone.Stub{Err: "system one call failed: timeout"})})
+	if r := dispatch(d, benignCommand(), tctx(t, t.TempDir())); !r.OK {
+		t.Fatal(r)
+	}
+	p := systemOneEvent(t, d).Payload.Plain()
+	if p["action"] != "continue" || !strings.Contains(p["error"].(string), "timeout") {
+		t.Fatal(p)
+	}
+}
+
+func TestOnlyRunCommandIsAsked(t *testing.T) {
+	stub := commandOpinionStub("dangerous", 0.99)
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{
+		AllowMutating: true, SecondOpinion: systemone.NewCommandSecondOpinion(stub)})
+	r := dispatch(d, call("w", "write_file", map[string]any{"path": "x", "content": "y"}), tctx(t, t.TempDir()))
+	if !r.OK || stub.Calls() != 0 || len(d.DrainEvents()) != 0 {
+		t.Fatal(r, stub.Calls())
+	}
+}
+
+func TestAClassifierGatedCommandIsNeverUnGated(t *testing.T) {
+	gate := &callbackGate{decision: contracts.GateReject, by: "policy"}
+	stub := commandOpinionStub("routine", 0.99) // a "routine" answer must not save a gated command
+	d := forTools(t, DefaultLocalTools(), execution.DispatcherOptions{
+		AllowMutating: true, Gate: gate, SecondOpinion: systemone.NewCommandSecondOpinion(stub)})
+	r := dispatch(d, call("p", "run_command", map[string]any{"argv": []any{"git", "push", "origin"}}), tctx(t, t.TempDir()))
+	if r.OK || !strings.Contains(r.ErrorText(), "git push") {
+		t.Fatal(r)
+	}
+	if len(gate.asked) != 1 || !strings.Contains(gate.asked[0].Context["reason"], "git push") || stub.Calls() != 0 {
+		t.Fatal(gate.asked, stub.Calls())
+	}
+	events := d.DrainEvents()
+	if len(events) != 1 || events[0].Kind != "tool_approval" {
+		t.Fatal(events)
+	}
+}
+
+func TestTheDispatcherAsksOnlyWhenTheSettingIsOn(t *testing.T) {
+	stub := commandOpinionStub("dangerous", 0.99)
+	on, err := BuildRunDispatcher(settings(t, "LHA_SYSTEM_ONE_COMMANDS=true"), RunDispatcherOptions{AllowMutating: true, SystemOne: stub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := dispatch(on, benignCommand(), tctx(t, t.TempDir())); r.OK {
+		t.Fatal(r)
+	}
+	if p := systemOneEvent(t, on).Payload.Plain(); p["action"] != "gate" {
+		t.Fatal(p)
+	}
+	off, err := BuildRunDispatcher(settings(t), RunDispatcherOptions{AllowMutating: true, SystemOne: stub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := dispatch(off, benignCommand(), tctx(t, t.TempDir())); !r.OK {
+		t.Fatal(r)
+	}
+	if events := off.DrainEvents(); len(events) != 0 {
+		t.Fatal(events)
 	}
 }
