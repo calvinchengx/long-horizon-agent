@@ -212,7 +212,12 @@ type Settings struct {
 	SystemOneCommandsThreshold  float64  `env:"system_one_commands_threshold" default:"0.9" ge:"0" le:"1"`
 	SystemOneUntrusted          bool     `env:"system_one_untrusted" default:"false"`
 	SystemOneUntrustedThreshold float64  `env:"system_one_untrusted_threshold" default:"0.9" ge:"0" le:"1"`
-	SystemOneRerankMin          float64  `env:"system_one_rerank_min" default:"0.0" ge:"0" le:"1"`
+	// Difficulty-based model-tier routing: off by default; needs a System One backend AND the
+	// claude backend (only there do roles have tiers). A confident "small" about an item routes its
+	// implementer to the next cheaper tier (never a stronger one).
+	SystemOneTiering          bool    `env:"system_one_tiering" default:"false"`
+	SystemOneTieringThreshold float64 `env:"system_one_tiering_threshold" default:"0.9" ge:"0" le:"1"`
+	SystemOneRerankMin        float64 `env:"system_one_rerank_min" default:"0.0" ge:"0" le:"1"`
 
 	// --- Model resilience
 	FallbackModels    string `env:"fallback_models" default:""`

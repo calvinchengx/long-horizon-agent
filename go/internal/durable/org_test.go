@@ -770,6 +770,40 @@ func TestTheModelScreenAddsAFindingOnTheDurablePath(t *testing.T) {
 	}
 }
 
+// TestADifficultyDowngradeUsesTheCheaperTierOnTheDurablePath: with the claude backend and
+// LHA_SYSTEM_ONE_TIERING, a confident "small" builds the next cheaper tier's model for the item
+// (the configured model would do no work and fail verification) and records a system_one event.
+func TestADifficultyDowngradeUsesTheCheaperTierOnTheDurablePath(t *testing.T) {
+	inp := initOrgMission(t, 1, 1, nil) // item 01 owns work/01.txt
+	work := inp.Workdir
+	ctx := context.Background()
+	base, _ := state.HeadSHA(ctx, work)
+	acts, _ := orgActs(t, nil)
+	acts.Settings = testSettings(t, "LHA_MODEL_BACKEND=claude", "LHA_ANTHROPIC_API_KEY=k",
+		"LHA_SYSTEM_ONE_TIERING=true")
+	acts.ImplementerModel = idleModel // the configured tier does no work: verification would fail
+	acts.tierModel = workingModel     // the cheaper tier writes the item's work file
+	stub := &systemone.Stub{Respond: func(_ any, _ []systemone.Named) map[string]systemone.Answer {
+		return map[string]systemone.Answer{systemone.TierQuestionID: {
+			Type: "choice", Choice: "small", Confidence: 0.95,
+			Probabilities: contracts.NewOrderedMap("small", 0.95, "large", 0.05),
+		}}
+	}}
+	acts.SystemOne = stub
+	out, err := acts.RunImplementer(ctx, ImplementerInput{MissionID: "m", Workdir: work, CycleID: "c1",
+		ItemID: "01", BaseSHA: base, CheckCommands: checkCommands, MaxCycles: 1000})
+	if err != nil || out.Error != "" || out.Head == "" {
+		t.Fatalf("out %+v err %v", out, err)
+	}
+	var verification map[string]any
+	if json.Unmarshal([]byte(out.VerificationJSON), &verification) != nil || verification["all_green"] != true {
+		t.Fatalf("verification %s (the cheaper model must have done the work)", out.VerificationJSON)
+	}
+	if stub.Calls() != 1 {
+		t.Fatalf("system one calls %d", stub.Calls())
+	}
+}
+
 // lha mission-abort during a parallel wave, on a real Temporal server (the test environment does
 // not wait for a cancelled activity): every implementer in flight is waited for (one
 // acknowledging, one finishing anyway), nothing is integrated, and the workflow then ends

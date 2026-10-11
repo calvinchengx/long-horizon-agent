@@ -206,7 +206,10 @@ system prompt, `allow_mutating`, `allow_egress` and `max_turns` (8, the turn bud
 `LHA_MAX_TURNS_PER_CYCLE`, default 20). With the `claude` backend,
 `model_for_role()` ([router.py](../python/src/lha/agents/router.py)) maps opus to
 `claude-opus-4-8`, sonnet to `claude-sonnet-4-6` and haiku to `claude-haiku-4-5-20251001`. Every
-other backend uses the single configured model for all roles.
+other backend uses the single configured model for all roles. Optionally, with the `claude` backend
+and `LHA_SYSTEM_ONE_TIERING=true` (off by default), a System One model is asked how hard an item is
+and, on a confident `small`, that item's implementer runs one tier cheaper (`model_for_tier()`) —
+never a stronger one ([25-system-one.md](25-system-one.md#difficulty-based-model-tier-routing)).
 
 | Role / module | Tier | Mutating | What the code does | Used by a CLI path |
 |---|---|---|---|---|

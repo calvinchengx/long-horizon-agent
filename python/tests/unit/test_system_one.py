@@ -8,6 +8,7 @@ answer: a confident answer may stop work on an item sooner, and nothing else cha
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -16,11 +17,15 @@ import pytest
 
 from lha.agent.assembly import build_lead_loop
 from lha.agent.loop import AgentLoop
+from lha.agents import orchestrator as orchestrator_module
+from lha.agents.orchestrator import Orchestrator
 from lha.agents.replanner import Replanner
+from lha.agents.roles import ModelTier, cheaper_tier
+from lha.agents.router import model_for_tier
 from lha.config import Settings
 from lha.contracts.hitl import GateDecision, GateRequest, RiskTier
 from lha.contracts.memory import MemoryRecord, RetrievalHit
-from lha.contracts.model import ToolCall, TurnResult
+from lha.contracts.model import ModelMessage, ToolCall, TurnResult
 from lha.contracts.state import Checklist, ChecklistItem, EventRecord
 from lha.contracts.system_one import (
     Choice,
@@ -33,6 +38,7 @@ from lha.contracts.system_one import (
 )
 from lha.contracts.tools import ToolContext, ToolResult, ToolSpec
 from lha.contracts.verify import Check
+from lha.coordination.ownership import FileOwnershipMap, writer_for_item
 from lha.execution.dispatcher import AllowListDispatcher
 from lha.execution.sandbox_local import LocalSandbox
 from lha.execution.tools import default_local_tools
@@ -51,6 +57,7 @@ from lha.systemone.build import (
     build_command_second_opinion,
     build_review_screen,
     build_stall_triage,
+    build_tier_screen,
     build_untrusted_screen,
 )
 from lha.systemone.client import TYPESAFE_ENDPOINT, default_price_in_per_mtok
@@ -58,8 +65,16 @@ from lha.systemone.commands import QUESTION as COMMAND_QUESTION
 from lha.systemone.commands import QUESTION_ID as COMMAND_QUESTION_ID
 from lha.systemone.commands import command_state
 from lha.systemone.review import QUESTION_ID as REVIEW_QUESTION_ID
-from lha.systemone.screen import CommandSecondOpinion, ReviewScreen, UntrustedContentScreen
+from lha.systemone.screen import (
+    CommandSecondOpinion,
+    ReviewScreen,
+    TierScreen,
+    UntrustedContentScreen,
+)
 from lha.systemone.stub import choice_answer
+from lha.systemone.tiering import QUESTION as TIER_QUESTION
+from lha.systemone.tiering import QUESTION_ID as TIER_QUESTION_ID
+from lha.systemone.tiering import tiering_state
 from lha.systemone.triage import QUESTION_ID, triage_action, triage_state
 from lha.systemone.untrusted import QUESTION as UNTRUSTED_QUESTION
 from lha.systemone.untrusted import QUESTION_ID as UNTRUSTED_QUESTION_ID
@@ -1102,3 +1117,243 @@ async def test_stub_answers_neutrally_unless_scripted() -> None:
     mood = result.answers["mood"]
     assert isinstance(mood, ScoreAnswer) and mood.score == pytest.approx(1.0)
     assert mood.confidence == 0.0
+
+
+# --- difficulty-based model-tier routing ------------------------------------------------------
+
+
+def _difficulty(answer: str, confidence: float) -> StubSystemOne:
+    probs = {answer: confidence, "other": round(1 - confidence, 4)}
+    return StubSystemOne(
+        lambda state, questions: {
+            TIER_QUESTION_ID: ChoiceAnswer(
+                choice=answer, probabilities=probs, confidence=confidence
+            )
+        }
+    )
+
+
+def test_difficulty_question_is_a_choice_in_option_order() -> None:
+    assert TIER_QUESTION_ID == "difficulty"
+    assert list(TIER_QUESTION.criteria) == ["small", "large"]
+    assert "task" in TIER_QUESTION.instructions
+    assert "one file or a few lines" in TIER_QUESTION.criteria["small"]
+    assert "several files" in TIER_QUESTION.criteria["large"]
+
+
+def test_difficulty_state_is_the_redacted_task_and_the_witnesses() -> None:
+    state = tiering_state("token ghp_" + "c" * 36, ["go:TestX"])
+    assert "ghp_" not in state["task"]
+    assert state["witnesses"] == ["go:TestX"]
+
+
+async def test_a_confident_small_selects_the_next_cheaper_tier() -> None:
+    stub = _difficulty("small", 0.95)
+    screen = TierScreen(stub)
+    assert screen.tier is ModelTier.SONNET
+    assert await screen.cheaper_tier("one line", []) is ModelTier.HAIKU
+    verdict = await screen.assess("one line", [])
+    assert verdict.action == "downgrade" and verdict.answer == "small"
+    assert verdict.tier is ModelTier.HAIKU
+    payload = verdict.payload("01", 0.9)
+    assert payload == {
+        "use": "model_tier",
+        "item_id": "01",
+        "model": "stub-1",
+        "answer": "small",
+        "confidence": 0.95,
+        "probabilities": {"small": 0.95, "other": 0.05},
+        "threshold": 0.9,
+        "action": "downgrade",
+        "error": "",
+    }
+    assert event_errors("system_one", payload) == []  # the recorded event matches its schema
+
+
+@pytest.mark.parametrize("answer,confidence", [("large", 0.99), ("small", 0.5)])
+async def test_large_or_low_confidence_keeps_the_configured_tier(
+    answer: str, confidence: float
+) -> None:
+    screen = TierScreen(_difficulty(answer, confidence))
+    assert await screen.cheaper_tier("x", []) is None
+    verdict = await screen.assess("x", [])
+    assert verdict.action == "continue" and verdict.answer == answer and verdict.tier is None
+
+
+async def test_a_failed_tier_call_keeps_the_tier_and_records_the_error() -> None:
+    screen = TierScreen(StubSystemOne(error="system one call failed: timeout"))
+    assert await screen.cheaper_tier("x", []) is None
+    verdict = await screen.assess("x", [])
+    assert verdict.action == "continue" and verdict.tier is None and "timeout" in verdict.error
+
+
+async def test_an_implementer_already_on_the_cheapest_tier_has_no_cheaper_tier() -> None:
+    screen = TierScreen(_difficulty("small", 0.99), tier=ModelTier.HAIKU)
+    assert await screen.cheaper_tier("x", []) is None
+    assert (await screen.assess("x", [])).action == "continue"
+
+
+def test_the_tier_screen_applies_only_on_the_claude_backend_when_enabled_and_configured() -> None:
+    stub = StubSystemOne()
+    assert build_tier_screen(_settings(), stub) is None  # off by default
+    assert build_tier_screen(_settings(system_one_tiering=True), stub) is None  # stub backend
+    assert (
+        build_tier_screen(_settings(system_one_tiering=True, model_backend="claude"), None) is None
+    )
+    screen = build_tier_screen(
+        _settings(
+            system_one_tiering=True, model_backend="claude", system_one_tiering_threshold=0.8
+        ),
+        stub,
+    )
+    assert isinstance(screen, TierScreen) and screen.threshold == 0.8
+
+
+def test_cheaper_tier_and_model_for_tier_map_the_claude_tiers() -> None:
+    assert cheaper_tier(ModelTier.OPUS) is ModelTier.SONNET
+    assert cheaper_tier(ModelTier.SONNET) is ModelTier.HAIKU
+    assert cheaper_tier(ModelTier.HAIKU) is None
+    settings = _settings(model_backend="claude", anthropic_api_key="dummy")
+    assert model_for_tier(ModelTier.SONNET, settings).name == "claude:claude-sonnet-4-6"
+    assert model_for_tier(ModelTier.HAIKU, settings).name == "claude:claude-haiku-4-5-20251001"
+    # Any other backend uses the single configured model for every tier.
+    assert model_for_tier(ModelTier.HAIKU, _settings()).name == "stub:stub-1"
+
+
+_TIER_WRITE_SET = re.compile(r"Your write-set \(the ONLY files you may create or modify\): (.*)")
+_TIER_ITEM = re.compile(r"Checklist item \[(\w+)\]")
+
+
+class _TierImplementers(StubModel):
+    """An implementer that writes its write-set and says done, counting its calls.
+
+    The configured and the cheaper tier are two instances; the test tells them apart by ``calls``.
+    """
+
+    def __init__(self, marker: str) -> None:
+        super().__init__(model_name=marker)
+        self.calls = 0
+
+    async def complete(
+        self,
+        messages: list[ModelMessage],
+        *,
+        tools: list[dict[str, object]] | None = None,
+        max_tokens: int | None = None,
+    ) -> TurnResult:
+        self.calls += 1
+        objective = messages[1].content
+        item = _TIER_ITEM.search(objective)
+        write_set = _TIER_WRITE_SET.search(objective)
+        assert item is not None and write_set is not None
+        paths = [p.strip() for p in write_set.group(1).split(",") if p.strip()]
+        actions = [
+            {"tool": "write_file", "arguments": {"path": p, "content": "x\n"}} for p in paths
+        ]
+        turn = sum(1 for m in messages if m.role == "assistant")
+        if turn < len(actions):
+            return TurnResult(text=json.dumps(actions[turn]))
+        return DONE
+
+
+def _tier_items() -> tuple[Checklist, FileOwnershipMap]:
+    checklist = Checklist(
+        items=[
+            ChecklistItem(id="01", description="write a"),
+            ChecklistItem(id="02", description="write b"),
+        ]
+    )
+    owners = FileOwnershipMap()
+    owners.assign("a.py", writer_for_item("01"))
+    owners.assign("b.py", writer_for_item("02"))
+    return checklist, owners
+
+
+@pytest.mark.asyncio
+async def test_a_confident_small_routes_the_implementer_to_the_cheaper_tier(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stub = _difficulty("small", 0.95)
+    monkeypatch.setattr(orchestrator_module, "build_system_one", lambda settings, meter: stub)
+    configured = _TierImplementers("configured")
+    cheaper = _TierImplementers("cheaper")
+    orchestrator = Orchestrator(
+        _settings(
+            sandbox="local",
+            allow_unsafe_local=True,
+            model_backend="claude",
+            anthropic_api_key="dummy",
+            system_one_backend="stub",
+            system_one_tiering=True,
+        ),
+        research_per_item=0,
+        do_review=False,
+        models={
+            "implementer": configured,
+            "lead": StubModel(script=[DONE]),
+            "researcher": StubModel(script=[DONE]),
+            "reviewer": StubModel(script=[DONE]),
+        },
+    )
+    orchestrator._tier_models[ModelTier.HAIKU] = cheaper
+    checklist, owners = _tier_items()
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path),
+        title="Tier test",
+        description="route the implementer",
+        checklist=checklist,
+        checks=[PASS],
+        ownership=owners,
+    )
+    assert summary.completed
+    assert cheaper.calls > 0 and configured.calls == 0  # only the cheaper tier ran
+    trace = [json.loads(line) for line in summary.trace_jsonl.splitlines() if line.strip()]
+    tier_events = [
+        e["data"]
+        for e in trace
+        if e["kind"] == "system_one" and e["data"].get("use") == "model_tier"
+    ]
+    assert [(e["item_id"], e["action"], e["answer"], e["threshold"]) for e in tier_events] == [
+        ("01", "downgrade", "small", 0.9),
+        ("02", "downgrade", "small", 0.9),
+    ]
+    committed = _events(tmp_path, "system_one")
+    assert len(committed) == 2  # committed with the wave, not just traced
+
+
+@pytest.mark.asyncio
+async def test_tiering_off_never_asks_and_uses_the_configured_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stub = _difficulty("small", 0.95)
+    monkeypatch.setattr(orchestrator_module, "build_system_one", lambda settings, meter: stub)
+    configured = _TierImplementers("configured")
+    orchestrator = Orchestrator(
+        _settings(
+            sandbox="local",
+            allow_unsafe_local=True,
+            model_backend="claude",
+            anthropic_api_key="dummy",
+            system_one_backend="stub",
+        ),
+        research_per_item=0,
+        do_review=False,
+        models={
+            "implementer": configured,
+            "lead": StubModel(script=[DONE]),
+            "researcher": StubModel(script=[DONE]),
+            "reviewer": StubModel(script=[DONE]),
+        },
+    )
+    checklist, owners = _tier_items()
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path),
+        title="Tier off",
+        description="no routing",
+        checklist=checklist,
+        checks=[PASS],
+        ownership=owners,
+    )
+    assert summary.completed
+    assert configured.calls > 0 and stub.calls == []
+    assert _events(tmp_path, "system_one") == []

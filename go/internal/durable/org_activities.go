@@ -467,15 +467,51 @@ func (a *Activities) RunImplementer(ctx context.Context, inp ImplementerInput) (
 	focused := snapshot
 	focusedItem := *item
 	focused.ActiveItem = &focusedItem
+	// Difficulty-based tiering (off by default): ask how hard the item is and, on a confident
+	// "small", build the next cheaper tier's model for THIS item (never a stronger one). The
+	// System One model is metered with the attempt and closed with it; every answer -- a "large"
+	// one, a below-threshold one or a failed call -- is recorded as a system_one event.
+	var tierScreen *systemone.TierScreen
+	var tierVerdict *systemone.TierVerdict
+	if settings.SystemOneTiering && settings.ModelBackend == "claude" {
+		systemOne := a.SystemOne
+		if systemOne == nil {
+			if systemOne, err = systemone.Build(settings, meter); err != nil {
+				return ImplementerOutput{}, configError(fmt.Sprintf("cannot build the System One model: %v", err), err)
+			}
+			defer func() { _ = systemone.Close(systemOne) }()
+		}
+		tierScreen = systemone.BuildTierScreen(settings, systemOne)
+		if tierScreen != nil {
+			v := tierScreen.Assess(ctx, item.Description, item.Witnesses)
+			tierVerdict = &v
+		}
+	}
 	inner, err := roleModel(a.ImplementerModel, "implementer", settings, focused)
 	if err != nil {
 		return ImplementerOutput{}, configError(fmt.Sprintf("cannot build the model: %v", err), err)
 	}
 	closeModel := func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
+	if tierVerdict != nil && tierVerdict.Tier != "" {
+		closeModel()
+		if a.tierModel != nil {
+			inner, err = a.tierModel(settings, focused)
+		} else {
+			inner, err = agents.ModelForTier(tierVerdict.Tier, settings, nil)
+		}
+		if err != nil {
+			return ImplementerOutput{}, configError(fmt.Sprintf("cannot build the model: %v", err), err)
+		}
+		closeModel = func() { _ = agent.CloseProvider(context.WithoutCancel(ctx), inner) }
+	}
 	detach, recorder, err := a.attachLedger(ctx, settings, inp.Workdir, inp.MissionID, meter, "impl")
 	if err != nil {
 		closeModel()
 		return ImplementerOutput{}, err
+	}
+	if tierVerdict != nil {
+		payload := tierVerdict.Payload(item.ID, tierScreen.Threshold)
+		recorder.Record("system_one", inp.MissionID, inp.CycleID, org.PayloadFields(payload)...)
 	}
 	gate := NewDeferredApprovalGate(approvedFingerprints(inp.ApprovedActions))
 	run := org.NewImplementerRun(*item, inp.CycleID, ownership, settings.MaxTurnsPerCycle, checkNames(checks))

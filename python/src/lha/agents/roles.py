@@ -87,3 +87,13 @@ _CLAUDE_BY_TIER: dict[ModelTier, str] = {
 def claude_model_for(tier: ModelTier) -> str:
     """Map a role's model tier to a concrete Claude model id."""
     return _CLAUDE_BY_TIER[tier]
+
+
+#: The tiers from strongest to cheapest; a "cheaper" tier is the next one down.
+_TIER_ORDER: tuple[ModelTier, ...] = (ModelTier.OPUS, ModelTier.SONNET, ModelTier.HAIKU)
+
+
+def cheaper_tier(tier: ModelTier) -> ModelTier | None:
+    """The next cheaper tier, or ``None`` when ``tier`` is already the cheapest."""
+    index = _TIER_ORDER.index(tier)
+    return _TIER_ORDER[index + 1] if index + 1 < len(_TIER_ORDER) else None

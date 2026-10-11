@@ -7,7 +7,12 @@ from lha.contracts.system_one import SystemOneModel
 from lha.governor.metering import CostMeter
 from lha.safety.egress import EgressDenied, parse_url
 from lha.systemone.client import SystemOneClient, default_price_in_per_mtok, is_local_endpoint
-from lha.systemone.screen import CommandSecondOpinion, ReviewScreen, UntrustedContentScreen
+from lha.systemone.screen import (
+    CommandSecondOpinion,
+    ReviewScreen,
+    TierScreen,
+    UntrustedContentScreen,
+)
 from lha.systemone.stub import StubSystemOne
 from lha.systemone.triage import StallTriage
 
@@ -105,6 +110,19 @@ def build_untrusted_screen(
     if model is None or not settings.system_one_untrusted:
         return None
     return UntrustedContentScreen(model, threshold=settings.system_one_untrusted_threshold)
+
+
+def build_tier_screen(settings: Settings, model: SystemOneModel | None) -> TierScreen | None:
+    """The difficulty-based tier screen over ``model`` when it applies.
+
+    Off by default and only meaningful for the ``claude`` backend, where roles have tiers: it needs
+    a System One backend, ``system_one_tiering`` and ``model_backend=claude``. It can only make LHA
+    cheaper (a confident ``small`` routes the implementer to the next cheaper tier, never a
+    stronger one), and its threshold is unmeasured.
+    """
+    if model is None or not settings.system_one_tiering or settings.model_backend != "claude":
+        return None
+    return TierScreen(model, threshold=settings.system_one_tiering_threshold)
 
 
 async def close_system_one(model: SystemOneModel | None) -> None:

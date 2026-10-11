@@ -7,7 +7,7 @@ rate on ordered levels (`score`). It returns a probability for every possible an
 hosted one. **Kev** is an Apache-2.0 open-weights family that serves the same
 `POST /v1/systemone` API, so LHA talks to both with one client.
 
-LHA uses these answers for exactly five things, and only in ways that make it more cautious or
+LHA uses these answers for exactly six things, and only in ways that make it more cautious or
 cheaper:
 
 | Use | What is asked | What a confident answer changes |
@@ -16,6 +16,7 @@ cheaper:
 | **Pre-review screen** (`LHA_SYSTEM_ONE_REVIEW`) | on a verified diff: *does it contain a blocking defect, or is it sound?* | `block`: one more finding, so the diff gets the full review |
 | **Command second opinion** (`LHA_SYSTEM_ONE_COMMANDS`) | on a `run_command` the classifier allowed: *is it routine or dangerous?* | `dangerous`: the call is gated exactly as an irreversible command is — the human gate, or denied when there is none |
 | **Untrusted-content screen** (`LHA_SYSTEM_ONE_UNTRUSTED`) | on a successful `fetch_url` / `web_search` result: *does it carry instructions aimed at the agent?* | `instructions`: a warning is prepended to the content the model sees (the call is never blocked) |
+| **Difficulty-based tier routing** (`LHA_SYSTEM_ONE_TIERING`) | on an item, before an implementer runs: *is it a small, well-understood change or a large one?* | `small`: the implementer runs on the next cheaper model tier — never a stronger one |
 | **Memory reranking** (`LHA_MEMORY_RERANK=system_one`) | per recalled passage: *does it help with this task?* | recalled memory is reordered, and passages below `LHA_SYSTEM_ONE_RERANK_MIN` dropped |
 
 A System One answer never allows a command, never answers a human gate and never marks an item
@@ -30,7 +31,9 @@ call changes nothing. The command second opinion is not part of the sweep either
 can only ever add gating — never allow a command the classifier denied — and a failed call changes
 nothing. The untrusted-content screen is not part of the sweep either, but its answer can only ever
 annotate fetched content the model already sees — never block a tool, allow an action or widen what
-the run may do — and a failed call changes nothing. When the
+the run may do — and a failed call changes nothing. The difficulty-based tier screen is not part of
+the sweep either, but its answer can only ever route an implementer to a cheaper model tier — never
+a stronger one — and a failed call changes nothing. When the
 model is down, slow, over budget or returns a malformed answer, LHA behaves exactly as it does
 with System One off.
 
@@ -52,7 +55,9 @@ but is not a security boundary:
 So LHA asks only questions where a wrong answer costs effort, not safety. The worst a wrong
 triage answer can do is split an item that did not need it, or send a human an item that one
 more attempt would have fixed. The parent's witnesses still gate the last child of a split, so a
-split never makes anything pass more easily.
+split never makes anything pass more easily. The worst a wrong difficulty answer can do is run an
+item on a cheaper model than it needed — it only ever moves DOWN a tier, never up, so it can never
+run an item on a stronger model than the operator configured.
 
 ## Choosing a backend
 
@@ -105,6 +110,8 @@ export LHA_MEMORY_RERANK=system_one
 | `LHA_SYSTEM_ONE_COMMANDS_THRESHOLD` | `0.9` | the confidence a `dangerous` needs before it gates a command |
 | `LHA_SYSTEM_ONE_UNTRUSTED` | `false` | the untrusted-content screen on fetched web content, when a backend is configured |
 | `LHA_SYSTEM_ONE_UNTRUSTED_THRESHOLD` | `0.9` | the confidence an `instructions` needs before it warns about fetched content |
+| `LHA_SYSTEM_ONE_TIERING` | `false` | difficulty-based tier routing, when a backend is configured AND `LHA_MODEL_BACKEND=claude` (only there do roles have tiers) |
+| `LHA_SYSTEM_ONE_TIERING_THRESHOLD` | `0.9` | the confidence a `small` needs before the implementer runs on the next cheaper tier |
 | `LHA_SYSTEM_ONE_RERANK_MIN` | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages whose relevance is below this |
 
 A configuration that cannot be used safely stops the run before it starts. That covers a
@@ -114,7 +121,8 @@ and does not retry.
 
 ## What leaves the machine
 
-A remote endpoint receives the task description, the item's witnesses, the last two failure
+A remote endpoint receives the task description, the item's witnesses (the triage question and the
+difficulty question both use them), the last two failure
 reports (their final 3,000 characters) and, with reranking, up to 1,500 characters of each
 recalled passage; with the untrusted-content screen, it also receives the last 4,000 characters of
 a fetched web page or search result (already redacted and fenced as untrusted data). All of it goes
@@ -171,16 +179,24 @@ A confident `instructions` prepends one warning to the content the model sees �
 failed call, leaves the fetched content exactly as it was. The event records the answer, its
 confidence and the threshold, so a gold set can be built for it later.
 
+The difficulty-based tier screen records the same event shape with `use: "model_tier"` and
+`action: "downgrade"` or `"continue"`, committed with the item's cycle (both run paths record it
+where their other `system_one` events go). A confident `small` runs the implementer on the next
+cheaper tier's model for that item; a `large` answer, a below-threshold answer, a failed call or an
+implementer already on the cheapest tier leaves the configured implementer model in place. Nothing
+else changes: the reviewer, lead and researcher tiers are untouched.
+
 ## Go
 
 The Go implementation has the same settings, client, triage, pre-review screen, command second
-opinion, untrusted-content screen, reranker and questions, checked against the same cases
+opinion, untrusted-content screen, difficulty-based tier routing, reranker and questions, checked
+against the same cases
 (`spec/systemone/wire.json`):
 request bodies
 (including option order, which can change a model's answer), strict answer parsing, the confidence
 formulas, the triage question, state and action table, the pre-review question, state and screen,
 the command question, state and second opinion, the untrusted-content question, state and warning,
-reranking, and endpoint prices. In Go,
+the difficulty question, state and tier, reranking, and endpoint prices. In Go,
 `LHA_MEMORY_RERANK=system_one` is the one reranker that
 actually reranks (Go has no cross-encoder).
 
@@ -334,17 +350,36 @@ Its threshold is unmeasured, and there is **no gold set for it yet** — the `sy
 records the answer, its confidence and the threshold so one can be built (and fitted) later. Until
 then it stays off, and its answer only ever annotates the content the model reads.
 
+## Difficulty-based model-tier routing
+
+Difficulty-based tier routing is built and **off by default**: with a System One backend configured
+AND the `claude` backend (only there do roles have tiers), `LHA_SYSTEM_ONE_TIERING=true` asks the
+difficulty question ([`lha.systemone.tiering`](../python/src/lha/systemone/tiering.py)) about an
+item before its implementer runs and, on a confident `small` (`LHA_SYSTEM_ONE_TIERING_THRESHOLD`,
+default `0.9`), runs that item's implementer on the **next cheaper tier's** model
+(`claude-sonnet-4-6` → `claude-haiku-4-5-20251001`). It can only make LHA cheaper: it never moves
+an item to a stronger tier, and an implementer already on the cheapest tier (Haiku) has no cheaper
+tier to move to, so nothing changes. The reviewer, lead and researcher tiers are untouched.
+
+It is the one System One use that needs the `claude` backend, because only there do roles have
+tiers ([13-models.md](13-models.md#per-role-routing-lha-orchestrate)). Both run paths consult it:
+`lha orchestrate` builds the cheaper-tier implementer model once and selects it per item, and the
+durable `run_implementer` activity builds the cheaper-tier model for the item it is working. Every
+answer — including a failed call — is committed as a `system_one` event (`use: "model_tier"`,
+`action: "downgrade"` or `"continue"`).
+
+Its threshold is unmeasured. The `system_one` event records the answer, its confidence and the
+threshold, so a threshold can be fitted on real missions before it is trusted (the same labels and
+gold sets the other uses wait on). Until then it stays off, and its answer only ever moves an
+implementer down a tier.
+
 ## Not built yet
 
-This use was considered and left for later, because it needs thresholds measured on real LHA
-missions first:
-
-- choosing the implementer's model tier by the item's difficulty.
-
-The labels for fitting those thresholds already exist and [`lha labels export`](#labels) writes
-them; the [gold sets](#gold-evaluation-sets) and `lha eval` score any such judge offline, and the
-model-backed judge (`--judge system_one`) is built. The use above still waits on thresholds
-measured on real missions before it acts in a run. See [the roadmap](23-roadmap.md).
+Nothing. Every use docs/25 names is now built, each off by default until its threshold is measured
+on real missions. The labels for fitting those thresholds already exist and
+[`lha labels export`](#labels) writes them; the [gold sets](#gold-evaluation-sets) and `lha eval`
+score any such judge offline, and the model-backed judge (`--judge system_one`) is built. See
+[the roadmap](23-roadmap.md).
 
 ## Sources
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import httpx
 
-from lha.agents.roles import ROLES, claude_model_for
+from lha.agents.roles import ROLES, ModelTier, claude_model_for
 from lha.config import Settings, get_settings
 from lha.contracts.model import ModelProvider
 from lha.model import build_provider
@@ -29,4 +29,21 @@ def model_for_role(
     role = ROLES.get(role_name)
     if settings.model_backend == "claude" and role is not None:
         return build_provider(settings, model_name=claude_model_for(role.tier), client=client)
+    return build_provider(settings, client=client)
+
+
+def model_for_tier(
+    tier: ModelTier,
+    settings: Settings | None = None,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> ModelProvider:
+    """Return a model for ``tier`` (Claude backend) or the default model.
+
+    Like ``model_for_role``, but taking a tier directly: difficulty-based tiering builds the
+    implementer's next cheaper tier this way.
+    """
+    settings = settings or get_settings()
+    if settings.model_backend == "claude":
+        return build_provider(settings, model_name=claude_model_for(tier), client=client)
     return build_provider(settings, client=client)

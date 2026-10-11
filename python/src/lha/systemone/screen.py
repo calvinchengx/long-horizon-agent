@@ -15,11 +15,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from lha.agents.roles import ROLES, ModelTier, cheaper_tier
 from lha.contracts.system_one import ChoiceAnswer, SystemOneError, SystemOneModel
 from lha.systemone.commands import QUESTION as COMMAND_QUESTION
 from lha.systemone.commands import QUESTION_ID as COMMAND_QUESTION_ID
 from lha.systemone.commands import command_state
 from lha.systemone.review import QUESTION, QUESTION_ID, review_state
+from lha.systemone.tiering import QUESTION as TIER_QUESTION
+from lha.systemone.tiering import QUESTION_ID as TIER_QUESTION_ID
+from lha.systemone.tiering import tiering_state
 from lha.systemone.untrusted import QUESTION as UNTRUSTED_QUESTION
 from lha.systemone.untrusted import QUESTION_ID as UNTRUSTED_QUESTION_ID
 from lha.systemone.untrusted import untrusted_state
@@ -32,10 +36,13 @@ USE = "pre_review"
 COMMAND_USE = "command_second_opinion"
 #: The ``use`` the untrusted-content screen writes into its ``system_one`` event.
 UNTRUSTED_USE = "untrusted_content"
+#: The ``use`` the difficulty-based model-tier screen writes into its ``system_one`` event.
+TIER_USE = "model_tier"
 
 ScreenAction = Literal["continue", "block"]
 CommandAction = Literal["continue", "gate"]
 UntrustedAction = Literal["continue", "flag"]
+TierAction = Literal["continue", "downgrade"]
 
 
 @dataclass
@@ -245,3 +252,81 @@ class UntrustedContentScreen:
     async def warning(self, source: str, content: str) -> str | None:
         """The warning a confident ``instructions`` gives, or ``None``."""
         return (await self.assess(source, content)).warning()
+
+
+@dataclass
+class TierVerdict:
+    """The model's answer about one item's difficulty and the tier it selects."""
+
+    action: TierAction = "continue"
+    answer: str = ""
+    confidence: float = 0.0
+    probabilities: dict[str, float] = field(default_factory=dict)
+    model: str = ""
+    error: str = ""
+    tier: ModelTier | None = None
+
+    def payload(self, item_id: str, threshold: float) -> dict[str, object]:
+        """The ``system_one`` event recorded with the item (the shape the other screens record)."""
+        return {
+            "use": TIER_USE,
+            "item_id": item_id,
+            "model": self.model,
+            "answer": self.answer,
+            "confidence": self.confidence,
+            "probabilities": dict(self.probabilities),
+            "threshold": threshold,
+            "action": self.action,
+            "error": self.error,
+        }
+
+
+class TierScreen:
+    """Asks ``model`` how hard an item is, and selects the next cheaper tier only when confident.
+
+    It can only make LHA cheaper: a confident ``small`` returns the tier below the implementer's
+    configured tier (``tier``, default the implementer role's) and never a stronger one; a
+    ``large`` answer, a below-threshold answer, a failed call or an implementer already on the
+    cheapest tier returns ``None`` (the configured model stays). Off by default; only meaningful
+    for the ``claude`` backend.
+    """
+
+    def __init__(
+        self,
+        model: SystemOneModel,
+        *,
+        threshold: float = 0.9,
+        tier: ModelTier | None = None,
+    ) -> None:
+        self.model = model
+        self.threshold = threshold
+        self.tier = ROLES["implementer"].tier if tier is None else tier
+
+    async def assess(self, description: str, witnesses: list[str]) -> TierVerdict:
+        """The model's answer for the item (a failure changes nothing)."""
+        state = tiering_state(description, witnesses)
+        try:
+            result = await self.model.evaluate(state, {TIER_QUESTION_ID: TIER_QUESTION})
+        except SystemOneError as exc:
+            return TierVerdict(error=str(exc))
+        answer = result.answers[TIER_QUESTION_ID]
+        if not isinstance(answer, ChoiceAnswer):  # parse_response guarantees it; be explicit
+            return TierVerdict(error="the answer is not a choice")
+        next_tier = cheaper_tier(self.tier)
+        downgrade = (
+            answer.choice == "small"
+            and answer.confidence >= self.threshold
+            and next_tier is not None
+        )
+        return TierVerdict(
+            action="downgrade" if downgrade else "continue",
+            answer=answer.choice,
+            confidence=answer.confidence,
+            probabilities=dict(answer.probabilities),
+            model=result.model,
+            tier=next_tier if downgrade else None,
+        )
+
+    async def cheaper_tier(self, description: str, witnesses: list[str]) -> ModelTier | None:
+        """The next cheaper tier a confident ``small`` selects, or ``None``."""
+        return (await self.assess(description, witnesses)).tier

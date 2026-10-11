@@ -95,6 +95,8 @@ func TestNewFieldDefaults(t *testing.T) {
 		"SystemOneCommandsThreshold":  {s.SystemOneCommandsThreshold, 0.9},
 		"SystemOneUntrusted":          {s.SystemOneUntrusted, false},
 		"SystemOneUntrustedThreshold": {s.SystemOneUntrustedThreshold, 0.9},
+		"SystemOneTiering":            {s.SystemOneTiering, false},
+		"SystemOneTieringThreshold":   {s.SystemOneTieringThreshold, 0.9},
 		"SystemOneRerankMin":          {s.SystemOneRerankMin, 0.0},
 	}
 	for name, c := range checks {
@@ -114,7 +116,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 124 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 126 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }

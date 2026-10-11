@@ -35,6 +35,39 @@ func TestModelForRoleRoutesTiersOnClaudeOnly(t *testing.T) {
 	}
 }
 
+func TestCheaperTierAndModelForTierMapTheClaudeTiers(t *testing.T) {
+	for _, c := range []struct {
+		tier ModelTier
+		want ModelTier
+		ok   bool
+	}{
+		{TierOpus, TierSonnet, true},
+		{TierSonnet, TierHaiku, true},
+		{TierHaiku, "", false},
+	} {
+		if got, ok := CheaperTier(c.tier); got != c.want || ok != c.ok {
+			t.Errorf("CheaperTier(%q) = %q, %v; want %q, %v", c.tier, got, ok, c.want, c.ok)
+		}
+	}
+	claude, err := config.LoadFrom([]string{"LHA_MODEL_BACKEND=claude", "LHA_ANTHROPIC_API_KEY=k"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for tier, want := range map[ModelTier]string{
+		TierSonnet: "claude-sonnet-4-6", TierHaiku: "claude-haiku-4-5-20251001",
+	} {
+		p, err := ModelForTier(tier, claude, nil)
+		if err != nil || p.(*model.ClaudeModel).Name() != "claude:"+want {
+			t.Errorf("ModelForTier(%q): %v %v", tier, p, err)
+		}
+	}
+	stub, _ := config.LoadFrom([]string{"LHA_MODEL_BACKEND=stub"}, "")
+	p, err := ModelForTier(TierHaiku, stub, nil)
+	if err != nil || p.Name() != "stub:"+stub.ModelName {
+		t.Fatalf("non-claude: %v %v", p, err)
+	}
+}
+
 type fixed struct{ *model.StubModel }
 
 func TestReflectOnFailureCapsTheText(t *testing.T) {
