@@ -543,6 +543,49 @@ async def test_review_is_exactly_once_and_repeated_blocks_block_the_item(tmp_pat
     assert [r["payload"]["blocked"] for r in _events(work, "review")] == [False, False, True]  # type: ignore[index]
 
 
+@pytest.mark.asyncio
+async def test_the_model_screen_adds_a_finding_on_the_durable_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import lha.durable.org_activities as org_module
+    from lha.contracts.system_one import ChoiceAnswer
+    from lha.systemone import StubSystemOne
+    from lha.systemone.review import QUESTION_ID
+
+    work = tmp_path / "w"
+    await init_org_mission(work, 1, owned=False)
+    anchor = GitMissionAnchor(work)
+    checklist = await anchor.read_checklist()
+    checklist.record_success("01", ["check"])
+    (work / "f.txt").write_text("x")
+    head = await anchor.commit_checkpoint(
+        Checkpoint(cycle_id="c1", progress_summary="- c1", checklist=checklist)
+    )
+    stub = StubSystemOne(
+        lambda state, questions: {
+            QUESTION_ID: ChoiceAnswer(
+                choice="block", probabilities={"block": 0.95, "approve": 0.05}, confidence=0.95
+            )
+        }
+    )
+    monkeypatch.setattr(org_module, "build_system_one", lambda settings, meter: stub)
+    settings = SETTINGS.model_copy(update={"system_one_review": True})
+    review = ReviewInput(
+        mission_id="m", workdir=str(work), cycle_id="c1", item_id="01", head_sha=head
+    )
+    result = await _review_cycle(review, settings=settings, model_factory=_reviewers([_APPROVE]))
+    assert result.advanced
+    [screen] = _events(work, "review_screen")
+    assert screen["payload"]["findings"] == ["system_one: block (confidence 0.95)"]  # type: ignore[index]
+    [event] = _events(work, "system_one")
+    payload = event["payload"]
+    assert isinstance(payload, dict)
+    assert payload["use"] == "pre_review" and payload["action"] == "block"
+    assert (
+        payload["item_id"] == "01" and payload["threshold"] == 0.9 and payload["answer"] == "block"
+    )
+
+
 #: The wave below: each implementer sets its event once running; "01" acknowledges the cancel,
 #: "02" finishes normally anyway. Both write RUNNING to the row while finishing.
 _abort_wave: dict[str, asyncio.Event] = {}

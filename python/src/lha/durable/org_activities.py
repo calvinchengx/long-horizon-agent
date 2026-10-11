@@ -113,6 +113,7 @@ from lha.persistence.store import MissionStore, StoreUnavailableError, open_stor
 from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
+from lha.systemone.build import build_review_screen, build_system_one, close_system_one
 from lha.verify.review_screen import review_screen_event, screen_criteria, screen_diff
 
 REVIEW_EVENT = _REVIEW_EVENT
@@ -768,21 +769,44 @@ async def _review_cycle(
             ),
         )
         try:
+            system_one = build_system_one(settings, meter)
+        except ValueError as exc:  # e.g. a remote System One endpoint without a key
+            raise _config_error(f"cannot build the System One model: {exc}", exc) from exc
+        review_screen = build_review_screen(settings, system_one)
+        try:
             model = meter.wrap(factory(settings, snapshot), role="reviewer")
             tools = build_run_dispatcher(settings, allow_mutating=False, allow_egress=False)
         except ValueError as exc:
+            await close_system_one(system_one)
             raise _config_error(f"cannot assemble the reviewer: {exc}", exc) from exc
         try:
             session = await open_lead_sandbox(settings, inp.workdir)
         except (UnsafeSandboxError, ValueError) as exc:
             await model.aclose()
+            await close_system_one(system_one)
             raise _config_error(f"cannot open the sandbox: {exc}", exc) from exc
         try:
             persisted = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "review")
         except BaseException:
             await session.close()
             await model.aclose()
+            await close_system_one(system_one)
             raise
+        # The model-backed screen (off by default) can only add to the deterministic findings: a
+        # confident ``block`` is one more reason for the full review, recorded as a ``system_one``
+        # event committed with the ``review_screen`` event below.
+        system_one_event: EventRecord | None = None
+        if review_screen is not None:
+            verdict = await review_screen.assess(diff, item.description)
+            if verdict.asked:
+                payload = verdict.payload(inp.item_id, review_screen.threshold)
+                persisted.recorder.record(
+                    "system_one", mission_id=inp.mission_id, cycle_id=review_id, **payload
+                )
+                system_one_event = EventRecord(
+                    kind="system_one", cycle_id=review_id, payload=payload
+                )
+                findings = findings + verdict.findings()
         try:
             review = await _with_heartbeat(
                 Reviewer(model, tools, recorder=persisted.recorder).review(
@@ -799,6 +823,7 @@ async def _review_cycle(
             try:
                 await session.close()
                 await model.aclose()
+                await close_system_one(system_one)
                 await asyncio.to_thread(
                     record_spend,
                     inp.workdir,
@@ -823,6 +848,7 @@ async def _review_cycle(
                     review_screen_event(
                         inp.item_id, base, inp.head_sha, findings, forced=False, cycle_id=review_id
                     ),
+                    *([system_one_event] if system_one_event is not None else []),
                     *(
                         [board_event(f"reviewer:{inp.item_id}", review.notes(), review_id)]
                         if review.blocking

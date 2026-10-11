@@ -74,6 +74,15 @@ func BuildStallTriage(s *config.Settings, m Model) *StallTriage {
 	return &StallTriage{Model: m, Threshold: s.SystemOneTriageThreshold, MinFailures: s.SystemOneTriageMinFailures}
 }
 
+// BuildReviewScreen is the model-backed pre-review screen over m when it is configured and
+// system_one_review is on (off by default).
+func BuildReviewScreen(s *config.Settings, m Model) *ReviewScreen {
+	if m == nil || !s.SystemOneReview {
+		return nil
+	}
+	return &ReviewScreen{Model: m, Threshold: s.SystemOneReviewThreshold}
+}
+
 // Close closes m when it holds resources.
 func Close(m Model) error {
 	if c, ok := m.(interface{ Close() error }); ok {

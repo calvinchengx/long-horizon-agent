@@ -43,8 +43,10 @@ from lha.model.stub import StubModel
 from lha.obs.events import TraceRecorder
 from lha.state.mission_anchor import GitMissionAnchor
 from lha.systemone import StallTriage, StubSystemOne, SystemOneClient, build_system_one
-from lha.systemone.build import build_stall_triage
+from lha.systemone.build import build_review_screen, build_stall_triage
 from lha.systemone.client import TYPESAFE_ENDPOINT, default_price_in_per_mtok
+from lha.systemone.review import QUESTION_ID as REVIEW_QUESTION_ID
+from lha.systemone.screen import ReviewScreen
 from lha.systemone.stub import choice_answer
 from lha.systemone.triage import QUESTION_ID, triage_action, triage_state
 from lha.systemone.wire import (
@@ -522,6 +524,80 @@ def test_the_lead_loop_gets_triage_only_when_configured(tmp_path: Path) -> None:
     )
     assert isinstance(on._triage, StallTriage) and off._triage is None
     assert build_stall_triage(_settings(), None) is None
+
+
+# --- the model-backed pre-review screen -------------------------------------------------------
+
+_DIFF = "--- a/src/x.py\n+++ b/src/x.py\n@@\n-x = 1\n+x = 2\n"
+
+
+def _soundness(answer: str, confidence: float) -> StubSystemOne:
+    probs = {answer: confidence, "other": round(1 - confidence, 4)}
+    return StubSystemOne(
+        lambda state, questions: {
+            REVIEW_QUESTION_ID: ChoiceAnswer(
+                choice=answer, probabilities=probs, confidence=confidence
+            )
+        }
+    )
+
+
+async def test_a_confident_block_adds_the_finding_and_payload() -> None:
+    stub = _soundness("block", 0.95)
+    screen = ReviewScreen(stub)
+    assert await screen.findings(_DIFF, "do the task") == ["system_one: block (confidence 0.95)"]
+    verdict = await screen.assess(_DIFF, "do the task")
+    assert verdict.action == "block" and verdict.answer == "block"
+    assert verdict.payload("01", 0.9) == {
+        "use": "pre_review",
+        "item_id": "01",
+        "model": "stub-1",
+        "answer": "block",
+        "confidence": 0.95,
+        "probabilities": {"block": 0.95, "other": 0.05},
+        "threshold": 0.9,
+        "action": "block",
+        "error": "",
+    }
+
+
+async def test_an_approve_or_a_low_confidence_adds_nothing() -> None:
+    for answer, confidence in [("approve", 0.99), ("block", 0.5)]:
+        stub = _soundness(answer, confidence)
+        screen = ReviewScreen(stub)
+        assert await screen.findings(_DIFF, "do the task") == []
+        verdict = await screen.assess(_DIFF, "do the task")
+        assert verdict.action == "continue" and verdict.asked and not verdict.error
+
+
+async def test_a_threshold_above_the_confidence_adds_nothing() -> None:
+    stub = _soundness("block", 0.95)
+    screen = ReviewScreen(stub, threshold=0.99)
+    assert await screen.findings(_DIFF, "do the task") == []
+
+
+async def test_a_failed_call_adds_nothing_and_records_the_error() -> None:
+    stub = StubSystemOne(error="system one call failed: timeout")
+    screen = ReviewScreen(stub)
+    assert await screen.findings(_DIFF, "do the task") == []
+    verdict = await screen.assess(_DIFF, "do the task")
+    assert verdict.action == "continue" and verdict.asked and "timeout" in verdict.error
+
+
+async def test_an_empty_diff_is_not_asked() -> None:
+    stub = _soundness("block", 0.99)
+    screen = ReviewScreen(stub)
+    assert await screen.findings("", "do the task") == []
+    assert stub.calls == []
+    verdict = await screen.assess("", "do the task")
+    assert not verdict.asked and verdict.action == "continue"
+
+
+def test_the_screen_is_built_only_when_enabled_and_configured() -> None:
+    stub = StubSystemOne()
+    assert build_review_screen(_settings(system_one_review=True), stub) is not None
+    assert build_review_screen(_settings(), stub) is None
+    assert build_review_screen(_settings(system_one_review=True), None) is None
 
 
 # --- reranking --------------------------------------------------------------------------------

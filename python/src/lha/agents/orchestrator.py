@@ -114,7 +114,8 @@ from lha.obs.redact import redact_text
 from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, MISSION_FILE, GitMissionAnchor
-from lha.systemone.build import build_system_one
+from lha.systemone.build import build_review_screen, build_system_one
+from lha.systemone.screen import ReviewScreen
 from lha.verify.review_screen import review_screen_event, screen_criteria, screen_diff
 from lha.verify.verifier import default_python_checks
 
@@ -257,6 +258,7 @@ class _MissionRun:
         self.mission_id = new_id("mission")
         self.board = Blackboard()
         self.reflections: dict[str, str] = {}
+        self.review_screen: ReviewScreen | None = None
         self.cycles = 0
         # Cycle ids continue after the last committed one when a run is resumed.
         self.cycle_offset = 0
@@ -267,6 +269,9 @@ class _MissionRun:
     def _cycle_id(self, n: int) -> str:
         """The id of this invocation's ``n``-th cycle (1-based)."""
         return f"c{self.cycle_offset + n}"
+
+    def _emit(self, kind: str, cycle_id: str, **data: object) -> None:
+        self.recorder.record(kind, mission_id=self.mission_id, cycle_id=cycle_id, **data)
 
     # --- the mission loop --------------------------------------------------------------
     async def execute(
@@ -341,6 +346,7 @@ class _MissionRun:
             )
             stack.push_async_callback(self.services.close)
             await self.services.tracker.running()
+            self.review_screen = build_review_screen(settings, self.services.system_one)
             if self.hitl_gate is not None:
                 bind_gate_store(self.hitl_gate, self.services.store)
             # The Lead writes through an ownership guard: unassigned space, shared files and the
@@ -694,6 +700,18 @@ class _MissionRun:
         # they force the review when the organization would have skipped it (--no-review). It
         # never approves anything itself.
         findings = screen_diff(diff)
+        # The model-backed screen (off by default) can only add to those findings: a confident
+        # ``block`` is one more reason for the full review, recorded as a ``system_one`` event
+        # alongside the ``review_screen`` event so the anchor carries both.
+        if self.review_screen is not None:
+            verdict = await self.review_screen.assess(diff, item.description)
+            if verdict.asked:
+                payload = verdict.payload(item.id, self.review_screen.threshold)
+                self._emit("system_one", cycle_id, **payload)
+                await self.anchor.append_event(
+                    EventRecord(kind="system_one", cycle_id=cycle_id, payload=payload)
+                )
+                findings = findings + verdict.findings()
         forced = bool(findings) and not self.org._do_review
         self.recorder.record(
             "review_screen",

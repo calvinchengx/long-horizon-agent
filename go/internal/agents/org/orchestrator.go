@@ -103,6 +103,9 @@ type OrchestratorOptions struct {
 	MaxParallel *int
 	// Services opens the run's persistence (nil => DefaultServices).
 	Services ServicesOpener
+	// SystemOne replaces the System One model built from settings (nil => systemone.Build); the
+	// caller owns it and must close it. Tests inject a scripted model here.
+	SystemOne systemone.Model
 }
 
 // DefaultOrchestratorOptions are the Python defaults (research_per_item=2, do_review=True).
@@ -239,6 +242,7 @@ type missionRun struct {
 	leadGuard        *coordination.OwnershipGuard
 	lead             *agent.AgentLoop
 	reviewer         *Reviewer
+	reviewScreen     *systemone.ReviewScreen
 	integrator       *BranchIntegrator
 	leases           *coordination.LeaseBroker
 	tctx             contracts.ToolContext
@@ -248,6 +252,16 @@ func (r *missionRun) cycleID(n int) string { return "c" + strconv.Itoa(r.cycleOf
 
 func (r *missionRun) record(kind string, data ...obs.Field) {
 	r.recorder.Record(kind, r.missionID, "", data...)
+}
+
+// PayloadFields is an event payload as trace fields, in the payload's (Python's) key order.
+func PayloadFields(payload *contracts.OrderedMap) []obs.Field {
+	fields := []obs.Field{}
+	payload.Range(func(k string, v any) bool {
+		fields = append(fields, obs.F(k, v))
+		return true
+	})
+	return fields
 }
 
 func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.MissionSummary, error) {
@@ -326,11 +340,13 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	if opener == nil {
 		opener = DefaultServices
 	}
-	systemOne, err := systemone.Build(settings, meter)
-	if err != nil {
-		return agent.MissionSummary{}, err
+	systemOne := r.org.opts.SystemOne
+	if systemOne == nil {
+		if systemOne, err = systemone.Build(settings, meter); err != nil {
+			return agent.MissionSummary{}, err
+		}
+		defer func() { _ = systemone.Close(systemOne) }()
 	}
-	defer func() { _ = systemone.Close(systemOne) }()
 	services, err := opener(ctx, ServicesRequest{
 		Settings: settings, MissionID: r.missionID, Workdir: r.workdir, Meter: meter,
 		Title: title, Description: description, Model: meter.Wrap(raw["lead"], "librarian"),
@@ -355,6 +371,7 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	}
 	r.lead.SetMemory(services.Memory())
 	r.lead.SetTriage(systemone.BuildStallTriage(settings, systemOne))
+	r.reviewScreen = systemone.BuildReviewScreen(settings, systemOne)
 	r.reviewer = NewReviewer(r.reviewModel, r.readTools)
 	// Integration is gated exactly like a Lead cycle would be for the same item: the mission
 	// checks plus the item's witnesses, on the lead verifier.
@@ -797,6 +814,20 @@ func (r *missionRun) review(ctx context.Context, item contracts.ChecklistItem, c
 	// force the review when the organization would have skipped it (--no-review). It never
 	// approves anything itself.
 	findings := verify.ScreenDiff(diff)
+	// The model-backed screen (off by default) can only add to those findings: a confident
+	// ``block`` is one more reason for the full review, recorded as a ``system_one`` event
+	// alongside the ``review_screen`` event so the anchor carries both.
+	if r.reviewScreen != nil {
+		verdict := r.reviewScreen.Assess(ctx, diff, item.Description)
+		if verdict.Asked {
+			payload := verdict.Payload(item.ID, r.reviewScreen.Threshold)
+			r.record("system_one", PayloadFields(payload)...)
+			if err := r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: systemone.SystemOneEvent, CycleID: cycleID, Payload: payload}); err != nil {
+				return "", err
+			}
+			findings = append(findings, verdict.Findings()...)
+		}
+	}
 	forced := len(findings) > 0 && !r.org.opts.DoReview
 	r.record("review_screen", obs.F("item", item.ID), obs.F("findings", len(findings)), obs.F("forced", forced))
 	if err := r.anchor.AppendEvent(ctx, verify.ReviewScreenEventRecord(item.ID, base, head, findings, forced, cycleID)); err != nil {

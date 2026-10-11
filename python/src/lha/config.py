@@ -342,6 +342,11 @@ class Settings(BaseSettings):
     system_one_triage: bool = True
     system_one_triage_threshold: float = Field(default=0.9, ge=0, le=1)
     system_one_triage_min_failures: int = Field(default=2, ge=1)
+    # Model-backed pre-review screen: off by default; a confident "block" adds one finding so the
+    # diff gets the full review, never an approval. Its threshold is unmeasured until the
+    # ``--judge system_one`` scorecard says what it should be.
+    system_one_review: bool = False
+    system_one_review_threshold: float = Field(default=0.9, ge=0, le=1)
     # ``memory_rerank=system_one``: drop passages whose relevance probability is below this.
     system_one_rerank_min: float = Field(default=0.0, ge=0, le=1)
 

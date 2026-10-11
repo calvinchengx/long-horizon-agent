@@ -26,6 +26,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/persistence"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/pyfmt"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -944,11 +945,18 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 	base = org.ReviewBase(priorEvents, inp.ItemID, base)
 	diff := org.DiffSince(ctx, inp.Workdir, base, inp.HeadSHA)
 	findings := verify.ScreenDiff(diff) // weakened tests go to the reviewer as criteria
-	criteria = verify.ScreenCriteria(findings, criteria)
 	meter, err := BuildCycleMeter(ctx, settings, inp.Workdir, reviewID, inp.BudgetUSD, inp.MaxCycles)
 	if err != nil {
 		return CycleResult{}, err
 	}
+	systemOne := a.SystemOne
+	if systemOne == nil {
+		if systemOne, err = systemone.Build(settings, meter); err != nil {
+			return CycleResult{}, configError(fmt.Sprintf("cannot build the System One model: %v", err), err)
+		}
+		defer func() { _ = systemone.Close(systemOne) }()
+	}
+	reviewScreen := systemone.BuildReviewScreen(settings, systemOne)
 	inner, err := roleModel(a.ReviewerModel, "reviewer", settings, snapshot)
 	if err != nil {
 		return CycleResult{}, configError(fmt.Sprintf("cannot assemble the reviewer: %v", err), err)
@@ -974,6 +982,20 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		closeModel()
 		return CycleResult{}, err
 	}
+	// The model-backed screen (off by default) can only add to the deterministic findings: a
+	// confident block is one more reason for the full review, recorded as a system_one event
+	// committed with the review_screen event below.
+	systemOneEvents := []contracts.EventRecord{}
+	if reviewScreen != nil {
+		verdict := reviewScreen.Assess(ctx, diff, target.Description)
+		if verdict.Asked {
+			payload := verdict.Payload(inp.ItemID, reviewScreen.Threshold)
+			recorder.Record("system_one", inp.MissionID, reviewID, org.PayloadFields(payload)...)
+			systemOneEvents = append(systemOneEvents, contracts.EventRecord{Kind: systemone.SystemOneEvent, CycleID: reviewID, Payload: payload})
+			findings = append(findings, verdict.Findings()...)
+		}
+	}
+	criteria = verify.ScreenCriteria(findings, criteria)
 	review, err := func() (agents.ReviewResult, error) {
 		defer func() {
 			_ = session.Close(context.WithoutCancel(ctx))
@@ -1012,7 +1034,8 @@ func (a *Activities) reviewCycle(ctx context.Context, inp ReviewInput) (CycleRes
 		CycleID:         reviewID,
 		ProgressSummary: fmt.Sprintf("- %s review of [%s]: %s", reviewID, inp.ItemID, outcome),
 		Checklist:       checklist,
-		Events: append(append([]contracts.EventRecord{verify.ReviewScreenEventRecord(inp.ItemID, base, inp.HeadSHA, findings, false, reviewID)},
+		Events: append(append(append([]contracts.EventRecord{verify.ReviewScreenEventRecord(inp.ItemID, base, inp.HeadSHA, findings, false, reviewID)},
+			systemOneEvents...),
 			reviewBoardPost(inp.ItemID, review, reviewID)...), contracts.EventRecord{Kind: ReviewEvent, CycleID: reviewID, Payload: contracts.Payload(
 			"item_id", inp.ItemID, "verdict", review.Verdict, "blocking", review.Blocking,
 			"blocking_issues", org.CapList(review.BlockingIssues, 20), "advisory", org.CapList(review.Advisory, 20),

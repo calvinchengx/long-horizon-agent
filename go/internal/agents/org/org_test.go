@@ -21,6 +21,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/obs"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/verify"
 )
 
@@ -871,6 +872,86 @@ func TestFindingsForceTheReviewWhenReviewIsOff(t *testing.T) {
 	reviews := committedEvents(t, dir, agents.ReviewEvent)
 	if len(reviews) != 1 || reviews[0].Payload["item_id"] != "01" || reviews[0].Payload["verdict"] != "approve" {
 		t.Fatalf("%+v", reviews)
+	}
+}
+
+// TestTheModelScreenAddsAFindingAndRecordsTheEvent is python's
+// test_the_model_screen_adds_a_finding_and_records_the_event: with DoReview off, a confident block
+// from the System One screen on item 01's clean diff forces the review and is recorded as a
+// system_one event; the model approves item 02, so nothing is forced.
+func TestTheModelScreenAddsAFindingAndRecordsTheEvent(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeOne := actText("write_file", map[string]any{"path": "src/a.py", "content": "x = 1\n"})
+	writeTwo := actText("write_file", map[string]any{"path": "src/b.py", "content": "y = 1\n"})
+	sysStub := &systemone.Stub{Respond: func(state any, questions []systemone.Named) map[string]systemone.Answer {
+		choice, confidence := "approve", 0.99
+		if m, ok := state.(*contracts.OrderedMap); ok {
+			if task, _ := m.String("task"); strings.Contains(task, "one") {
+				choice, confidence = "block", 0.95
+			}
+		}
+		return map[string]systemone.Answer{systemone.ReviewQuestionID: {
+			Type: "choice", Choice: choice, Confidence: confidence,
+			Probabilities: contracts.NewOrderedMap(choice, confidence),
+		}}
+	}}
+	summary := run(t, []string{"LHA_SYSTEM_ONE_REVIEW=true"}, OrchestratorOptions{ResearchPerItem: 0, DoReview: false, SystemOne: sysStub,
+		Models: map[string]contracts.ModelProvider{
+			"lead": stub(writeOne, doneTurn, writeTwo, doneTurn), "researcher": stub(doneTurn), "reviewer": stub(approve),
+		}}, MissionOptions{Workdir: dir, Title: "Model screen", Description: "review is off", Checklist: checklist2(),
+		Checks: []contracts.Check{pass}})
+	if !summary.Completed {
+		t.Fatalf("%+v", summary)
+	}
+	screens := kinds(traceOf(t, summary), "review_screen")
+	if len(screens) != 2 || screens[0].Data["item"] != "01" || screens[0].Data["findings"] != float64(1) || screens[0].Data["forced"] != true ||
+		screens[1].Data["item"] != "02" || screens[1].Data["findings"] != float64(0) || screens[1].Data["forced"] != false {
+		t.Fatalf("%+v", screens)
+	}
+	model := kinds(traceOf(t, summary), "system_one")
+	if len(model) != 2 || model[0].Data["item_id"] != "01" || model[0].Data["action"] != "block" ||
+		model[0].Data["use"] != "pre_review" || model[1].Data["item_id"] != "02" || model[1].Data["action"] != "continue" {
+		t.Fatalf("%+v", model)
+	}
+	if n := len(kinds(traceOf(t, summary), "review")); n != 1 { // only the flagged item was reviewed
+		t.Fatalf("%d reviews", n)
+	}
+	committed := committedEvents(t, dir, "system_one")
+	if len(committed) != 2 || committed[0].Payload["item_id"] != "01" || committed[0].Payload["use"] != "pre_review" ||
+		committed[0].Payload["action"] != "block" || committed[0].Payload["threshold"] != 0.9 ||
+		committed[1].Payload["item_id"] != "02" || committed[1].Payload["action"] != "continue" {
+		t.Fatalf("%+v", committed)
+	}
+	modelScreen := committedEvents(t, dir, "review_screen")
+	if len(modelScreen) != 2 || len(modelScreen[0].Payload["findings"].([]any)) != 1 ||
+		modelScreen[0].Payload["findings"].([]any)[0] != "system_one: block (confidence 0.95)" {
+		t.Fatalf("%+v", modelScreen)
+	}
+}
+
+// TestTheModelScreenIsOffByDefault: without LHA_SYSTEM_ONE_REVIEW nothing asks a System One model.
+func TestTheModelScreenIsOffByDefault(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeOne := actText("write_file", map[string]any{"path": "src/a.py", "content": "x = 1\n"})
+	calls := 0
+	sysStub := &systemone.Stub{Respond: func(state any, questions []systemone.Named) map[string]systemone.Answer {
+		calls++
+		return map[string]systemone.Answer{systemone.ReviewQuestionID: {
+			Type: "choice", Choice: "block", Confidence: 0.99, Probabilities: contracts.NewOrderedMap("block", 0.99),
+		}}
+	}}
+	summary := run(t, nil, OrchestratorOptions{ResearchPerItem: 0, DoReview: false, SystemOne: sysStub,
+		Models: map[string]contracts.ModelProvider{
+			"lead": stub(writeOne, doneTurn), "researcher": stub(doneTurn), "reviewer": stub(approve),
+		}}, MissionOptions{Workdir: dir, Title: "Model screen off", Description: "review is off", Checklist: checklist2(),
+		Checks: []contracts.Check{pass}})
+	if !summary.Completed || calls != 0 {
+		t.Fatalf("calls %d %+v", calls, summary)
+	}
+	if n := len(kinds(traceOf(t, summary), "system_one")); n != 0 {
+		t.Fatalf("%d system_one events", n)
 	}
 }
 

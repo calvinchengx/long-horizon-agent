@@ -89,6 +89,8 @@ func TestNewFieldDefaults(t *testing.T) {
 		"SystemOneTriage":            {s.SystemOneTriage, true},
 		"SystemOneTriageThreshold":   {s.SystemOneTriageThreshold, 0.9},
 		"SystemOneTriageMinFailures": {s.SystemOneTriageMinFailures, 2},
+		"SystemOneReview":            {s.SystemOneReview, false},
+		"SystemOneReviewThreshold":   {s.SystemOneReviewThreshold, 0.9},
 		"SystemOneRerankMin":         {s.SystemOneRerankMin, 0.0},
 	}
 	for name, c := range checks {
@@ -108,7 +110,7 @@ func TestNewFieldDefaults(t *testing.T) {
 	for _, kv := range s.Redacted() {
 		keys = append(keys, kv.Key)
 	}
-	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 118 {
+	if keys[0] != "model_backend" || keys[len(keys)-1] != "gate_webhook_timeout_seconds" || len(keys) != 120 {
 		t.Errorf("redacted keys (%d): %v", len(keys), keys)
 	}
 }
