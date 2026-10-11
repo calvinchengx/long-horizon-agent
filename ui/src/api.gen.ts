@@ -670,7 +670,7 @@ export interface components {
             };
             threshold: number;
             /** @enum {string} */
-            action: "continue" | "split" | "block" | "gate";
+            action: "continue" | "split" | "block" | "gate" | "flag";
             error: string;
             item_id?: string;
         };

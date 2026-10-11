@@ -40,6 +40,7 @@ type AllowListDispatcher struct {
 	allowEgress   bool
 	gate          contracts.HITLGate
 	secondOpinion CommandSecondOpinion
+	untrusted     UntrustedScreen
 	events        []contracts.EventRecord
 	capabilities  map[safety.Capability]struct{}
 	gateAllEgress bool
@@ -60,6 +61,17 @@ type CommandSecondOpinion interface {
 	Reason(ctx context.Context, command []string) (string, *contracts.OrderedMap)
 }
 
+// UntrustedScreen is asked about the content of a successful fetch_url / web_search call. It can
+// only annotate the content the model sees: a non-empty warning is prepended to it, and the
+// judgment is recorded as a system_one event. It never blocks or fails the call. The implementation
+// is *systemone.UntrustedContentScreen.
+type UntrustedScreen interface {
+	// Warning asks the model about content from source and returns the warning to prepend when it
+	// looks like instructions aimed at the agent ("" otherwise), plus the system_one event to
+	// record (nil when the model was not asked).
+	Warning(ctx context.Context, source, content string) (string, *contracts.OrderedMap)
+}
+
 // DispatcherOptions configures an AllowListDispatcher.
 type DispatcherOptions struct {
 	// Allow names the tools that may be called. FAIL-CLOSED: empty allows nothing (ForTools
@@ -78,6 +90,10 @@ type DispatcherOptions struct {
 	// SecondOpinion, when set, optionally gates a run_command the classifier ALLOWED: a confident
 	// "dangerous" becomes the gate reason. It can only add gating, never allow a denied command.
 	SecondOpinion CommandSecondOpinion
+	// UntrustedScreen, when set, is asked about a successful fetch_url / web_search result: a
+	// confident "instructions" prepends a warning to the content the model sees. It never blocks or
+	// fails the call.
+	UntrustedScreen UntrustedScreen
 }
 
 // NewAllowListDispatcher builds a dispatcher over tools (registration is itself an allow-list).
@@ -91,6 +107,7 @@ func NewAllowListDispatcher(tools []contracts.Tool, opts DispatcherOptions) (*Al
 		allowEgress:   opts.AllowEgress,
 		gate:          opts.Gate,
 		secondOpinion: opts.SecondOpinion,
+		untrusted:     opts.UntrustedScreen,
 		capabilities:  map[safety.Capability]struct{}{},
 	}
 	for _, t := range tools {
@@ -238,7 +255,45 @@ func (d *AllowListDispatcher) Dispatch(ctx context.Context, call contracts.ToolC
 			result = contracts.Failure(fmt.Sprintf("RuntimeError: %v", r))
 		}
 	}()
-	return tool.Run(ctx, arguments, tctx)
+	result = tool.Run(ctx, arguments, tctx)
+	return d.screenUntrusted(ctx, call, arguments, result)
+}
+
+// untrustedTools are the tools whose successful result the untrusted-content screen reads (matched
+// by tool name).
+var untrustedTools = map[string]bool{"fetch_url": true, "web_search": true}
+
+// screenUntrusted annotates a successful web result when a confident answer flags instructions.
+// The screen is asked ONLY about a successful fetch_url / web_search call with non-empty content,
+// and only when it is configured. The judgment is always recorded as a system_one event; a flagged
+// result gets the warning prepended to the content the model sees. It NEVER fails or blocks the
+// call: this is defence in depth, and the Rule of Two stays the boundary.
+func (d *AllowListDispatcher) screenUntrusted(ctx context.Context, call contracts.ToolCall, arguments map[string]any, result contracts.ToolResult) contracts.ToolResult {
+	if d.untrusted == nil || !result.OK || !untrustedTools[call.Name] || result.Content == "" {
+		return result
+	}
+	warning, payload := d.untrusted.Warning(ctx, untrustedSource(call, arguments), result.Content)
+	if payload != nil {
+		d.events = append(d.events, contracts.EventRecord{Kind: "system_one", Payload: payload})
+	}
+	if warning == "" {
+		return result
+	}
+	result.Content = warning + "\n" + result.Content
+	return result
+}
+
+// untrustedSource is the source the untrusted-content screen names: the fetch_url URL or the search
+// query.
+func untrustedSource(call contracts.ToolCall, arguments map[string]any) string {
+	key := "query"
+	if call.Name == "fetch_url" {
+		key = "url"
+	}
+	if v, ok := arguments[key]; ok && v != nil {
+		return pyval.Str(v)
+	}
+	return ""
 }
 
 func (d *AllowListDispatcher) gateReason(spec contracts.ToolSpec, arguments map[string]any, tctx contracts.ToolContext) (string, bool) {

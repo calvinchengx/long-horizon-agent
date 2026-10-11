@@ -93,6 +93,16 @@ func BuildCommandSecondOpinion(s *config.Settings, m Model) *CommandSecondOpinio
 	return &CommandSecondOpinion{Model: m, Threshold: s.SystemOneCommandsThreshold}
 }
 
+// BuildUntrustedScreen is the untrusted-content screen over m when it is configured and
+// system_one_untrusted is on (off by default). It never blocks a tool: a confident "instructions"
+// only annotates the fetched content.
+func BuildUntrustedScreen(s *config.Settings, m Model) *UntrustedContentScreen {
+	if m == nil || !s.SystemOneUntrusted {
+		return nil
+	}
+	return &UntrustedContentScreen{Model: m, Threshold: s.SystemOneUntrustedThreshold}
+}
+
 // Close closes m when it holds resources.
 func Close(m Model) error {
 	if c, ok := m.(interface{ Close() error }); ok {

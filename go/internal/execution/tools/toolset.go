@@ -362,7 +362,9 @@ type RunDispatcherOptions struct {
 	IO            *WebIO
 	// SystemOne (off by default via LHA_SYSTEM_ONE_COMMANDS) adds the command second opinion: a
 	// confident "dangerous" about an allowed run_command sends it to the human gate. It can only
-	// add gating.
+	// add gating. It also adds the untrusted-content screen (off by default via
+	// LHA_SYSTEM_ONE_UNTRUSTED): a confident "instructions" about a fetched fetch_url / web_search
+	// result only annotates it.
 	SystemOne systemone.Model
 }
 
@@ -393,6 +395,9 @@ func BuildRunDispatcher(s *config.Settings, opts RunDispatcherOptions) (*executi
 	}
 	if opinion := systemone.BuildCommandSecondOpinion(s, opts.SystemOne); opinion != nil {
 		dopts.SecondOpinion = opinion
+	}
+	if screen := systemone.BuildUntrustedScreen(s, opts.SystemOne); screen != nil {
+		dopts.UntrustedScreen = screen
 	}
 	return execution.ForTools(tools, dopts)
 }

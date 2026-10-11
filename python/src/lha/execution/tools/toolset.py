@@ -46,7 +46,7 @@ from lha.safety.egress import (
     system_resolver,
 )
 from lha.safety.rule_of_two import Capability, RuleOfTwoViolation, check_rule_of_two
-from lha.systemone.build import build_command_second_opinion
+from lha.systemone.build import build_command_second_opinion, build_untrusted_screen
 
 
 class WebConfigError(ValueError):
@@ -264,7 +264,9 @@ def build_run_dispatcher(
     is checked with the RUN's capabilities (a run's agents share briefs, so untrusted content
     read by one reaches the others) and raises ``RuleOfTwoViolation``. ``system_one`` (off by
     default via ``LHA_SYSTEM_ONE_COMMANDS``) adds the command second opinion: a confident
-    ``dangerous`` about an allowed ``run_command`` sends it to the human gate.
+    ``dangerous`` about an allowed ``run_command`` sends it to the human gate. It also adds the
+    untrusted-content screen (off by default via ``LHA_SYSTEM_ONE_UNTRUSTED``): a confident
+    ``instructions`` about a fetched ``fetch_url`` / ``web_search`` result only annotates it.
     """
     check_run_rule_of_two(settings)
     use_web = web_enabled(settings) and allow_egress is not False
@@ -277,4 +279,5 @@ def build_run_dispatcher(
         gate=gate,
         capabilities=declared,
         second_opinion=build_command_second_opinion(settings, system_one),
+        untrusted_screen=build_untrusted_screen(settings, system_one),
     )

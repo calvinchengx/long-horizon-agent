@@ -322,7 +322,8 @@
       "continue",
       "split",
       "block",
-      "gate"
+      "gate",
+      "flag"
      ]
     },
     "error": {

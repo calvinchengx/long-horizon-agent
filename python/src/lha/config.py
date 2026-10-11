@@ -353,6 +353,11 @@ class Settings(BaseSettings):
     # a command the classifier denied and never change the classifier.
     system_one_commands: bool = False
     system_one_commands_threshold: float = Field(default=0.9, ge=0, le=1)
+    # Untrusted-content screen: off by default; after a SUCCESSFUL ``fetch_url`` or ``web_search``
+    # call, a confident "instructions" only annotates the content the model sees with a warning and
+    # records a ``system_one`` event. It never blocks a tool; the Rule of Two stays the boundary.
+    system_one_untrusted: bool = False
+    system_one_untrusted_threshold: float = Field(default=0.9, ge=0, le=1)
     # ``memory_rerank=system_one``: drop passages whose relevance probability is below this.
     system_one_rerank_min: float = Field(default=0.0, ge=0, le=1)
 

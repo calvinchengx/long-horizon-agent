@@ -8,10 +8,18 @@ from lha.systemone.build import (
     build_review_screen,
     build_stall_triage,
     build_system_one,
+    build_untrusted_screen,
     close_system_one,
 )
 from lha.systemone.client import SystemOneClient
-from lha.systemone.screen import CommandSecondOpinion, CommandVerdict, ReviewScreen, ScreenVerdict
+from lha.systemone.screen import (
+    CommandSecondOpinion,
+    CommandVerdict,
+    ReviewScreen,
+    ScreenVerdict,
+    UntrustedContentScreen,
+    UntrustedVerdict,
+)
 from lha.systemone.stub import StubSystemOne
 from lha.systemone.triage import StallTriage, TriageVerdict
 
@@ -24,9 +32,12 @@ __all__ = [
     "StubSystemOne",
     "SystemOneClient",
     "TriageVerdict",
+    "UntrustedContentScreen",
+    "UntrustedVerdict",
     "build_command_second_opinion",
     "build_review_screen",
     "build_stall_triage",
     "build_system_one",
+    "build_untrusted_screen",
     "close_system_one",
 ]

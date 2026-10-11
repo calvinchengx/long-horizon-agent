@@ -171,6 +171,8 @@ Measured once so far, with no gain: see [building a large project](24-large-miss
 | `LHA_SYSTEM_ONE_REVIEW_THRESHOLD` | float (0-1) | `0.9` | confidence a pre-review `block` needs before it adds a finding |
 | `LHA_SYSTEM_ONE_COMMANDS` | bool | `false` | the command second opinion when a backend is configured: a confident `dangerous` about a command the classifier allowed is gated |
 | `LHA_SYSTEM_ONE_COMMANDS_THRESHOLD` | float (0-1) | `0.9` | confidence a command `dangerous` needs before it gates the call |
+| `LHA_SYSTEM_ONE_UNTRUSTED` | bool | `false` | the untrusted-content screen when a backend is configured: a confident `instructions` about a fetched `fetch_url`/`web_search` result prepends a warning |
+| `LHA_SYSTEM_ONE_UNTRUSTED_THRESHOLD` | float (0-1) | `0.9` | confidence an `instructions` needs before it warns about fetched content |
 | `LHA_SYSTEM_ONE_RERANK_MIN` | float (0-1) | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages below this relevance |
 
 See [25-system-one.md](25-system-one.md).
