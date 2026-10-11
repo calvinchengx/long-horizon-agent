@@ -262,10 +262,20 @@ acceptance criteria as blocking unless the item itself requires them, and in `lh
 anything and never skips the reviewer. Every screened diff is committed as a `review_screen`
 event (`item_id`, `base`, `head`, `findings`, `forced`), which
 [`lha labels export`](17-cli.md#lha-labels-export) joins to the review verdict as
-`screen_findings`, so a model-backed screen can later be fitted against what the reviewer
-decided ([25-system-one.md](25-system-one.md#not-built-yet)). In a durable mission the screen
-runs inside `review_cycle`, so it needs `--review`. Both implementations produce the same
-findings for the same diff (`spec/verify/review_screen.json`).
+`screen_findings`, so a model-backed screen can be fitted against what the reviewer decided
+([25-system-one.md](25-system-one.md#pre-review-screen)). In a durable mission the screen runs
+inside `review_cycle`, so it needs `--review`. Both implementations produce the same findings for
+the same diff (`spec/verify/review_screen.json`).
+
+An optional model-backed pass sits in front of the same reviewer: with a System One backend
+configured and `LHA_SYSTEM_ONE_REVIEW=true` (off by default), a System One model is asked the
+pre-review question on the same diff and a confident `block` adds one more finding,
+`system_one: block (confidence 0.94)`, to the list above. It is purely additive — the
+deterministic findings are unchanged, a `block` is one more reason for the full review, and the
+model never approves anything or skips the reviewer. Its call is committed as a `system_one`
+event (`use: "pre_review"`) alongside the `review_screen` event, and its threshold is unmeasured
+until the `--judge system_one` scorecard says what it should be
+([25-system-one.md](25-system-one.md#pre-review-screen)).
 
 ## Harness integrity
 

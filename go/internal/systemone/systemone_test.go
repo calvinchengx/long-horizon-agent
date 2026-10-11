@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -219,6 +220,97 @@ func TestBuildStallTriageOnlyWhenConfigured(t *testing.T) {
 	}
 	if tr := BuildStallTriage(settings(t, "LHA_SYSTEM_ONE_TRIAGE_THRESHOLD=0.8"), &Stub{}); tr == nil || tr.Threshold != 0.8 || tr.MinFailures != 2 {
 		t.Fatalf("triage: %+v", tr)
+	}
+}
+
+func soundnessStub(choice string, confidence float64) *Stub {
+	return &Stub{Respond: func(state any, questions []Named) map[string]Answer {
+		return map[string]Answer{ReviewQuestionID: {
+			Type: "choice", Choice: choice, Confidence: confidence,
+			Probabilities: contracts.NewOrderedMap(choice, confidence),
+		}}
+	}}
+}
+
+const screenDiff = "--- a/src/x.py\n+++ b/src/x.py\n@@\n-x = 1\n+x = 2\n"
+
+func TestAConfidentBlockAddsTheFindingAndPayload(t *testing.T) {
+	stub := soundnessStub("block", 0.95)
+	screen := NewReviewScreen(stub)
+	if got := screen.Findings(context.Background(), screenDiff, "do the task"); !reflect.DeepEqual(got, []string{"system_one: block (confidence 0.95)"}) {
+		t.Fatalf("findings: %v", got)
+	}
+	v := screen.Assess(context.Background(), screenDiff, "do the task")
+	if v.Action != ActionBlock || v.Answer != "block" || !v.Asked {
+		t.Fatalf("verdict: %+v", v)
+	}
+	p := v.Payload("01", 0.9)
+	if p.Value("use") != "pre_review" || p.Value("action") != "block" || p.Value("item_id") != "01" ||
+		p.Value("model") != "stub-1" || p.Value("threshold") != 0.9 || p.Value("error") != "" ||
+		p.Value("confidence") != 0.95 || p.Value("answer") != "block" {
+		t.Fatalf("payload: %v", p.Plain())
+	}
+	probs, _ := p.Value("probabilities").(*contracts.OrderedMap)
+	if probs == nil || probs.Value("block") != 0.95 {
+		t.Fatalf("probabilities: %v", probs)
+	}
+}
+
+func TestAnApproveOrALowConfidenceAddsNothing(t *testing.T) {
+	for _, c := range []struct {
+		choice     string
+		confidence float64
+	}{{"approve", 0.99}, {"block", 0.5}} {
+		screen := NewReviewScreen(soundnessStub(c.choice, c.confidence))
+		if got := screen.Findings(context.Background(), screenDiff, "do the task"); len(got) != 0 {
+			t.Fatalf("%s %v: findings %v", c.choice, c.confidence, got)
+		}
+		v := screen.Assess(context.Background(), screenDiff, "do the task")
+		if v.Action != ActionContinue || !v.Asked || v.Error != "" {
+			t.Fatalf("%s %v: verdict %+v", c.choice, c.confidence, v)
+		}
+	}
+}
+
+func TestAThresholdAboveTheConfidenceAddsNothing(t *testing.T) {
+	screen := &ReviewScreen{Model: soundnessStub("block", 0.95), Threshold: 0.99}
+	if got := screen.Findings(context.Background(), screenDiff, "do the task"); len(got) != 0 {
+		t.Fatalf("findings: %v", got)
+	}
+}
+
+func TestAFailedCallAddsNothingAndRecordsTheError(t *testing.T) {
+	screen := NewReviewScreen(&Stub{Err: "system one call failed: timeout"})
+	if got := screen.Findings(context.Background(), screenDiff, "do the task"); len(got) != 0 {
+		t.Fatalf("findings: %v", got)
+	}
+	v := screen.Assess(context.Background(), screenDiff, "do the task")
+	if v.Action != ActionContinue || !v.Asked || !strings.Contains(v.Error, "timeout") {
+		t.Fatalf("verdict: %+v", v)
+	}
+}
+
+func TestAnEmptyDiffIsNotAsked(t *testing.T) {
+	stub := soundnessStub("block", 0.99)
+	screen := NewReviewScreen(stub)
+	if got := screen.Findings(context.Background(), "", "do the task"); len(got) != 0 || stub.Calls() != 0 {
+		t.Fatalf("findings %v calls %d", got, stub.Calls())
+	}
+	v := screen.Assess(context.Background(), "", "do the task")
+	if v.Asked || v.Action != ActionContinue {
+		t.Fatalf("verdict: %+v", v)
+	}
+}
+
+func TestBuildReviewScreenOnlyWhenEnabledAndConfigured(t *testing.T) {
+	if BuildReviewScreen(settings(t), &Stub{}) != nil {
+		t.Fatal("screen without the setting")
+	}
+	if BuildReviewScreen(settings(t, "LHA_SYSTEM_ONE_REVIEW=true"), nil) != nil {
+		t.Fatal("screen without a model")
+	}
+	if s := BuildReviewScreen(settings(t, "LHA_SYSTEM_ONE_REVIEW=true", "LHA_SYSTEM_ONE_REVIEW_THRESHOLD=0.8"), &Stub{}); s == nil || s.Threshold != 0.8 {
+		t.Fatalf("screen: %+v", s)
 	}
 }
 

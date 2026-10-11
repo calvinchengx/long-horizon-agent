@@ -90,6 +90,9 @@ type Activities struct {
 	ImplementerModel ModelFactory
 	ReviewerModel    ModelFactory
 	SubAgentModel    ModelFactory
+	// SystemOne replaces the System One model built from settings (nil => systemone.Build); the
+	// caller owns it and must close it. Tests inject a scripted model here.
+	SystemOne systemone.Model
 	// HeartbeatEvery is the heartbeat period (0 = HeartbeatEvery).
 	HeartbeatEvery time.Duration
 }

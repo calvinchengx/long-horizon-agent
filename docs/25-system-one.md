@@ -7,12 +7,13 @@ rate on ordered levels (`score`). It returns a probability for every possible an
 hosted one. **Kev** is an Apache-2.0 open-weights family that serves the same
 `POST /v1/systemone` API, so LHA talks to both with one client.
 
-LHA uses these answers for exactly two things, and only in ways that make it more cautious or
+LHA uses these answers for exactly three things, and only in ways that make it more cautious or
 cheaper:
 
 | Use | What is asked | What a confident answer changes |
 |---|---|---|
 | **Stall triage** | after an item fails twice in a row: *why do the attempts fail?* (a fixable defect, too much scope, or the environment) | `scope`: the item is split now, not after `max_consecutive_failures`. `environment`: the item is blocked now, for a human |
+| **Pre-review screen** (`LHA_SYSTEM_ONE_REVIEW`) | on a verified diff: *does it contain a blocking defect, or is it sound?* | `block`: one more finding, so the diff gets the full review |
 | **Memory reranking** (`LHA_MEMORY_RERANK=system_one`) | per recalled passage: *does it help with this task?* | recalled memory is reordered, and passages below `LHA_SYSTEM_ONE_RERANK_MIN` dropped |
 
 A System One answer never allows a command, never answers a human gate and never marks an item
@@ -21,7 +22,9 @@ just a design intention: [`spec/systemone/authority.json`](../spec/systemone/aut
 sweeps the answer space — including option labels that were never offered, labels naming an
 authority-widening outcome, and confidence 1.00 under a zero threshold — and both
 implementations must show that triage still only continues, splits or blocks, and that
-reranking only reorders and drops passages. When the
+reranking only reorders and drops passages. The model-backed pre-review screen is not part of
+that sweep yet, but its answer can only ever add one finding — never an approval — and a failed
+call changes nothing. When the
 model is down, slow, over budget or returns a malformed answer, LHA behaves exactly as it does
 with System One off.
 
@@ -90,6 +93,8 @@ export LHA_MEMORY_RERANK=system_one
 | `LHA_SYSTEM_ONE_TRIAGE` | `true` | stall triage, when a backend is configured |
 | `LHA_SYSTEM_ONE_TRIAGE_THRESHOLD` | `0.9` | the confidence an answer needs before it acts |
 | `LHA_SYSTEM_ONE_TRIAGE_MIN_FAILURES` | `2` | failures in a row before triage is asked |
+| `LHA_SYSTEM_ONE_REVIEW` | `false` | the model-backed pre-review screen, when a backend is configured |
+| `LHA_SYSTEM_ONE_REVIEW_THRESHOLD` | `0.9` | the confidence a `block` needs before it adds a finding |
 | `LHA_SYSTEM_ONE_RERANK_MIN` | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages whose relevance is below this |
 
 A configuration that cannot be used safely stops the run before it starts. That covers a
@@ -135,14 +140,19 @@ item blocked for an environment problem starts its `last_failure` with that reas
 deadlock gate question and the next attempt both show. Reranking answers are not committed; a
 failed rerank is logged as `memory_rerank_failed`.
 
+The model-backed pre-review screen records the same event shape with `use: "pre_review"`,
+committed alongside its `review_screen` event (so the anchor carries both). A confident `block`
+adds one finding, `system_one: block (confidence 0.95)`, in front of the item's acceptance
+criteria; anything else, or a failed call, leaves the deterministic findings alone.
+
 ## Go
 
-The Go implementation has the same settings, client, triage, reranker and pre-review question,
-checked against the same cases (`spec/systemone/wire.json`): request bodies (including option
-order, which can change a model's answer), strict answer parsing, the confidence formulas, the
-triage question, state and action table, the pre-review question and state, reranking, and
-endpoint prices. In Go, `LHA_MEMORY_RERANK=system_one` is the one reranker that actually reranks
-(Go has no cross-encoder).
+The Go implementation has the same settings, client, triage, pre-review screen, reranker and
+pre-review question, checked against the same cases (`spec/systemone/wire.json`): request bodies
+(including option order, which can change a model's answer), strict answer parsing, the confidence
+formulas, the triage question, state and action table, the pre-review question, state and screen,
+reranking, and endpoint prices. In Go, `LHA_MEMORY_RERANK=system_one` is the one reranker that
+actually reranks (Go has no cross-encoder).
 
 ## Measured
 
@@ -233,16 +243,29 @@ see what is not in the diff. A model-backed judge (a System One model asked the 
 or a fine-tuned Kev) is the third judge, `--judge system_one`; the rows carry everything it would
 be shown, so its score on this set is measured the same way.
 
+## Pre-review screen
+
+The model-backed pre-review screen is built and **off by default**: with a System One backend
+configured, `LHA_SYSTEM_ONE_REVIEW=true` asks the pre-review question
+([`lha.systemone.review`](../python/src/lha/systemone/review.py)) on a verified diff and, on a
+confident `block` (`LHA_SYSTEM_ONE_REVIEW_THRESHOLD`, default `0.9`), adds one finding —
+`system_one: block (confidence 0.94)` — to the deterministic screen's findings
+([07-verification.md](07-verification.md#pre-review-screen)). It can only make LHA more cautious:
+the finding goes to the reviewer as a blocking criterion and, under `lha orchestrate --no-review`,
+forces the review exactly as a deterministic finding does. It never approves anything and never
+skips the reviewer. Every call is committed as a `system_one` event (`use: "pre_review"`)
+alongside the `review_screen` event.
+
+Its threshold is unmeasured. The `--judge system_one` scorecard
+([gold sets](#gold-evaluation-sets)) scores the same question offline, and the review rows carry
+everything the screen is shown, so a threshold can be fitted before it is trusted. Until then it
+stays off, and its answer only ever adds a review.
+
 ## Not built yet
 
 These uses were considered and left for later, because each needs thresholds measured on real
 LHA missions first:
 
-- a model-backed pre-review screen: the deterministic one is built
-  ([07-verification.md](07-verification.md#pre-review-screen)) and records what it found next to
-  each review verdict, which is the label set a model-backed screen would be fitted on, and
-  `lha eval --judge system_one` scores one offline; wiring it into a run still waits on a
-  threshold measured here;
 - screening `fetch_url` and `web_search` results for instructions aimed at the agent (defence in
   depth; the Rule of Two stays the boundary);
 - choosing the implementer's model tier by the item's difficulty;
@@ -251,7 +274,7 @@ LHA missions first:
 
 The labels for fitting those thresholds already exist and [`lha labels export`](#labels) writes
 them; the [gold sets](#gold-evaluation-sets) and `lha eval` score any such judge offline, and the
-model-backed judge (`--judge system_one`) is built. The four uses above still wait on thresholds
+model-backed judge (`--judge system_one`) is built. The three uses above still wait on thresholds
 measured on real missions before they act in a run. See [the roadmap](23-roadmap.md).
 
 ## Sources

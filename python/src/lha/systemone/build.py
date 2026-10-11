@@ -7,6 +7,7 @@ from lha.contracts.system_one import SystemOneModel
 from lha.governor.metering import CostMeter
 from lha.safety.egress import EgressDenied, parse_url
 from lha.systemone.client import SystemOneClient, default_price_in_per_mtok, is_local_endpoint
+from lha.systemone.screen import ReviewScreen
 from lha.systemone.stub import StubSystemOne
 from lha.systemone.triage import StallTriage
 
@@ -70,6 +71,13 @@ def build_stall_triage(settings: Settings, model: SystemOneModel | None) -> Stal
         threshold=settings.system_one_triage_threshold,
         min_failures=settings.system_one_triage_min_failures,
     )
+
+
+def build_review_screen(settings: Settings, model: SystemOneModel | None) -> ReviewScreen | None:
+    """The model-backed pre-review screen over ``model`` when it is configured and review is on."""
+    if model is None or not settings.system_one_review:
+        return None
+    return ReviewScreen(model, threshold=settings.system_one_review_threshold)
 
 
 async def close_system_one(model: SystemOneModel | None) -> None:

@@ -135,3 +135,124 @@ async def test_findings_force_the_review_when_review_is_off(
         if hasattr(reviewer, "calls")
         else True
     )
+
+
+# --- the model-backed pre-review screen (off by default) --------------------------------------
+_MODEL_DIFF = "--- a/src/x.py\n+++ b/src/x.py\n@@\n-x = 1\n+x = 2\n"
+
+
+@pytest.mark.asyncio
+async def test_the_model_screen_adds_a_finding_and_records_the_event(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lha.contracts.system_one import ChoiceAnswer
+    from lha.systemone import ReviewScreen, StubSystemOne
+    from lha.systemone.review import QUESTION_ID
+
+    answers = [("block", 0.95), ("approve", 0.99)]
+
+    def respond(state: object, questions: object) -> dict[str, object]:
+        choice, confidence = answers.pop(0)
+        return {
+            QUESTION_ID: ChoiceAnswer(
+                choice=choice, probabilities={choice: confidence}, confidence=confidence
+            )
+        }
+
+    stub = StubSystemOne(respond)  # type: ignore[arg-type]
+    monkeypatch.setattr(orchestrator_module, "diff_since", lambda *_a: _MODEL_DIFF)
+    monkeypatch.setattr(
+        orchestrator_module, "build_review_screen", lambda settings, model: ReviewScreen(stub)
+    )
+    reviewer = StubModel(script=[_APPROVE])
+    orchestrator = Orchestrator(
+        Settings(
+            sandbox="local",
+            allow_unsafe_local=True,
+            model_backend="stub",
+            max_cycles=10,
+            system_one_backend="stub",
+            system_one_review=True,
+        ),
+        research_per_item=0,
+        do_review=False,
+        models={
+            "lead": StubModel(script=[_DONE]),
+            "researcher": StubModel(script=[_DONE]),
+            "reviewer": reviewer,
+        },
+    )
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path),
+        title="Model screen test",
+        description="review is off",
+        checklist=Checklist(
+            items=[ChecklistItem(id="01", description="a"), ChecklistItem(id="02", description="b")]
+        ),
+        checks=[Check(name="always_green", command=["python", "-c", "pass"])],
+    )
+    assert summary.completed
+    trace = [json.loads(line) for line in summary.trace_jsonl.splitlines() if line.strip()]
+    screens = [t["data"] for t in trace if t["kind"] == "review_screen"]
+    # The model's finding joins the deterministic ones (item 01 blocks, item 02 approves).
+    assert [(s["item"], s["findings"], s["forced"]) for s in screens] == [
+        ("01", 1, True),
+        ("02", 0, False),
+    ]
+    model = [
+        t["data"]
+        for t in trace
+        if t["kind"] == "system_one" and t["data"].get("use") == "pre_review"
+    ]
+    assert [(e["item_id"], e["action"], e["answer"]) for e in model] == [
+        ("01", "block", "block"),
+        ("02", "continue", "approve"),
+    ]
+    assert len([t for t in trace if t["kind"] == "review"]) == 1  # only the flagged item
+    raw = git_ops.show_at_head(tmp_path, ".lha/events.ndjson")
+    events = [json.loads(line) for line in raw.splitlines() if line.strip()]
+    committed = [e["payload"] for e in events if e["kind"] == "system_one"]
+    assert [(p["item_id"], p["use"], p["action"], p["threshold"]) for p in committed] == [
+        ("01", "pre_review", "block", 0.9),
+        ("02", "pre_review", "continue", 0.9),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_model_screen_is_off_by_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lha.systemone import StubSystemOne
+
+    stub = StubSystemOne()
+    monkeypatch.setattr(orchestrator_module, "diff_since", lambda *_a: _MODEL_DIFF)
+    # The stub is wired as the run's System One model; the default settings leave the screen off,
+    # so nothing asks it (build_review_screen is not patched).
+    monkeypatch.setattr(orchestrator_module, "build_system_one", lambda settings, meter: stub)
+    orchestrator = Orchestrator(
+        Settings(
+            sandbox="local",
+            allow_unsafe_local=True,
+            model_backend="stub",
+            max_cycles=10,
+            system_one_backend="stub",
+        ),
+        research_per_item=0,
+        do_review=False,
+        models={
+            "lead": StubModel(script=[_DONE]),
+            "researcher": StubModel(script=[_DONE]),
+            "reviewer": StubModel(script=[_APPROVE]),
+        },
+    )
+    summary = await orchestrator.run_mission(
+        workdir=str(tmp_path),
+        title="Model screen off",
+        description="review is off",
+        checklist=Checklist(items=[ChecklistItem(id="01", description="a")]),
+        checks=[Check(name="always_green", command=["python", "-c", "pass"])],
+    )
+    assert summary.completed
+    assert stub.calls == []  # nothing asked the System One model
+    trace = [json.loads(line) for line in summary.trace_jsonl.splitlines() if line.strip()]
+    assert not [t for t in trace if t["kind"] == "system_one"]

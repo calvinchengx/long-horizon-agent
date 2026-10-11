@@ -167,6 +167,8 @@ Measured once so far, with no gain: see [building a large project](24-large-miss
 | `LHA_SYSTEM_ONE_TRIAGE` | bool | `true` | stall triage when a backend is configured |
 | `LHA_SYSTEM_ONE_TRIAGE_THRESHOLD` | float (0-1) | `0.9` | confidence a triage answer needs before it splits or blocks an item |
 | `LHA_SYSTEM_ONE_TRIAGE_MIN_FAILURES` | int (>= 1) | `2` | failures in a row before triage is asked |
+| `LHA_SYSTEM_ONE_REVIEW` | bool | `false` | the model-backed pre-review screen when a backend is configured |
+| `LHA_SYSTEM_ONE_REVIEW_THRESHOLD` | float (0-1) | `0.9` | confidence a pre-review `block` needs before it adds a finding |
 | `LHA_SYSTEM_ONE_RERANK_MIN` | float (0-1) | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages below this relevance |
 
 See [25-system-one.md](25-system-one.md).

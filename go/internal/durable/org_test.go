@@ -30,6 +30,7 @@ import (
 	"github.com/calvinchengx/long-horizon-agent/go/internal/coordination"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/model"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/state"
+	"github.com/calvinchengx/long-horizon-agent/go/internal/systemone"
 )
 
 // The multi-agent organization on the durable path (python: tests/durability/test_org_workflow.py),
@@ -718,6 +719,54 @@ func TestReviewIsExactlyOnceAndRepeatedBlocksBlockTheItem(t *testing.T) {
 	}
 	if !reflect.DeepEqual(blocked, []any{false, false, true}) {
 		t.Fatalf("blocked %v", blocked)
+	}
+}
+
+// TestTheModelScreenAddsAFindingOnTheDurablePath is python's
+// test_the_model_screen_adds_a_finding_on_the_durable_path: a confident block from the System One
+// screen joins the deterministic findings and is committed as a system_one event alongside the
+// review_screen event.
+func TestTheModelScreenAddsAFindingOnTheDurablePath(t *testing.T) {
+	work := initOrgMission(t, 1, 0, nil).Workdir
+	ctx := context.Background()
+	anchor := state.NewGitMissionAnchor(work)
+	acts, _ := orgActs(t, nil)
+	acts.Settings = testSettings(t, "LHA_SYSTEM_ONE_REVIEW=true")
+	acts.SystemOne = &systemone.Stub{Respond: func(state any, questions []systemone.Named) map[string]systemone.Answer {
+		return map[string]systemone.Answer{systemone.ReviewQuestionID: {
+			Type: "choice", Choice: "block", Confidence: 0.95,
+			Probabilities: contracts.NewOrderedMap("block", 0.95, "approve", 0.05),
+		}}
+	}}
+	cl, _ := anchor.ReadChecklist(ctx)
+	if _, err := cl.RecordSuccess("01", []string{"check"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	head, err := anchor.CommitCheckpoint(ctx, contracts.Checkpoint{CycleID: "c1", ProgressSummary: "- c1", Checklist: cl})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review := ReviewInput{MissionID: "m", Workdir: work, CycleID: "c1", ItemID: "01", HeadSHA: head, MaxCycles: 1000}
+	result, err := acts.ReviewCycle(ctx, review)
+	if err != nil || result.Verdict != "passed" {
+		t.Fatalf("%+v err %v", result, err)
+	}
+	screens := eventsOf(t, work, "review_screen")
+	if len(screens) != 1 || len(screens[0].Payload.Value("findings").([]any)) != 1 ||
+		screens[0].Payload.Value("findings").([]any)[0] != "system_one: block (confidence 0.95)" {
+		t.Fatalf("%+v", screens)
+	}
+	events := eventsOf(t, work, "system_one")
+	if len(events) != 1 {
+		t.Fatalf("%d system_one events", len(events))
+	}
+	plain := events[0].Payload.Plain()
+	if plain["use"] != "pre_review" || plain["action"] != "block" || plain["item_id"] != "01" ||
+		plain["threshold"] != 0.9 || plain["answer"] != "block" {
+		t.Fatalf("%v", plain)
 	}
 }
 
