@@ -955,6 +955,75 @@ func TestTheModelScreenIsOffByDefault(t *testing.T) {
 	}
 }
 
+// TestAConfidentSmallRoutesTheImplementerToTheCheaperTier: with the claude backend and
+// LHA_SYSTEM_ONE_TIERING, a confident "small" from the System One model runs the implementer on the
+// next cheaper tier's model and records the system_one event (action "downgrade").
+func TestAConfidentSmallRoutesTheImplementerToTheCheaperTier(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	checklist, owners := twoItems()
+	sysStub := &systemone.Stub{Respond: func(_ any, _ []systemone.Named) map[string]systemone.Answer {
+		return map[string]systemone.Answer{systemone.TierQuestionID: {
+			Type: "choice", Choice: "small", Confidence: 0.95,
+			Probabilities: contracts.NewOrderedMap("small", 0.95, "large", 0.05),
+		}}
+	}}
+	configured := newCountingImplementers()
+	cheaper := newCountingImplementers()
+	o := NewOrchestrator(settingsFor(t, "LHA_MODEL_BACKEND=claude", "LHA_ANTHROPIC_API_KEY=k",
+		"LHA_SYSTEM_ONE_TIERING=true"), OrchestratorOptions{ResearchPerItem: 0, DoReview: false,
+		SystemOne: sysStub, Models: map[string]contracts.ModelProvider{"implementer": configured, "lead": stub(doneTurn)}})
+	o.tierModels = map[agents.ModelTier]contracts.ModelProvider{agents.TierHaiku: cheaper}
+	summary, err := o.RunMission(ctx, MissionOptions{Workdir: dir, Title: "Tier", Description: "d",
+		Checklist: &checklist, Checks: []contracts.Check{pass}, Ownership: owners})
+	if err != nil || !summary.Completed {
+		t.Fatalf("%+v err %v", summary, err)
+	}
+	if cheaper.Calls() == 0 || configured.Calls() != 0 {
+		t.Fatalf("configured %d, cheaper %d", configured.Calls(), cheaper.Calls())
+	}
+	committed := committedEvents(t, dir, "system_one")
+	if len(committed) != 2 {
+		t.Fatalf("%d events: %+v", len(committed), committed)
+	}
+	for _, e := range committed {
+		if e.Payload["use"] != "model_tier" || e.Payload["action"] != "downgrade" ||
+			e.Payload["answer"] != "small" || e.Payload["threshold"] != 0.9 {
+			t.Fatalf("%+v", e.Payload)
+		}
+	}
+}
+
+// TestTieringOffNeverAsksAndUsesTheConfiguredModel: without LHA_SYSTEM_ONE_TIERING nothing asks
+// the System One model and the configured implementer model runs.
+func TestTieringOffNeverAsksAndUsesTheConfiguredModel(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+	checklist, owners := twoItems()
+	calls := 0
+	sysStub := &systemone.Stub{Respond: func(_ any, _ []systemone.Named) map[string]systemone.Answer {
+		calls++
+		return map[string]systemone.Answer{systemone.TierQuestionID: {
+			Type: "choice", Choice: "small", Confidence: 0.95,
+			Probabilities: contracts.NewOrderedMap("small", 0.95),
+		}}
+	}}
+	configured := newCountingImplementers()
+	o := NewOrchestrator(settingsFor(t, "LHA_MODEL_BACKEND=claude", "LHA_ANTHROPIC_API_KEY=k"),
+		OrchestratorOptions{ResearchPerItem: 0, DoReview: false, SystemOne: sysStub,
+			Models: map[string]contracts.ModelProvider{"implementer": configured, "lead": stub(doneTurn)}})
+	summary, err := o.RunMission(ctx, MissionOptions{Workdir: dir, Title: "Tier off", Description: "d",
+		Checklist: &checklist, Checks: []contracts.Check{pass}, Ownership: owners})
+	if err != nil || !summary.Completed || calls != 0 || configured.Calls() == 0 {
+		t.Fatalf("calls %d configured %d %+v err %v", calls, configured.Calls(), summary, err)
+	}
+	if n := len(committedEvents(t, dir, "system_one")); n != 0 {
+		t.Fatalf("%d system_one events", n)
+	}
+}
+
 // TestDiffSinceReturnsThePatchDespiteHardening is python's
 // test_diff_since_returns_the_patch_despite_hardening: the hardening config's empty diff.external
 // must not empty the reviewer's diff.

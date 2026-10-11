@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
@@ -483,6 +484,118 @@ func TestBuildUntrustedScreenOnlyWhenEnabledAndConfigured(t *testing.T) {
 		t.Fatal("screen without a model")
 	}
 	if s := BuildUntrustedScreen(settings(t, "LHA_SYSTEM_ONE_UNTRUSTED=true", "LHA_SYSTEM_ONE_UNTRUSTED_THRESHOLD=0.8"), &Stub{}); s == nil || s.Threshold != 0.8 {
+		t.Fatalf("screen: %+v", s)
+	}
+}
+
+// --- difficulty-based model-tier routing ------------------------------------------------------
+
+func tierStub(choice string, confidence float64) *Stub {
+	return &Stub{Respond: func(_ any, _ []Named) map[string]Answer {
+		return map[string]Answer{TierQuestionID: {
+			Type: "choice", Choice: choice, Confidence: confidence,
+			Probabilities: contracts.NewOrderedMap(choice, confidence, "other", 1-confidence),
+		}}
+	}}
+}
+
+func TestTierQuestionIsAChoiceInOptionOrder(t *testing.T) {
+	if TierQuestionID != "difficulty" {
+		t.Fatalf("%q", TierQuestionID)
+	}
+	q := TierQuestion()
+	if q.Type != "choice" || strings.Join(q.options(), ",") != "small,large" {
+		t.Fatalf("%+v", q)
+	}
+	if instructions, _ := q.Instructions.(string); !strings.Contains(instructions, "task") {
+		t.Fatalf("instructions: %v", q.Instructions)
+	}
+}
+
+func TestTieringStateIsTheRedactedTaskAndWitnesses(t *testing.T) {
+	state := TieringState("token ghp_"+strings.Repeat("c", 36), []string{"go:TestX"})
+	task, _ := state.String("task")
+	if strings.Contains(task, "ghp_") {
+		t.Fatalf("task: %q", task)
+	}
+	witnesses, _ := state.Value("witnesses").([]any)
+	if len(witnesses) != 1 || witnesses[0] != "go:TestX" {
+		t.Fatalf("witnesses: %v", witnesses)
+	}
+}
+
+func TestAConfidentSmallSelectsTheNextCheaperTier(t *testing.T) {
+	screen := NewTierScreen(tierStub("small", 0.95))
+	if screen.Tier != agents.TierSonnet {
+		t.Fatalf("tier: %q", screen.Tier)
+	}
+	if tier, ok := screen.CheaperTier(context.Background(), "one line", nil); !ok || tier != agents.TierHaiku {
+		t.Fatalf("cheaper: %q %v", tier, ok)
+	}
+	v := screen.Assess(context.Background(), "one line", nil)
+	if v.Action != ActionDowngrade || v.Answer != "small" || v.Tier != agents.TierHaiku {
+		t.Fatalf("%+v", v)
+	}
+	payload := v.Payload("01", 0.9)
+	if payload.Value("use") != "model_tier" || payload.Value("item_id") != "01" ||
+		payload.Value("model") != "stub-1" || payload.Value("answer") != "small" ||
+		payload.Value("confidence") != 0.95 || payload.Value("action") != "downgrade" ||
+		payload.Value("threshold") != 0.9 || payload.Value("error") != "" {
+		t.Fatalf("%v", payload.Plain())
+	}
+}
+
+func TestLargeOrLowConfidenceKeepsTheConfiguredTier(t *testing.T) {
+	for _, c := range []struct {
+		choice     string
+		confidence float64
+	}{{"large", 0.99}, {"small", 0.5}} {
+		screen := NewTierScreen(tierStub(c.choice, c.confidence))
+		if _, ok := screen.CheaperTier(context.Background(), "x", nil); ok {
+			t.Fatalf("%s %v: a cheaper tier", c.choice, c.confidence)
+		}
+		v := screen.Assess(context.Background(), "x", nil)
+		if v.Action != ActionContinue || v.Tier != "" {
+			t.Fatalf("%+v", v)
+		}
+	}
+}
+
+func TestAFailedTierCallKeepsTheTierAndRecordsTheError(t *testing.T) {
+	screen := NewTierScreen(&Stub{Err: "system one call failed: timeout"})
+	if _, ok := screen.CheaperTier(context.Background(), "x", nil); ok {
+		t.Fatal("a cheaper tier")
+	}
+	v := screen.Assess(context.Background(), "x", nil)
+	if v.Action != ActionContinue || v.Tier != "" || !strings.Contains(v.Error, "timeout") {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestTheCheapestTierHasNoCheaperTier(t *testing.T) {
+	screen := NewTierScreen(tierStub("small", 0.99))
+	screen.Tier = agents.TierHaiku
+	if _, ok := screen.CheaperTier(context.Background(), "x", nil); ok {
+		t.Fatal("a cheaper tier below haiku")
+	}
+	if v := screen.Assess(context.Background(), "x", nil); v.Action != ActionContinue {
+		t.Fatalf("%+v", v)
+	}
+}
+
+func TestBuildTierScreenOnlyOnClaudeWhenEnabledAndConfigured(t *testing.T) {
+	if BuildTierScreen(settings(t), &Stub{}) != nil {
+		t.Fatal("screen off by default")
+	}
+	if BuildTierScreen(settings(t, "LHA_SYSTEM_ONE_TIERING=true"), &Stub{}) != nil {
+		t.Fatal("screen without the claude backend")
+	}
+	if BuildTierScreen(settings(t, "LHA_SYSTEM_ONE_TIERING=true", "LHA_MODEL_BACKEND=claude"), nil) != nil {
+		t.Fatal("screen without a model")
+	}
+	s := BuildTierScreen(settings(t, "LHA_SYSTEM_ONE_TIERING=true", "LHA_MODEL_BACKEND=claude",
+		"LHA_SYSTEM_ONE_TIERING_THRESHOLD=0.8"), &Stub{})
+	if s == nil || s.Threshold != 0.8 || s.Tier != agents.TierSonnet {
 		t.Fatalf("screen: %+v", s)
 	}
 }

@@ -173,6 +173,8 @@ Measured once so far, with no gain: see [building a large project](24-large-miss
 | `LHA_SYSTEM_ONE_COMMANDS_THRESHOLD` | float (0-1) | `0.9` | confidence a command `dangerous` needs before it gates the call |
 | `LHA_SYSTEM_ONE_UNTRUSTED` | bool | `false` | the untrusted-content screen when a backend is configured: a confident `instructions` about a fetched `fetch_url`/`web_search` result prepends a warning |
 | `LHA_SYSTEM_ONE_UNTRUSTED_THRESHOLD` | float (0-1) | `0.9` | confidence an `instructions` needs before it warns about fetched content |
+| `LHA_SYSTEM_ONE_TIERING` | bool | `false` | difficulty-based tier routing when a backend is configured AND `LHA_MODEL_BACKEND=claude`: a confident `small` about an item runs its implementer one tier cheaper (never a stronger one) |
+| `LHA_SYSTEM_ONE_TIERING_THRESHOLD` | float (0-1) | `0.9` | confidence a `small` needs before the implementer runs on the next cheaper tier |
 | `LHA_SYSTEM_ONE_RERANK_MIN` | float (0-1) | `0.0` | `LHA_MEMORY_RERANK=system_one` drops passages below this relevance |
 
 See [25-system-one.md](25-system-one.md).

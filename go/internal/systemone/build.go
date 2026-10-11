@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/config"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/governor"
@@ -101,6 +102,17 @@ func BuildUntrustedScreen(s *config.Settings, m Model) *UntrustedContentScreen {
 		return nil
 	}
 	return &UntrustedContentScreen{Model: m, Threshold: s.SystemOneUntrustedThreshold}
+}
+
+// BuildTierScreen is the difficulty-based tier screen over m when it applies: a System One backend,
+// system_one_tiering, and the claude backend (only there do roles have tiers). Off by default; it
+// can only make LHA cheaper (a confident "small" routes the implementer to the next cheaper tier,
+// never a stronger one), and its threshold is unmeasured.
+func BuildTierScreen(s *config.Settings, m Model) *TierScreen {
+	if m == nil || !s.SystemOneTiering || s.ModelBackend != "claude" {
+		return nil
+	}
+	return &TierScreen{Model: m, Threshold: s.SystemOneTieringThreshold, Tier: agents.Roles["implementer"].Tier}
 }
 
 // Close closes m when it holds resources.

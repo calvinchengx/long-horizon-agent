@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/calvinchengx/long-horizon-agent/go/internal/agents"
 	"github.com/calvinchengx/long-horizon-agent/go/internal/contracts"
 )
 
@@ -24,6 +25,12 @@ const (
 	UseCommandSecondOpinion = "command_second_opinion"
 	// UseUntrustedContent is the use the untrusted-content screen writes into its system_one event.
 	UseUntrustedContent = "untrusted_content"
+	// UseModelTier is the use the difficulty-based model-tier screen writes into its system_one
+	// event.
+	UseModelTier = "model_tier"
+	// ActionDowngrade is the action a confident "small" takes (the implementer runs on the next
+	// cheaper tier).
+	ActionDowngrade = "downgrade"
 )
 
 // ScreenVerdict is the model's answer and what it changed (Asked is false when the diff was empty).
@@ -277,4 +284,84 @@ func (s *UntrustedContentScreen) Assess(ctx context.Context, source, content str
 func (s *UntrustedContentScreen) Warning(ctx context.Context, source, content string) (string, *contracts.OrderedMap) {
 	v := s.Assess(ctx, source, content)
 	return v.Warning(), v.Payload(s.Threshold)
+}
+
+// TierVerdict is the model's answer about one item's difficulty and the tier it selects.
+type TierVerdict struct {
+	Action        string
+	Answer        string
+	Confidence    float64
+	Probabilities *contracts.OrderedMap
+	Model         string
+	Error         string
+	Tier          agents.ModelTier
+}
+
+// Payload is the system_one event recorded with the item (the shape the other screens record).
+func (v TierVerdict) Payload(itemID string, threshold float64) *contracts.OrderedMap {
+	probs := v.Probabilities
+	if probs == nil {
+		probs = contracts.NewOrderedMap()
+	}
+	return contracts.NewOrderedMap(
+		"use", UseModelTier,
+		"item_id", itemID,
+		"model", v.Model,
+		"answer", v.Answer,
+		"confidence", v.Confidence,
+		"probabilities", probs,
+		"threshold", threshold,
+		"action", v.Action,
+		"error", v.Error,
+	)
+}
+
+// TierScreen asks Model how hard an item is, and selects the next cheaper tier only when
+// confident. It can only make LHA cheaper: a confident "small" returns the tier below the
+// implementer's configured tier (Tier, default the implementer role's) and never a stronger one; a
+// "large" answer, a below-threshold answer, a failed call or an implementer already on the
+// cheapest tier returns "" (the configured model stays). Off by default; only meaningful for the
+// claude backend.
+type TierScreen struct {
+	Model     Model
+	Threshold float64
+	Tier      agents.ModelTier
+}
+
+// NewTierScreen is a screen with the default threshold (0.9) and the implementer role's tier.
+func NewTierScreen(m Model) *TierScreen {
+	return &TierScreen{Model: m, Threshold: 0.9, Tier: agents.Roles["implementer"].Tier}
+}
+
+// Assess is the model's answer for the item (a failure changes nothing).
+func (s *TierScreen) Assess(ctx context.Context, description string, witnesses []string) TierVerdict {
+	state := TieringState(description, witnesses)
+	result, err := s.Model.Evaluate(ctx, state, []Named{{ID: TierQuestionID, Question: TierQuestion()}})
+	if err != nil {
+		return TierVerdict{Action: ActionContinue, Error: err.Error()}
+	}
+	a := result.Answers[TierQuestionID]
+	if a.Type != "choice" { // parse_response guarantees it; be explicit
+		return TierVerdict{Action: ActionContinue, Error: "the answer is not a choice"}
+	}
+	next, ok := agents.CheaperTier(s.Tier)
+	action := ActionContinue
+	tier := agents.ModelTier("")
+	if a.Choice == "small" && a.Confidence >= s.Threshold && ok {
+		action, tier = ActionDowngrade, next
+	}
+	return TierVerdict{
+		Action:        action,
+		Answer:        a.Choice,
+		Confidence:    a.Confidence,
+		Probabilities: a.Probabilities,
+		Model:         result.Model,
+		Tier:          tier,
+	}
+}
+
+// CheaperTier is the next cheaper tier a confident "small" selects, or ok=false.
+func (s *TierScreen) CheaperTier(ctx context.Context, description string, witnesses []string) (agents.ModelTier, bool) {
+	v := s.Assess(ctx, description, witnesses)
+	return v.Tier, v.Tier != ""
 }

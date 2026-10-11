@@ -93,6 +93,9 @@ type Activities struct {
 	// SystemOne replaces the System One model built from settings (nil => systemone.Build); the
 	// caller owns it and must close it. Tests inject a scripted model here.
 	SystemOne systemone.Model
+	// tierModel builds the implementer's model for a cheaper tier (nil => agents.ModelForTier);
+	// tests inject a scripted provider here so a difficulty downgrade never reaches a real provider.
+	tierModel ModelFactory
 	// HeartbeatEvery is the heartbeat period (0 = HeartbeatEvery).
 	HeartbeatEvery time.Duration
 }

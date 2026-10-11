@@ -159,6 +159,12 @@ run path. The planner call in `lha orchestrate` uses `LHA_MODEL_NAME`, not the r
 `LHA_CLAUDE_PRICE_*` values apply only to calls whose model is `LHA_MODEL_NAME`; routed roles are
 priced from the table. With any other backend every role uses `LHA_MODEL_NAME`.
 
+Optionally, `LHA_SYSTEM_ONE_TIERING=true` (off by default; needs a System One backend and the
+`claude` backend) asks a System One model how hard each item is and, on a confident `small`, routes
+that item's implementer one tier cheaper via `model_for_tier()` — `sonnet` to `haiku` — never a
+stronger one. It is the only optional downgrade; the reviewer, lead and researcher tiers are
+untouched ([25-system-one.md](25-system-one.md#difficulty-based-model-tier-routing)).
+
 To run the lead through Claude Code, use the `claude_code` lead engine below. To run it through
 OpenCode, use the `opencode` lead engine below.
 

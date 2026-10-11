@@ -323,7 +323,8 @@
       "split",
       "block",
       "gate",
-      "flag"
+      "flag",
+      "downgrade"
      ]
     },
     "error": {

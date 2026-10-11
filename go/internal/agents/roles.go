@@ -57,6 +57,20 @@ var claudeByTier = map[ModelTier]string{
 // ClaudeModelFor maps a role's model tier to a concrete Claude model id.
 func ClaudeModelFor(tier ModelTier) string { return claudeByTier[tier] }
 
+// tierOrder is the tiers from strongest to cheapest; a "cheaper" tier is the next one down.
+var tierOrder = []ModelTier{TierOpus, TierSonnet, TierHaiku}
+
+// CheaperTier is the next cheaper tier, or ok=false when tier is already the cheapest (python:
+// lha.agents.roles.cheaper_tier).
+func CheaperTier(tier ModelTier) (ModelTier, bool) {
+	for i, t := range tierOrder {
+		if t == tier && i+1 < len(tierOrder) {
+			return tierOrder[i+1], true
+		}
+	}
+	return "", false
+}
+
 // ModelForRole is a model tuned to roleName's tier on the Claude backend, or the configured
 // model on every other backend (python: lha.agents.router.model_for_role). Pass one shared
 // client for every role so all providers reuse one connection pool (the caller owns it).
@@ -70,6 +84,23 @@ func ModelForRole(roleName string, settings *config.Settings, client *http.Clien
 	}
 	if role, ok := Roles[roleName]; ok && settings.ModelBackend == "claude" {
 		return model.BuildProvider(settings, ClaudeModelFor(role.Tier), client)
+	}
+	return model.BuildProvider(settings, "", client)
+}
+
+// ModelForTier is a model for tier on the Claude backend, or the configured model on every other
+// backend (python: lha.agents.router.model_for_tier). Difficulty-based tiering builds the
+// implementer's next cheaper tier this way.
+func ModelForTier(tier ModelTier, settings *config.Settings, client *http.Client) (contracts.ModelProvider, error) {
+	if settings == nil {
+		s, err := config.Load()
+		if err != nil {
+			return nil, err
+		}
+		settings = s
+	}
+	if settings.ModelBackend == "claude" {
+		return model.BuildProvider(settings, ClaudeModelFor(tier), client)
 	}
 	return model.BuildProvider(settings, "", client)
 }

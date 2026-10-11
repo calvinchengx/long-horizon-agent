@@ -358,6 +358,11 @@ class Settings(BaseSettings):
     # records a ``system_one`` event. It never blocks a tool; the Rule of Two stays the boundary.
     system_one_untrusted: bool = False
     system_one_untrusted_threshold: float = Field(default=0.9, ge=0, le=1)
+    # Difficulty-based model-tier routing: off by default; needs a System One backend AND the
+    # ``claude`` backend (only there do roles have tiers). A confident "small" about an item routes
+    # its implementer to the next cheaper tier (never a stronger one).
+    system_one_tiering: bool = False
+    system_one_tiering_threshold: float = Field(default=0.9, ge=0, le=1)
     # ``memory_rerank=system_one``: drop passages whose relevance probability is below this.
     system_one_rerank_min: float = Field(default=0.0, ge=0, le=1)
 

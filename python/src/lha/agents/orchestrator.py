@@ -66,7 +66,8 @@ from lha.agent.runner import (
 from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_worktree
 from lha.agents.reflection import reflect_on_failure
 from lha.agents.reviewer import REVIEW_EVENT, Reviewer, ReviewResult
-from lha.agents.router import model_for_role
+from lha.agents.roles import ModelTier, cheaper_tier
+from lha.agents.router import model_for_role, model_for_tier
 from lha.agents.team import research_fanout
 from lha.agents.waves import (
     BOARD_ENTRIES,
@@ -114,8 +115,8 @@ from lha.obs.redact import redact_text
 from lha.persistence.services import open_run_services
 from lha.state import git_ops
 from lha.state.mission_anchor import ANCHOR_DIR, MISSION_FILE, GitMissionAnchor
-from lha.systemone.build import build_review_screen, build_system_one
-from lha.systemone.screen import ReviewScreen
+from lha.systemone.build import build_review_screen, build_system_one, build_tier_screen
+from lha.systemone.screen import ReviewScreen, TierScreen
 from lha.verify.review_screen import review_screen_event, screen_criteria, screen_diff
 from lha.verify.verifier import default_python_checks
 
@@ -171,6 +172,9 @@ class Orchestrator:
         self._do_review = do_review
         self._meter = meter
         self._models = dict(models or {})
+        # Difficulty-based tiering builds the cheaper implementer tier's model here when set
+        # (tests inject a scripted provider so a downgrade never reaches a real provider).
+        self._tier_models: dict[ModelTier, ModelProvider] = {}
         self._max_parallel = (
             self._settings.max_parallel_implementers if max_parallel is None else max_parallel
         )
@@ -259,6 +263,8 @@ class _MissionRun:
         self.board = Blackboard()
         self.reflections: dict[str, str] = {}
         self.review_screen: ReviewScreen | None = None
+        self.tier_screen: TierScreen | None = None
+        self.cheaper_implementer_model: ModelProvider | None = None
         self.cycles = 0
         # Cycle ids continue after the last committed one when a run is resumed.
         self.cycle_offset = 0
@@ -347,6 +353,18 @@ class _MissionRun:
             stack.push_async_callback(self.services.close)
             await self.services.tracker.running()
             self.review_screen = build_review_screen(settings, self.services.system_one)
+            # Difficulty-based tiering (off by default): the screen is asked per item and, on a
+            # confident "small", the implementer runs on the next cheaper tier's model. The cheaper
+            # model is built ONCE here; the configured implementer model is untouched otherwise.
+            self.tier_screen = build_tier_screen(settings, self.services.system_one)
+            self.cheaper_implementer_model = None
+            if self.tier_screen is not None:
+                cheaper = cheaper_tier(self.tier_screen.tier)
+                if cheaper is not None:
+                    provider = self.org._tier_models.get(cheaper) or model_for_tier(
+                        cheaper, settings, client=http
+                    )
+                    self.cheaper_implementer_model = meter.wrap(provider, role="implementer")
             if self.hitl_gate is not None:
                 bind_gate_store(self.hitl_gate, self.services.store)
             # The Lead writes through an ownership guard: unassigned space, shared files and the
@@ -881,6 +899,19 @@ class _MissionRun:
             briefs=briefs,
             board=self._board_context(),
         )
+        # Difficulty-based tiering (off by default): ask how hard the item is; a confident "small"
+        # runs this implementer on the next cheaper tier's model (never a stronger one). Every
+        # answer -- including a failed call -- is recorded as a ``system_one`` event with the item.
+        model = self.implementer_model
+        if self.tier_screen is not None and self.cheaper_implementer_model is not None:
+            verdict = await self.tier_screen.assess(run.item.description, run.item.witnesses)
+            payload = verdict.payload(run.item.id, self.tier_screen.threshold)
+            self._emit("system_one", run.cycle_id, **payload)
+            await self.anchor.append_event(
+                EventRecord(kind="system_one", cycle_id=run.cycle_id, payload=payload)
+            )
+            if verdict.tier is not None:
+                model = self.cheaper_implementer_model
         summaries: list[str] = []
         await implement_in_worktree(
             run,
@@ -888,7 +919,7 @@ class _MissionRun:
             workdir=self.workdir,
             base=base,
             ownership=ownership,
-            model=self.implementer_model,
+            model=model,
             gate=self.hitl_gate,
             allow_egress=self.allow_egress,
             mission_id=self.mission_id,

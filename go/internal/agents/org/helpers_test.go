@@ -134,6 +134,31 @@ func (m *implementers) seen() []string {
 	return append([]string{}, m.observations...)
 }
 
+// countingImplementers is an implementer that counts its calls, so a test can tell the configured
+// and the cheaper tier apart.
+type countingImplementers struct {
+	*implementers
+	mu    sync.Mutex
+	calls int
+}
+
+func newCountingImplementers() *countingImplementers {
+	return &countingImplementers{implementers: newImplementers(nil)}
+}
+
+func (m *countingImplementers) Complete(ctx context.Context, messages []contracts.ModelMessage, tools []map[string]any, maxTokens int) (contracts.TurnResult, error) {
+	m.mu.Lock()
+	m.calls++
+	m.mu.Unlock()
+	return m.implementers.Complete(ctx, messages, tools, maxTokens)
+}
+
+func (m *countingImplementers) Calls() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
 // broken fails every call.
 type broken struct{ *model.StubModel }
 

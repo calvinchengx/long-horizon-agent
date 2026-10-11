@@ -125,7 +125,7 @@ EVENT_KINDS: dict[str, JSONSchema] = {
             "confidence": NUMBER,
             "probabilities": {"type": "object", "additionalProperties": NUMBER},
             "threshold": NUMBER,
-            "action": _enum("continue", "split", "block", "gate", "flag"),
+            "action": _enum("continue", "split", "block", "gate", "flag", "downgrade"),
             "error": STRING,
         },
         # item_id only when the answer is about an item (triage); a command second opinion has none.

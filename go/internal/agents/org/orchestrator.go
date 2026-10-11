@@ -118,6 +118,9 @@ func DefaultOrchestratorOptions() OrchestratorOptions {
 type Orchestrator struct {
 	settings *config.Settings
 	opts     OrchestratorOptions
+	// tierModels override the model built for a cheaper implementer tier (nil => agents.ModelForTier);
+	// tests inject a scripted provider here so a difficulty downgrade never reaches a real provider.
+	tierModels map[agents.ModelTier]contracts.ModelProvider
 }
 
 // NewOrchestrator returns an orchestrator (settings nil => config.Load() at run time).
@@ -238,14 +241,18 @@ type missionRun struct {
 	reviewModel      contracts.ModelProvider
 	reflectionModel  contracts.ModelProvider
 	implementerModel contracts.ModelProvider
-	readTools        contracts.ToolDispatcher
-	leadGuard        *coordination.OwnershipGuard
-	lead             *agent.AgentLoop
-	reviewer         *Reviewer
-	reviewScreen     *systemone.ReviewScreen
-	integrator       *BranchIntegrator
-	leases           *coordination.LeaseBroker
-	tctx             contracts.ToolContext
+	// cheaperImplementerModel is the next cheaper tier's implementer model, built once when the
+	// difficulty screen applies (nil otherwise).
+	cheaperImplementerModel contracts.ModelProvider
+	readTools               contracts.ToolDispatcher
+	leadGuard               *coordination.OwnershipGuard
+	lead                    *agent.AgentLoop
+	reviewer                *Reviewer
+	reviewScreen            *systemone.ReviewScreen
+	tierScreen              *systemone.TierScreen
+	integrator              *BranchIntegrator
+	leases                  *coordination.LeaseBroker
+	tctx                    contracts.ToolContext
 }
 
 func (r *missionRun) cycleID(n int) string { return "c" + strconv.Itoa(r.cycleOffset+n) }
@@ -372,6 +379,22 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	r.lead.SetMemory(services.Memory())
 	r.lead.SetTriage(systemone.BuildStallTriage(settings, systemOne))
 	r.reviewScreen = systemone.BuildReviewScreen(settings, systemOne)
+	// Difficulty-based tiering (off by default): the screen is asked per item and, on a confident
+	// "small", the implementer runs on the next cheaper tier's model (never a stronger one). The
+	// cheaper model is built ONCE here; the configured implementer model is untouched otherwise.
+	r.tierScreen = systemone.BuildTierScreen(settings, systemOne)
+	if r.tierScreen != nil {
+		if cheaper, ok := agents.CheaperTier(r.tierScreen.Tier); ok {
+			built := r.org.tierModels[cheaper]
+			if built == nil {
+				if built, err = agents.ModelForTier(cheaper, settings, client); err != nil {
+					return agent.MissionSummary{}, err
+				}
+				defer agent.CloseProvider(context.WithoutCancel(ctx), built)
+			}
+			r.cheaperImplementerModel = meter.Wrap(built, "implementer")
+		}
+	}
 	r.reviewer = NewReviewer(r.reviewModel, r.readTools)
 	// Integration is gated exactly like a Lead cycle would be for the same item: the mission
 	// checks plus the item's witnesses, on the lead verifier.
@@ -980,10 +1003,25 @@ func (r *missionRun) implement(ctx context.Context, run *ImplementerRun, base st
 		Briefs:        briefs,
 		Board:         r.boardContext(),
 	})
+	// Difficulty-based tiering (off by default): ask how hard the item is; a confident "small" runs
+	// this implementer on the next cheaper tier's model (never a stronger one). Every answer --
+	// including a failed call -- is recorded as a system_one event with the item.
+	model := r.implementerModel
+	if r.tierScreen != nil && r.cheaperImplementerModel != nil {
+		verdict := r.tierScreen.Assess(ctx, run.Item.Description, run.Item.Witnesses)
+		payload := verdict.Payload(run.Item.ID, r.tierScreen.Threshold)
+		r.record("system_one", PayloadFields(payload)...)
+		if err := r.anchor.AppendEvent(ctx, contracts.EventRecord{Kind: systemone.SystemOneEvent, CycleID: run.CycleID, Payload: payload}); err != nil {
+			return err
+		}
+		if verdict.Tier != "" {
+			model = r.cheaperImplementerModel
+		}
+	}
 	summaries := []string{}
 	if err := ImplementInWorktree(ctx, run, ImplementOptions{
 		Settings: r.settings, Workdir: r.workdir, Base: base, Ownership: ownership,
-		Model: r.implementerModel, Gate: r.gate, AllowEgress: r.allowEgress, MissionID: r.missionID,
+		Model: model, Gate: r.gate, AllowEgress: r.allowEgress, MissionID: r.missionID,
 		MissionChecks: r.checks, Objective: objective, Extra: extra, Recorder: r.recorder,
 		Lease:     coordination.NewLeaseHandler(r.leases, run.Writer, run.CycleID, ownership, run.Leases),
 		OnSummary: func(s string) { summaries = append(summaries, s) },

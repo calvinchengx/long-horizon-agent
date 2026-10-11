@@ -46,7 +46,7 @@ from lha.agents.integrator import BranchIntegrator, prune_worktrees, remove_work
 from lha.agents.reflection import reflect_on_failure
 from lha.agents.reviewer import REVIEW_EVENT as _REVIEW_EVENT
 from lha.agents.reviewer import Reviewer
-from lha.agents.router import model_for_role
+from lha.agents.router import model_for_role, model_for_tier
 from lha.agents.waves import (
     MAX_CONSECUTIVE_FAILURES,
     ImplementerRun,
@@ -68,6 +68,7 @@ from lha.agents.waves import (
 from lha.config import Settings
 from lha.contracts.model import ModelProvider
 from lha.contracts.state import Checklist, ChecklistItem, Checkpoint, DecisionRecord, EventRecord
+from lha.contracts.system_one import SystemOneModel
 from lha.contracts.tools import ToolContext
 from lha.contracts.verify import VerificationResult
 from lha.coordination.enforcement import changed_paths, effective_ownership
@@ -113,7 +114,12 @@ from lha.persistence.store import MissionStore, StoreUnavailableError, open_stor
 from lha.persistence.tracking import LedgerSink
 from lha.state import git_ops
 from lha.state.mission_anchor import GitMissionAnchor
-from lha.systemone.build import build_review_screen, build_system_one, close_system_one
+from lha.systemone.build import (
+    build_review_screen,
+    build_system_one,
+    build_tier_screen,
+    close_system_one,
+)
 from lha.verify.review_screen import review_screen_event, screen_criteria, screen_diff
 
 REVIEW_EVENT = _REVIEW_EVENT
@@ -279,6 +285,7 @@ async def _run_implementer(
     *,
     settings: Settings | None = None,
     model_factory: ModelFactory | None = None,
+    tier_factory: ModelFactory | None = None,
 ) -> ImplementerOutput:
     """One implementer attempt (see the module docstring); safe to retry."""
     settings, _ = current_settings(settings)
@@ -314,15 +321,45 @@ async def _run_implementer(
             )
         )
         focused = snapshot.model_copy(update={"active_item": item})
+        # Difficulty-based tiering (off by default): ask how hard the item is and, on a confident
+        # "small", build the next cheaper tier's model for THIS item (never a stronger one). The
+        # System One model is metered with the attempt and closed with it; every answer -- a
+        # ``large`` one, a below-threshold one or a failed call -- is recorded as a ``system_one``
+        # event, where the run's other events go.
+        system_one: SystemOneModel | None = None
+        tier_screen = None
+        if settings.system_one_tiering and settings.model_backend == "claude":
+            try:
+                system_one = build_system_one(settings, meter)
+            except ValueError as exc:
+                raise _config_error(f"cannot build the System One model: {exc}", exc) from exc
+            tier_screen = build_tier_screen(settings, system_one)
+        tier_payload: dict[str, object] | None = None
         try:
-            model = meter.wrap(factory(settings, focused), role="implementer")
+            chosen = factory(settings, focused)
+            if tier_screen is not None:
+                verdict = await tier_screen.assess(item.description, item.witnesses)
+                tier_payload = verdict.payload(item.id, tier_screen.threshold)
+                if verdict.tier is not None:
+                    chosen = (
+                        tier_factory(settings, focused)
+                        if tier_factory is not None
+                        else model_for_tier(verdict.tier, settings)
+                    )
+            model = meter.wrap(chosen, role="implementer")
         except ValueError as exc:
+            await close_system_one(system_one)
             raise _config_error(f"cannot build the model: {exc}", exc) from exc
         try:
             persisted = await _attach_ledger(settings, inp.workdir, inp.mission_id, meter, "impl")
         except BaseException:
             await model.aclose()
+            await close_system_one(system_one)
             raise
+        if tier_payload is not None:
+            persisted.recorder.record(
+                "system_one", mission_id=inp.mission_id, cycle_id=inp.cycle_id, **tier_payload
+            )
         gate = DeferredApprovalGate(approved=[a.fingerprint for a in inp.approved_actions])
         run = new_implementer_run(
             item,
@@ -377,6 +414,7 @@ async def _run_implementer(
         finally:
             try:
                 await model.aclose()
+                await close_system_one(system_one)
                 if run.worktree is not None:  # the branch stays for the integrator
                     await asyncio.to_thread(remove_worktree, inp.workdir, path=run.worktree)
                 await asyncio.to_thread(
@@ -396,13 +434,18 @@ async def _run_implementer(
 
 
 def make_implementer_activity(
-    *, settings: Settings | None = None, model_factory: ModelFactory | None = None
+    *,
+    settings: Settings | None = None,
+    model_factory: ModelFactory | None = None,
+    tier_factory: ModelFactory | None = None,
 ) -> Callable[[ImplementerInput], Awaitable[ImplementerOutput]]:
-    """A ``run_implementer`` activity bound to explicit settings / model factory (tests)."""
+    """A ``run_implementer`` activity bound to explicit settings / model factories (tests)."""
 
     @activity.defn(name="run_implementer")
     async def run_implementer_bound(inp: ImplementerInput) -> ImplementerOutput:
-        return await _run_implementer(inp, settings=settings, model_factory=model_factory)
+        return await _run_implementer(
+            inp, settings=settings, model_factory=model_factory, tier_factory=tier_factory
+        )
 
     return run_implementer_bound
 
