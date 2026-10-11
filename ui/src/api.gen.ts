@@ -662,7 +662,6 @@ export interface components {
         };
         system_one: {
             use: string;
-            item_id: string;
             model: string;
             answer: string;
             confidence: number;
@@ -671,8 +670,9 @@ export interface components {
             };
             threshold: number;
             /** @enum {string} */
-            action: "continue" | "split" | "block";
+            action: "continue" | "split" | "block" | "gate";
             error: string;
+            item_id?: string;
         };
         tool_call: {
             tool: string;
