@@ -143,6 +143,9 @@ type RunOptions struct {
 	Preflight func(*config.Settings) error
 	// Recorder collects the trace; nil => a fresh obs.TraceRecorder.
 	Recorder *obs.TraceRecorder
+	// PlanReviews are the optional plan review's plan_review events (recorded before the first
+	// cycle, cycle_id ""; the Planner was already re-planned by the caller).
+	PlanReviews []agents.PlanReview
 }
 
 func loadSettings(s *config.Settings) (*config.Settings, error) {
@@ -383,6 +386,12 @@ func runCycles(ctx context.Context, o RunOptions, settings *config.Settings, met
 	loop.SetTriage(systemone.BuildStallTriage(settings, svc.SystemOne))
 	tctx := contracts.ToolContext{MissionID: missionID, Session: toolbox.Session()}
 
+	// The optional plan review ran before this call; its events belong before the first cycle
+	// (cycle_id ""). Advisory: they are recorded whatever the plan, and gate nothing.
+	for _, review := range o.PlanReviews {
+		recorder.Record("plan_review", missionID, "", review.PlanReviewFields()...)
+	}
+
 cycleLoop:
 	for cycles < settings.MaxCycles {
 		decision := meter.Governor.AuthorizeNext(meter.Ledger, cycles, nil)
@@ -501,7 +510,15 @@ func PlanAndRunLocal(ctx context.Context, o PlanOptions) (MissionSummary, error)
 		plannerModel = built
 		defer CloseProvider(context.WithoutCancel(ctx), built)
 	}
-	checklist, err := agents.NewPlanner(meter.Wrap(plannerModel, "planner")).Plan(ctx, o.Title, o.Task, "")
+	plan, planReviews, err := agents.PlanWithOptionalReview(
+		ctx,
+		agents.NewPlanner(meter.Wrap(plannerModel, "planner")),
+		meter.Wrap(plannerModel, "plan_reviewer"),
+		settings,
+		o.Title,
+		o.Task,
+		"",
+	)
 	if err != nil {
 		if reason, ok := model.UnavailableReason(err); ok && ctx.Err() == nil {
 			return MissionSummary{}, &model.UnavailableError{Reason: reason, Err: err}
@@ -512,6 +529,7 @@ func PlanAndRunLocal(ctx context.Context, o PlanOptions) (MissionSummary, error)
 	run.Settings = settings
 	run.Meter = meter
 	run.Description = o.Task
-	run.Checklist = checklist
+	run.Checklist = plan.Checklist
+	run.PlanReviews = planReviews
 	return RunMissionLocal(ctx, run)
 }

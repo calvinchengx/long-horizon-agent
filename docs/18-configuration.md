@@ -189,6 +189,8 @@ See [25-system-one.md](25-system-one.md).
 | `LHA_STALL_LIMIT` | int | `5` | local runs stop when one item fails this many times in a row; unused by the durable workflow |
 | `LHA_MAX_REPLANS` | int | `20` | splits of blocked items allowed per mission (counted as items with status `split`); `0` disables the replanner |
 | `LHA_MAX_SPLIT_DEPTH` | int | `2` | how deeply splits may nest: an item whose id already has this many dots (`03.1.2`) is not split again |
+| `LHA_PLAN_REVIEW` | bool | `false` | before the first cycle, a design reviewer model (the planner's model) reads the Planner's checklist and, on findings, the Planner re-plans; **advisory** — the per-item deterministic verifier still gates every item, and an unparseable review means no findings. Needs a model; each review is a `plan_review` event. Skipped when `--checklist` is given (no planning) |
+| `LHA_PLAN_REVIEW_MAX` | int (0 to 3) | `1` | how many re-plans one plan review may force; after the bound the mission starts anyway |
 | `LHA_APPROVAL_TIMEOUT_S` | int | `86400` | durable missions: how long the workflow waits for a human to approve or reject an irreversible action before rejecting it; read by `lha mission-start`, whose `--approval-timeout-hours` overrides it per mission (`MissionInput.approval_timeout_seconds`). Local runs use `LHA_CONSOLE_APPROVAL_TIMEOUT_S` instead |
 
 Durable sub-agent activities (`run_subagent`) build their own governor from
@@ -307,7 +309,8 @@ difference is that Python logs a warning for a relative `LHA_SQLITE_PATH` and Go
 CLI uses the model settings (including `LHA_LEAD_ENGINE` and `LHA_CLAUDE_CODE_*`), the governor,
 sandbox, trusted-check and harness settings, `LHA_RESET_KEEP`, the verification settings
 (`LHA_MUTATION_CHECK`, `LHA_MUTATION_TIMEOUT_S`, `LHA_FLAKY_RETRIES`), the web-tool settings,
-the code map settings (`LHA_CODE_MAP*`, `LHA_CODE_QUERY*`), `LHA_MAX_PARALLEL_IMPLEMENTERS`, the
+the code map settings (`LHA_CODE_MAP*`, `LHA_CODE_QUERY*`), `LHA_PLAN_REVIEW`,
+`LHA_PLAN_REVIEW_MAX`, `LHA_MAX_PARALLEL_IMPLEMENTERS`, the
 observability settings (`LHA_OTEL_*`, `LHA_LANGFUSE_*`), the `LHA_SYSTEM_ONE_*` settings, the
 human-gate settings (`LHA_CONSOLE_APPROVAL_TIMEOUT_S`, `LHA_GATE_ESCALATION_SECONDS`,
 `LHA_GATE_WEBHOOK_URL`, `LHA_GATE_WEBHOOK_TIMEOUT_SECONDS`), the mission store

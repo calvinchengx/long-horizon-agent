@@ -2398,5 +2398,81 @@
     "content": "Mission: M\n\nBlocked item [03]: OneLake data plane\nIts acceptance checks (they will gate the LAST step): trusted:e2e\n\nIt failed 3 times in a row. Latest verification report:\nboom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom boom \n\nReply with ONLY a JSON array of 2-6 steps; each element: {\"description\": \"<imperative step>\"}. No prose, no code fences."
    }
   ]
+ },
+ "plan_reviewer": {
+  "item_count": 2,
+  "messages": [
+   {
+    "role": "system",
+    "content": "You are a design reviewer. You are given a mission and the checklist a planner produced for it. List only the ways the plan is inadequate: items that are not independently verifiable, items too coarse to finish in one focused attempt, work the task needs that is missing, or dependencies that are wrong. Be concrete and brief. If the plan is sound, return an empty array."
+   },
+   {
+    "role": "user",
+    "content": "Mission: T\n\nBuild the thing.\n\nDefinition of done: (use your judgment)\n\nPlan:\n[01] Add the model (files: src/model.py)\n[02] Add the tests (files: tests/test_model.py)\n\nReply with ONLY a JSON array of short findings (strings). An empty array [] means the plan is sound. No prose, no code fences."
+   }
+  ],
+  "findings": [
+   {
+    "text": "[\"item 02 is not independently verifiable\"]",
+    "findings": [
+     "item 02 is not independently verifiable"
+    ]
+   },
+   {
+    "text": "[]",
+    "findings": []
+   },
+   {
+    "text": "Sure, here you go:\n[\"too coarse\", \"missing migration step\"]\nHope that helps.",
+    "findings": [
+     "too coarse",
+     "missing migration step"
+    ]
+   },
+   {
+    "text": "no json here",
+    "findings": []
+   },
+   {
+    "text": "{\"findings\": [\"x\"]}",
+    "findings": [
+     "x"
+    ]
+   },
+   {
+    "text": "[\"a\", \" a \", \"b\", 7, \"\", null]",
+    "findings": [
+     "a",
+     "b",
+     "7",
+     "None"
+    ]
+   },
+   {
+    "text": "[\"finding 0\", \"finding 1\", \"finding 2\", \"finding 3\", \"finding 4\", \"finding 5\", \"finding 6\", \"finding 7\", \"finding 8\", \"finding 9\", \"finding 10\", \"finding 11\", \"finding 12\", \"finding 13\", \"finding 14\", \"finding 15\", \"finding 16\", \"finding 17\", \"finding 18\", \"finding 19\", \"finding 20\", \"finding 21\", \"finding 22\", \"finding 23\", \"finding 24\"]",
+    "findings": [
+     "finding 0",
+     "finding 1",
+     "finding 2",
+     "finding 3",
+     "finding 4",
+     "finding 5",
+     "finding 6",
+     "finding 7",
+     "finding 8",
+     "finding 9",
+     "finding 10",
+     "finding 11",
+     "finding 12",
+     "finding 13",
+     "finding 14",
+     "finding 15",
+     "finding 16",
+     "finding 17",
+     "finding 18",
+     "finding 19"
+    ]
+   }
+  ]
  }
 }

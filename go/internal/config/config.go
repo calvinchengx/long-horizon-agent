@@ -109,7 +109,13 @@ type Settings struct {
 	StallLimit       int     `env:"stall_limit" default:"5"`
 	MaxReplans       int     `env:"max_replans" default:"20"`
 	MaxSplitDepth    int     `env:"max_split_depth" default:"2"`
-	ApprovalTimeoutS int     `env:"approval_timeout_s" default:"86400"`
+	// Plan review (off by default): a design reviewer model reads the Planner's checklist before
+	// the first cycle and, on findings, the Planner re-plans up to PlanReviewMax times (the
+	// findings are handed to it through the acceptance channel). Advisory: the per-item verifier
+	// still gates every item, and an unparseable review means no findings. Needs the planner's model.
+	PlanReview       bool `env:"plan_review" default:"false"`
+	PlanReviewMax    int  `env:"plan_review_max" default:"1" ge:"0" le:"3"`
+	ApprovalTimeoutS int  `env:"approval_timeout_s" default:"86400"`
 
 	// --- Execution sandbox
 	Sandbox          string `env:"sandbox" default:"docker" choices:"docker,e2b,local"`

@@ -511,6 +511,26 @@
    ],
    "additionalProperties": false
   },
+  "plan_review": {
+   "type": "object",
+   "properties": {
+    "item_count": {
+     "type": "integer"
+    },
+    "findings": {
+     "type": "integer"
+    },
+    "replanned": {
+     "type": "integer"
+    }
+   },
+   "required": [
+    "findings",
+    "item_count",
+    "replanned"
+   ],
+   "additionalProperties": false
+  },
   "ownership_released": {
    "type": "object",
    "properties": {
@@ -2732,6 +2752,96 @@
     "run": 3,
     "cycle_offset": 3,
     "board": 3.5
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "findings": 3,
+    "replanned": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "findings": 3,
+    "item_count": 3,
+    "replanned": 3
+   },
+   "valid": true
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "replanned": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "findings": 3,
+    "replanned": 3,
+    "unexpected": 1
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": "s",
+    "findings": 3,
+    "replanned": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3.5,
+    "findings": 3,
+    "replanned": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "findings": "s",
+    "replanned": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "findings": 3.5,
+    "replanned": 3
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "findings": 3,
+    "replanned": "s"
+   },
+   "valid": false
+  },
+  {
+   "kind": "plan_review",
+   "data": {
+    "item_count": 3,
+    "findings": 3,
+    "replanned": 3.5
    },
    "valid": false
   },

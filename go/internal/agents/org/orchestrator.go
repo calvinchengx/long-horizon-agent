@@ -149,6 +149,9 @@ type MissionOptions struct {
 	// Resume continues the mission anchored in Workdir (Title / Description / Checklist /
 	// References / Ownership are then ignored); a *MissionResumeError without an anchor.
 	Resume bool
+	// PlanReviews are the optional plan review's plan_review events (recorded before the first
+	// cycle; the Planner was already re-planned by the caller).
+	PlanReviews []agents.PlanReview
 }
 
 // RunMission runs the org until complete / deadlocked / over-budget / looping. A budget refusal
@@ -365,6 +368,13 @@ func (r *missionRun) execute(ctx context.Context, m MissionOptions) (agent.Missi
 	defer services.Close(context.WithoutCancel(ctx))
 	if err := services.Running(ctx); err != nil {
 		return agent.MissionSummary{}, err
+	}
+	// The optional plan review ran in the caller; its events belong before the first cycle
+	// (cycle_id ""). Advisory: they are recorded whatever the plan, and gate nothing.
+	if !m.Resume {
+		for _, review := range m.PlanReviews {
+			r.record("plan_review", review.PlanReviewFields()...)
+		}
 	}
 	// The Lead writes through an ownership guard: unassigned space, shared files and the active
 	// item's own files — never another open item's leased files.

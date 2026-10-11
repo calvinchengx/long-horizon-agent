@@ -704,10 +704,10 @@
             ],
             "events": [
               {
-                "id": 43
+                "id": 44
               },
               {
-                "id": 44
+                "id": 45
               }
             ],
             "events_total": 5
@@ -773,7 +773,7 @@
             "name": "list_events",
             "arguments": {
               "mission_id": "mission_local",
-              "after": 35,
+              "after": 36,
               "limit": 1
             }
           }
@@ -785,10 +785,10 @@
           "structuredContent": {
             "events": [
               {
-                "id": 36
+                "id": 37
               }
             ],
-            "next_after": 36
+            "next_after": 37
           }
         }
       }

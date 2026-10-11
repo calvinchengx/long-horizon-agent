@@ -151,6 +151,9 @@ EVENT_KINDS: dict[str, JSONSchema] = {
     "loop_detected": _payload({"item_id": STRING}),
     # --- an organization (orchestrator) ---------------------------------------------------------
     "resumed": _payload({"run": INTEGER, "cycle_offset": INTEGER, "board": INTEGER}),
+    # One per plan review (before any cycle): the plan's item count, the review's finding count,
+    # and whether the review forced a re-plan.
+    "plan_review": _payload({"item_count": INTEGER, "findings": INTEGER, "replanned": INTEGER}),
     "ownership_released": _payload({"paths": _array(STRING)}),
     "ownership_violation": _payload({"writer": STRING, "paths": _array(STRING)}),
     "research": _payload({"item": STRING, "n": INTEGER, "failed": INTEGER}),

@@ -160,6 +160,14 @@ type promptSpec struct {
 		Item        contracts.ChecklistItem `json:"item"`
 		Messages    []message               `json:"messages"`
 	} `json:"replanner"`
+	PlanReviewer struct {
+		ItemCount int       `json:"item_count"`
+		Messages  []message `json:"messages"`
+		Findings  []struct {
+			Text     string   `json:"text"`
+			Findings []string `json:"findings"`
+		} `json:"findings"`
+	} `json:"plan_reviewer"`
 }
 
 func loadPrompts(t *testing.T) promptSpec {
@@ -293,6 +301,34 @@ func TestAgentPlannerAndReplannerMessages(t *testing.T) {
 	}
 	if got := messagesOf(rec.seen); !reflect.DeepEqual(got, s.Replanner.Messages) {
 		t.Errorf("replanner messages:\n go:     %q\n python: %q", got, s.Replanner.Messages)
+	}
+}
+
+// TestAgentPlanReviewerMessages runs agent/prompts.json's plan_reviewer section: the PlanReviewer's
+// messages and its defensive findings parsing (python: lha.agents.plan_review).
+func TestAgentPlanReviewerMessages(t *testing.T) {
+	s := loadPrompts(t)
+	plan := agents.MissionPlan{
+		Checklist: contracts.Checklist{SchemaVersion: 1, Items: []contracts.ChecklistItem{
+			contracts.NewChecklistItem("01", "Add the model"),
+			contracts.NewChecklistItem("02", "Add the tests", "01"),
+		}},
+		Files: map[string][]string{"01": {"src/model.py"}, "02": {"tests/test_model.py"}},
+	}
+	if len(plan.Checklist.Items) != s.PlanReviewer.ItemCount {
+		t.Fatalf("plan has %d items, spec says %d", len(plan.Checklist.Items), s.PlanReviewer.ItemCount)
+	}
+	rec := &recording{StubModel: model.NewStub(nil)}
+	if _, err := agents.NewPlanReviewer(rec).Review(context.Background(), "T", "Build the thing.", "", plan); err != nil {
+		t.Fatal(err)
+	}
+	if got := messagesOf(rec.seen); !reflect.DeepEqual(got, s.PlanReviewer.Messages) {
+		t.Errorf("plan reviewer messages:\n go:     %q\n python: %q", got, s.PlanReviewer.Messages)
+	}
+	for _, c := range s.PlanReviewer.Findings {
+		if got := agents.ParseFindings(c.Text); !reflect.DeepEqual(got, c.Findings) {
+			t.Errorf("ParseFindings(%q) = %v, want %v", c.Text, got, c.Findings)
+		}
 	}
 }
 

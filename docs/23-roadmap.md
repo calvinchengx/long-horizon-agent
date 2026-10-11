@@ -105,6 +105,7 @@ quality with real models.
 |---|---|
 | Planner (task -> checklist) | done: used by `mission`, `orchestrate`, `mission-start` (skipped when `--checklist` is given) |
 | Replanner (split a blocked item) | done: every run path |
+| Plan (spec) review before the first cycle | done: Python and Go, off by default (`LHA_PLAN_REVIEW`, `LHA_PLAN_REVIEW_MAX`): a design reviewer model reads the Planner's checklist and the Planner re-plans on findings; advisory, the per-item verifier still gates every item, each review a `plan_review` event ([11](11-multi-agent-organization.md)) |
 | Per-role model routing (Claude tiers) | done: `orchestrate` with the `claude` backend |
 | File ownership, tickets, parallel implementers in git worktrees, `BranchIntegrator`, lease granting | done in `lha orchestrate` (`LHA_MAX_PARALLEL_IMPLEMENTERS`, default 3) and in a durable mission started with `--max-parallel N` (one activity per implementer and per integration) ([11-multi-agent-organization.md](11-multi-agent-organization.md)) |
 | Blackboard, reflection | done: `lha orchestrate` and the durable organization (from committed events; [08](08-durable-execution.md#the-multi-agent-organization-opt-in)) |

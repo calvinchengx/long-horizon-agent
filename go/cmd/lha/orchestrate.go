@@ -86,7 +86,7 @@ func (c *cli) orchestrate(args []string) error {
 			mission.Checklist = &imported.Checklist
 			mission.References = mergeReferences(f.reference, imported.References)
 		} else {
-			plan, err := c.plan(settings, meter, firstNonEmpty(f.title.value, "mission"), *task)
+			plan, planReviews, err := c.plan(settings, meter, firstNonEmpty(f.title.value, "mission"), *task)
 			if err != nil {
 				return runError(err)
 			}
@@ -95,6 +95,7 @@ func (c *cli) orchestrate(args []string) error {
 			mission.Checklist = &plan.Checklist
 			mission.References = append([]string{}, f.reference...)
 			mission.Ownership = plan.Ownership
+			mission.PlanReviews = planReviews
 		}
 	}
 	summary, err := orchestrator.RunMission(c.ctx, mission)
@@ -104,23 +105,32 @@ func (c *cli) orchestrate(args []string) error {
 	return c.report(summary)
 }
 
-// plan runs the Planner on the configured model (or the test override), metered as "planner".
-func (c *cli) plan(settings *config.Settings, meter *governor.CostMeter, title, task string) (agents.MissionPlan, error) {
+// plan runs the Planner on the configured model (or the test override), metered as "planner", and
+// the optional plan review when LHA_PLAN_REVIEW is on.
+func (c *cli) plan(settings *config.Settings, meter *governor.CostMeter, title, task string) (agents.MissionPlan, []agents.PlanReview, error) {
 	plannerModel := c.leadModel
 	if plannerModel == nil {
 		built, err := model.BuildProvider(settings, "", nil)
 		if err != nil {
-			return agents.MissionPlan{}, err
+			return agents.MissionPlan{}, nil, err
 		}
 		defer agent.CloseProvider(c.ctx, built)
 		plannerModel = built
 	}
-	plan, err := agents.NewPlanner(meter.Wrap(plannerModel, "planner")).PlanMission(c.ctx, title, task, "")
+	plan, reviews, err := agents.PlanWithOptionalReview(
+		c.ctx,
+		agents.NewPlanner(meter.Wrap(plannerModel, "planner")),
+		meter.Wrap(plannerModel, "plan_reviewer"),
+		settings,
+		title,
+		task,
+		"",
+	)
 	if err != nil {
-		return agents.MissionPlan{}, err
+		return agents.MissionPlan{}, nil, err
 	}
 	if plan.Ownership == nil {
 		plan.Ownership = coordination.NewFileOwnershipMap()
 	}
-	return plan, nil
+	return plan, reviews, nil
 }

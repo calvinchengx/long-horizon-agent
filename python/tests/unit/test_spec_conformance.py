@@ -12,7 +12,8 @@ import pytest
 
 from lha.agent.loop import parse_action
 from lha.agent.prompt import build_messages, corrective_message, render_memory_block, render_tools
-from lha.agents.planner import Planner, assign_ownership, parse_plan
+from lha.agents.plan_review import PlanReviewer, parse_findings
+from lha.agents.planner import MissionPlan, Planner, assign_ownership, parse_plan
 from lha.agents.reflection import reflect_on_failure
 from lha.agents.replanner import Replanner
 from lha.agents.reviewer import Reviewer, ReviewResult, parse_review
@@ -453,6 +454,28 @@ def test_agent_reply_protocol_and_planning() -> None:
     item = ChecklistItem.model_validate(replan["item"])
     asyncio.run(Replanner(model).split(mission_text=replan["mission_text"], item=item))
     assert model.seen == replan["messages"]
+
+    review = spec["plan_reviewer"]
+    plan = MissionPlan(
+        checklist=Checklist(
+            items=[
+                ChecklistItem(id="01", description="Add the model", depends_on=[]),
+                ChecklistItem(id="02", description="Add the tests", depends_on=["01"]),
+            ]
+        ),
+        ownership=FileOwnershipMap(),
+        files={"01": ["src/model.py"], "02": ["tests/test_model.py"]},
+    )
+    assert len(plan.checklist.items) == review["item_count"]
+    model = _Recording()
+    asyncio.run(
+        PlanReviewer(model).review(
+            title="T", description="Build the thing.", acceptance="", plan=plan
+        )
+    )
+    assert model.seen == review["messages"]
+    for case in review["findings"]:
+        assert parse_findings(case["text"]) == case["findings"], case
 
 
 def test_execution_paths() -> None:
