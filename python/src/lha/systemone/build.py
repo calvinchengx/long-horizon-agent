@@ -7,7 +7,7 @@ from lha.contracts.system_one import SystemOneModel
 from lha.governor.metering import CostMeter
 from lha.safety.egress import EgressDenied, parse_url
 from lha.systemone.client import SystemOneClient, default_price_in_per_mtok, is_local_endpoint
-from lha.systemone.screen import CommandSecondOpinion, ReviewScreen
+from lha.systemone.screen import CommandSecondOpinion, ReviewScreen, UntrustedContentScreen
 from lha.systemone.stub import StubSystemOne
 from lha.systemone.triage import StallTriage
 
@@ -91,6 +91,20 @@ def build_command_second_opinion(
     if model is None or not settings.system_one_commands:
         return None
     return CommandSecondOpinion(model, threshold=settings.system_one_commands_threshold)
+
+
+def build_untrusted_screen(
+    settings: Settings, model: SystemOneModel | None
+) -> UntrustedContentScreen | None:
+    """The untrusted-content screen over ``model`` when it is configured and untrusted is on.
+
+    Off by default: it needs a System One backend (like triage), and its threshold is unmeasured
+    (there is no gold set for it yet; the ``system_one`` event records the judgment for a future
+    one). It never blocks a tool: a confident ``instructions`` only annotates the fetched content.
+    """
+    if model is None or not settings.system_one_untrusted:
+        return None
+    return UntrustedContentScreen(model, threshold=settings.system_one_untrusted_threshold)
 
 
 async def close_system_one(model: SystemOneModel | None) -> None:

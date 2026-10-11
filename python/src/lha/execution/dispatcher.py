@@ -30,7 +30,10 @@ from lha.hitl.approvals import PENDING, action_fingerprint
 from lha.obs.redact import redact_text
 from lha.safety.commands import classify_command
 from lha.safety.rule_of_two import Capability, check_rule_of_two, permits
-from lha.systemone.screen import CommandSecondOpinion
+from lha.systemone.screen import CommandSecondOpinion, UntrustedContentScreen
+
+#: The tools whose successful result the untrusted-content screen reads (matched by tool name).
+UNTRUSTED_TOOLS = frozenset({"fetch_url", "web_search"})
 
 
 class AllowListDispatcher:
@@ -50,6 +53,9 @@ class AllowListDispatcher:
         second_opinion: when set, a ``run_command`` the classifier ALLOWED is optionally sent to
             it; a confident ``dangerous`` becomes the gate reason (the human gate, or denied with
             no gate). It can only add gating, never allow a denied command.
+        untrusted_screen: when set, a successful ``fetch_url`` or ``web_search`` call is optionally
+            sent to it; a confident ``instructions`` prepends a warning to the content the model
+            sees and records a ``system_one`` event. It never blocks or fails the call.
 
     Raises:
         RuleOfTwoViolation: if the derived capability set is the full trifecta and no gate is set.
@@ -65,6 +71,7 @@ class AllowListDispatcher:
         gate: HITLGate | None = None,
         capabilities: Iterable[Capability] = (),
         second_opinion: CommandSecondOpinion | None = None,
+        untrusted_screen: UntrustedContentScreen | None = None,
     ) -> None:
         self._tools: dict[str, Tool] = {t.spec.name: t for t in tools}
         if isinstance(allow, str):
@@ -74,6 +81,7 @@ class AllowListDispatcher:
         self._allow_egress = allow_egress
         self._gate = gate
         self._second_opinion = second_opinion
+        self._untrusted_screen = untrusted_screen
         self._events: list[EventRecord] = []
         self.capabilities: frozenset[Capability] = frozenset(
             {*capabilities, *self._derived_capabilities()}
@@ -92,6 +100,7 @@ class AllowListDispatcher:
         gate: HITLGate | None = None,
         capabilities: Iterable[Capability] = (),
         second_opinion: CommandSecondOpinion | None = None,
+        untrusted_screen: UntrustedContentScreen | None = None,
     ) -> AllowListDispatcher:
         """Allow every tool in ``tools`` by name; the mutating policy must still be stated."""
         registered = list(tools)
@@ -103,6 +112,7 @@ class AllowListDispatcher:
             gate=gate,
             capabilities=capabilities,
             second_opinion=second_opinion,
+            untrusted_screen=untrusted_screen,
         )
 
     def _derived_capabilities(self) -> set[Capability]:
@@ -173,9 +183,38 @@ class AllowListDispatcher:
                 return ToolResult.failure(denied)
 
         try:
-            return await tool.run(call.arguments, ctx)
+            result = await tool.run(call.arguments, ctx)
         except Exception as exc:
             return ToolResult.failure(f"{type(exc).__name__}: {exc}")
+        return await self._screen_untrusted(call, result)
+
+    async def _screen_untrusted(self, call: ToolCall, result: ToolResult) -> ToolResult:
+        """Annotate a successful web result when a confident answer flags instructions.
+
+        The screen is asked ONLY about a successful ``fetch_url`` or ``web_search`` call with
+        non-empty content, and only when it is configured. The judgment is always recorded as a
+        ``system_one`` event; a flagged result gets the warning prepended to the content the model
+        sees. It NEVER fails or blocks the call: this is defence in depth, and the Rule of Two
+        stays the boundary.
+        """
+        if (
+            self._untrusted_screen is None
+            or not result.ok
+            or call.name not in UNTRUSTED_TOOLS
+            or not result.content
+        ):
+            return result
+        verdict = await self._untrusted_screen.assess(_untrusted_source(call), result.content)
+        self._events.append(
+            EventRecord(
+                kind="system_one",
+                payload=verdict.payload(self._untrusted_screen.threshold),
+            )
+        )
+        warning = verdict.warning()
+        if warning is None:
+            return result
+        return result.model_copy(update={"content": f"{warning}\n{result.content}"})
 
     def _gate_reason(
         self, spec: ToolSpec, arguments: dict[str, object], ctx: ToolContext
@@ -286,6 +325,13 @@ class AllowListDispatcher:
                 },
             )
         )
+
+
+def _untrusted_source(call: ToolCall) -> str:
+    """The source the untrusted-content screen names: the ``fetch_url`` URL or the search query."""
+    key = "url" if call.name == "fetch_url" else "query"
+    value = call.arguments.get(key)
+    return str(value) if value is not None else ""
 
 
 def _check_paths(spec: ToolSpec, arguments: dict[str, object], ctx: ToolContext) -> str | None:

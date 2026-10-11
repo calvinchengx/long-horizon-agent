@@ -406,7 +406,11 @@ is asked whether the command is dangerous; a confident `dangerous` is used as th
 the call goes to the human gate exactly as an irreversible command is (denied when there is no
 gate). It can only add gating: it never allows a command the classifier denied and never changes
 the classifier, and a command the classifier already gates is not asked about. Only the command
-argv is sent (redacted), never tool output. A remote endpoint must be
+argv is sent (redacted), never tool output. With `LHA_SYSTEM_ONE_UNTRUSTED` (off by default), after
+a successful `fetch_url` or `web_search` call the model is asked whether the result carries
+instructions aimed at the agent; a confident `instructions` prepends one warning to the content the
+model sees. It never blocks or fails the call: it is defence in depth on top of the untrusted-data
+fence, and the Rule of Two stays the boundary. A remote endpoint must be
 https, is re-resolved and checked for public addresses on every request, is dialled only at the
 vetted addresses, and receives its API key only for its own host. What it is sent is redacted
 first. It receives what the lead's model provider already receives, so it adds no Rule of Two
